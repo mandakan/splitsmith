@@ -54,7 +54,7 @@ from .overlay_still import letterbox
 from .overlay_summary_cell import build_summary_still
 from .overlay_theme import OverlayTheme, theme_for
 from .shooter_book import EMPTY_BOOK, BookSnapshot
-from .stage_summary_data import TileShot, TileStageData, load_stage_shots
+from .stage_summary_data import TileShot, TileStageData, load_stage_events, load_stage_shots
 from .summary_template import (
     ResolvedSummary,
     resolve_match_summary,
@@ -346,12 +346,16 @@ def _trim_for(project: MatchProject, root: Path, stage_number: int) -> tuple[Pat
     return audit_trim, beep
 
 
-def _shots(audit_doc: dict | None, work_dir: Path) -> tuple[TileShot, ...]:
+def _shots_and_regions(
+    audit_doc: dict | None, work_dir: Path
+) -> tuple[tuple[TileShot, ...], tuple[StageEvent, ...]]:
+    """The stage's shots and confirmed regions, read back through the
+    export's own loaders (the regions give the Draw, spec 2026-10-17)."""
     if not isinstance(audit_doc, dict):
-        return ()
+        return (), ()
     path = work_dir / "audit.json"
     path.write_text(json.dumps(audit_doc), encoding="utf-8")
-    return load_stage_shots(path)
+    return load_stage_shots(path), load_stage_events(path)
 
 
 def match_summary_for(
@@ -377,6 +381,7 @@ def match_summary_for(
     for stage in chosen:
         folder = work_dir / f"stage{stage.stage_number}"
         folder.mkdir(parents=True, exist_ok=True)
+        shots, regions = _shots_and_regions(audit_docs.get(stage.stage_number), folder)
         stages.append(
             (
                 # The name the export prints (``match_exports``): "Stage N" for a blank one.
@@ -384,11 +389,12 @@ def match_summary_for(
                 TileStageData(
                     label=label,
                     stage_number=stage.stage_number,
-                    shots=_shots(audit_docs.get(stage.stage_number), folder),
+                    shots=shots,
                     stage_time_seconds=stage.time_seconds if stage.time_seconds > 0 else None,
                     stage_time_is_manual=stage.time_seconds_manual,
                     scorecard=stage.scorecard,
                     stage_rounds=stage.stage_rounds,
+                    events=regions,
                 ),
             )
         )
@@ -460,7 +466,7 @@ def render_preview(
     except KeyError as exc:
         raise PreviewError(404, f"stage {spec.stage_number} not found") from exc
     work_dir.mkdir(parents=True, exist_ok=True)
-    shots = _shots(audit_doc, work_dir)
+    shots, _regions = _shots_and_regions(audit_doc, work_dir)
     if spec.card == "overlay" and not shots:
         raise PreviewError(409, "the overlay needs audited shots on this stage")
 

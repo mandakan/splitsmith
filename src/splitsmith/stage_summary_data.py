@@ -23,7 +23,14 @@ from pydantic import BaseModel, Field
 from .audit_data import audit_shots_to_engine_shots, read_audit_data
 from .coach import heal_unclassified, statistic_split_shots
 from .config import IntervalClass, StageEvent, StageRounds
-from .events import ReloadFigure, confirmed_from_doc, exposed_reload_s, reload_figures, shot_is_moving
+from .events import (
+    ReloadFigure,
+    confirmed_from_doc,
+    draw_seconds,
+    exposed_reload_s,
+    reload_figures,
+    shot_is_moving,
+)
 from .match_project import StageScorecard, is_stub_audit
 
 logger = logging.getLogger(__name__)
@@ -83,10 +90,16 @@ class TileStageData:
     #: (:func:`load_stage_reloads`). Empty when there are none, which is
     #: every stage nobody marked up: the summary then draws no reload row.
     reloads: tuple[ReloadFigure, ...] = ()
-    #: The stage's confirmed regions (:func:`load_stage_events`), for a
-    #: summary template's ``data.stage``. The engine card reads ``reloads``
-    #: and ``shots[].moving`` and never this.
+    #: The stage's confirmed regions (:func:`load_stage_events`): a summary
+    #: template's ``data.stage``, and the draw (:attr:`draw`). A builder
+    #: that leaves it empty shows the first shot as the draw.
     events: tuple[StageEvent, ...] = ()
+
+    @property
+    def draw(self) -> float | None:
+        """The stage's Draw figure: a confirmed draw region's length, else
+        the first shot's split (``events.draw_seconds``, spec 2026-10-17)."""
+        return draw_seconds(self.shots[0].split if self.shots else None, self.events)
 
     @property
     def shot_count(self) -> int:
@@ -301,7 +314,7 @@ def stage_summary_figures(tile: TileStageData) -> StageSummaryFigures:
         }
     if tile.has_shots:
         selected = statistic_split_shots(tile.shots)
-        figures.draw = round(tile.shots[0].split, 6)
+        figures.draw = round(tile.draw, 6) if tile.draw is not None else None
         figures.splits = _split_figures([s.split for s in selected])
         static = [s.split for s in selected if not s.moving]
         moving = [s.split for s in selected if s.moving]

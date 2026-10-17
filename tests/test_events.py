@@ -75,15 +75,13 @@ def test_lane_violation_names_both_events(case: dict) -> None:
 
 @pytest.mark.parametrize("case", DATA["draws"], ids=lambda c: c["name"])
 def test_draw_figure(case: dict) -> None:
-    from splitsmith.events import draw_on_the_move, draw_seconds
+    from splitsmith.events import draw_seconds
 
-    regions = _events(case["events"])
-    got = draw_seconds(case["first_shot"], regions)
+    got = draw_seconds(case["first_shot"], _events(case["events"]))
     want = case["expect"]["draw"]
     assert (got is None) == (want is None)
     if want is not None:
         assert round(got, 2) == pytest.approx(want)
-    assert draw_on_the_move(regions) is case["expect"]["moving"]
 
 
 @pytest.mark.parametrize("case", DATA["lane_ok"], ids=lambda c: c["name"])

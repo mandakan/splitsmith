@@ -291,6 +291,25 @@ def test_confirmed_reloads_and_movement_reach_the_grid_tile(tmp_path, with_proje
     assert reload_.exposed == pytest.approx(1.0)
 
 
+@pytest.mark.parametrize("with_project", [False, True])
+def test_a_confirmed_draw_is_the_grid_tiles_draw(tmp_path, with_project):
+    """Spec 2026-10-17: the grid's Draw is the draw region's length, from
+    both of ``_load_tile``'s returns; a proposed draw changes nothing."""
+    root = tmp_path / "ann"
+    if with_project:
+        _write_project(root)
+    audit = _write_audit(root, 1, [2310, 2600, 2900])
+    doc = json.loads(audit.read_text())
+    doc["events"] = [{"id": "evt-1", "kind": "draw", "start": 1.33, "end": 2.31, "source": "manual"}]
+    audit.write_text(json.dumps(doc))
+    tile = overlay_data.load_overlay_data([_bundle(tmp_path, "ann", audit=audit)])[("ann", 1)]
+    assert tile.draw == pytest.approx(0.98)
+    doc["events"][0]["source"] = "auto"
+    audit.write_text(json.dumps(doc))
+    tile = overlay_data.load_overlay_data([_bundle(tmp_path, "ann", audit=audit)])[("ann", 1)]
+    assert tile.draw == pytest.approx(2.31)
+
+
 def test_scoring_comes_off_the_project_on_disk(tmp_path):
     root = tmp_path / "ann"
     card = StageScorecard(hit_factor=6.5, stage_points=80.0, stage_pct=91.25)

@@ -114,7 +114,7 @@ def _split_rows(ctx: FreeCellContext) -> list[_SplitRow]:
         rows.append(
             _SplitRow(
                 name=names[label],
-                draw=tile.shots[0].split,
+                draw=tile.draw,
                 avg=sum(rest) / len(rest) if rest else None,
                 best=min(rest) if rest else None,
             )

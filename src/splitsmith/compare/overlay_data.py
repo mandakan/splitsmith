@@ -13,7 +13,13 @@ import logging
 from collections.abc import Sequence
 
 from ..match_project import MatchProject
-from ..stage_summary_data import TileShot, TileStageData, load_stage_reloads, load_stage_shots
+from ..stage_summary_data import (
+    TileShot,
+    TileStageData,
+    load_stage_events,
+    load_stage_reloads,
+    load_stage_shots,
+)
 from .project_loader import CompareShooterBundle, CompareStageBundle
 
 logger = logging.getLogger(__name__)
@@ -105,6 +111,9 @@ def _load_tile(
     # Confirmed reloads ride on the tile so the grid hold's summary gets the
     # same reload row the single-shooter card does (spec 2026-10-08, part 2).
     reloads = load_stage_reloads(stage.audit_path)
+    # And the confirmed regions, for the tile's Draw (a draw region's
+    # length, spec 2026-10-17).
+    events = load_stage_events(stage.audit_path)
     entry = None
     if project is not None:
         try:
@@ -116,7 +125,9 @@ def _load_tile(
                 stage_number,
             )
     if entry is None:
-        return TileStageData(label=bundle.label, stage_number=stage_number, shots=shots, reloads=reloads)
+        return TileStageData(
+            label=bundle.label, stage_number=stage_number, shots=shots, reloads=reloads, events=events
+        )
     return TileStageData(
         label=bundle.label,
         stage_number=stage_number,
@@ -128,6 +139,7 @@ def _load_tile(
         scorecard=entry.scorecard,
         stage_rounds=entry.stage_rounds,
         reloads=reloads,
+        events=events,
     )
 
 

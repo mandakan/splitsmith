@@ -519,7 +519,7 @@ def summary_groups(
             selected = statistic_split_shots(tile.shots)
             static = [shot.split for shot in selected if not shot.moving]
             moving = [shot.split for shot in selected if shot.moving]
-            draw = Element(role=Role.HEADLINE, text=f"{tile.shots[0].split:.2f}", caption="Draw")
+            draw = Element(role=Role.HEADLINE, text=f"{tile.draw:.2f}", caption="Draw")
             if static and moving and split_rows and _fits_split_rows(cell_width, cell_height):
                 rows.append([Element(role=Role.LABEL, text="Static"), *_split_stat_elements(static)])
                 # No captions: the Moving figures sit under the Static row's.
@@ -599,7 +599,7 @@ def _upright_split_groups(
     selected = statistic_split_shots(tile.shots)
     static = [shot.split for shot in selected if not shot.moving]
     moving = [shot.split for shot in selected if shot.moving]
-    draw = Element(role=Role.HEADLINE, text=f"{tile.shots[0].split:.2f}", caption="Draw")
+    draw = Element(role=Role.HEADLINE, text=f"{tile.draw:.2f}", caption="Draw")
     gap = _sgrid_gap(cell_width)
 
     def label(text: str) -> Group:

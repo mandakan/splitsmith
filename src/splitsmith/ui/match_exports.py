@@ -793,6 +793,8 @@ def export_match(
                             stage_time_is_manual=stage_input.stage_time_is_manual,
                             scorecard=stage_input.scorecard,
                             stage_rounds=stage_input.stage_rounds,
+                            # The Draw (a draw region's length, spec 2026-10-17).
+                            events=load_stage_events(stage_input.audit_path),
                         ),
                     )
                     for stage_input in stages

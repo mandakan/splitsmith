@@ -6,6 +6,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from splitsmith.match_project import StageScorecard
 from splitsmith.stage_summary_data import TileShot, TileStageData, stage_summary_figures
 from tests.test_overlay_summary_cell import (
@@ -21,6 +23,39 @@ from tests.test_overlay_summary_cell import (
 
 def _texts(groups) -> list[str]:  # noqa: ANN001
     return [e.text for g in groups for e in g.elements]
+
+
+def _draw_tile(*, with_movement: bool) -> TileStageData:
+    from splitsmith.config import StageEvent
+
+    events = [StageEvent(id="evt-2", kind="draw", start=1.33, end=2.31, source="manual")]
+    if with_movement:
+        events.insert(0, StageEvent(id="evt-1", kind="movement", start=0.0, end=2.2, source="manual"))
+    return TileStageData(
+        label="Me",
+        stage_number=2,
+        shots=(TileShot(2.31, 2.31), TileShot(2.6, 0.29), TileShot(2.9, 0.3)),
+        stage_time_seconds=9.0,
+        events=tuple(events),
+    )
+
+
+@pytest.mark.parametrize("with_movement", [False, True])
+def test_a_confirmed_draw_is_the_stages_draw_everywhere(with_movement: bool) -> None:
+    """Spec 2026-10-17: the draw region's length, not the first shot's time;
+    the figures and the engine card's Draw element say the same. A movement
+    beside it is a region of its own and changes nothing here."""
+    tile = _draw_tile(with_movement=with_movement)
+    assert stage_summary_figures(tile).draw == 0.98
+    draws = [e for g in _groups(tile) for e in g.elements if e.caption == "Draw"]
+    assert [e.text for e in draws] == ["0.98"]
+
+
+def test_the_match_summary_reads_the_draw_region_too() -> None:
+    from splitsmith.match_summary import build_match_summary
+
+    summary = build_match_summary([("Skolhuset", _draw_tile(with_movement=True))], title="M", label="Me")
+    assert summary.rows[0].draw == 0.98 and summary.best_draw == 0.98
 
 
 def test_figures_match_the_engine_card_on_a_stage_with_regions(tmp_path: Path) -> None:
