@@ -47,12 +47,14 @@ import { Label } from "@/components/ui/Label";
 import type { StageEvent, StageEventKind } from "@/lib/api";
 import { enclosingMovement, exposedSpans, shotIsMoving, snapTime, timeFromX } from "@/lib/events";
 import { useSnapToShots } from "@/lib/timelinePrefs";
+import { CHIP_TICK_BG } from "@/components/ui/chipTicks";
 import { cn } from "@/lib/utils";
 
 import {
   DRAG_THRESHOLD_PX,
   LANE_FILL,
   LANE_LABEL,
+  LANE_TICK,
   LANES,
   SNAP_PX,
   TOUCH_DRAG_THRESHOLD_PX,
@@ -82,13 +84,6 @@ function regionLabel(x: StageEvent): string {
   const state = x.source === "auto" ? "proposed" : "confirmed";
   return `${LANE_LABEL[x.kind]} ${x.start.toFixed(2)} to ${x.end.toFixed(2)}, ${(x.end - x.start).toFixed(2)} seconds, ${state}`;
 }
-
-const HANDLE_FILL: Record<StageEventKind, string> = {
-  draw: "bg-draw",
-  movement: "bg-beep",
-  reload: "bg-live",
-  activation: "bg-ink-2",
-};
 
 export interface LaneEditorProps {
   shots: { shot_number: number; time_from_beep: number }[];
@@ -486,7 +481,7 @@ export function LaneEditor(props: LaneEditorProps) {
                       className={cn(
                         "absolute top-1/2 h-4 w-2 -translate-y-1/2 cursor-ew-resize rounded-sm",
                         edge === "start" ? "-left-1" : "-right-1",
-                        HANDLE_FILL[kind],
+                        CHIP_TICK_BG[LANE_TICK[kind]],
                       )}
                     />
                   ))}

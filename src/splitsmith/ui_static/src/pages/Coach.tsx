@@ -47,6 +47,7 @@ import { reviewFigures } from "@/lib/coachReview";
 import { useMatchHref } from "@/lib/matchHref";
 import { stageLinkSearch } from "@/lib/stageLink";
 import { INTERVAL_LABEL, baselinesFromMatchDistributions, gapTier, statisticSplits } from "@/lib/splits";
+import { hueSwatch } from "@/components/ui/chipTicks";
 import { BUDGET_LABEL, BUDGET_TICK, matchBudget, timeBudget } from "@/lib/timeBudget";
 import { useStageWorkspace, deriveStageView } from "@/lib/useStageWorkspace";
 import { cn } from "@/lib/utils";
@@ -323,9 +324,9 @@ function CoachMatchInner({ slug }: { slug: string }) {
           );
         })}
         <div className="flex flex-wrap items-center gap-4 border-t border-rule px-3.5 py-2 text-sm text-muted">
-          {(["first_shot", "movement", "transition", "split", "reload", "unclassified"] as const).map((c) => (
+          {(["first_shot", "movement", "transition", "split", "reload", "activation", "unclassified"] as const).map((c) => (
             <span key={c} className="inline-flex items-center gap-1.5">
-              <i aria-hidden className={cn("size-2 rounded-full", LEGEND_BG[c])} />
+              <i aria-hidden className={hueSwatch(BUDGET_TICK[c])} />
               {BUDGET_LABEL[c]}
             </span>
           ))}
@@ -358,15 +359,6 @@ function firstShotRow(distributions: CoachMatchDistributions | null): { mean_s: 
     count: v.length,
   };
 }
-
-const LEGEND_BG: Record<string, string> = {
-  first_shot: "bg-led",
-  movement: "bg-beep",
-  transition: "bg-manual",
-  split: "bg-done",
-  reload: "bg-live",
-  unclassified: "bg-surface-3",
-};
 
 function computeHeadline(aggs: PerStageAggregate[]) {
   let totalSeconds = 0;
@@ -445,7 +437,7 @@ function IntervalBreakdownCard({
         return (
           <div key={cls} className="numeral grid grid-cols-[minmax(110px,1fr)_repeat(4,minmax(0,72px))] items-center gap-3 border-b border-rule px-3.5 py-1.5 text-md text-ink-2 last:border-b-0">
             <span className="inline-flex items-center gap-2 font-sans text-ink">
-              <i aria-hidden className={cn("size-2 rounded-full", LEGEND_BG[cls] ?? "bg-ink-2")} />
+              <i aria-hidden className={hueSwatch(BUDGET_TICK[cls])} />
               {BUDGET_LABEL[cls]}
             </span>
             <span className="text-right">{d?.mean_s != null ? d.mean_s.toFixed(2) : "\u2014"}</span>
