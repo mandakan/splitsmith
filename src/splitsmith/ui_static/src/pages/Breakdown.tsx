@@ -58,7 +58,7 @@ export function Breakdown() {
 
 /** ``/breakdown/:slug``: the first stage with a stage time (the ones with
  *  shots to break down), else the first stage. */
-function FirstStageRedirect({ slug }: { slug: string }) {
+export function FirstStageRedirect({ slug }: { slug: string }) {
   const href = useMatchHref();
   const [target, setTarget] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);

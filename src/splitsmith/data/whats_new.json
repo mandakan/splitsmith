@@ -1,6 +1,12 @@
 {
   "entries": [
     {
+      "id": "breakdown-on-phone",
+      "date": "2026-10-17",
+      "title": "Review Breakdown proposals on your phone",
+      "body": "Open Breakdown on a phone to step through the proposed reloads and movement, keep or delete them, and drag an edge on the video until the frame is right."
+    },
+    {
       "id": "breakdown-frame-steps",
       "date": "2026-10-17",
       "title": "Frame steps match your camera",

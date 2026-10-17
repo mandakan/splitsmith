@@ -9,7 +9,8 @@
  * the rendition, else the trim, else 404 -- never the source. The
  * rendition is used only when the server named a fresh
  * one (``scrub_version``), the user has not asked for full resolution,
- * and it has not already failed to play on this page.
+ * and it has not already failed to play on this page. A phone ignores the
+ * full-resolution switch.
  */
 export interface ScrubChoice {
   kind: "scrub" | "trim";
@@ -21,8 +22,10 @@ export function scrubSource(args: {
   scrubVersion: string | null | undefined;
   fullRes: boolean;
   failed: boolean;
+  /** A phone always plays the rendition: the full trim ran at 9 frames a second on Android (spike 2026-10-17). */
+  phone?: boolean;
 }): ScrubChoice {
-  const { trimVersion, scrubVersion, fullRes, failed } = args;
-  if (scrubVersion && !fullRes && !failed) return { kind: "scrub", version: scrubVersion };
+  const { trimVersion, scrubVersion, fullRes, failed, phone = false } = args;
+  if (scrubVersion && (!fullRes || phone) && !failed) return { kind: "scrub", version: scrubVersion };
   return { kind: "trim", version: trimVersion ?? null };
 }

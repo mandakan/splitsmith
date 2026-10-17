@@ -8,6 +8,13 @@ import type { StageEvent, StageEventKind } from "@/lib/api";
 import { MIN_EVENT_S, clampToLane, nextEventId } from "@/lib/events";
 
 export const LANES: readonly StageEventKind[] = ["movement", "reload", "activation"];
+export const LANE_LABEL: Record<StageEventKind, string> = { movement: "Movement", reload: "Reload", activation: "Activation" };
+// Budget hues (Chip TICK): movement beep, reload live, activation ink-2. The lanes and the phone's focus strip draw with them.
+export const LANE_FILL: Record<StageEventKind, string> = {
+  movement: "bg-beep/30 border-beep",
+  reload: "bg-live/30 border-live",
+  activation: "bg-ink-2/20 border-ink-2",
+};
 export const SNAP_PX = 8;
 export const DRAG_THRESHOLD_PX = 6;
 export const TOUCH_DRAG_THRESHOLD_PX = 10;
@@ -66,13 +73,15 @@ export function sameEvents(a: StageEvent[], b: StageEvent[]): boolean {
 }
 
 /**
- * One frame of a drag past its threshold. ``t`` is the time under the
- * pointer; ``snap`` applies the shot snap (identity when snapping is off
- * for this gesture: the "Snap to shots" switch, which Alt inverts). Null when
- * the frame changes nothing (a create still shorter than MIN_EVENT_S).
+ * One frame of a gesture: a LaneEditor drag past its threshold, or a phone
+ * edge drag (``lib/edgeDrag``, which has no pointer fields). ``t`` is the
+ * time under the pointer; ``snap`` applies the shot snap (identity when
+ * snapping is off for this gesture: the "Snap to shots" switch, which Alt
+ * inverts). Null when the frame changes nothing (a create still shorter
+ * than MIN_EVENT_S).
  */
 export function dragFrame(
-  drag: Drag,
+  drag: DragInit,
   current: StageEvent[],
   t: number,
   snap: (t: number) => number,
