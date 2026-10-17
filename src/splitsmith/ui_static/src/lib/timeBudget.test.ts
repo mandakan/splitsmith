@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import type { CoachIntervalClass, CoachMatchDistributions, CoachShot } from "@/lib/api";
 import { LANE_TICK } from "@/components/coach/laneDrag";
 import { CHIP_TICK_BG } from "@/components/ui/chipTicks";
+import { INTERVAL_TONE } from "@/lib/splits";
 import { BUDGET_TICK, matchBudget, timeBudget } from "@/lib/timeBudget";
 
 // Stage 03 B6 Rear as seeded by scripts/seed_demo_match.py (real times
@@ -101,5 +102,14 @@ describe("the draw's hue", () => {
   it("is one hue for the draw interval and the draw region, and never the brand red", () => {
     expect(CHIP_TICK_BG[BUDGET_TICK.first_shot]).toBe(CHIP_TICK_BG[LANE_TICK.draw]);
     expect(CHIP_TICK_BG[BUDGET_TICK.first_shot]).not.toBe("bg-led");
+  });
+});
+
+describe("the Reclassify tones", () => {
+  it("use each class's chip hue", () => {
+    for (const cls of Object.keys(INTERVAL_TONE) as (keyof typeof INTERVAL_TONE)[]) {
+      const hue = CHIP_TICK_BG[BUDGET_TICK[cls]].replace(/^bg-/, "");
+      expect(INTERVAL_TONE[cls].split(" ")[0]).toBe(`text-${hue}`);
+    }
   });
 });
