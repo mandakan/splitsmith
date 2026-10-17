@@ -25,9 +25,12 @@
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 
+import { SpectrogramTrack } from "@/components/audit/SpectrogramTrack";
 import { Timeline, type TimelineTrack } from "@/components/timeline/Timeline";
 import { WaveformTrack } from "@/components/timeline/WaveformTrack";
-import { api, type PeaksResult } from "@/lib/api";
+import { Segmented } from "@/components/ui/Segmented";
+import { api, type PeaksResult, type Spectrogram } from "@/lib/api";
+import { TIMER_BAND, bandOf, bandParam, useBeepFilter, validBand } from "@/lib/beepFilter";
 import type { PeaksDetail } from "@/lib/timelineView";
 import { snapToLeadingEdge } from "@/lib/peak-snap";
 import { coalescedSeek, seekNow } from "@/lib/coalescedSeek";
@@ -81,6 +84,11 @@ const BEEP_SNAP_S = 0.1;
  *  measured from it (a corpus scan, 2026-10-13: 50 of 185 confirmed beeps). */
 const BEEP_OFF_S = 0.02;
 const CANDIDATES_ROW_H = 22;
+const SPECTRUM_ROW_H = 72;
+/** The spectrogram's window around the beep, seconds either side; fetched
+ *  again when the beep comes within SPECTRUM_EDGE_S of its edge. */
+const SPECTRUM_HALF_S = 1.5;
+const SPECTRUM_EDGE_S = 0.5;
 const AUDIO_ROW_H = 120;
 /** Source <-> local tolerance for "is this candidate the chosen one". */
 const SELECTED_EPS = 0.005;
@@ -106,6 +114,13 @@ export function BeepTimeline({
   const [playing, setPlaying] = useState(false);
   const [zoom, setZoom] = useState<Zoom>(null);
   const [detail, setDetail] = useState<PeaksDetail | null>(null);
+  const [spectrum, setSpectrum] = useState<Spectrogram | null>(null);
+  // Off, the timer's own tone (the spectrum's ``tone_band``, else the
+  // detector's band) or a custom band: the Audio row and Snap read it.
+  const [filter, setFilter] = useBeepFilter();
+  const band = bandParam(filter, spectrum?.tone_band ?? null);
+  // The band the held detail was fetched with: a new band fetches again.
+  const detailBandRef = useRef<string | undefined>(undefined);
   const lastScrubRef = useRef(0);
 
   // The fetch effect parks the video once peaks land (below), using
@@ -213,15 +228,21 @@ export function BeepTimeline({
   // beep moves out of the window it has.
   useEffect(() => {
     if (!peaks || chosenLocalNow == null) return undefined;
-    if (detail && chosenLocalNow - detail.start > 0.5 && detail.start + detail.duration - chosenLocalNow > 0.5) {
+    if (
+      detail &&
+      detailBandRef.current === band &&
+      chosenLocalNow - detail.start > 0.5 &&
+      detail.start + detail.duration - chosenLocalNow > 0.5
+    ) {
       return undefined;
     }
+    detailBandRef.current = band;
     const start = Math.max(0, Math.round((chosenLocalNow - DETAIL_HALF_S) * 1000) / 1000);
     const end = Math.min(peaks.duration, Math.round((chosenLocalNow + DETAIL_HALF_S) * 1000) / 1000);
     if (end <= start) return undefined;
     let alive = true;
     api
-      .getVideoPeaks(slug, stageNumber, videoId, DETAIL_BINS, { start, end })
+      .getVideoPeaks(slug, stageNumber, videoId, DETAIL_BINS, { start, end }, undefined, band)
       .then((d) => {
         if (alive) setDetail({ start: d.start ?? start, duration: d.duration, peaks: d.peaks });
       })
@@ -233,8 +254,40 @@ export function BeepTimeline({
     };
     // detail is read to decide whether to fetch, not a reason to.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [peaks, chosenLocalNow, slug, stageNumber, videoId]);
+  }, [peaks, chosenLocalNow, slug, stageNumber, videoId, band]);
   useEffect(() => setDetail(null), [slug, stageNumber, videoId]);
+
+  // The spectrogram for the seconds around the beep, fetched again only
+  // when the beep nears the edge of the window it has. A pending answer
+  // (the WAV still being made) is retried by whenReady.
+  useEffect(() => {
+    if (!peaks || chosenLocalNow == null) return undefined;
+    if (
+      spectrum &&
+      chosenLocalNow - spectrum.start > SPECTRUM_EDGE_S &&
+      spectrum.start + spectrum.duration - chosenLocalNow > SPECTRUM_EDGE_S
+    ) {
+      return undefined;
+    }
+    const start = Math.max(0, Math.round((chosenLocalNow - SPECTRUM_HALF_S) * 1000) / 1000);
+    const end = Math.min(peaks.duration, Math.round((chosenLocalNow + SPECTRUM_HALF_S) * 1000) / 1000);
+    if (end <= start) return undefined;
+    let alive = true;
+    api
+      .getVideoSpectrum(slug, stageNumber, videoId, { start, end })
+      .then((sp) => {
+        if (alive && sp && "data" in sp) setSpectrum(sp);
+      })
+      .catch(() => {
+        // No spectrum: the row says so; the waveform still draws.
+      });
+    return () => {
+      alive = false;
+    };
+    // spectrum is read to decide whether to fetch, not a reason to.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [peaks, chosenLocalNow, slug, stageNumber, videoId]);
+  useEffect(() => setSpectrum(null), [slug, stageNumber, videoId]);
 
   // Space -> play/pause the preview, the same window-level hook every
   // other Splitsmith media surface wires (BeepWaveformPicker
@@ -339,6 +392,21 @@ export function BeepTimeline({
       ),
     },
     {
+      id: "spectrum",
+      rows: [{ label: "Spectrum", height: SPECTRUM_ROW_H }],
+      seekable: true,
+      render: (geom) => (
+        <SpectrogramTrack
+          spectrum={spectrum}
+          from={0}
+          to={peaks.duration}
+          geom={geom}
+          height={SPECTRUM_ROW_H}
+          band={bandOf(filter, spectrum?.tone_band ?? null)}
+        />
+      ),
+    },
+    {
       id: "audio",
       rows: [{ label: "Audio", height: AUDIO_ROW_H }],
       seekable: true,
@@ -372,6 +440,44 @@ export function BeepTimeline({
       tracks={tracks}
       actionsEnd={
         <span className="flex items-center gap-2">
+          <Segmented
+            label="Filter"
+            value={filter.kind}
+            onChange={(k) =>
+              setFilter(k === "custom" ? { kind: "custom", lo: TIMER_BAND.lo, hi: TIMER_BAND.hi } : { kind: k })
+            }
+            options={[
+              { value: "off", label: "Off" },
+              { value: "tone", label: "Timer tone" },
+              { value: "custom", label: "Custom" },
+            ]}
+          />
+          {filter.kind === "custom" ? (
+            <span className="inline-flex items-center gap-1 text-sm text-muted">
+              <input
+                aria-label="Low Hz"
+                type="number"
+                className="numeral w-16 rounded-md border border-rule bg-surface-2 px-1"
+                value={filter.lo}
+                onChange={(e) => {
+                  const lo = Number(e.target.value);
+                  if (validBand(lo, filter.hi)) setFilter({ ...filter, lo });
+                }}
+              />
+              to
+              <input
+                aria-label="High Hz"
+                type="number"
+                className="numeral w-16 rounded-md border border-rule bg-surface-2 px-1"
+                value={filter.hi}
+                onChange={(e) => {
+                  const hi = Number(e.target.value);
+                  if (validBand(filter.lo, hi)) setFilter({ ...filter, hi });
+                }}
+              />
+              Hz
+            </span>
+          ) : null}
           {snapLocal != null && chosenLocal != null && Math.abs(chosenLocal - snapLocal) >= BEEP_OFF_S ? (
             <span className="numeral text-sm text-status-warning">
               {Math.round(Math.abs(chosenLocal - snapLocal) * 1000)} ms{" "}

@@ -22,6 +22,7 @@ vi.mock("@/lib/api", () => ({
   api: {
     videoStreamUrl: () => "/proxy.mp4",
     getVideoPeaks: vi.fn(),
+    getVideoSpectrum: vi.fn(() => new Promise(() => {})),
     getBeepQueue: vi.fn(),
   },
 }));

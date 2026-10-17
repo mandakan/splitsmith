@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { StrictMode, useState } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -9,7 +9,7 @@ import { resetTimelinePrefsForTests } from "@/lib/timelinePrefs";
 import { BeepTimeline, type BeepCandidate } from "./BeepTimeline";
 
 vi.mock("@/lib/api", () => ({
-  api: { getVideoPeaks: vi.fn() },
+  api: { getVideoPeaks: vi.fn(), getVideoSpectrum: vi.fn() },
 }));
 
 const { api } = await import("@/lib/api");
@@ -103,6 +103,8 @@ function stubRequestAnimationFrame() {
 
 beforeEach(() => {
   vi.mocked(api.getVideoPeaks).mockReset();
+  vi.mocked(api.getVideoSpectrum).mockReset();
+  vi.mocked(api.getVideoSpectrum).mockReturnValue(new Promise(() => {}));
   vi.spyOn(Element.prototype, "clientWidth", "get").mockReturnValue(VIEWPORT);
   vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
     const w = this.dataset.testid === "timeline-content" ? parseFloat(this.style.width) || VIEWPORT : VIEWPORT;
@@ -495,7 +497,7 @@ describe("BeepTimeline", () => {
     vi.mocked(api.getVideoPeaks).mockResolvedValue(peaksFixture({ beep_time: 5 }));
     render(<Harness videoId="v1" videoBeepTime={5} />);
     await screen.findByTestId("waveform-track");
-    expect(api.getVideoPeaks).toHaveBeenCalledWith("alice", 10, "v1", 4000, { start: 3, end: 7 });
+    expect(api.getVideoPeaks).toHaveBeenCalledWith("alice", 10, "v1", 4000, { start: 3, end: 7 }, undefined, "2200-3500");
   });
 
   it("Snap puts the pick on the beep tone's start", async () => {
@@ -546,3 +548,43 @@ describe("BeepTimeline", () => {
   });
 });
 
+
+describe("the timer tone filter and the spectrum row (spec 2026-10-17)", () => {
+  const SPEC = {
+    start: 3.5,
+    duration: 3,
+    hz: [0, 2000, 4000, 6000],
+    columns: 2,
+    data: btoa(String.fromCharCode(0, 10, 200, 0, 0, 10, 200, 0)),
+    tone_band: [2507, 2907] as [number, number],
+  };
+
+  it("asks for the timer's own band once the spectrum names it, and none with the filter off", async () => {
+    vi.mocked(api.getVideoPeaks).mockResolvedValue(peaksFixture({ beep_time: 5 }));
+    vi.mocked(api.getVideoSpectrum).mockResolvedValue(SPEC);
+    render(<Harness videoId="v1" videoBeepTime={5} />);
+    await waitFor(() =>
+      expect(api.getVideoPeaks).toHaveBeenCalledWith("alice", 10, "v1", 4000, { start: 3, end: 7 }, undefined, "2507-2907"),
+    );
+    fireEvent.click(within(screen.getByRole("group", { name: "Filter" })).getByRole("button", { name: "Off" }));
+    await waitFor(() => expect(vi.mocked(api.getVideoPeaks).mock.calls.at(-1)?.[6]).toBeUndefined());
+  });
+
+  it("draws the Spectrum row under the candidates", async () => {
+    vi.mocked(api.getVideoPeaks).mockResolvedValue(peaksFixture({ beep_time: 5 }));
+    vi.mocked(api.getVideoSpectrum).mockResolvedValue(SPEC);
+    render(<Harness videoId="v1" videoBeepTime={5} />);
+    expect(await screen.findByText("Spectrum")).toBeInTheDocument();
+    expect(api.getVideoSpectrum).toHaveBeenCalledWith("alice", 10, "v1", { start: 3.5, end: 6.5 });
+  });
+
+  it("refetches the spectrum when the beep leaves the window it holds", async () => {
+    vi.mocked(api.getVideoPeaks).mockResolvedValue(peaksFixture({ beep_time: 5 }));
+    vi.mocked(api.getVideoSpectrum).mockResolvedValue(SPEC);
+    const { rerender } = render(<Harness videoId="v1" videoBeepTime={5} />);
+    await waitFor(() => expect(api.getVideoSpectrum).toHaveBeenCalledTimes(1));
+    rerender(<Harness videoId="v1" videoBeepTime={5} draftSourceTime={8} />);
+    await waitFor(() => expect(api.getVideoSpectrum).toHaveBeenCalledTimes(2));
+    expect(vi.mocked(api.getVideoSpectrum).mock.calls[1][3]).toEqual({ start: 6.5, end: 9.5 });
+  });
+});
