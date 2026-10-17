@@ -23,6 +23,14 @@ def test_the_breakdown_is_used_by_default_everywhere_a_user_starts() -> None:
     assert StageExportRequest.__dataclass_fields__["breakdown"].default is True
 
 
+def test_a_preset_remembers_the_choice_and_an_older_one_uses_the_breakdown() -> None:
+    from splitsmith.export_presets import ExportPresetBody
+
+    assert ExportPresetBody().breakdown is True
+    assert ExportPresetBody.model_validate({}).breakdown is True
+    assert ExportPresetBody.model_validate({"breakdown": False}).breakdown is False
+
+
 def test_the_match_export_threads_the_choice(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     from splitsmith.ui import match_exports as match_exports_mod
 
@@ -228,3 +236,103 @@ def test_the_mcp_match_export_threads_the_choice(tmp_path: Path) -> None:
             export_tools.export_match_tool(str(root), stage_numbers=[1], breakdown=breakdown)
             seen.append(mock.call_args.kwargs["request"].breakdown)
     assert seen == [True, False]
+
+
+# --- the preview ------------------------------------------------------------------------
+
+_REGIONS = [
+    {"id": "evt-1", "kind": "reload", "start": 1.45, "end": 1.65, "source": "manual"},
+    {"id": "evt-2", "kind": "draw", "start": 0.5, "end": 1.42, "source": "manual"},
+]
+
+
+def test_the_summary_preview_follows_the_switch(tmp_path: Path) -> None:
+    from splitsmith import export_preview as ep
+
+    from .test_export_preview import AUDIT, _render, _StubRasterizer
+
+    htmls = []
+    for breakdown in (True, False):
+        raster = _StubRasterizer()
+        (tmp_path / str(breakdown)).mkdir()
+        spec = ep.PreviewSpec(card="summary", stage_number=3, breakdown=breakdown)
+        _render(tmp_path / str(breakdown), spec, audit={**AUDIT, "events": _REGIONS}, raster=raster)
+        htmls.append(raster.htmls[-1])
+    used, unused = htmls
+    assert ">Reloads<" in used and ">0.92<" in used
+    assert ">Reloads<" not in unused and ">1.42<" in unused
+
+
+def test_the_hud_preview_follows_the_switch(tmp_path: Path) -> None:
+    from splitsmith import export_preview as ep
+
+    from .test_export_preview import AUDIT, _HudRasterizer, _render
+
+    raster = _HudRasterizer()
+    spec = ep.PreviewSpec(card="overlay", stage_number=3, width=480, overlay_variant="plate", breakdown=False)
+    _render(tmp_path, spec, audit={**AUDIT, "events": _REGIONS}, raster=raster)
+    (timeline,) = raster.timelines
+    stage = timeline["data"]["stage"]
+    assert stage["reloads"] == [] and stage["events"] == []
+
+
+def test_the_previews_match_summary_follows_the_switch(tmp_path: Path) -> None:
+    from splitsmith import export_preview as ep
+
+    from .test_export_preview import AUDIT, _project
+
+    project, _root = _project(tmp_path)
+    docs = {3: {**AUDIT, "events": _REGIONS}}
+    used = ep.match_summary_for(project, docs, title="T", label="M", work_dir=tmp_path / "a")
+    unused = ep.match_summary_for(project, docs, title="T", label="M", work_dir=tmp_path / "b", breakdown=False)
+    assert used.rows[0].draw == pytest.approx(0.92)
+    assert unused.rows[0].draw == pytest.approx(1.42)
+
+
+def test_the_preview_key_moves_only_when_the_breakdown_is_off() -> None:
+    from dataclasses import replace
+
+    from splitsmith import export_preview as ep
+
+    spec = ep.PreviewSpec(card="summary", stage_number=3)
+
+    def key(s: ep.PreviewSpec) -> str:
+        return ep.preview_key(s, slug="me", project_updated_at="t1", audit="a1")
+
+    assert key(spec) == key(replace(spec, breakdown=True))
+    assert key(spec) != key(replace(spec, breakdown=False))
+
+
+def test_the_preview_route_threads_the_choice(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from splitsmith import export_preview as ep
+    from splitsmith import runtime as runtime_module
+    from splitsmith.ui import export_preview_api
+
+    from .test_look_editor_api import _factory, _Recorder
+    from .test_ui_server import _seed_match_export_project
+
+    monkeypatch.setattr(export_preview_api, "rasterizer_factory", _factory)
+    monkeypatch.setenv(runtime_module.ENV_CACHE_DIR, str(tmp_path / "cache"))
+    runtime_module._clear_runtime_cache()
+    specs: list = []
+    summaries: list = []
+    real_render, real_summary = ep.render_preview, ep.match_summary_for
+
+    def render(spec, **kwargs):  # noqa: ANN001, ANN003, ANN202
+        specs.append(spec)
+        return real_render(spec, **kwargs)
+
+    def summary(*args, **kwargs):  # noqa: ANN002, ANN003, ANN202
+        summaries.append(kwargs.get("breakdown", True))
+        return real_summary(*args, **kwargs)
+
+    monkeypatch.setattr(export_preview_api, "render_preview", render)
+    monkeypatch.setattr(export_preview_api, "match_summary_for", summary)
+    http, _root = _seed_match_export_project(tmp_path, stage_count=1)
+    for card in ("summary", "match_summary"):
+        for extra in ({}, {"breakdown": False}):
+            body = {"card": card, "stage_number": 1, "width": 480, **extra}
+            assert http.post("/api/shooters/me/export-preview", json=body).status_code == 200
+    assert [s.breakdown for s in specs] == [True, False, True, False]
+    assert summaries == [True, False]
+    runtime_module._clear_runtime_cache()

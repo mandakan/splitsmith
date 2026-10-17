@@ -121,6 +121,8 @@ class PreviewSpec:
     backdrop: Literal["footage", "demo"] = "footage"
     #: "Made with splitsmith" on the closing card.
     made_with: bool = True
+    #: The export's "Use Breakdown" switch: off, the card reads no region.
+    breakdown: bool = True
     #: Digest of the match summary the caller built from every stage's audit;
     #: the cache key's only view of the stages this request does not name.
     summary_digest: str | None = None
@@ -168,12 +170,15 @@ def audit_digest(audit_doc: dict | None) -> str:
     return hashlib.sha256(json.dumps(audit_doc, sort_keys=True, default=str).encode("utf-8")).hexdigest()
 
 
-def _confirmed_regions(audit_doc: dict | None) -> list[StageEvent]:
+def _confirmed_regions(audit_doc: dict | None, *, breakdown: bool = True) -> list[StageEvent]:
     """The stage's confirmed regions, the way ``overlay_hud_render``'s
     ``_confirmed_regions(audit_path)`` reads them -- here from the
     already-loaded doc rather than a file. A corrupt events list must not
     fail a preview: draw with no regions, as the Coach GET's in-memory
-    heal tolerates a legacy doc (``events.confirmed_from_doc``)."""
+    heal tolerates a legacy doc (``events.confirmed_from_doc``). ``breakdown``
+    off reads none, as the export does."""
+    if not breakdown:
+        return []
     return confirmed_from_doc(audit_doc, log_context="preview")
 
 
@@ -239,6 +244,8 @@ def preview_key(
         fields["event_logo"] = spec.event_logo
     if spec.card == "closing" and spec.made_with:
         fields["credit"] = True
+    if not spec.breakdown:
+        fields["breakdown"] = False
     if spec.summary_digest is not None:
         fields["summary"] = spec.summary_digest
     if spec.book_identity is not None:
@@ -347,7 +354,7 @@ def _trim_for(project: MatchProject, root: Path, stage_number: int) -> tuple[Pat
 
 
 def _shots_and_regions(
-    audit_doc: dict | None, work_dir: Path
+    audit_doc: dict | None, work_dir: Path, *, breakdown: bool = True
 ) -> tuple[tuple[TileShot, ...], tuple[StageEvent, ...]]:
     """The stage's shots and confirmed regions, read back through the
     export's own loaders (the regions give the Draw, spec 2026-10-17)."""
@@ -355,7 +362,7 @@ def _shots_and_regions(
         return (), ()
     path = work_dir / "audit.json"
     path.write_text(json.dumps(audit_doc), encoding="utf-8")
-    return load_stage_shots(path), load_stage_events(path)
+    return load_stage_shots(path, breakdown=breakdown), load_stage_events(path, breakdown=breakdown)
 
 
 def match_summary_for(
@@ -366,11 +373,13 @@ def match_summary_for(
     label: str,
     work_dir: Path,
     stage_numbers: Sequence[int] | None = None,
+    breakdown: bool = True,
 ) -> MatchSummary:
     """The match summary the export would draw, from each stage's audit doc
     (the preview reads docs, not files, so each is written to ``work_dir``
     and read back through the export's own loader). ``stage_numbers`` is
-    the export's selection, in its order; ``None`` is every stage."""
+    the export's selection, in its order; ``None`` is every stage.
+    ``breakdown`` is the export's switch."""
     stages: list[tuple[str, TileStageData]] = []
     by_number = {stage.stage_number: stage for stage in project.stages}
     chosen = (
@@ -381,7 +390,9 @@ def match_summary_for(
     for stage in chosen:
         folder = work_dir / f"stage{stage.stage_number}"
         folder.mkdir(parents=True, exist_ok=True)
-        shots, regions = _shots_and_regions(audit_docs.get(stage.stage_number), folder)
+        shots, regions = _shots_and_regions(
+            audit_docs.get(stage.stage_number), folder, breakdown=breakdown
+        )
         stages.append(
             (
                 # The name the export prints (``match_exports``): "Stage N" for a blank one.
@@ -466,7 +477,7 @@ def render_preview(
     except KeyError as exc:
         raise PreviewError(404, f"stage {spec.stage_number} not found") from exc
     work_dir.mkdir(parents=True, exist_ok=True)
-    shots, _regions = _shots_and_regions(audit_doc, work_dir)
+    shots, _regions = _shots_and_regions(audit_doc, work_dir, breakdown=spec.breakdown)
     if spec.card == "overlay" and not shots:
         raise PreviewError(409, "the overlay needs audited shots on this stage")
 
@@ -614,7 +625,7 @@ def render_preview(
                 logo=summary_logo,
             )
     elif spec.card == "summary":
-        regions = _confirmed_regions(audit_doc)
+        regions = _confirmed_regions(audit_doc, breakdown=spec.breakdown)
         tile = TileStageData(
             label=label,
             stage_number=spec.stage_number,
@@ -744,7 +755,7 @@ def _hud_preview(
     # Deferred: overlay_hud_render builds on the renderer's encoder module.
     from .overlay_hud_render import hud_context
 
-    stage = hud_stage_data(shots, beep_in_clip=HUD_PREVIEW_BEEP, events=_confirmed_regions(audit_doc))
+    stage = hud_stage_data(shots, beep_in_clip=HUD_PREVIEW_BEEP, events=_confirmed_regions(audit_doc, breakdown=spec.breakdown))
     position = resolve_position(spec.overlay_options.position, declared_positions(template))
     context = hud_context(
         stage=stage,
