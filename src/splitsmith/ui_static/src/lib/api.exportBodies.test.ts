@@ -75,6 +75,7 @@ const matchPayload: Required<MatchExportRequestPayload> = {
   title_page_duration_seconds: 3,
   closing_card: true,
   made_with: false,
+  breakdown: false,
   account_brand: false,
   logo_spots: ["wipe"],
   summary_hold_seconds: 3,
@@ -137,6 +138,7 @@ describe("export wrappers forward every declared field", () => {
       title_page_duration_seconds: 3,
       closing_card: true,
       made_with: false,
+      breakdown: false,
   account_brand: false,
   logo_spots: ["wipe"],
       match_summary: true,
@@ -179,6 +181,7 @@ describe("export wrappers forward every declared field", () => {
       overlay_max_fps: 30,
       secondary_video_ids: ["v1"],
       write_summary_card: true,
+      breakdown: false,
       summary_hold_seconds: 3,
     };
     const fetchMock = mockFetch();

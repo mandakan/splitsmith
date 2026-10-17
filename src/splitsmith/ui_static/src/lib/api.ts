@@ -1152,6 +1152,8 @@ export interface ExportPresetBody extends OverlayStyleBody {
   title_division: boolean;
   closing_card: boolean;
   made_with: boolean;
+  /** A preset saved before the switch has none: on. */
+  breakdown?: boolean;
   account_brand?: boolean;
   /** Where logos go beyond the cards; a preset saved before it has none. */
   logo_spots?: LogoSpot[];
@@ -1320,6 +1322,9 @@ export interface ExportPreviewBody extends OverlayStyleBody {
   title_division?: boolean;
   /** "Made with splitsmith" on the closing card. Server default on. */
   made_with?: boolean;
+  /** "Use Breakdown": the stages' confirmed regions in the export. Server
+   *  default on; off exports every stage as one nobody broke down. */
+  breakdown?: boolean;
   /** Your brand from the You page on the cards. Server default on. */
   account_brand?: boolean;
   /** Where logos go beyond the cards. Server default: Polished. */
@@ -1376,6 +1381,9 @@ export interface ExportStageRequestPayload {
   write_summary_card?: boolean;
   /** Seconds the summary MOV holds for. Server default 3.0. */
   summary_hold_seconds?: number;
+  /** "Use Breakdown": the stages' confirmed regions in the export. Server
+   *  default on; off exports every stage as one nobody broke down. */
+  breakdown?: boolean;
 }
 
 export interface ExportStageResult {
@@ -1490,6 +1498,9 @@ export interface MatchExportRequestPayload extends OverlayStyleBody {
   closing_card?: boolean;
   /** "Made with splitsmith" on the closing card. Server default on. */
   made_with?: boolean;
+  /** "Use Breakdown": the stages' confirmed regions in the export. Server
+   *  default on; off exports every stage as one nobody broke down. */
+  breakdown?: boolean;
   /** Your brand from the You page on the cards. Server default on. */
   account_brand?: boolean;
   /** Where logos go beyond the cards. Server default: Polished. */
@@ -1586,6 +1597,9 @@ export interface CompareGridRequestPayload {
   closing_card?: boolean;
   /** "Made with splitsmith" on the closing card. Server default on. */
   made_with?: boolean;
+  /** "Use Breakdown": the stages' confirmed regions in the export. Server
+   *  default on; off exports every stage as one nobody broke down. */
+  breakdown?: boolean;
   /** Your brand from the You page on the cards. Server default on. */
   account_brand?: boolean;
   /** Where logos go beyond the cards. Server default: Polished. */

@@ -255,6 +255,7 @@ function ExportInner({ slug }: { slug: string }) {
     transitionSeconds,
     renderOptions,
     includeOverlay,
+    useBreakdown,
     gridOverlay,
     gridHoldSeconds,
     gridFreeCell,
@@ -394,6 +395,14 @@ function ExportInner({ slug }: { slug: string }) {
     () => rows.map((r) => r.stage.stage_number).filter((n) => selection.has(n)),
     [rows, selection],
   );
+  // The Breakdown switch shows only where it changes something: a selected
+  // stage with a confirmed region (#1371 keeps an unbroken-down match free
+  // of it), or the grid, whose other shooters may have some.
+  const breakdownShown =
+    mode === "compare" ||
+    orderedSelection.some(
+      (n) => (project?.stages.find((s) => s.stage_number === n)?.figures?.regions ?? 0) > 0,
+    );
 
   // Secondaries with a confirmed beep on the selected stages: what the
   // cam rows offer, and zero is what hides them.
@@ -677,6 +686,7 @@ function ExportInner({ slug }: { slug: string }) {
         look: lookRequest.choice,
         kinds: lookRequest.kinds,
         youtubeConnected: false,
+        useBreakdown,
       }),
     );
   }
@@ -709,6 +719,7 @@ function ExportInner({ slug }: { slug: string }) {
           look: lookRequest.choice,
           kinds: lookRequest.kinds,
           youtubeConnected: !!youtubeSettings?.connected,
+          useBreakdown,
         }),
       );
       setJob(submitted);
@@ -746,6 +757,7 @@ function ExportInner({ slug }: { slug: string }) {
         descriptionLead,
         uploadOptions,
         youtubeConnected: !!youtubeSettings?.connected,
+        useBreakdown,
       });
       const submitted = await api.exportCompareGrid(payload);
       setJob(submitted);
@@ -822,6 +834,7 @@ function ExportInner({ slug }: { slug: string }) {
     reference: shooters.find((s) => s.slug === audioFrom)?.name ?? null,
     canvas: canvas.label,
     bare: bareSelected,
+    breakdown: breakdownShown ? useBreakdown : undefined,
   });
   const summaryCtx = {
     secondaryCount,
@@ -952,6 +965,7 @@ function ExportInner({ slug }: { slug: string }) {
               camChoices={camChoices}
               bareSelected={bareSelected}
               onDesktop={onDesktop}
+              showBreakdown={breakdownShown}
             />
           </Section>
 

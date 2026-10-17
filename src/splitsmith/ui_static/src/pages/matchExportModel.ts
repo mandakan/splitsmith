@@ -88,6 +88,8 @@ export function buildCompareGridPayload(input: {
   look?: LookChoice;
   /** The MP4 kinds the catalog offers (``requestLook``), for the kind filter. */
   kinds?: readonly string[];
+  /** "Use Breakdown"; sent only when off, so an untouched body stays as it was. */
+  useBreakdown?: boolean;
 }): CompareGridRequestPayload {
   const payload: CompareGridRequestPayload = {
     stage_numbers: [...input.stageNumbers].sort((a, b) => a - b),
@@ -106,6 +108,7 @@ export function buildCompareGridPayload(input: {
   if (input.render && anyRenderOptionOn(input.render)) {
     Object.assign(payload, gridExportFields(input.render, input.look));
   }
+  if (input.useBreakdown === false) payload.breakdown = false;
   if (input.overlay) {
     payload.overlay = true;
     const hold = input.summaryHoldSeconds ?? 0;
@@ -203,6 +206,9 @@ export interface MatchExportPayloadInput {
    *  render and upload, which only makes sense as an MP4 that uploads. */
   uploadTarget: "desk" | "desktop";
   youtubeConnected: boolean;
+  /** "Use Breakdown"; sent only when off, for every format (the markers
+   *  read regions too). */
+  useBreakdown?: boolean;
   /** The resolved Look choice (#1246); omitted, the server's defaults. */
   look?: LookChoice;
   /** The MP4 kinds the catalog offers (``requestLook``), for the kind filter. */
@@ -250,5 +256,6 @@ export function buildMatchExportPayload(input: MatchExportPayloadInput): MatchEx
     overlay_max_height: null,
     overlay_max_fps: null,
     project_name: input.projectName,
+    ...(input.useBreakdown === false ? { breakdown: false } : {}),
   };
 }

@@ -382,3 +382,39 @@ describe("the overlay style on the match export (template HUD)", () => {
     );
   });
 });
+
+describe("the breakdown switch on the payloads", () => {
+  const match: MatchExportPayloadInput = {
+    stageNumbers: [1],
+    headPad: S.headPad,
+    tailPad: S.tailPad,
+    camOptions: S.camOptions,
+    outputFormat: "fcpxml",
+    transitionKind: S.transitionKind,
+    transitionSeconds: S.transitionSeconds,
+    renderOptions: S.renderOptions,
+    youtube: false,
+    descriptionLead: "",
+    uploadOptions: S.uploadOptions,
+    includeOverlay: S.includeOverlay,
+    overlayCodec: S.overlayCodec,
+    projectName: "Match",
+    uploadTarget: "desk",
+    youtubeConnected: false,
+  };
+
+  it("rides the match export only when off, whatever the format", () => {
+    expect(buildMatchExportPayload(match)).not.toHaveProperty("breakdown");
+    expect(buildMatchExportPayload({ ...match, useBreakdown: true })).not.toHaveProperty("breakdown");
+    for (const outputFormat of ["fcpxml", "fcp7xml", "mp4"] as const) {
+      expect(buildMatchExportPayload({ ...match, outputFormat, useBreakdown: false }).breakdown).toBe(false);
+    }
+  });
+
+  it("rides the grid only when off", () => {
+    const grid = { stageNumbers: [1], audioFrom: "mathias", canvas: CANVAS_CHOICES[1], outputName: "g" };
+    expect(buildCompareGridPayload(grid)).not.toHaveProperty("breakdown");
+    expect(buildCompareGridPayload({ ...grid, useBreakdown: true })).not.toHaveProperty("breakdown");
+    expect(buildCompareGridPayload({ ...grid, useBreakdown: false }).breakdown).toBe(false);
+  });
+});

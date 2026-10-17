@@ -312,7 +312,8 @@ describe("Breakdown is optional by design (#1371)", () => {
     expect(document.body.textContent).not.toMatch(/breakdown|region/i);
     cleanup();
 
-    // The same stages with regions: nothing about the page moves.
+    // The same stages with regions: nothing about the selection moves, and
+    // the one addition is the export's own switch, on, to opt out with.
     vi.mocked(api.getProject).mockResolvedValue({
       ...PROJECT,
       stages: PROJECT.stages.map((s) => ({ ...s, figures: figures(3) })),
@@ -320,6 +321,7 @@ describe("Breakdown is optional by design (#1371)", () => {
     await renderPage();
     expect(screen.getByRole("checkbox", { name: /Stage 1/i })).toBeChecked();
     expect(screen.getByRole("checkbox", { name: /Stage 2/i })).toBeChecked();
-    expect(document.body.textContent).not.toMatch(/breakdown|region/i);
+    expect(screen.getByRole("checkbox", { name: "Use Breakdown" })).toBeChecked();
+    expect(document.body.textContent).not.toMatch(/region/i);
   });
 });

@@ -120,6 +120,10 @@ export interface ExportSettings {
   /** ``titleInfo`` inside is match-specific and never stored. */
   renderOptions: RenderOptions;
   includeOverlay: boolean;
+  /** "Use Breakdown": the stages' confirmed regions (draw, movement,
+   *  reloads) reach the export; off, every stage exports as one nobody
+   *  broke down. Both modes, every format. */
+  useBreakdown: boolean;
   /** Which of the Look's HUD styles draws the overlay, and its toggles
    *  (``lib/overlayStyle``); one shooter's overlay only. */
   overlayStyle: OverlayStyle;
@@ -150,6 +154,7 @@ export const DEFAULT_EXPORT_SETTINGS: ExportSettings = {
   matchSummaryVariant: "default",
   renderOptions: DEFAULT_RENDER_OPTIONS,
   includeOverlay: false,
+  useBreakdown: true,
   overlayStyle: DEFAULT_OVERLAY_STYLE,
   gridOverlay: false,
   gridHoldSeconds: 0,
@@ -203,6 +208,7 @@ export function settingsToBody(s: ExportSettings): ExportPresetBody {
     match_summary: s.renderOptions.matchSummary,
     match_summary_seconds: finite(s.renderOptions.matchSummarySeconds, D.matchSummarySeconds),
     overlay: s.includeOverlay,
+    breakdown: s.useBreakdown,
     ...overlayStyleBody(s.overlayStyle),
     grid_overlay: s.gridOverlay,
     grid_hold_seconds: finite(s.gridHoldSeconds, 0),
@@ -261,6 +267,7 @@ export function applyBody(s: ExportSettings, body: ExportPresetBody): ExportSett
       matchSummarySeconds: finite(body.match_summary_seconds ?? D.matchSummarySeconds, D.matchSummarySeconds),
     },
     includeOverlay: body.overlay,
+    useBreakdown: body.breakdown ?? true,
     overlayStyle: styleFromBody(body),
     gridOverlay: body.grid_overlay,
     gridHoldSeconds: finite(body.grid_hold_seconds, 0),

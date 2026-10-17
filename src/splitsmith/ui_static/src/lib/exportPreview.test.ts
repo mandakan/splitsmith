@@ -244,3 +244,13 @@ describe("previewBody logo spots", () => {
     expect(previewBody(DEFAULT_EXPORT_SETTINGS, "title", 1).logo_placeholders).toBeUndefined();
   });
 });
+
+describe("the breakdown switch on the preview", () => {
+  it("rides the request only when off, so an untouched form keeps its cache keys", () => {
+    expect(previewBody(DEFAULT_EXPORT_SETTINGS, "summary", 1)).not.toHaveProperty("breakdown");
+    const off = { ...DEFAULT_EXPORT_SETTINGS, useBreakdown: false };
+    for (const card of ["summary", "match_summary", "overlay"] as const) {
+      expect(previewBody(off, card, 1).breakdown).toBe(false);
+    }
+  });
+});
