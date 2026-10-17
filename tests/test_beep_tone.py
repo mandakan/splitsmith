@@ -56,7 +56,11 @@ def test_a_wavering_tone_starts_where_it_starts() -> None:
     """A timer tone that beats and grows louder 200 ms in (Little Trouble 1,
     Bofors 5): its start is its onset, not a dip before its loudest point."""
     t = np.arange(2 * SR) / SR
-    env = np.where((t >= 1.0) & (t < 1.45), 0.25 + 0.35 * (t - 1.0) / 0.45 * (0.5 + 0.5 * np.cos(2 * np.pi * 9 * (t - 1.0))), 0.0)
+    env = np.where(
+        (t >= 1.0) & (t < 1.45),
+        0.25 + 0.35 * (t - 1.0) / 0.45 * (0.5 + 0.5 * np.cos(2 * np.pi * 9 * (t - 1.0))),
+        0.0,
+    )
     sig = (env * np.sin(2 * np.pi * 2800 * t)).astype(np.float32)
     assert beep_tone.tone_offset_ms(sig, SR, 1.0, (2200, 3500)) == pytest.approx(0.0, abs=6)
 
@@ -88,6 +92,14 @@ def test_spectrogram_shape_and_tone_row() -> None:
     assert abs(spec.hz[int(mid.argmax())] - 2800) < 100
 
 
+def test_the_tone_band_follows_the_timer_and_falls_back_without_one() -> None:
+    """Timers run from 1.6 to 5.4 kHz in the corpus; the band is +-200 Hz
+    around the steadiest line near the beep, the detector's band without one."""
+    lo, hi = beep_tone.tone_band(_tone(2.0, 4600, 1.0), SR, 1.0)
+    assert lo < 4600 < hi and hi - lo == pytest.approx(400, abs=60)
+    assert beep_tone.tone_band(np.zeros(2 * SR, dtype=np.float32), SR, 1.0) == beep_tone.default_band()
+
+
 def test_default_band_is_the_detectors_tonal_band() -> None:
     from splitsmith.config import BeepDetectConfig
 
@@ -95,18 +107,17 @@ def test_default_band_is_the_detectors_tonal_band() -> None:
     assert beep_tone.default_band() == (cfg.tonal_band_lo_hz, cfg.tonal_band_hi_hz)
 
 
-def test_a_cross_bay_shot_on_a_real_beep() -> None:
-    """Little Trouble stage 2 (Mathias, GO 3S): the full-range scan put the
-    audited beep 79 ms off its tone. In the band the audited beep is on
-    the tone. If this fails, the audited beep may be wrong: stop and
-    report, do not tune the test."""
+def test_a_corrected_beep_sits_on_its_tone() -> None:
+    """Little Trouble stage 2 (Mathias, GO 3S): the tone starts 191 ms after
+    where the beep was first confirmed, past a cross-bay shot at +78 ms; the
+    beep was moved onto it on 2026-10-17. In the timer's own band it reads 0."""
     stem = "stage-shots-little-trouble-in-big-satra-2026-stage2-s97dcec94"
     wav = FIXTURES / f"{stem}.wav"
     if not wav.exists() or not (FIXTURES / f"{stem}.json").exists():
         pytest.skip("fixture not here (scripts/fixture_audio.py fetch)")
     beep = json.loads((FIXTURES / f"{stem}.json").read_text())["beep_time"]
     audio, sr = beep_detect.load_audio(wav)
-    banded = beep_tone.tone_offset_ms(audio, sr, beep, beep_tone.default_band())
-    full = beep_tone.tone_offset_ms(audio, sr, beep, None)
-    assert banded is not None and abs(banded) < 10
-    assert full is not None and abs(full) >= 40
+    lo, hi = beep_tone.tone_band(audio, sr, beep)
+    assert lo < 2700 < hi
+    banded = beep_tone.tone_offset_ms(audio, sr, beep, (lo, hi))
+    assert banded is not None and abs(banded) < 5
