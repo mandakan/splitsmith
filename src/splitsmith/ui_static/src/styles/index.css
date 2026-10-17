@@ -134,6 +134,12 @@
   --color-moment:       #F472B6;
   --color-moment-glow:  rgba(244, 114, 182, 0.30);
   --color-moment-tint:  rgba(244, 114, 182, 0.10);
+  /* A draw region (spec 2026-10-17): the Draw lane, its handles and the
+   * stage strip; the overlay's draw band (overlay_theme.DEFAULT_DRAW) is
+   * the same pink. The moment marker shares the hue, but only on Results'
+   * timeline, where no region is drawn. Not red: red is the brand, the
+   * draw interval class and the slow split; violet is the transition. */
+  --color-draw:         #F472B6;
 
   /* Stage status taxonomy -- six tiers, aliased to the existing palette so
    * the meaning is encoded in the token name (not the underlying color).

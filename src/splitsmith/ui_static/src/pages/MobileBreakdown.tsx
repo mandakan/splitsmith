@@ -20,7 +20,7 @@ import { Link, Navigate, useLocation, useOutletContext, useParams } from "react-
 import { EdgePad } from "@/components/breakdown/mobile/EdgePad";
 import { FocusStrip, type HandleDrag } from "@/components/breakdown/mobile/FocusStrip";
 import { PhoneVideo } from "@/components/breakdown/mobile/PhoneVideo";
-import { LANE_LABEL, LANES, sameEvents } from "@/components/coach/laneDrag";
+import { LANE_LABEL, LANE_TICK, LANES, sameEvents } from "@/components/coach/laneDrag";
 import { SaveNotice } from "@/components/coach/SaveNotice";
 import type { MatchShellOutletContext } from "@/components/match/MatchShell";
 import { Button } from "@/components/ui/button";
@@ -291,7 +291,7 @@ function MobileBreakdownStage({ slug, stage }: { slug: string; stage: number }) 
   };
 
   const kindChip = (e: StageEvent) => (
-    <Chip tick={e.kind}>{LANE_LABEL[e.kind]}</Chip>
+    <Chip tick={LANE_TICK[e.kind]}>{LANE_LABEL[e.kind]}</Chip>
   );
   const header = (
     <PageHeader

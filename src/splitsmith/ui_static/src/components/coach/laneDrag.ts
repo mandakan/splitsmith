@@ -4,6 +4,7 @@
  * geometry rules themselves (clamp, snap, ids) live in lib/events.ts; this
  * module only composes them per gesture so LaneEditor.tsx can stay DOM.
  */
+import type { ChipTick } from "@/components/ui/chipTicks";
 import type { StageEvent, StageEventKind } from "@/lib/api";
 import { MIN_EVENT_S, clampToLane, nextEventId } from "@/lib/events";
 
@@ -14,12 +15,20 @@ export const LANE_LABEL: Record<StageEventKind, string> = {
   reload: "Reload",
   activation: "Activation",
 };
-// Budget hues (Chip TICK): draw led, movement beep, reload live, activation ink-2. The lanes and the phone's focus strip draw with them.
+// Region hues: draw pink (--color-draw), movement beep, reload live, activation ink-2. The lanes and the phone's focus strip draw with them.
 export const LANE_FILL: Record<StageEventKind, string> = {
-  draw: "bg-led/30 border-led",
+  draw: "bg-draw/30 border-draw",
   movement: "bg-beep/30 border-beep",
   reload: "bg-live/30 border-live",
   activation: "bg-ink-2/20 border-ink-2",
+};
+/** A region kind's chip tick: the kind's own, except a draw region, whose
+ *  pink is not the draw interval class's red. */
+export const LANE_TICK: Record<StageEventKind, ChipTick> = {
+  draw: "region_draw",
+  movement: "movement",
+  reload: "reload",
+  activation: "activation",
 };
 export const SNAP_PX = 8;
 export const DRAG_THRESHOLD_PX = 6;

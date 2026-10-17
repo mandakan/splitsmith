@@ -42,6 +42,7 @@ from typing import Literal
 from PIL import Image, ImageFont
 
 from .config import VideoMetadata
+from .events import confirmed_from_doc, draw_seconds
 from .fcpxml_gen import probe_video
 from .hud_extras import HudExtras
 from .looks import DEFAULT_VARIANT, load_look, overlay_template_for
@@ -111,8 +112,12 @@ def build_frame_states(
     beep_time_in_clip: float,
     fps: float,
     duration_seconds: float,
+    draw_seconds: float | None = None,
 ) -> list[FrameState]:
     """Pre-compute every frame's state. Pure -- no I/O.
+
+    ``draw_seconds`` is a confirmed draw region's length: shot 1's split
+    then shows it instead of the time from the beep (spec 2026-10-17).
 
     The result has exactly ``round(duration_seconds * fps)`` entries; entry
     ``i`` describes the frame at ``i / fps``. ``shot_times_in_clip`` is
@@ -135,8 +140,9 @@ def build_frame_states(
         else:
             last_shot = shots_sorted[fired - 1]
             if fired == 1:
-                # Shot 1's "split" is the draw -- its time from the beep.
-                last_split = shots_sorted[0] - beep_time_in_clip
+                # Shot 1's "split" is the draw -- its time from the beep,
+                # or a confirmed draw region's length.
+                last_split = draw_seconds if draw_seconds is not None else shots_sorted[0] - beep_time_in_clip
             else:
                 last_split = shots_sorted[fired - 1] - shots_sorted[fired - 2]
         # Freeze the timer once the last shot has fired -- the running total
@@ -637,11 +643,15 @@ def render_overlay(
     scale = CellScale.for_cell(height)
     palette = load_theme(theme)
 
+    # A confirmed draw region is shot 1's split (spec 2026-10-17); None keeps
+    # the time from the beep.
+    draw = draw_seconds(None, confirmed_from_doc(audit_data, log_context=audit_path.name))
     states = build_frame_states(
         shot_times_in_clip=shot_times,
         beep_time_in_clip=beep_offset_seconds,
         fps=fps,
         duration_seconds=duration_seconds,
+        draw_seconds=draw,
     )
     runs = build_overlay_runs(states)
 

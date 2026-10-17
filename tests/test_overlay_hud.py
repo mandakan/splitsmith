@@ -232,13 +232,23 @@ def test_proposals_never_reach_the_stage() -> None:
     assert all(s["moving"] is False for s in data["shots"])
 
 
-def test_a_confirmed_draw_does_not_reach_the_stage_yet() -> None:
-    """The overlay's draw band is slice 3 (spec 2026-10-17): until then a
-    draw never reaches a template, so no HUD or summary template draws it
-    as an unknown, muted band."""
+def test_a_confirmed_draw_is_shot_ones_split_on_the_hud() -> None:
+    """Spec 2026-10-17: the template HUDs label shot 1's split "Draw"; with
+    a confirmed draw region it is the region's length. A proposal changes
+    nothing, and later splits are untouched."""
+    draw = _event("evt-1", "draw", 0.4, 1.2)
+    data = hud_stage_data(EVENT_SHOTS, beep_in_clip=2.0, events=[draw])
+    assert [s["split"] for s in data["shots"]][:2] == [0.8, 3.15]
+    proposed = _event("evt-1", "draw", 0.4, 1.2, "auto")
+    assert hud_stage_data(EVENT_SHOTS, beep_in_clip=2.0, events=[proposed])["shots"][0]["split"] == 1.2
+
+
+def test_a_confirmed_draw_reaches_the_stage() -> None:
+    """Spec 2026-10-17, slice 3: the overlay draws a draw band, so a
+    confirmed draw reaches the templates like every other region."""
     events = [_event("evt-1", "draw", 0.4, 1.2), _event("evt-2", "movement", 3.4, 6.1)]
     data = hud_stage_data(EVENT_SHOTS, beep_in_clip=2.0, events=events)
-    assert [e["kind"] for e in data["events"]] == ["movement"]
+    assert [e["kind"] for e in data["events"]] == ["draw", "movement"]
 
 
 def test_a_stage_without_events_still_carries_the_keys() -> None:

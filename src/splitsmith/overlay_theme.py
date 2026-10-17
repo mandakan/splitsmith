@@ -55,6 +55,10 @@ RGB = tuple[int, int, int]
 #: ``looks.REQUIRED_COLORS``, so every Look written before them loads.
 DEFAULT_RELOAD: RGB = (251, 191, 36)
 DEFAULT_MOVEMENT: RGB = (6, 182, 212)
+#: The draw's colour, the same way (spec 2026-10-17): the app's Draw lane
+#: (``--color-draw``). Pink: red is the brand and the slow split, violet the
+#: transition, amber and cyan the reload and movement.
+DEFAULT_DRAW: RGB = (244, 114, 182)
 
 
 class OverlayThemeError(RuntimeError):
@@ -131,6 +135,8 @@ class OverlayTheme:
     reload: RGB = DEFAULT_RELOAD
     #: A confirmed movement's bar band (``look.json`` ``movement``, optional).
     movement: RGB = DEFAULT_MOVEMENT
+    #: A confirmed draw's bar band (``look.json`` ``draw``, optional).
+    draw: RGB = DEFAULT_DRAW
 
     @property
     def shadow(self) -> RGB:
@@ -163,6 +169,7 @@ def theme_for(look: Look) -> OverlayTheme:
         mono_font=faces["mono"],
         reload=c.get("reload", DEFAULT_RELOAD),
         movement=c.get("movement", DEFAULT_MOVEMENT),
+        draw=c.get("draw", DEFAULT_DRAW),
     )
 
 

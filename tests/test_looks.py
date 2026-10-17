@@ -137,6 +137,23 @@ def test_a_look_can_choose_its_event_colours(user_dir: Path) -> None:
     assert theme.movement == (6, 182, 212)
 
 
+def test_the_draw_colour_defaults_to_pink_and_a_look_may_choose_it(user_dir: Path) -> None:
+    """Spec 2026-10-17: the draw band's colour is optional like the other
+    event colours; its default is the app's --color-draw."""
+    from splitsmith.look_template import theme_tokens
+    from splitsmith.overlay_theme import load_theme
+
+    _write_look(user_dir, "club")
+    assert theme_tokens(load_theme("club"))["draw"] == "#f472b6"
+    assert "draw" not in looks.REQUIRED_COLORS
+    colors = json.loads((looks.shipped_looks_dir() / "clean" / "look.json").read_text(encoding="utf-8"))[
+        "colors"
+    ]
+    colors["draw"] = [0, 200, 0]
+    _write_look(user_dir, "club2", colors=colors)
+    assert load_theme("club2").draw == (0, 200, 0)
+
+
 def test_the_manifest_name_must_match_its_directory(user_dir: Path) -> None:
     d = _write_look(user_dir, "club")
     manifest = json.loads((d / "look.json").read_text(encoding="utf-8"))

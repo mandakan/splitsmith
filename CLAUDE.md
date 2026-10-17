@@ -1547,11 +1547,15 @@ HUD contract (``overlay_hud.hud_stage_data``): ``data.stage.events``
 ``data.stage.reloads`` (``{start, end, duration, exposed}``, exposed
 the whole duration standing; templates never re-derive a figure), ``shots[].moving``,
 ``options.reload_chip`` / ``options.stage_bar`` (both off by default, on
-the existing style-toggle seam), palette ``reload`` (``#FBBF24``) and
-``movement`` (``#06B6D4``) in ``OverlayTheme`` / ``look.json``, optional.
-All five template styles draw both; Classic (drawtext) and the compare
-grid's sprite overlay draw neither. A reload on the move draws split on
-the stage bar (reload in the top half, the movement under it). On an
+the existing style-toggle seam), palette ``reload`` (``#FBBF24``),
+``movement`` (``#06B6D4``) and ``draw`` (``#F472B6``, the app's
+``--color-draw``) in ``OverlayTheme`` / ``look.json``, optional.
+All five template styles draw them; Classic (drawtext) and the compare
+grid's sprite overlay draw no regions. A reload or a draw on the move
+draws split on the stage bar (it in the top half, the movement under it,
+``hud.js`` ``pieces``). Shot 1's split is the Draw on every overlay: a
+confirmed draw region's length (``hud_stage_data``'s first ``split``,
+Classic's ``build_frame_states(draw_seconds=)``). On an
 upright page the context also carries ``data.safe_area`` (see "The upright
 HUD"). The
 stage-event helpers the five styles share (the stage bar and its bands,

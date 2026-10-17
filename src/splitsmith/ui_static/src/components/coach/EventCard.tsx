@@ -12,7 +12,7 @@ import { Button } from "@/components/ui/button";
 import { Chip } from "@/components/ui/Chip";
 import { Label } from "@/components/ui/Label";
 import { Segmented, type SegmentedOption } from "@/components/ui/Segmented";
-import { LANES } from "@/components/coach/laneDrag";
+import { LANE_TICK, LANES } from "@/components/coach/laneDrag";
 import type { StageEvent, StageEventKind } from "@/lib/api";
 import { enclosingMovement, reloadFigures, withKind } from "@/lib/events";
 import { cn } from "@/lib/utils";
@@ -52,7 +52,7 @@ export function EventCard({ event, events, onKind, onKeep, onDelete, onDone, com
     const blocked = k.value !== event.kind && withKind(events, event.id, k.value) === null;
     const secondDraw = k.value === "draw" && events.some((e) => e.kind === "draw" && e.id !== event.id);
     const why = secondDraw ? "A stage has one draw" : "Overlaps a region in that lane";
-    return { ...k, tick: k.value, disabled: blocked, title: blocked ? why : undefined };
+    return { ...k, tick: LANE_TICK[k.value], disabled: blocked, title: blocked ? why : undefined };
   });
   const kindControl = (
     <Segmented
