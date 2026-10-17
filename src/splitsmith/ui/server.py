@@ -14020,6 +14020,19 @@ def create_app(
             filename=result.audio_path.name,
         )
 
+    def _parse_band(raw: str | None) -> tuple[float, float] | None:
+        """``LO-HI`` in Hz, 100 <= LO < HI <= 12000, or None for the full range."""
+        if raw is None:
+            return None
+        try:
+            lo_s, hi_s = raw.split("-")
+            lo, hi = float(lo_s), float(hi_s)
+        except ValueError:
+            raise HTTPException(status_code=422, detail="band is LO-HI in Hz") from None
+        if not (100 <= lo < hi <= 12000):
+            raise HTTPException(status_code=422, detail="band is LO-HI in Hz, 100 <= LO < HI <= 12000")
+        return (lo, hi)
+
     @app.get("/api/shooters/{slug}/stages/{stage_number}/videos/{video_id}/peaks")
     def video_peaks(
         slug: str,
@@ -14030,6 +14043,9 @@ def create_app(
         # around the beep. Both or neither.
         start: float | None = Query(default=None, ge=0),
         end: float | None = Query(default=None, gt=0),
+        # A frequency band, ``LO-HI`` Hz, for the beep step's Timer tone
+        # filter (spec 2026-10-17); only with a window.
+        band: str | None = Query(default=None),
     ) -> JSONResponse:
         """Return ``bins`` peak magnitudes for ``video``'s WAV.
 
@@ -14040,13 +14056,18 @@ def create_app(
         project, _stage, video = _resolve_stage_video(slug, stage_number, video_id)
         if (start is None) != (end is None) or (start is not None and end is not None and end <= start):
             raise HTTPException(status_code=422, detail="start and end go together, start before end")
+        band_range = _parse_band(band)
+        if band_range is not None and start is None:
+            raise HTTPException(status_code=422, detail="a band needs a window (start and end)")
         audit = _resolve_video_audio(slug, project, stage_number, video)
         if isinstance(audit, JSONResponse):
             return audit
         peaks = (
             waveform_helpers.ensure_peaks(audit.audio_path, bins)
             if start is None or end is None
-            else waveform_helpers.ensure_peaks_window(audit.audio_path, bins, start=start, end=end)
+            else waveform_helpers.ensure_peaks_window(
+                audit.audio_path, bins, start=start, end=end, band=band_range
+            )
         )
         payload = peaks.model_dump(mode="json")
         payload["beep_time"] = audit.beep_in_clip
