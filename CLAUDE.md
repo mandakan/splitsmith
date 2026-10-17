@@ -1367,7 +1367,9 @@ purpose: a wrong guess is one tap to delete or relabel. Both are opt-in
 seeder arguments only the coach GET passes. ``events_from_doc`` skips a
 region of a kind this version does not know (with a warning) instead of
 failing the stage, so an install one version behind reads a doc holding
-a draw; a corrupt known region still fails it. The stage's **Draw figure**
+a draw. A region starting before the beep (what moving a beep later leaves
+behind) starts at the beep instead, or is skipped when it ends there; any
+other corrupt known region still fails it. The stage's **Draw figure**
 is ``events.draw_seconds`` (TS ``drawSeconds``, ``cases.json`` ``draws``):
 a confirmed draw region's length, else the first shot's time from the beep.
 Every Draw surface reads it: ``TileStageData.draw`` (the summary card, its
@@ -1533,8 +1535,10 @@ Part 2 (rendering and export; the spec's "Part 2 as built" section wins
 over its older "Rendering and export" text). Every rendered or exported
 output -- overlay, summary card, ``events.csv``, FCPXML markers, share
 figures -- reads **confirmed** regions only (``source == "manual"``)
-through ``events.confirmed_from_doc``, which degrades a corrupt list to
-none; a new consumer calls it, never re-derives the rule. Breakdown
+through ``events.confirmed_from_doc``, which leaves out each unreadable
+region on its own and keeps the rest (dropping the whole list for one bad
+entry took Little Trouble 2's nine regions out of every export, silently);
+a new consumer calls it, never re-derives the rule. Breakdown
 alone shows proposals: on the lanes, the region card and the region list.
 Coach's ``StageStrip`` and its stat strip (on the move, exposed reload,
 ``lib/coachReview.reviewFigures``) draw and count confirmed regions only

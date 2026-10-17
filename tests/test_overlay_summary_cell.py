@@ -489,12 +489,19 @@ def test_reloads_load_from_confirmed_regions_only(tmp_path: Path) -> None:
     assert load_stage_reloads(_audit(tmp_path, None)) == ()
 
 
-def test_a_corrupt_events_list_keeps_the_shots_and_draws_no_regions(tmp_path: Path) -> None:
-    bad = {"id": "evt-1", "kind": "movement", "start": 2, "end": 1, "source": "manual"}
-    path = _audit(tmp_path, [_MOVE_1, bad])
+def test_a_corrupt_region_is_left_out_and_the_others_drawn(tmp_path: Path) -> None:
+    """One bad region leaves out only itself: dropping the whole list took
+    a stage's every region out of its export (Little Trouble 2)."""
+    bad = {"id": "evt-9", "kind": "movement", "start": 2, "end": 1, "source": "manual"}
+    clean_dir, bad_dir = tmp_path / "clean", tmp_path / "bad"
+    clean_dir.mkdir()
+    bad_dir.mkdir()
+    clean = load_stage_shots(_audit(clean_dir, [_MOVE_1]))
+    path = _audit(bad_dir, [_MOVE_1, bad])
     shots = load_stage_shots(path)
     assert len(shots) == len(_EVENT_SHOTS)
-    assert not any(s.moving for s in shots)
+    assert any(s.moving for s in shots)
+    assert [s.moving for s in shots] == [s.moving for s in clean]
     assert load_stage_reloads(path) == ()
     assert load_stage_reloads(tmp_path / "missing.json") == ()
 
