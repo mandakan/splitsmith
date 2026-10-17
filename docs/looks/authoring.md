@@ -108,9 +108,10 @@ holds, then delete what your Look does not need.
   |---|---|---|
   | `reload` | `#FBBF24` | The reload chip and reload bands on an overlay's stage bar |
   | `movement` | `#06B6D4` | Movement bands on an overlay's stage bar |
+  | `draw` | `#F472B6` | Draw bands on an overlay's stage bar |
 
-  A template reads them as `#rrggbb` strings. Keep `reload` and `movement`
-  apart from `accent`: red is the brand and the slow split, not an event.
+  A template reads them as `#rrggbb` strings. Keep `reload`, `movement` and
+  `draw` apart from `accent`: red is the brand and the slow split, not an event.
 - `accent_series` colours shooters who have not set an accent of their own,
   by grid tile.
 - `slots` names a template per card: `title_page`, `slate`, `lower_third`,
@@ -268,7 +269,7 @@ a person kept on the Coach page; an automatic proposal never reaches a
 template. Both lists are always there and empty when there is nothing:
 
 - `events[]` is every confirmed region, in clip seconds: `kind` is
-  `movement`, `reload` or `activation`.
+  `draw`, `movement`, `reload` or `activation`.
 - `reloads[]` is the reloads again, with `duration` (seconds, already
   measured) and `exposed`: the seconds of the reload no confirmed movement
   covers, never negative. A standing reload is exposed for its whole
@@ -284,7 +285,7 @@ Two more toggles, both off unless the exporter turns them on:
   counts `t - start` up; then hold `duration` while it fades out over about
   0.4 s. Draw nothing when the toggle is off.
 - `stage_bar`: a thin bar under the clock that fills with time, with a band
-  per region drawn as the fill reaches it (`reload` and `movement` colours,
+  per region drawn as the fill reaches it (`draw`, `reload` and `movement` colours,
   `muted` for an activation). Draw nothing when the toggle is off.
 
 With either toggle off, or no confirmed regions, the page must be exactly
@@ -315,7 +316,7 @@ takes the figure; `null` without a reload; call `.seek(t)`), `chipSettle(base)`
 at clip time `t`), `span` (the stage time `along` divides by, 1 for a stage
 without one), `tierColour(tier)`, `regionColour(kind)` (the theme colour of a
 region) and `pieces(regions)` (the bar's pieces of a region list: a reload
-cut where it meets a movement, that slice marked `half`). Each one honours the toggles, so a
+or a draw cut where it meets a movement, that slice marked `half`). Each one honours the toggles, so a
 style that calls them draws nothing extra with a toggle off. A change to the
 script reaches every cached render and every exported overlay, yours included.
 

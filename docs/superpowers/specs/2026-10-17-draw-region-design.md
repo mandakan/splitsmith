@@ -97,7 +97,10 @@ kept, edited or deleted region is left alone.
    phone), the seeder (v4: draw always, movement past 2.0 s), the markers
    and the CSV. PR #1522 is closed in favour of this.
 2. **The figures.** `draw_seconds` and every consumer above.
-3. **The overlay.** The HUD band colour and `_shared/hud.js`.
+3. **The overlay.** The HUD band colour and `_shared/hud.js`. As built:
+   pink (`#F472B6`, the app's `--color-draw`), not red (the brand, the
+   draw interval and the slow split) nor violet (the transition). Shot 1's
+   split on every overlay is the Draw figure.
 
 Each slice ships with its tests and a frame check where pixels change.
 
