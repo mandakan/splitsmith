@@ -8,106 +8,151 @@
       "shot_number": 1,
       "candidate_number": 4,
       "time": 4.205,
-      "ms_after_beep": 3207,
-      "source": "detected"
+      "ms_after_beep": 3208,
+      "source": "detected",
+      "id": "cand-4",
+      "interval_class": "first_shot",
+      "interval_class_source": "auto"
     },
     {
       "shot_number": 2,
       "candidate_number": 5,
       "time": 4.506,
-      "ms_after_beep": 3508,
-      "source": "detected"
+      "ms_after_beep": 3509,
+      "source": "detected",
+      "id": "cand-5",
+      "interval_class": "split",
+      "interval_class_source": "auto"
     },
     {
       "shot_number": 3,
       "candidate_number": 6,
       "time": 7.578,
-      "ms_after_beep": 6580,
-      "source": "detected"
+      "ms_after_beep": 6581,
+      "source": "detected",
+      "id": "cand-6",
+      "interval_class": "movement",
+      "interval_class_source": "auto"
     },
     {
       "shot_number": 4,
       "candidate_number": 7,
       "time": 7.969,
       "ms_after_beep": 6972,
-      "source": "detected"
+      "source": "detected",
+      "id": "cand-7",
+      "interval_class": "split",
+      "interval_class_source": "auto"
     },
     {
       "shot_number": 5,
       "candidate_number": 8,
       "time": 10.099,
       "ms_after_beep": 9102,
-      "source": "detected"
+      "source": "detected",
+      "id": "cand-8",
+      "interval_class": "movement",
+      "interval_class_source": "auto"
     },
     {
       "shot_number": 6,
       "candidate_number": 10,
       "time": 11.498,
       "ms_after_beep": 10501,
-      "source": "detected"
+      "source": "detected",
+      "id": "cand-10",
+      "interval_class": "transition",
+      "interval_class_source": "auto"
     },
     {
       "shot_number": 7,
       "candidate_number": 11,
       "time": 12.842,
       "ms_after_beep": 11845,
-      "source": "detected"
+      "source": "detected",
+      "id": "cand-11",
+      "interval_class": "transition",
+      "interval_class_source": "auto"
     },
     {
       "shot_number": 8,
       "candidate_number": 12,
       "time": 13.867,
       "ms_after_beep": 12870,
-      "source": "detected"
+      "source": "detected",
+      "id": "cand-12",
+      "interval_class": "transition",
+      "interval_class_source": "auto"
     },
     {
       "shot_number": 9,
       "candidate_number": 13,
       "time": 14.406,
-      "ms_after_beep": 13408,
-      "source": "detected"
+      "ms_after_beep": 13409,
+      "source": "detected",
+      "id": "cand-13",
+      "interval_class": "split",
+      "interval_class_source": "auto"
     },
     {
       "shot_number": 10,
       "candidate_number": 14,
       "time": 16.237,
       "ms_after_beep": 15240,
-      "source": "detected"
+      "source": "detected",
+      "id": "cand-14",
+      "interval_class": "transition",
+      "interval_class_source": "auto"
     },
     {
       "shot_number": 11,
       "candidate_number": 19,
       "time": 22.01,
       "ms_after_beep": 21013,
-      "source": "detected"
+      "source": "detected",
+      "id": "cand-19",
+      "interval_class": "movement",
+      "interval_class_source": "auto"
     },
     {
       "shot_number": 12,
       "candidate_number": 20,
       "time": 22.275,
       "ms_after_beep": 21278,
-      "source": "detected"
+      "source": "detected",
+      "id": "cand-20",
+      "interval_class": "split",
+      "interval_class_source": "auto"
     },
     {
       "shot_number": 13,
       "candidate_number": 21,
-      "time": 22.572,
-      "ms_after_beep": 21575,
-      "source": "detected"
+      "time": 22.535,
+      "ms_after_beep": 21538,
+      "source": "detected",
+      "id": "cand-21",
+      "interval_class": "split",
+      "interval_class_source": "auto"
     },
     {
       "shot_number": 14,
       "candidate_number": 27,
       "time": 27.523,
       "ms_after_beep": 26526,
-      "source": "detected"
+      "source": "detected",
+      "id": "cand-27",
+      "interval_class": "movement",
+      "interval_class_source": "auto"
     },
     {
       "shot_number": 15,
       "candidate_number": 28,
       "time": 27.864,
       "ms_after_beep": 26867,
-      "source": "detected"
+      "source": "detected",
+      "id": "cand-28",
+      "interval_class": "split",
+      "interval_class_source": "auto"
     }
   ],
   "stage_rounds": {
@@ -636,48 +681,68 @@
         "consensus": 2,
         "expected_rounds": 12,
         "seeded_shots": true
-      }
+      },
+      "id": "6c764f75e75a453385de55720427c3a2"
     },
     {
       "ts": "2026-05-13T10:56:34.627Z",
       "kind": "save",
       "payload": {
         "shots_count": 15
-      }
+      },
+      "id": "67de324a8b1848bcbcf640855d2a7202"
+    },
+    {
+      "ts": "2026-05-13T16:18:37.101653+00:00",
+      "kind": "coach_reclassify",
+      "payload": {
+        "shot_count": 15
+      },
+      "id": "37da55386ff14a8ebb6096888df78124"
+    },
+    {
+      "ts": "2026-10-17T11:55:00.832Z",
+      "kind": "marker_time_changed",
+      "payload": {
+        "id": "cand-21",
+        "from_time": 22.572,
+        "to_time": 22.535
+      },
+      "id": "47cf99212bd5495c9b10d5670a29047f"
+    },
+    {
+      "ts": "2026-10-17T11:55:08.987Z",
+      "kind": "save",
+      "payload": {
+        "shots_count": 15
+      },
+      "id": "5b66506038e047b1bd3995fd8c259098"
     }
   ],
-  "promoted_at": "2026-05-13T12:14:33.887296+00:00",
+  "promoted_at": "2026-10-17T12:09:43.745402+00:00",
   "provenance": {
     "stage_number": 1,
-    "stage_name": null
+    "stage_name": "Krols vapenverkstad Lock&Load"
   },
-  "source_video": "/Volumes/X9/raw/2026-bofors-bombardment/anton/hand/Anton_stage_1.mov",
+  "source_video": "/Volumes/X9/matches/bofors-bombardment-2026/shooters/s_53198a7a/raw/Anton_stage_1.mov",
   "fixture_window_in_source": [
     0.0,
     32.8571
   ],
   "camera": {
-    "id": "unknown",
+    "id": "apple-iphone17promax",
     "make": "Apple",
     "model": "iPhone 17 Pro Max",
     "mount": "hand",
-    "position": "shooter",
+    "position": "squadmate",
     "audio_source": "internal",
     "agc_state": "unknown",
-    "sample_rate": null,
+    "sample_rate": 48000,
     "bit_depth": null,
-    "audio_codec": null
+    "audio_codec": "aac"
   },
   "shooter": {
     "id": "s0fe3d797"
   },
-  "event_id": "bofors-bombardment-2026:1:s0fe3d797",
-  "review": {
-    "status": "needs_review",
-    "derived_from": null,
-    "reviewed_at": null,
-    "note": "shot times predate the rise-foot definition (docs/METHODOLOGY.md, 2026-10-10): check each shot's leading edge",
-    "previous_status": "reviewed",
-    "previous_reviewed_at": null
-  }
+  "event_id": "bofors-bombardment-2026:1:s0fe3d797"
 }
