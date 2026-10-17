@@ -51,6 +51,8 @@ import { cn } from "@/lib/utils";
 
 import {
   DRAG_THRESHOLD_PX,
+  LANE_FILL,
+  LANE_LABEL,
   LANES,
   SNAP_PX,
   TOUCH_DRAG_THRESHOLD_PX,
@@ -72,13 +74,6 @@ export const LANE_ROWS: { label: string; height: number }[] = [
   { label: "Activation", height: 36 },
 ];
 
-const LANE_LABEL: Record<StageEventKind, string> = { movement: "Movement", reload: "Reload", activation: "Activation" };
-// Budget hues (Chip TICK): movement beep, reload live, activation ink-2.
-const LANE_FILL: Record<StageEventKind, string> = {
-  movement: "bg-beep/30 border-beep",
-  reload: "bg-live/30 border-live",
-  activation: "bg-ink-2/20 border-ink-2",
-};
 const byStart = (a: StageEvent, b: StageEvent) => a.start - b.start || a.end - b.end;
 
 /** What a screen reader says for a region: "Reload 8.05 to 9.47, 1.42 seconds, proposed". */
