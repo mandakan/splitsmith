@@ -820,7 +820,7 @@ function CoachStageInner({ stage, slug }: { stage: number; slug: string }) {
                 className="mt-2"
                 shots={coach.shots}
                 events={regions.events}
-                stageTime={view.stageTime}
+                stageTime={view.span}
                 tFromBeep={view.tFromBeep}
                 activeShotNumber={ws.activeShotNumber}
                 onSeek={ws.seekToTime}

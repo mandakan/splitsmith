@@ -11,6 +11,7 @@
  * playhead, read-only lanes, the selected region, neighbouring stages) come
  * from ``deriveStageView`` once both payloads have loaded.
  */
+import { bandSpan } from "@/lib/timelineView";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import {
@@ -426,8 +427,10 @@ export interface StageView {
   streamUrl: string | null;
   /** The stream is the scrub rendition: an error marks it failed so the next render falls back. */
   playingScrub: boolean;
-  /** Seconds from the beep the band spans: the stage time, else the last shot plus one. */
-  stageTime: number;
+  /** Seconds from the beep the band spans (``timelineView.bandSpan``): the stage time or the
+   *  last shot, whichever is later, plus a margin. Never the scorecard time alone: a timer
+   *  that disagrees with the video must not clamp the last shot to the edge. */
+  span: number;
   /** The playhead in seconds from the beep. */
   tFromBeep: number;
   /** The audit audio's beep in its own clip, else the coach anchor. */
@@ -478,8 +481,7 @@ export function deriveStageView(ws: StageWorkspace, slug: string, stage: number)
   const { events, selectedId } = ws.regions;
   const selectedEvent = eventsReadOnly ? null : (events.find((e) => e.id === selectedId) ?? null);
   const stageSeconds = project.stages.find((s) => s.stage_number === stage)?.time_seconds ?? 0;
-  const lastShot = coach.shots.length > 0 ? Math.max(...coach.shots.map((s) => s.time_from_beep)) : 0;
-  const stageTime = stageSeconds > 0 ? stageSeconds : lastShot + 1;
+  const span = bandSpan(stageSeconds, coach.shots.map((s) => s.time_from_beep));
   // coach.beep_time is the coach response's own clip anchor (the same
   // trim-vs-source anchor the video stream uses); peaks.beep_time is the
   // audit audio's beep in its own clip. The two agree in the normal case
@@ -491,7 +493,7 @@ export function deriveStageView(ws: StageWorkspace, slug: string, stage: number)
     primary,
     streamUrl,
     playingScrub,
-    stageTime,
+    span,
     tFromBeep: ws.currentTime - coach.beep_time,
     audioBeep,
     eventsReadOnly,

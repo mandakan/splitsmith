@@ -196,7 +196,7 @@ function MobileBreakdownStage({ slug, stage }: { slug: string; stage: number }) 
   const onPadMove = (dxFrac: number, padPx: number) => {
     if (!edit || !gestureBase.current) return;
     const base = { ...edit.g, before: gestureBase.current };
-    const frame = edgeFrame(base, regions.events, dxFrac, { snap: snapOn, shotTimes, duration: view.stageTime, padPx });
+    const frame = edgeFrame(base, regions.events, dxFrac, { snap: snapOn, shotTimes, duration: view.span, padPx });
     if (!frame) return;
     regions.change(frame.events, false);
     ws.seekFromBeep(frame.seek);
@@ -240,7 +240,7 @@ function MobileBreakdownStage({ slug, stage }: { slug: string; stage: number }) 
   const handleDrag: HandleDrag = {
     start: (edge) => {
       if (!open || readOnly) return;
-      const w = focusWindow(open, view.stageTime);
+      const w = focusWindow(open, view.span);
       setFrozenWindow(w);
       stripEdge.current = edge;
       if (!edit) startEdge(edge);
@@ -251,11 +251,11 @@ function MobileBreakdownStage({ slug, stage }: { slug: string; stage: number }) 
       const base = gestureBase.current;
       if (!base) return;
       // The first frame can land before the frozen window has rendered.
-      const w = frozenWindow ?? focusWindow(base, view.stageTime);
+      const w = frozenWindow ?? focusWindow(base, view.span);
       const frame = edgeFrame({ target: stripEdge.current, id: base.id, before: base }, regions.events, dxFrac, {
         snap: snapOn,
         shotTimes,
-        duration: view.stageTime,
+        duration: view.span,
         padPx: stripPx,
         secondsPerWidth: w.to - w.from,
       });
@@ -432,7 +432,7 @@ function MobileBreakdownStage({ slug, stage }: { slug: string; stage: number }) 
             <span className="numeral text-md text-ink-2">{(open.end - open.start).toFixed(2)} s</span>
           </div>
           <FocusStrip
-            window={frozenWindow ?? focusWindow(open, view.stageTime)}
+            window={frozenWindow ?? focusWindow(open, view.span)}
             onHandleDrag={readOnly ? undefined : handleDrag}
             events={events}
             region={open}
@@ -509,7 +509,7 @@ function MobileBreakdownStage({ slug, stage }: { slug: string; stage: number }) 
                   className="min-h-11 flex-1"
                   onClick={() => {
                     if (ws.isPlaying) return pause();
-                    const w = playWindow(open, view.stageTime);
+                    const w = playWindow(open, view.span);
                     play(w.from, w.to);
                   }}
                 >

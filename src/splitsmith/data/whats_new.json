@@ -1,6 +1,12 @@
 {
   "entries": [
     {
+      "id": "breakdown-band-last-shot",
+      "date": "2026-10-17",
+      "title": "The last shot stays in view on Breakdown",
+      "body": "The timeline now runs a little past the last shot, even when the stage time from the timer ends before it, so the final shots are never cut off at the edge."
+    },
+    {
       "id": "export-use-breakdown",
       "date": "2026-10-17",
       "title": "Export with or without your Breakdown",
