@@ -1262,6 +1262,14 @@ def overlay(
         "--stage-bar/--no-stage-bar",
         help="Template styles: confirmed movement and reload regions on a stage bar.",
     ),
+    breakdown: bool = typer.Option(
+        True,
+        "--breakdown/--no-breakdown",
+        help=(
+            "Use the stage's confirmed Breakdown regions (draw, movement, reloads); "
+            "--no-breakdown draws the stage without them."
+        ),
+    ),
     summary_card: bool = typer.Option(
         False,
         "--summary-card",
@@ -1324,6 +1332,7 @@ def overlay(
         ),
         segment_cache=render_segment_cache(Config.load(None).output),
         degraded=degraded,
+        breakdown=breakdown,
     )
     for note in degraded:
         console.print(f"[yellow]{note}[/]")
@@ -1341,10 +1350,10 @@ def overlay(
                 data=TileStageData(
                     label=summary_label,
                     stage_number=int(audit_doc.get("stage_number", 0)) if isinstance(audit_doc, dict) else 0,
-                    shots=load_stage_shots(audit_path),
+                    shots=load_stage_shots(audit_path, breakdown=breakdown),
                     stage_time_seconds=float(stage_time) if stage_time else None,
-                    reloads=load_stage_reloads(audit_path),
-                    events=load_stage_events(audit_path),
+                    reloads=load_stage_reloads(audit_path, breakdown=breakdown),
+                    events=load_stage_events(audit_path, breakdown=breakdown),
                 ),
                 label=summary_label,
                 trimmed_video_path=video,

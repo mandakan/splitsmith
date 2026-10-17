@@ -336,3 +336,46 @@ def test_the_preview_route_threads_the_choice(tmp_path: Path, monkeypatch: pytes
     assert [s.breakdown for s in specs] == [True, False, True, False]
     assert summaries == [True, False]
     runtime_module._clear_runtime_cache()
+
+
+def test_the_overlay_cli_threads_the_choice(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """``splitsmith overlay --no-breakdown``: the overlay and the summary
+    card it writes beside it read no region."""
+    import json
+    from typing import Any
+
+    from typer.testing import CliRunner
+
+    from splitsmith import overlay_render, summary_card
+    from splitsmith.cli import app
+
+    from .test_overlay_render import _write_audit
+
+    audit = _write_audit(tmp_path)
+    doc = json.loads(audit.read_text())
+    doc["events"] = [{"id": "evt-1", "kind": "reload", "start": 0.1, "end": 0.4, "source": "manual"}]
+    audit.write_text(json.dumps(doc))
+    seen: dict[str, Any] = {}
+    tiles: list = []
+
+    def fake_render(**kwargs: Any) -> Path:
+        seen.update(kwargs)
+        return kwargs["output_path"]
+
+    def fake_card(**kwargs: Any) -> Any:
+        tiles.append(kwargs["data"])
+        raise summary_card.SummaryCardError("stub")
+
+    monkeypatch.setattr(overlay_render, "render_overlay", fake_render)
+    monkeypatch.setattr(summary_card, "render_summary_card", fake_card)
+    base = [
+        "overlay",
+        "--audit", str(audit),
+        "--video", str(tmp_path / "t.mp4"),
+        "--output", str(tmp_path / "o.mov"),
+        "--summary-card",
+    ]  # fmt: skip
+    CliRunner().invoke(app, base)
+    assert seen["breakdown"] is True and tiles[-1].reloads
+    CliRunner().invoke(app, [*base, "--no-breakdown"])
+    assert seen["breakdown"] is False and tiles[-1].reloads == () and tiles[-1].events == ()
