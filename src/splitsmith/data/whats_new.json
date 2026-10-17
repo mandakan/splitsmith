@@ -1,6 +1,12 @@
 {
   "entries": [
     {
+      "id": "regions-after-beep-move",
+      "date": "2026-10-17",
+      "title": "Regions stay put when a beep moves",
+      "body": "A draw or movement left before a moved beep now starts at the beep on Breakdown, and one broken region no longer hides a stage's other regions from your videos."
+    },
+    {
       "id": "broadcast-look",
       "date": "2026-10-17",
       "title": "A Broadcast Look for every card",

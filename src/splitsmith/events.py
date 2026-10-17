@@ -99,11 +99,36 @@ def next_event_id(events: Iterable[StageEvent | dict[str, Any]]) -> str:
     return f"evt-{high + 1}"
 
 
+def _before_the_beep(e: Any) -> tuple[float, float] | None:
+    """``(start, end)`` of a region whose start lies before the beep, else
+    None (not a dict, unreadable times, or a start at or after the beep)."""
+    if not isinstance(e, dict):
+        return None
+    start, end = e.get("start"), e.get("end")
+    if isinstance(start, bool) or isinstance(end, bool):
+        return None
+    try:
+        s, t = float(start), float(end)
+    except (TypeError, ValueError):
+        return None
+    if not (math.isfinite(s) and math.isfinite(t)) or s >= 0:
+        return None
+    return s, t
+
+
 def events_from_doc(doc: dict[str, Any]) -> list[StageEvent]:
     """The doc's regions. A region of a kind this version does not know (a
     newer version wrote it, as ``draw`` once was new) is skipped with a
     warning, never fatal: failing the list made the stage's coach read a
-    422 on an install one version behind. Any other bad entry still raises."""
+    422 on an install one version behind.
+
+    A region that starts before the beep is what moving a beep later leaves
+    behind (regions are seconds from the beep): it starts at the beep
+    instead, or is skipped when it ends there or earlier, each with a
+    warning. Little Trouble stage 2 held a draw and a movement 0.191 s
+    before its moved beep, and the one bad start failed the whole list, so
+    every export and the stage's Breakdown dropped all nine regions. Any
+    other bad entry still raises."""
     raw = doc.get(EVENTS_FIELD) or []
     known = set(get_args(EventKind))
     out: list[StageEvent] = []
@@ -111,6 +136,16 @@ def events_from_doc(doc: dict[str, Any]) -> list[StageEvent]:
         if isinstance(e, dict) and isinstance(e.get("kind"), str) and e["kind"] not in known:
             logger.warning("skipping a stage event of unknown kind %r", e["kind"])
             continue
+        early = _before_the_beep(e)
+        if early is not None:
+            start, end = early
+            if end <= 0:
+                logger.warning("skipping a %s region that ends before the beep (%.3f s)", e.get("kind"), end)
+                continue
+            logger.warning(
+                "a %s region started %.3f s before the beep; it starts at the beep", e.get("kind"), -start
+            )
+            e = {**e, "start": 0.0}
         out.append(StageEvent.model_validate(e))
     return out
 
@@ -159,21 +194,29 @@ def confirmed_from_doc(doc: Any, *, log_context: str = "") -> list[StageEvent]:
 
     Every rendered or exported surface that reads confirmed regions off an
     audit doc goes through this (spec 2026-10-08, part 2) instead of
-    re-deriving the same try/except: a bad doc -- not a dict, an event
-    with ``end <= start``, a non-object entry -- degrades to no regions
-    (the conservative read: under-report rather than invent) instead of
-    failing the whole render or export. ``log_context`` names the file or
-    stage in the one warning this logs, e.g. an audit path's name; omit it
-    for a caller with nothing more specific to say.
+    re-deriving the same try/except. A bad entry -- an event with
+    ``end <= start``, a non-object, an unreadable time -- is left out on
+    its own (the conservative read: under-report rather than invent), and
+    the rest are kept: dropping the whole list for one bad entry took a
+    stage's every region out of its export without a word. A list that is
+    not a list, or a doc that is not a dict, reads as none. ``log_context``
+    names the file or stage in the warnings this logs, e.g. an audit
+    path's name; omit it for a caller with nothing more specific to say.
     """
     if not isinstance(doc, dict):
         return []
-    try:
-        return confirmed(events_from_doc(doc))
-    except (ValueError, TypeError) as exc:
-        where = f"{log_context}: " if log_context else ""
-        logger.warning("%sunreadable stage events, treating as none: %s", where, exc)
+    raw = doc.get(EVENTS_FIELD) or []
+    where = f"{log_context}: " if log_context else ""
+    if not isinstance(raw, list):
+        logger.warning("%sstage events are not a list, treating as none", where)
         return []
+    kept: list[StageEvent] = []
+    for entry in raw:
+        try:
+            kept.extend(events_from_doc({EVENTS_FIELD: [entry]}))
+        except (ValueError, TypeError) as exc:
+            logger.warning("%sleaving out an unreadable stage event: %s", where, exc)
+    return confirmed(kept)
 
 
 def shot_ms(shot: Any) -> float | None:

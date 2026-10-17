@@ -339,6 +339,49 @@ def test_confirmed_from_doc_tolerates_a_non_dict_event_entry() -> None:
     assert confirmed_from_doc(doc) == []
 
 
+def test_one_bad_region_leaves_out_only_itself() -> None:
+    """A stage's other regions stay in its export: dropping the whole list
+    for one bad entry took every region out without a word."""
+    doc = {
+        "events": [
+            {"id": "evt-1", "kind": "reload", "start": 5.0, "end": 1.0, "source": "manual"},
+            {"id": "evt-2", "kind": "movement", "start": 3.0, "end": 4.0, "source": "manual"},
+            42,
+        ]
+    }
+    assert [e.id for e in confirmed_from_doc(doc)] == ["evt-2"]
+
+
+def test_a_region_started_before_a_moved_beep_starts_at_the_beep() -> None:
+    """Little Trouble stage 2: the beep moved 191 ms later and a draw and a
+    movement were left 0.191 s before it; the one bad start failed the whole
+    list, so its Breakdown and every export dropped all nine regions."""
+    doc = {
+        "events": [
+            {"id": "evt-1", "kind": "draw", "start": -0.191, "end": 2.13, "source": "manual"},
+            {"id": "evt-2", "kind": "movement", "start": -0.191, "end": 2.13, "source": "manual"},
+            {"id": "evt-3", "kind": "reload", "start": 12.97, "end": 14.83, "source": "manual"},
+        ]
+    }
+    regions = events_from_doc(doc)
+    assert [(e.id, e.start, e.end) for e in regions] == [
+        ("evt-1", 0.0, 2.13),
+        ("evt-2", 0.0, 2.13),
+        ("evt-3", 12.97, 14.83),
+    ]
+    assert len(confirmed_from_doc(doc)) == 3
+
+
+def test_a_region_wholly_before_the_beep_is_skipped() -> None:
+    doc = {
+        "events": [
+            {"id": "evt-1", "kind": "movement", "start": -0.5, "end": -0.1, "source": "manual"},
+            {"id": "evt-2", "kind": "reload", "start": 1.0, "end": 2.0, "source": "manual"},
+        ]
+    }
+    assert [e.id for e in events_from_doc(doc)] == ["evt-2"]
+
+
 def test_confirmed_from_doc_logs_with_the_given_context(caplog: pytest.LogCaptureFixture) -> None:
     doc = {"events": [{"id": "evt-1", "kind": "reload", "start": 5.0, "end": 1.0, "source": "manual"}]}
     with caplog.at_level("WARNING"):
