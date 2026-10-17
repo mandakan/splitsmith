@@ -39,6 +39,22 @@ def test_broken_files_fail_and_say_why(tmp_path: Path, data: bytes, reason: str)
     assert reason in (check.reason or "")
 
 
+def test_the_video_tracks_frame_rate_comes_from_its_mdhd(tmp_path: Path) -> None:
+    check = media_check.valid_mp4(_write(tmp_path / "fifty.mp4", tiny_mp4(duration_s=2.0, video_samples=100)))
+    assert check.ok, check.reason
+    assert check.frame_rate == pytest.approx(50.0)
+
+
+def test_no_mdhd_means_no_frame_rate_and_the_file_still_passes(tmp_path: Path) -> None:
+    check = media_check.valid_mp4(_write(tmp_path / "bare.mp4", tiny_mp4(with_mdhd=False)))
+    assert check.ok
+    assert check.frame_rate is None
+
+
+def test_a_broken_file_has_no_frame_rate(tmp_path: Path) -> None:
+    assert media_check.valid_mp4(_write(tmp_path / "bad.mp4", corrupt_moov_mp4())).frame_rate is None
+
+
 def test_a_missing_or_unreadable_file_is_invalid_not_an_error(tmp_path: Path) -> None:
     assert not media_check.valid_mp4(tmp_path / "gone.mp4").ok
 
@@ -57,6 +73,11 @@ def test_a_real_ffmpeg_file_and_a_full_range_one_pass(tmp_path: Path) -> None:
         pytest.skip("ffmpeg not on PATH")
     src = build_synthetic_video(tmp_path / "src.mp4")
     assert media_check.valid_mp4(src).ok
+    from tests.synthetic_media import SYNTHETIC_FPS_DEN, SYNTHETIC_FPS_NUM
+
+    assert media_check.valid_mp4(src).frame_rate == pytest.approx(
+        SYNTHETIC_FPS_NUM / SYNTHETIC_FPS_DEN, abs=0.01
+    )
     full_range = tmp_path / "full.mp4"
     subprocess.run(
         [

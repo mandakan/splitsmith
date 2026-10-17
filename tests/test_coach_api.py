@@ -706,6 +706,27 @@ def test_get_coach_video_entries_carry_trim_and_scrub_versions(tmp_path: Path) -
     assert primary["scrub_version"] is None  # no _web.mp4 beside the trim in this fixture
 
 
+def test_get_coach_video_entries_carry_the_trims_frame_rate(tmp_path: Path) -> None:
+    from tests.media_bytes import tiny_mp4
+
+    client, base = _bootstrap_legacy_trim(tmp_path, stage_numbers=(1,))
+    trims = list(tmp_path.rglob("stage1_cam_*_trimmed.mp4"))
+    assert len(trims) == 1
+    trims[0].write_bytes(tiny_mp4(duration_s=2.0, video_samples=100))
+    primary = client.get(f"{base}/shooters/me/stages/1/coach").json()["videos"][0]
+    assert primary["fps"] == pytest.approx(50.0)
+
+
+def test_get_coach_fps_is_null_when_the_trim_does_not_say(tmp_path: Path) -> None:
+    client, base = _bootstrap_legacy_trim(tmp_path, stage_numbers=(1,))  # the fixture's trim is not an MP4
+    assert client.get(f"{base}/shooters/me/stages/1/coach").json()["videos"][0]["fps"] is None
+
+
+def test_get_coach_source_video_has_no_fps(tmp_path: Path) -> None:
+    client, _audit, base = _bootstrap(tmp_path)
+    assert client.get(f"{base}/shooters/me/stages/1/coach").json()["videos"][0]["fps"] is None
+
+
 def test_get_coach_source_video_has_null_versions(tmp_path: Path) -> None:
     client, _audit, base = _bootstrap(tmp_path)
     primary = client.get(f"{base}/shooters/me/stages/1/coach").json()["videos"][0]

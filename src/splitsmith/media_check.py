@@ -31,6 +31,8 @@ class MediaCheck(BaseModel):
     reason: str | None = None
     duration_s: float | None = None
     video_samples: int = 0
+    #: The video track's frames per second (samples over its mdhd seconds), when its boxes say.
+    frame_rate: float | None = None
 
 
 class _StructureError(Exception):
@@ -57,21 +59,31 @@ def _boxes(data: bytes, start: int, end: int):
         pos += size
 
 
-def _track(data: bytes, start: int, end: int, depth: int = 0) -> tuple[bytes | None, int]:
+def _track(
+    data: bytes, start: int, end: int, depth: int = 0
+) -> tuple[bytes | None, int, tuple[int, int] | None]:
+    """A track's handler, sample count and media time (``mdhd`` timescale, duration)."""
     if depth > _MAX_DEPTH:
         raise _StructureError("boxes nested too deep")
     handler: bytes | None = None
     samples = 0
+    media: tuple[int, int] | None = None
     for typ, s, e in _boxes(data, start, end):
         if typ == b"hdlr" and e - s >= 12:
             handler = data[s + 8 : s + 12]
         elif typ == b"stsz" and e - s >= 12:
             samples = struct.unpack(">I", data[s + 8 : s + 12])[0]
+        elif typ == b"mdhd" and e - s >= 20:
+            if data[s] == 1 and e - s >= 32:
+                media = struct.unpack(">IQ", data[s + 20 : s + 32])
+            else:
+                media = struct.unpack(">II", data[s + 12 : s + 20])
         elif typ in _CONTAINERS:
-            h, n = _track(data, s, e, depth + 1)
+            h, n, m = _track(data, s, e, depth + 1)
             handler = handler or h
             samples = samples or n
-    return handler, samples
+            media = media or m
+    return handler, samples, media
 
 
 def _moov_bytes(f, file_size: int) -> bytes | None:
@@ -112,6 +124,7 @@ def _moov_bytes(f, file_size: int) -> bytes | None:
 def _check_moov(data: bytes) -> MediaCheck:
     duration: float | None = None
     video_samples = 0
+    frame_rate: float | None = None
     for typ, s, e in _boxes(data, 0, len(data)):
         if typ == b"mvhd" and e - s >= 20:
             version = data[s]
@@ -122,12 +135,15 @@ def _check_moov(data: bytes) -> MediaCheck:
             if timescale:
                 duration = dur / timescale
         elif typ == b"trak":
-            handler, samples = _track(data, s, e)
-            if handler == b"vide":
-                video_samples = max(video_samples, samples)
+            handler, samples, media = _track(data, s, e)
+            if handler == b"vide" and samples > video_samples:
+                video_samples = samples
+                frame_rate = None
+                if media is not None and media[0] and media[1]:
+                    frame_rate = round(samples * media[0] / media[1], 3)
     if video_samples <= 0:
         return MediaCheck(ok=False, reason="no video track with samples", duration_s=duration)
-    return MediaCheck(ok=True, duration_s=duration, video_samples=video_samples)
+    return MediaCheck(ok=True, duration_s=duration, video_samples=video_samples, frame_rate=frame_rate)
 
 
 def valid_mp4(path: Path) -> MediaCheck:

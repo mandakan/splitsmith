@@ -1879,6 +1879,9 @@ export interface CoachVideoEntry {
   /** The camera's mount ("head", "hand", ...); with the role it is what a
    *  camera choice keys on across stages (``camera_select``). */
   mount?: string | null;
+  /** The trim's frames per second from its own MP4 boxes; null when the
+   *  trim is not on the server's disk. Read through ``clipFps``. */
+  fps?: number | null;
   /** Identity of the local audit trim (mtime + size), null when none is on
    *  disk. Goes into a pinned ``kind=trim`` URL so a re-cut trim is a new
    *  URL and remounts the player instead of leaving it on a dead stream. */
