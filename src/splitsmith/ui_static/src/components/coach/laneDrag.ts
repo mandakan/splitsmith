@@ -25,7 +25,7 @@ export const LANE_FILL: Record<StageEventKind, string> = {
 /** A region kind's chip tick: the kind's own, except a draw region, whose
  *  pink is not the draw interval class's red. */
 export const LANE_TICK: Record<StageEventKind, ChipTick> = {
-  draw: "region_draw",
+  draw: "draw",
   movement: "movement",
   reload: "reload",
   activation: "activation",

@@ -197,7 +197,7 @@ export function beepElapsed(
 }
 
 export const INTERVAL_TONE: Record<CoachIntervalClass, string> = {
-  first_shot: "text-led border-led-deep bg-led/10",
+  first_shot: "text-draw border-draw/40 bg-draw/10",
   split: "text-done border-done/40 bg-done/10",
   transition: "text-live border-live/40 bg-live/10",
   movement: "text-beep border-beep/40 bg-beep-tint",

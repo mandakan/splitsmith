@@ -6,7 +6,7 @@
  */
 export type ChipTick =
   | "draw"
-  | "region_draw"
+  | "primary"
   | "movement"
   | "transition"
   | "fire"
@@ -17,9 +17,10 @@ export type ChipTick =
 
 /** The background class of each tick. */
 export const CHIP_TICK_BG: Record<ChipTick, string> = {
-  draw: "bg-led",
-  // A draw region (spec 2026-10-17), apart from the draw interval class above.
-  region_draw: "bg-draw",
+  // The draw, interval class and region alike: one meaning, one hue.
+  draw: "bg-draw",
+  // The primary camera (Footage's clip sheet): the brand red it always had.
+  primary: "bg-led",
   movement: "bg-beep",
   transition: "bg-manual",
   fire: "bg-done",

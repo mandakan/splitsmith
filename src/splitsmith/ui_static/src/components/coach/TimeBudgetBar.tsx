@@ -10,7 +10,7 @@ import { BUDGET_LABEL, type BudgetClass, type TimeBudget } from "@/lib/timeBudge
 import { cn } from "@/lib/utils";
 
 const FILL: Record<BudgetClass, string> = {
-  first_shot: "bg-led text-white",
+  first_shot: "bg-draw text-bg",
   movement: "bg-beep text-bg",
   transition: "bg-manual text-bg",
   split: "bg-done text-bg",

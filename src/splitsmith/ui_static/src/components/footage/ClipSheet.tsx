@@ -64,7 +64,7 @@ export interface ClipSheetProps {
 }
 
 const SELECT = "min-w-0 rounded-md border border-rule-strong bg-surface-2 px-2.5 py-1.5 text-md text-ink disabled:opacity-50";
-const ROLE_TICK: Record<VideoRole, "draw" | "muted" | undefined> = { primary: "draw", secondary: "muted", ignored: undefined };
+const ROLE_TICK: Record<VideoRole, "primary" | "muted" | undefined> = { primary: "primary", secondary: "muted", ignored: undefined };
 
 function Row({ label, children }: { label: string; children: React.ReactNode }) {
   return (
