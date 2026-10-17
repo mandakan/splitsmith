@@ -54,7 +54,9 @@ def peak_envelope(audio: np.ndarray, sample_rate: int, bin_s: float = BIN_S) -> 
     return compute_peaks(np.asarray(audio, dtype=np.float32), sample_rate, bins).peaks, duration
 
 
-def rise_foot(peaks: list[float] | np.ndarray, duration: float, time: float) -> float | None:
+def rise_foot(
+    peaks: list[float] | np.ndarray, duration: float, time: float, *, tolerance_s: float = TOLERANCE_S
+) -> float | None:
     """The rise foot of the shot nearest ``time`` (start of its first bin);
     ``None`` when the window holds no shot (silence, or only the slope of a
     farther sound)."""
@@ -64,7 +66,7 @@ def rise_foot(peaks: list[float] | np.ndarray, duration: float, time: float) -> 
         return None
     bin_w = duration / n
     center = min(n - 1, max(0, int(np.floor(time / bin_w))))
-    radius = max(1, round(TOLERANCE_S / bin_w))
+    radius = max(1, round(tolerance_s / bin_w))
     lo, hi = max(0, center - radius), min(n - 1, center + radius)
     max_idx = lo + int(np.argmax(p[lo : hi + 1]))
     peak = p[max_idx]

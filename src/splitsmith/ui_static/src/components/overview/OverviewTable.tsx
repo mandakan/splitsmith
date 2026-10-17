@@ -59,6 +59,14 @@ function BeepCell({ cell, threshold }: { cell: OverviewCell; threshold: number }
     <span className="inline-flex items-center gap-1.5">
       <span className="numeral">{cell.beepTime.toFixed(2)}</span>
       {low ? <Chip tone="warn">{Math.round(cell.beepConfidence! * 100)}%</Chip> : null}
+      {cell.checkBeep != null ? (
+        <Chip
+          tone="warn"
+          title={`${Math.abs(Math.round(cell.checkBeep))} ms ${cell.checkBeep > 0 ? "before" : "after"} the tone starts`}
+        >
+          check beep
+        </Chip>
+      ) : null}
     </span>
   );
 }

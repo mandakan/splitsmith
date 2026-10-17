@@ -371,6 +371,14 @@ class StageVideo(BaseModel):
     # Manual entry (``beep_source == "manual"``) clamps to 1.0 -- the user
     # told us where the beep is.
     beep_confidence: float | None = None
+    # The confirmed beep's distance from its tone's start, ms, measured in
+    # the timer band (``beep_tone.tone_offset_ms``), and the ``beep_time``
+    # it was measured for. A value counts only while the beep is reviewed
+    # and still at that time (``tone_flag_ms``), so a moved or unreviewed
+    # beep never shows a stale flag. Derived: an older install that drops
+    # it loses nothing the next confirm or the backfill does not write again.
+    beep_tone_offset_ms: float | None = None
+    beep_tone_for: float | None = None
     # Auto-detection ran and produced no candidate (e.g. iPhone secondary cam
     # where the buzzer wasn't audible / sustained, or recording started after
     # the beep). Distinct from "never detected" (``beep_source is None`` and
@@ -470,6 +478,15 @@ class StageVideo(BaseModel):
         together with the fallbacks once a cache migration tool exists.
         """
         return hashlib.blake2s(str(self.path).encode("utf-8"), digest_size=6).hexdigest()
+
+
+def tone_flag_ms(video: StageVideo) -> float | None:
+    """The stored tone offset while it describes the confirmed beep, else None."""
+    if not video.beep_reviewed or video.beep_time is None or video.beep_tone_offset_ms is None:
+        return None
+    if video.beep_tone_for is None or abs(video.beep_tone_for - video.beep_time) > 1e-6:
+        return None
+    return video.beep_tone_offset_ms
 
 
 class StageStatus(StrEnum):

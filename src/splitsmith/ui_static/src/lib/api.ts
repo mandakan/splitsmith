@@ -1754,6 +1754,18 @@ export interface FsListing {
   suggested_starts: SuggestedStart[];
 }
 
+/** One window of a video's spectrogram (spec 2026-10-17): ``data`` is base64
+ *  uint8, column-major, ``hz.length`` bytes per column, low to high. */
+export interface Spectrogram {
+  start: number;
+  duration: number;
+  hz: number[];
+  columns: number;
+  data: string;
+  /** The timer's own band around the video's beep, Hz. */
+  tone_band: [number, number];
+}
+
 export interface PeaksResult {
   duration: number;
   sample_rate: number;
@@ -2572,6 +2584,9 @@ export interface TriageCell {
   draw: number | null;
   avg_split: number | null;
   time_seconds: number;
+  /** The stage's confirmed beeps' distance from their tone, ms, the largest
+   *  in magnitude (spec 2026-10-17); null or absent when none is measured. */
+  beep_tone_offset_ms?: number | null;
 }
 
 /** Response from GET /api/match/triage and POST accept/attention mutations.
@@ -2584,6 +2599,9 @@ export interface TriageResponse {
    *  The SPA reads this instead of hardcoding the global default so a
    *  project-level override is reflected in the low-confidence pill. */
   beep_low_confidence_threshold: number;
+  /** A beep this far or farther from its tone gets Overview's Check beep;
+   *  absent from an older server, which never flags. */
+  beep_tone_flag_ms?: number;
 }
 
 /** Response from GET /api/match/triage/summary - the cheap poll behind
@@ -4642,12 +4660,31 @@ export const api = {
     /** One window of the WAV, source seconds (the beep picker's 1 ms detail). */
     window?: { start: number; end: number },
     opts?: WhenReadyOptions,
+    /** A frequency band, ``LO-HI`` Hz (the beep step's filter); only with a window. */
+    band?: string,
   ) =>
     whenReady(
       () =>
         request<PeaksResult | Pending>(
           `/api/shooters/${encodeURIComponent(slug)}/stages/${stageNumber}/videos/${encodeURIComponent(videoId)}/peaks?bins=${bins}`
-            + (window ? `&start=${window.start}&end=${window.end}` : ""),
+            + (window ? `&start=${window.start}&end=${window.end}` : "")
+            + (band ? `&band=${band}` : ""),
+        ),
+      { jobError: failedJobError, ...opts },
+    ),
+
+  /** The beep step's spectrogram row: one window of the video's own WAV. */
+  getVideoSpectrum: (
+    slug: string,
+    stageNumber: number,
+    videoId: string,
+    window: { start: number; end: number },
+    opts?: WhenReadyOptions,
+  ) =>
+    whenReady(
+      () =>
+        request<Spectrogram | Pending>(
+          `/api/shooters/${encodeURIComponent(slug)}/stages/${stageNumber}/videos/${encodeURIComponent(videoId)}/spectrum?start=${window.start}&end=${window.end}`,
         ),
       { jobError: failedJobError, ...opts },
     ),

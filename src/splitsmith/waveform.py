@@ -157,14 +157,19 @@ def ensure_peaks(audio_path: Path, bins: int) -> PeaksResult:
     return result
 
 
-def ensure_peaks_window(audio_path: Path, bins: int, *, start: float, end: float) -> PeaksResult:
+def ensure_peaks_window(
+    audio_path: Path, bins: int, *, start: float, end: float, band: tuple[float, float] | None = None
+) -> PeaksResult:
     """Peaks of one window of ``audio_path``, ``[start, end)`` seconds clamped
     to the file, scaled by the whole file's loudest sample. The beep picker
     draws a few seconds around the beep at 1 ms over a source that can run
     minutes. Cached per window, with the same source record as
-    :func:`ensure_peaks`."""
+    :func:`ensure_peaks`. With ``band`` the window is band-passed first
+    (``beep_tone.band_pass``) and scaled by its own loudest sample, so the
+    timer's tone fills the row however quiet it is beside a shot."""
     st = audio_path.stat()
-    key = f"{audio_path.stem}.peaks-{bins}-{round(start * 1000)}-{round(end * 1000)}.json"
+    tag = f"-band{int(band[0])}-{int(band[1])}" if band else ""
+    key = f"{audio_path.stem}.peaks-{bins}-{round(start * 1000)}-{round(end * 1000)}{tag}.json"
     cf = audio_path.with_name(key)
     hit = _read_cache(cf, audio_path)
     if hit is not None and hit.bins == bins:
@@ -173,8 +178,18 @@ def ensure_peaks_window(audio_path: Path, bins: int, *, start: float, end: float
     n = audio.shape[0]
     lo = min(n, max(0, int(round(start * sr))))
     hi = min(n, max(lo, int(round(end * sr))))
-    scale = float(np.abs(audio).max()) if n else 0.0
-    result = compute_peaks(audio[lo:hi], sr, bins, scale=scale)
+    if band is not None:
+        from .beep_tone import band_pass
+
+        # Filter a little beyond the window so its edges carry no filter ramp.
+        pad = int(0.05 * sr)
+        a, b = max(0, lo - pad), min(n, hi + pad)
+        window = band_pass(audio[a:b], sr, *band)[lo - a : lo - a + (hi - lo)]
+        scale = float(np.abs(window).max()) if window.size else 0.0
+    else:
+        window = audio[lo:hi]
+        scale = float(np.abs(audio).max()) if n else 0.0
+    result = compute_peaks(window, sr, bins, scale=scale)
     result.start = lo / sr if sr else 0.0
     result.source_size = st.st_size
     result.source_mtime_ns = st.st_mtime_ns

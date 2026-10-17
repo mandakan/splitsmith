@@ -201,3 +201,28 @@ describe("formatClock", () => {
     expect(formatClock(60)).toBe("1:00.0");
   });
 });
+
+describe("the tone check (spec 2026-10-17)", () => {
+  const checkBeep = (offset: number | null, flag: number | null = 20) =>
+    buildOverviewRows({
+      triage: {
+        ...STOCKHOLM,
+        ...(flag === null ? {} : { beep_tone_flag_ms: flag }),
+        cells: [cell({ video_count: 1, beep_time: 5, beep_reviewed: true, beep_tone_offset_ms: offset })],
+      },
+      shooters: [shooter("s1", "Mathias Axell")],
+      leadSlug: null,
+      jobs: [],
+    })[0].cells[0].checkBeep;
+
+  it("flags a beep at or past the threshold, and only then", () => {
+    expect(checkBeep(-51)).toBe(-51);
+    expect(checkBeep(20)).toBe(20);
+    expect(checkBeep(19.9)).toBeNull();
+    expect(checkBeep(null)).toBeNull();
+  });
+
+  it("never flags against an older server that sends no threshold", () => {
+    expect(checkBeep(-51, null)).toBeNull();
+  });
+});

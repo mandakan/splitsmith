@@ -2048,7 +2048,28 @@ its waveform is the shared timeline band too
 row of pins over a seekable Audio row, origin at the detector's beep,
 one pick per release. ``BeepWaveformPicker`` and its own zoom code
 remain for ``MobileBeepReview`` and ``StageTimeSection``, never for
-``BeepStep``. Step 2's top row is
+``BeepStep``. The band also has a Spectrum row (``SpectrogramTrack``,
+``GET .../videos/{id}/spectrum``, spec ``2026-10-17-beep-spectral-view-design``)
+and a Filter (``lib/beepFilter``: Off, Timer tone, Custom). Timer tone is the
+spectrum's ``tone_band``, the timer's own frequency found near the beep
+(``beep_tone.tone_band``, about ±200 Hz; timers in the corpus run from 1.6
+to 5.4 kHz), else ``BeepDetectConfig``'s 2.2 to 3.5 kHz. The detail peaks
+and Snap read it through the peaks route's ``band``. A confirmed beep's
+distance from its tone is ``beep_tone.tone_offset_ms``: the earliest rise
+within ``reach_s`` (0.3 s) that stays up for 80 % of the next 100 ms. That is
+deliberately not Snap's nearest-peak rule, which lands mid-tone on a tone
+that wavers. It reads any sustained sound within reach, a steel ring or a
+voice as well as a tone, so it is a measure for confirmed beeps, not a beep
+detector (78 of 92 isolated shots gave a number in a review). The value
+is stored on the video with the beep time it was measured for
+(``beep_tone_offset_ms`` / ``beep_tone_for``; ``tone_flag_ms`` ignores a value
+whose beep moved or was unreviewed). It is written on confirm, on the manual
+override and by the video ``derive_audio`` job. Triage carries it, and
+Overview shows "check beep" at ``BeepToneConfig.flag_ms`` (20 ms).
+``scripts/measure_beep_tones.py`` measures or backfills a match folder. On the
+2026-10-17 corpus pass it agreed with the audited beep within 6 ms on 57 of
+66 primaries; three wrong beeps were moved onto their tones with every
+audited time shifted with them. Step 2's top row is
 the video (``MultiCamColumn``, a 16:9 tile capped at
 ``max-h-[max(240px,calc(100dvh-620px))]`` below lg, letterboxed) and
 ``ShotList``; on lg the row is ``max(300px,calc(100dvh-502px))``, and

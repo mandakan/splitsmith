@@ -158,6 +158,7 @@ from .. import (
     video_probe,
     youtube_sidecar,
 )
+from .. import beep_tone as beep_tone_module
 from .. import cleanup as cleanup_module
 from .. import coach as coach_module
 from .. import coach_distributions as coach_distributions_module
@@ -244,6 +245,7 @@ from ..match_project import (
     VideoRole,
     camera_labels,
     is_stub_audit,
+    tone_flag_ms,
 )
 from ..match_registry import MatchRegistry
 from ..mp4_render import RenderStep
@@ -270,7 +272,7 @@ from ..sync.run import format_sync_message
 from ..sync.run import run_sync as run_bidirectional_sync  # ..async_bridge.run_sync already owns this name
 from ..sync.state import SyncState, load_sync_state, save_sync_state
 from . import audio as audio_helpers
-from . import export_storage, stage_edit
+from . import beep_tone_check, export_storage, stage_edit
 from . import exports as export_helpers
 from . import match_exports as match_export_helpers
 from . import shooter_move as shooter_move_module
@@ -3996,6 +3998,14 @@ def register_job_bodies(state: AppState) -> None:
             audio_helpers.ensure_video_audio(
                 root, stage_number, video, source, project=proj, ffmpeg_binary=ffmpeg
             )
+            # Onto the project as it is now: ffmpeg ran long enough for an
+            # edit (a beep confirmed elsewhere) that the snapshot above lacks.
+            fresh = state.shooter_project(slug)
+            fresh_video = fresh.stage(stage_number).find_video_by_id(video_id)
+            if fresh_video is not None and beep_tone_check.record_tone_offset(
+                root, fresh, stage_number, fresh_video
+            ):
+                fresh.save(root)
         elif target == "audit":
             if stage_number is None:
                 raise RuntimeError("audit audio needs stage_number")
@@ -5524,6 +5534,9 @@ class TriageCell(BaseModel):
     draw: float | None = None
     avg_split: float | None = None
     time_seconds: float = 0.0
+    # The stage's confirmed beeps' distance from their tone (spec
+    # 2026-10-17), the largest in magnitude; None when none is measured.
+    beep_tone_offset_ms: float | None = None
 
 
 class TriageResponse(BaseModel):
@@ -5533,6 +5546,8 @@ class TriageResponse(BaseModel):
     cells: list[TriageCell]
     flagged_count: int
     beep_low_confidence_threshold: float
+    # A beep this far or farther from its tone gets Overview's Check beep.
+    beep_tone_flag_ms: float = 20.0
 
 
 class TriageSummaryResponse(BaseModel):
@@ -12965,6 +12980,7 @@ def create_app(
         if req.beep_time is not None:
             _check_beep_time(video, req.beep_time)
         _apply_beep_override(slug, project, stage, video, req.beep_time)
+        beep_tone_check.record_tone_offset(state.shooter_root(slug), project, stage.stage_number, video)
         project.save(state.shooter_root(slug))
         # Mirrors mark state only: no raw media exists hosted-side, so
         # there is nothing to trim or detect against. Desktop re-derives
@@ -13191,6 +13207,14 @@ def create_app(
         stub nor the job is written. Desktop re-derives on its next sync
         pull.
         """
+        # The beep's distance from its tone (spec 2026-10-17), when its
+        # source WAV is published here; the derive job measures it otherwise.
+        proj_now = state.shooter_project(slug)
+        target = proj_now.stage(stage_number).find_video_by_id(video.video_id)
+        if target is not None and beep_tone_check.record_tone_offset(
+            state.shooter_root(slug), proj_now, stage_number, target
+        ):
+            proj_now.save(state.shooter_root(slug))
         if current_match_origin.get() == "desktop":
             return
         with _audit_rmw():
@@ -14020,6 +14044,19 @@ def create_app(
             filename=result.audio_path.name,
         )
 
+    def _parse_band(raw: str | None) -> tuple[float, float] | None:
+        """``LO-HI`` in Hz, 100 <= LO < HI <= 12000, or None for the full range."""
+        if raw is None:
+            return None
+        try:
+            lo_s, hi_s = raw.split("-")
+            lo, hi = float(lo_s), float(hi_s)
+        except ValueError:
+            raise HTTPException(status_code=422, detail="band is LO-HI in Hz") from None
+        if not (100 <= lo < hi <= 12000):
+            raise HTTPException(status_code=422, detail="band is LO-HI in Hz, 100 <= LO < HI <= 12000")
+        return (lo, hi)
+
     @app.get("/api/shooters/{slug}/stages/{stage_number}/videos/{video_id}/peaks")
     def video_peaks(
         slug: str,
@@ -14030,6 +14067,9 @@ def create_app(
         # around the beep. Both or neither.
         start: float | None = Query(default=None, ge=0),
         end: float | None = Query(default=None, gt=0),
+        # A frequency band, ``LO-HI`` Hz, for the beep step's Timer tone
+        # filter (spec 2026-10-17); only with a window.
+        band: str | None = Query(default=None),
     ) -> JSONResponse:
         """Return ``bins`` peak magnitudes for ``video``'s WAV.
 
@@ -14040,17 +14080,50 @@ def create_app(
         project, _stage, video = _resolve_stage_video(slug, stage_number, video_id)
         if (start is None) != (end is None) or (start is not None and end is not None and end <= start):
             raise HTTPException(status_code=422, detail="start and end go together, start before end")
+        band_range = _parse_band(band)
+        if band_range is not None and start is None:
+            raise HTTPException(status_code=422, detail="a band needs a window (start and end)")
         audit = _resolve_video_audio(slug, project, stage_number, video)
         if isinstance(audit, JSONResponse):
             return audit
         peaks = (
             waveform_helpers.ensure_peaks(audit.audio_path, bins)
             if start is None or end is None
-            else waveform_helpers.ensure_peaks_window(audit.audio_path, bins, start=start, end=end)
+            else waveform_helpers.ensure_peaks_window(
+                audit.audio_path, bins, start=start, end=end, band=band_range
+            )
         )
         payload = peaks.model_dump(mode="json")
         payload["beep_time"] = audit.beep_in_clip
         payload["trimmed"] = audit.trimmed
+        return JSONResponse(payload)
+
+    @app.get("/api/shooters/{slug}/stages/{stage_number}/videos/{video_id}/spectrum")
+    def video_spectrum(
+        slug: str,
+        stage_number: int,
+        video_id: str,
+        start: float = Query(ge=0),
+        end: float = Query(gt=0),
+    ) -> JSONResponse:
+        """The beep step's spectrogram row (spec 2026-10-17): one window of
+        the video's own WAV, 0 to 8 kHz, ~5 ms columns, the window capped at
+        ``BeepToneConfig.max_window_s``, plus ``tone_band``: the timer's own
+        band around the video's beep, which the Timer tone filter asks for.
+        Reads the published WAV; when it is missing, queues ``derive_audio``
+        and answers 202 like the peaks."""
+        from .. import beep_detect, beep_tone
+
+        if end <= start:
+            raise HTTPException(status_code=422, detail="start before end")
+        project, _stage, video = _resolve_stage_video(slug, stage_number, video_id)
+        audit = _resolve_video_audio(slug, project, stage_number, video)
+        if isinstance(audit, JSONResponse):
+            return audit
+        audio, sr = beep_detect.load_audio(audit.audio_path)
+        payload = beep_tone.spectrogram(audio, sr, start, end).model_dump(mode="json")
+        around = float(video.beep_time) if video.beep_time is not None else (start + end) / 2
+        payload["tone_band"] = list(beep_tone.tone_band(audio, sr, around))
         return JSONResponse(payload)
 
     def _beep_snippet_key(slug: str, video_id: str, suffix: str) -> str | None:
@@ -16838,6 +16911,9 @@ def create_app(
                         needs_attention = TriageAttentionOut(**na_raw)
                     except ValidationError:
                         needs_attention = None
+                tones = [
+                    o for o in (tone_flag_ms(v) for v in stg.videos if v.role != "ignored") if o is not None
+                ]
                 cells.append(
                     TriageCell(
                         slug=slug,
@@ -16855,6 +16931,7 @@ def create_app(
                         draw=figures.draw if figures is not None else None,
                         avg_split=figures.avg_split if figures is not None else None,
                         time_seconds=float(stg.time_seconds),
+                        beep_tone_offset_ms=max(tones, key=abs) if tones else None,
                     )
                 )
         cells.sort(key=lambda c: (c.stage_number, c.shooter_name.lower()))
@@ -16864,6 +16941,7 @@ def create_app(
             cells=cells,
             flagged_count=_count_flagged(docs),
             beep_low_confidence_threshold=threshold,
+            beep_tone_flag_ms=beep_tone_module.beep_tone_config().flag_ms,
         )
 
     @app.get("/api/match/triage", response_model=TriageResponse)
