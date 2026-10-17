@@ -173,6 +173,7 @@ def _overlay_on_disk(
     args: tuple[str, ...] = (),
     beep_time: float = 12.0,
     short_head: float | None = None,
+    drawn_with_breakdown: bool = True,
 ) -> Any:
     """Seed a stage with an overlay MOV and its record (``record``:
     ``current`` / ``none``, drawn in Look ``drawn_in``), change something
@@ -208,6 +209,7 @@ def _overlay_on_disk(
             max_fps=None,
             audit_revision=exports_mod.overlay_audit_revision(audit_path),
             short_head=short_head,
+            breakdown=drawn_with_breakdown,
         )
         exports_mod.overlay_settings_file(exports, base).write_text(json.dumps(settings))
     if change == "audit":

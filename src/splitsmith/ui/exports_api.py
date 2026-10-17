@@ -284,6 +284,8 @@ class CompareGridRequest(BaseModel):
     closing_card: bool = False
     #: "Made with splitsmith" at the bottom of the closing card.
     made_with: bool = True
+    #: "Use Breakdown": off, no stage region reaches a hold or the match summary.
+    breakdown: bool = True
     #: Your account's brand on the title page and the closing card, for a
     #: Look without one of its own (spec 2026-10-08).
     account_brand: bool = True

@@ -310,6 +310,29 @@ def test_a_confirmed_draw_is_the_grid_tiles_draw(tmp_path, with_project):
     assert tile.draw == pytest.approx(2.31)
 
 
+@pytest.mark.parametrize("with_project", [False, True])
+def test_without_the_breakdown_a_grid_tile_reads_no_region(tmp_path, with_project):
+    """The export's 'Use Breakdown' switch off: no reloads, no regions, no
+    shot fired moving, and the Draw is the first shot, from both returns."""
+    root = tmp_path / "ann"
+    if with_project:
+        _write_project(root)
+    audit = _write_audit(root, 1, [2310, 2600, 2900])
+    doc = json.loads(audit.read_text())
+    doc["events"] = [
+        {"id": "evt-1", "kind": "draw", "start": 1.33, "end": 2.31, "source": "manual"},
+        {"id": "evt-2", "kind": "movement", "start": 2.4, "end": 2.8, "source": "manual"},
+        {"id": "evt-3", "kind": "reload", "start": 2.4, "end": 2.8, "source": "manual"},
+    ]
+    audit.write_text(json.dumps(doc))
+    bundles = [_bundle(tmp_path, "ann", audit=audit)]
+    tile = overlay_data.load_overlay_data(bundles, breakdown=False)[("ann", 1)]
+    assert (tile.stage_time_seconds is not None) is with_project
+    assert tile.events == () and tile.reloads == ()
+    assert not any(s.moving for s in tile.shots)
+    assert tile.draw == pytest.approx(2.31)
+
+
 def test_scoring_comes_off_the_project_on_disk(tmp_path):
     root = tmp_path / "ann"
     card = StageScorecard(hit_factor=6.5, stage_points=80.0, stage_pct=91.25)

@@ -3051,6 +3051,7 @@ def _run_compare_grid(
             match_date=match.match_date.isoformat() if match.match_date else None,
             match_summary_seconds=req.match_summary_seconds if req.match_summary else 0.0,
             logo_spots=frozenset(req.logo_spots),
+            breakdown=req.breakdown,
             brand=account_brand if req.account_brand else None,
         )
 
