@@ -69,7 +69,9 @@ def test_no_shipped_template_declares_a_key() -> None:
     for every piece of data a template can read and opts in on purpose."""
     # The starters are not shipped Looks: they are copied into a Look of your own.
     templates = sorted(
-        t for t in looks.shipped_looks_dir().rglob("*.html") if "_starters" not in t.parts and "broadcast" not in t.parts
+        t
+        for t in looks.shipped_looks_dir().rglob("*.html")
+        if "_starters" not in t.parts and "broadcast" not in t.parts
     )
     assert templates
     for template in templates:
