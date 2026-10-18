@@ -140,9 +140,16 @@ argv test proves nothing about pixels.
   `load_overlay_data` itself; no ranking between shooters. The rail preview
   cannot draw it (the route previews one shooter), so the pane shows its gallery
   thumbnail.
-- `fit_columns` (fit.js `fitColumns`, `fitColumnsPastFloor`) is set only by the
-  summary stills (`build_summary_still`, `build_hold_still`,
-  `build_match_summary_grid_still`). The live race never opts in.
+- `fit_columns` is set only by the summary stills (`build_summary_still`,
+  `build_hold_still`, `build_match_summary_grid_still`) on `single_html` /
+  `grid_html`. fit.js `fitColumns` shrinks the band until no grid column's text
+  overflows its column or comes within 0.6 em (the caption size) of the next
+  column overlapping it vertically, measured on the row's last baseline. It
+  floors at the caption size; past that, and only when a *figure* still
+  collides (`fitColumnsPastFloor`), rows wrap to half their columns, then go one
+  line without captions, then both, never below the floor. A caption that merely
+  wrapped does not trigger it. The live race never opts in (its rows change
+  text per frame).
 - Static / Moving split rows need a single-shooter landscape/square cell
   >= `_SPLIT_ROWS_MIN_CELL_HEIGHT` or an upright card; grid holds pass
   `split_rows=False` but keep the reload row.
