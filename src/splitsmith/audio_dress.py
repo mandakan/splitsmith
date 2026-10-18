@@ -75,6 +75,10 @@ class DressError(RuntimeError):
     """The Look's sound map or the export cannot be dressed."""
 
 
+class NothingToPlayError(DressError):
+    """No cue of the Look's lands on the export: there is nothing to mix."""
+
+
 def load_sound_map(look_root: Path) -> SoundMap:
     """The ``sounds`` block of ``look_root/look.json`` (none is an empty
     map: the Look's templates may declare every sound); every file it
@@ -287,7 +291,7 @@ def dress_export(
     placed, notes = place_template_cues(sounds, timeline, look_root / "sounds")
     notes = (*notes, *_stages_without_hud(timeline, look_root))
     if not placed:
-        raise DressError(f"nothing to play: no cue of the Look's lands on {export.name}")
+        raise NothingToPlayError(f"nothing to play: no cue of the Look's lands on {export.name}")
     out = output_path or dressed_path(export)
     partial = out.with_name(f".{out.stem}.partial{out.suffix}")
     cmd = dress_command(export, placed, output_path=partial, ffmpeg_binary=ffmpeg_binary)
@@ -299,3 +303,32 @@ def dress_export(
         tail = (exc.stderr or "").strip().splitlines()[-3:]
         raise DressError(f"ffmpeg failed: {' '.join(tail)}") from exc
     return DressResult(path=out, notes=notes)
+
+
+def dress_in_place(
+    export: Path,
+    look_root: Path,
+    *,
+    ffmpeg_binary: str = "ffmpeg",
+    runner: Runner = subprocess.run,
+) -> DressResult | None:
+    """Dress ``export`` in the Look's sounds and put the mix where the export
+    was: what the app's match export does after the render. ``None`` when the
+    Look has no sounds folder or nothing of it lands on this export, and the
+    file is left as rendered. A failed mix raises :class:`DressError` and
+    leaves the render untouched."""
+    folder = look_root / "sounds"
+    if not folder.is_dir() or not any(p.is_file() and not p.is_symlink() for p in folder.iterdir()):
+        return None
+    mixed = export.with_name(f".{export.stem}.dressing{export.suffix}")
+    try:
+        result = dress_export(
+            export, look_root, output_path=mixed, ffmpeg_binary=ffmpeg_binary, runner=runner
+        )
+    except NothingToPlayError:
+        return None
+    except BaseException:
+        mixed.unlink(missing_ok=True)
+        raise
+    mixed.replace(export)
+    return DressResult(path=export, notes=result.notes)

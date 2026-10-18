@@ -633,6 +633,9 @@ class LookInfo(BaseModel):
     accent_series: list[str]
     preview: str | None
     slots: dict[str, list[LookVariantInfo]]
+    #: It carries sounds (:func:`look_has_sounds`): the Export page offers
+    #: the switch that mixes them into a rendered MP4.
+    sounds: bool = False
 
 
 def _preview_url(look: Look, slot: str, variant: str) -> str | None:
@@ -653,6 +656,14 @@ def _positions(look: Look, slot: str, variant: str) -> list[str]:
     from .overlay_hud import declared_positions
 
     return list(declared_positions(template))
+
+
+def look_has_sounds(look: Look) -> bool:
+    """Whether the Look carries sounds: a file in its own ``sounds/`` folder,
+    which both its ``look.json`` cues and its templates' ``sounds()`` play
+    from (``audio_dress``). A hosted Look holds no files, so never."""
+    folder = look.root / "sounds"
+    return folder.is_dir() and any(p.is_file() and not p.is_symlink() for p in folder.iterdir())
 
 
 def look_catalog() -> list[LookInfo]:
@@ -682,12 +693,14 @@ def look_catalog() -> list[LookInfo]:
                 accent_series=list(look.accent_series),
                 preview=_preview_url(look, "look", DEFAULT_VARIANT),
                 slots=slots,
+                sounds=look_has_sounds(look),
             )
         )
     return out
 
 
 __all__ = [
+    "look_has_sounds",
     "BRAND_DIR",
     "BRAND_FILE_RE",
     "LookBrand",

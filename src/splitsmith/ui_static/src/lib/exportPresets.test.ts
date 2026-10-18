@@ -412,3 +412,17 @@ describe("breakdown", () => {
     expect(applyBody(DEFAULT_EXPORT_SETTINGS, settingsToBody(off)).useBreakdown).toBe(false);
   });
 });
+
+describe("look_sounds", () => {
+  it("is on by default, a body stored before it shipped applies it on, and off round-trips", () => {
+    expect(DEFAULT_EXPORT_SETTINGS.renderOptions.lookSounds).toBe(true);
+    const legacy: Partial<ExportPresetBody> = { ...YOUTUBE };
+    delete legacy.look_sounds;
+    const off = { ...DEFAULT_EXPORT_SETTINGS.renderOptions, lookSounds: false };
+    const applied = applyBody({ ...DEFAULT_EXPORT_SETTINGS, renderOptions: off }, legacy as ExportPresetBody);
+    expect(applied.renderOptions.lookSounds).toBe(true);
+    const offSettings = { ...DEFAULT_EXPORT_SETTINGS, renderOptions: off };
+    expect(settingsToBody(offSettings).look_sounds).toBe(false);
+    expect(applyBody(DEFAULT_EXPORT_SETTINGS, settingsToBody(offSettings)).renderOptions.lookSounds).toBe(false);
+  });
+});

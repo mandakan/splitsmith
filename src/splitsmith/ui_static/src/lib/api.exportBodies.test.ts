@@ -75,6 +75,7 @@ const matchPayload: Required<MatchExportRequestPayload> = {
   title_page_duration_seconds: 3,
   closing_card: true,
   made_with: false,
+  look_sounds: false,
   breakdown: false,
   account_brand: false,
   logo_spots: ["wipe"],

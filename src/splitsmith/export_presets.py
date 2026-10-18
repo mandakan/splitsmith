@@ -121,6 +121,8 @@ class ExportPresetBody(OverlayStyleFields, BaseModel):
     closing_card: bool = False
     #: "Made with splitsmith" on the closing card (on unless turned off).
     made_with: bool = True
+    #: The Look's sounds mixed into a rendered MP4 (on unless turned off).
+    look_sounds: bool = True
     #: "Use Breakdown": the stages' confirmed regions in the export (on unless off).
     breakdown: bool = True
     #: Your account's brand on the cards (on unless turned off).

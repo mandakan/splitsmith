@@ -207,6 +207,10 @@ class MatchExportRequest(OverlayStyleFields, BaseModel):
     closing_card: bool = False
     #: "Made with splitsmith" at the bottom of the closing card.
     made_with: bool = True
+    #: The Look's sounds (its ``sounds/`` folder) mixed into the rendered MP4
+    #: after the render (``audio_dress.dress_in_place``); a Look without
+    #: sounds is untouched either way.
+    look_sounds: bool = True
     #: Your account's brand on the title page and the closing card, for a
     #: Look without one of its own (spec 2026-10-08).
     account_brand: bool = True

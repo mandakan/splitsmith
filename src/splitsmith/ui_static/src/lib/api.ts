@@ -1160,6 +1160,8 @@ export interface ExportPresetBody extends OverlayStyleBody {
   title_division: boolean;
   closing_card: boolean;
   made_with: boolean;
+  /** The Look's sounds in a rendered MP4; a preset saved before it has none: on. */
+  look_sounds?: boolean;
   /** A preset saved before the switch has none: on. */
   breakdown?: boolean;
   account_brand?: boolean;
@@ -1210,6 +1212,8 @@ export interface LookInfo {
   accent_series: string[];
   preview: string | null;
   slots: Record<string, LookVariantInfo[]>;
+  /** It carries sounds the export can mix into a rendered MP4. */
+  sounds?: boolean;
 }
 
 /** An RGB triple, as ``look.json`` stores a colour. */
@@ -1515,6 +1519,9 @@ export interface MatchExportRequestPayload extends OverlayStyleBody {
   closing_card?: boolean;
   /** "Made with splitsmith" on the closing card. Server default on. */
   made_with?: boolean;
+  /** The Look's sounds mixed into the rendered MP4. Server default on; a
+   *  Look without sounds is untouched either way. */
+  look_sounds?: boolean;
   /** "Use Breakdown": the stages' confirmed regions in the export. Server
    *  default on; off exports every stage as one nobody broke down. */
   breakdown?: boolean;

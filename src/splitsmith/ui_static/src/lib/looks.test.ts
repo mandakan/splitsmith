@@ -7,6 +7,7 @@ import type { LookInfo } from "@/lib/api";
 import { DEFAULT_EXPORT_SETTINGS } from "@/lib/exportPresets";
 import { FAMILIES, FAMILY_KINDS } from "@/test/transitionFamilies";
 import {
+  lookSoundsOffered,
   BUILTIN_LOOKS,
   DEFAULT_LOOK,
   previewSrc,
@@ -193,5 +194,18 @@ describe("transitionLabel / transitionFamily (#1259)", () => {
     expect(transitionLabel("radial", [])).toBe("radial");
     expect(transitionFamily("circleclose", FAMILIES)?.family.id).toBe("circle");
     expect(transitionFamily("zoom", FAMILIES)).toBeNull();
+  });
+});
+
+describe("lookSoundsOffered", () => {
+  const loud = { ...BUILTIN_LOOKS[0], name: "freedoom", source: "user" as const, sounds: true };
+  const quiet = { ...BUILTIN_LOOKS[0], name: "club", source: "user" as const };
+
+  it("offers the switch for a Look with sounds on one shooter's MP4 only", () => {
+    expect(lookSoundsOffered([loud, quiet], "freedoom", "single", "mp4")).toBe(true);
+    expect(lookSoundsOffered([loud, quiet], "club", "single", "mp4")).toBe(false);
+    expect(lookSoundsOffered([loud, quiet], "freedoom", "compare", "mp4")).toBe(false);
+    expect(lookSoundsOffered([loud, quiet], "freedoom", "single", "fcpxml")).toBe(false);
+    expect(lookSoundsOffered([], "freedoom", "single", "mp4")).toBe(false);
   });
 });
