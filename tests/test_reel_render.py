@@ -5,8 +5,15 @@ import pytest
 
 from splitsmith.composition import SequenceFormat
 from splitsmith.config import VideoMetadata
-from splitsmith.reel_plan import FrameRef, ReelClip
-from splitsmith.reel_render import card_command, clip_command, frame_command, reel_format, sfx_source
+from splitsmith.reel_plan import FrameRef, ReelCard, ReelClip
+from splitsmith.reel_render import (
+    card_command,
+    clip_command,
+    frame_command,
+    reel_format,
+    render_reel,
+    sfx_source,
+)
 from tests.synthetic_media import build_synthetic_video, ffmpeg_available
 
 UP = SequenceFormat(1080, 1920, 30, 1)
@@ -78,6 +85,70 @@ def test_frame_command_grabs_one_cropped_frame():
     argv = frame_command(FrameRef(Path("/m/a.mp4"), 8.0), sequence=UP, output_path=Path("/w/f.png"))
     assert argv[argv.index("-ss") + 1] == "8"
     assert "-frames:v" in argv and "scale=1080:1920" in " ".join(argv)
+
+
+class _FakeFrames:
+    duration = 0.0
+
+    def __init__(self, width: int, height: int) -> None:
+        self.width, self.height = width, height
+        self.frames = [bytes(width * height * 4)]
+
+    def close(self) -> None:
+        pass
+
+
+class _FakeRaster:
+    """Stands in for Chromium: every card is a one-frame still."""
+
+    def engine_version(self) -> str:
+        return "fake"
+
+    def render_template_frames(self, template, *, context, width, height, fps, max_seconds):
+        return _FakeFrames(width, height)
+
+
+def test_render_reel_encodes_every_item_then_stitches(tmp_path, monkeypatch):
+    calls: list[list[str]] = []
+
+    def runner(cmd, **kw):
+        calls.append(list(cmd))
+        out = Path(cmd[-1])
+        out.parent.mkdir(parents=True, exist_ok=True)
+        if out.suffix == ".png":
+            from PIL import Image
+
+            Image.new("RGB", (UP.width, UP.height)).save(out)
+        else:
+            out.write_bytes(b"x")
+        return subprocess.CompletedProcess(cmd, 0, "", "")
+
+    monkeypatch.setattr("splitsmith.reel_render._has_audio_stream", lambda p: True)
+    items = (
+        ReelCard("001_title", "title", 1.6, "Bromma", lines=("Anna",), sfx="impact"),
+        ReelClip("002_beat", Path("/m/a.mp4"), 7.4, 1.2),
+        ReelCard(
+            "003_callout",
+            "callout",
+            1.2,
+            "FASTEST SPLIT",
+            figure="0.19",
+            unit="SEC",
+            backdrop=FrameRef(Path("/m/a.mp4"), 8.0),
+        ),
+    )
+    result = render_reel(
+        items,
+        sequence=UP,
+        output_path=tmp_path / "reel.mp4",
+        work_dir=tmp_path / "w",
+        runner=runner,
+        rasterizer=_FakeRaster(),
+    )
+    assert len(calls) == 5  # title card, clip, frame grab, callout card, stitch
+    assert "concat" in calls[-1]
+    assert result.duration_seconds == pytest.approx(1.6 + 1.2 + 1.2)
+    assert result.degradations == ()
 
 
 def _probe_seconds(path: Path) -> float:

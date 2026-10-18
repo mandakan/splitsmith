@@ -10,17 +10,31 @@ audio file ships.
 
 from __future__ import annotations
 
+import logging
+import subprocess
 from collections import Counter
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
+from dataclasses import dataclass
 from pathlib import Path
+
+from PIL import Image
 
 from .composition import SequenceFormat
 from .config import VideoMetadata
-from .look_motion import motion_overlay_filters
-from .mp4_render import _encode_args, _rate_string
-from .reel_plan import FrameRef, ReelClip, SfxKind
+from .look_motion import motion_overlay_filters, write_motion_clip
+from .looks import load_look
+from .mp4_render import Runner, _build_concat_command, _encode_args, _has_audio_stream, _rate_string, _run
+from .overlay_card import card_backdrop, compose_card, first_frame_image
+from .overlay_raster import ChromiumRasterizer, Rasterizer, RasterizerUnavailableError
+from .reel_cards import reel_card_motion
+from .reel_plan import FrameRef, ReelCard, ReelClip, ReelItem, SfxKind
+from .segment_cache import SegmentCache
+
+logger = logging.getLogger(__name__)
 
 AUDIO_NORMALIZE = "aresample=48000,aformat=sample_rates=48000:channel_layouts=stereo"
+#: How far a callout's frozen frame is dimmed under its text.
+CALLOUT_DIM = 0.35
 
 
 def reel_format(primaries: Sequence[VideoMetadata], *, upright: bool) -> SequenceFormat:
@@ -132,6 +146,162 @@ def card_command(
     args += ["-t", f"{seconds:g}", "-filter_complex", f"{video};{audio}", "-map", "[final]", "-map", "[aout]"]
     args += [*_encode_args(sequence, youtube_preset=False), str(output_path)]
     return tuple(args)
+
+
+@dataclass(frozen=True)
+class ReelRenderResult:
+    output_path: Path
+    duration_seconds: float
+    degradations: tuple[str, ...]
+
+
+def render_reel(
+    items: Sequence[ReelItem],
+    *,
+    sequence: SequenceFormat,
+    output_path: Path,
+    work_dir: Path,
+    look_name: str = "splitsmith",
+    ffmpeg_binary: str = "ffmpeg",
+    runner: Runner = subprocess.run,
+    rasterizer: Rasterizer | None = None,
+    segment_cache: SegmentCache | None = None,
+) -> ReelRenderResult:
+    """Encode every item as a segment (reused from ``segment_cache`` when
+    its argv and inputs are unchanged) and stitch them. No browser draws
+    every card as its backdrop alone and records a degradation; the reel
+    never fails for a card."""
+    work_dir.mkdir(parents=True, exist_ok=True)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    degradations: list[str] = []
+    owned: ChromiumRasterizer | None = None
+    active = rasterizer
+    if active is None and any(isinstance(i, ReelCard) for i in items):
+        owned = ChromiumRasterizer()
+        try:
+            active = owned.__enter__()
+        except RasterizerUnavailableError as exc:
+            owned, active = None, None
+            degradations.append(f"reel cards drawn without text: {exc.detail}")
+            logger.warning("%s", degradations[-1])
+    look = load_look(look_name)
+    fps = sequence.frame_rate_num / sequence.frame_rate_den
+    used: set[str] = set()
+
+    def encode(
+        cmd: tuple[str, ...],
+        out: Path,
+        *,
+        virtual: dict[str, str] | None = None,
+        prepare: Callable[[], object] | None = None,
+    ) -> Path:
+        if segment_cache is None:
+            if prepare is not None:
+                prepare()
+            _run(cmd, runner=runner)
+            return out
+        key = segment_cache.key(cmd, output_path=out, work_dir=work_dir, virtual_inputs=virtual)
+        used.add(key)
+        hit = segment_cache.lookup(key)
+        if hit is not None:
+            return hit
+        if prepare is not None:
+            prepare()
+        partial = segment_cache.partial_path(key)
+        try:
+            _run(tuple(str(partial) if token == str(out) else token for token in cmd), runner=runner)
+            return segment_cache.commit(partial, key)
+        finally:
+            partial.unlink(missing_ok=True)
+
+    def backdrop_for(card: ReelCard) -> Image.Image:
+        if card.backdrop is None:
+            return Image.new("RGB", (sequence.width, sequence.height), "black")
+        frame = work_dir / f"{card.name}_frame.png"
+        _run(
+            frame_command(card.backdrop, sequence=sequence, output_path=frame, ffmpeg_binary=ffmpeg_binary),
+            runner=runner,
+        )
+        return card_backdrop(
+            frame, width=sequence.width, height=sequence.height, look=look, blur_radius=0, dim=CALLOUT_DIM
+        )
+
+    segments: list[tuple[Path, float]] = []
+    try:
+        for item in items:
+            out = work_dir / f"{item.name}.mp4"
+            if isinstance(item, ReelClip):
+                cmd = clip_command(
+                    item,
+                    sequence=sequence,
+                    output_path=out,
+                    ffmpeg_binary=ffmpeg_binary,
+                    source_audio=_has_audio_stream(item.source),
+                )
+                segments.append((encode(cmd, out), item.out_seconds))
+                continue
+            canvas = backdrop_for(item)
+            png = work_dir / f"{item.name}_backdrop.png"
+            motion = None
+            if active is not None:
+                motion = reel_card_motion(
+                    look, item, width=sequence.width, height=sequence.height, fps=fps, rasterizer=active
+                )
+                if motion is None:
+                    degradations.append(f"{item.name}: the highlight card failed to load")
+            if motion is not None and motion.animated:
+                canvas.save(png)
+                clip_path = work_dir / f"{item.name}_motion.mov"
+
+                def write(frames=motion.frames, clip_path=clip_path) -> None:
+                    if not clip_path.exists():
+                        write_motion_clip(frames, out=clip_path, fps=fps, ffmpeg_binary=ffmpeg_binary)
+
+                cmd = card_command(
+                    png,
+                    clip_path,
+                    seconds=item.seconds,
+                    sfx=item.sfx,
+                    sequence=sequence,
+                    output_path=out,
+                    ffmpeg_binary=ffmpeg_binary,
+                )
+                try:
+                    path = encode(cmd, out, virtual={str(clip_path): motion.digest}, prepare=write)
+                finally:
+                    motion.close()
+                segments.append((path, item.seconds))
+                continue
+            if motion is not None:
+                text = first_frame_image(motion)
+                if text is not None:
+                    canvas = compose_card(text, canvas)
+            canvas.save(png)
+            cmd = card_command(
+                png,
+                None,
+                seconds=item.seconds,
+                sfx=item.sfx,
+                sequence=sequence,
+                output_path=out,
+                ffmpeg_binary=ffmpeg_binary,
+            )
+            segments.append((encode(cmd, out), item.seconds))
+    finally:
+        if owned is not None:
+            owned.__exit__(None, None, None)
+
+    listing = work_dir / "segments.txt"
+    listing.write_text("".join(f"file '{path}'\n" for path, _ in segments))
+    _run(
+        _build_concat_command(
+            list_path=listing, output_path=output_path, ffmpeg_binary=ffmpeg_binary, reencode_audio=True
+        ),
+        runner=runner,
+    )
+    if segment_cache is not None:
+        segment_cache.evict(keep=used)
+    return ReelRenderResult(output_path, sum(seconds for _, seconds in segments), tuple(degradations))
 
 
 def frame_command(
