@@ -52,9 +52,12 @@ def lift_gain(rgb: Rgb, lift: float = 0.0, gain: float = 1.0) -> Rgb:
 
 
 def split_tone(rgb: Rgb, shadows: tuple[float, float, float], highlights: tuple[float, float, float]) -> Rgb:
-    """Add ``shadows`` weighted toward black and ``highlights`` toward white."""
+    """Add ``shadows`` weighted toward black and ``highlights`` toward white.
+    The shadow tint fades out in the last stretch to black, so true black
+    stays black (a tinted black reads as a coloured lens rim)."""
     y = luma(rgb)[..., None]
-    return rgb + np.asarray(shadows) * (1.0 - y) ** 2 + np.asarray(highlights) * y**2
+    shadow_weight = (1.0 - y) ** 2 * np.clip(y / 0.15, 0.0, 1.0)
+    return rgb + np.asarray(shadows) * shadow_weight + np.asarray(highlights) * y**2
 
 
 def channel_gain(rgb: Rgb, r: float = 1.0, g: float = 1.0, b: float = 1.0) -> Rgb:
@@ -69,15 +72,15 @@ PRESETS: dict[str, Callable[[Rgb], Rgb]] = {
     "vivid": lambda c: s_curve(saturate(c, 1.35), 0.25),
     "warm-film": lambda c: saturate(
         split_tone(
-            lift_gain(s_curve(c, 0.15), lift=0.03, gain=0.98), (0.01, 0.0, -0.01), (0.05, 0.01, -0.06)
+            lift_gain(s_curve(c, 0.2), lift=0.04, gain=0.97), (0.03, 0.01, -0.02), (0.11, 0.03, -0.12)
         ),
         0.9,
     ),
     "teal-orange": lambda c: saturate(
-        split_tone(s_curve(c, 0.2), (-0.06, 0.02, 0.06), (0.07, 0.01, -0.07)),
+        split_tone(s_curve(c, 0.25), (-0.12, 0.03, 0.13), (0.13, 0.02, -0.13)),
         1.1,
     ),
-    "cool-steel": lambda c: s_curve(saturate(channel_gain(c, r=0.95, g=1.0, b=1.06), 0.8), 0.2),
+    "cool-steel": lambda c: s_curve(saturate(channel_gain(c, r=0.9, g=1.0, b=1.1), 0.75), 0.25),
     "bleach-bypass": lambda c: s_curve(saturate(c, 0.45), 0.45),
     "faded": lambda c: saturate(lift_gain(c, lift=0.08, gain=0.92), 0.8),
     "noir": lambda c: np.repeat(s_curve(luma(c)[..., None], 0.5), 3, axis=-1),
