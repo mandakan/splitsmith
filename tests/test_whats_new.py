@@ -131,6 +131,24 @@ def test_a_bad_video_is_refused(video: dict) -> None:
         whats_new.WhatsNewEntry.model_validate(_entry_with_video(video))
 
 
+@pytest.mark.parametrize(
+    "url",
+    [
+        "http://youtu.be/WRlgT0Bkggo",
+        "https://vimeo.com/123",
+        "https://youtu.be.evil.example/x",
+        "https://user@youtu.be/x",
+        "https://youtu.be:8443/x",
+        "javascript:alert(1)",
+    ],
+)
+def test_a_bad_video_url_is_refused_by_the_url_rule(url: str) -> None:
+    # Everything but the URL is valid, so only the URL rule can refuse it: the
+    # message names the rule, which a model without it could not produce.
+    with pytest.raises(ValueError, match="a video link is an https URL"):
+        whats_new.WhatsNewVideo.model_validate({"url": url, "label": "Watch the tour"})
+
+
 def test_an_entry_without_a_video_has_none() -> None:
     entry = whats_new.WhatsNewEntry.model_validate(
         {"id": "plain", "date": "2026-10-18", "title": "Plain", "body": "No video."}
