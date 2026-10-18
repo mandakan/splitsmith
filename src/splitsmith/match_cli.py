@@ -454,6 +454,12 @@ def export(
     tail_pad: float = typer.Option(5.0, "--tail-pad", help="Seconds of footage kept after each last shot."),
     no_secondaries: bool = typer.Option(False, "--no-secondaries", help="Leave secondary cams out."),
     no_overlay: bool = typer.Option(False, "--no-overlay", help="Leave the rendered overlay out."),
+    keep_stale_overlays: bool = typer.Option(
+        False,
+        "--keep-stale-overlays",
+        help="Leave out an overlay drawn from an older audit, Look or template instead of drawing it "
+        "again (the default draws it again in the style its record names).",
+    ),
     pip_layout: str = typer.Option("stacked", "--pip", help="'stacked' or 'pip-corners' for secondary cams."),
     titles: str = typer.Option("none", "--titles", help="Per-stage title: 'slate', 'lower-third' or 'none'."),
     title_duration: float = typer.Option(1.5, "--title-duration", help="Seconds a stage title shows for."),
@@ -744,14 +750,16 @@ def export(
     except (KeyError, ValueError) as exc:
         console.print(f"[red]Error:[/] {exc}")
         raise typer.Exit(code=1) from exc
+    without_hud: list[int] = []
     if not no_overlay:
-        stages_input = _vouched_overlays(
+        stages_input, without_hud = _vouched_overlays(
             stages_input,
             theme_option,
             pre_buffer_seconds=project.trim_pre_buffer_seconds,
             project=project,
             project_dir=shooter_root,
             breakdown=breakdown,
+            redraw=not keep_stale_overlays,
         )
 
     project_name = project.name or match.name or "match"
@@ -880,6 +888,16 @@ def export(
             console.print(f"[red]Error:[/] upload failed: {exc}", soft_wrap=True)
             raise typer.Exit(code=1) from exc
         report_upload(record)
+    if without_hud:
+        # Loud on purpose: a stage that lost its HUD is the export's to
+        # fix, and a note scrolled past is how it went unseen.
+        listed = ", ".join(f"stage {n}" for n in without_hud)
+        console.print(
+            f"[red]Rendered without its HUD overlay: {listed}.[/] See the notes above; the export "
+            "exits 3 so a script notices.",
+            soft_wrap=True,
+        )
+        raise typer.Exit(code=3)
 
 
 def _vouched_overlays(
@@ -890,17 +908,20 @@ def _vouched_overlays(
     project: Any = None,
     project_dir: Path | None = None,
     breakdown: bool = True,
-) -> list[Any]:
+    redraw: bool = False,
+) -> tuple[list[Any], list[int]]:
     """Each stage's overlay MOV only when its record says it was drawn the way
     this export would draw it: from the audit as it stands, with its template
     and its Look's palette and faces as they stand
     (``exports.overlay_record_matches``, the rule the app's match export and
     the MCP tool use). The CLI has no style, options or format of its own to
     ask for, so the recorded ones are wanted, and the recorded Look too unless
-    ``look`` (an explicit ``--theme``) asks for another. It cannot redraw
-    either (it re-cuts nothing; the style a redraw needs is the app's
-    request), so a stale overlay is left out and said so; the MOV stays on
-    disk. ``pre_buffer_seconds`` is the project's, which says whether a
+    ``look`` (an explicit ``--theme``) asks for another. With ``redraw`` a
+    stale overlay is drawn again in that style (:func:`_redraw_overlay`, the
+    per-stage export the app's match export runs) and stitched; without it,
+    or when the redraw fails or no record names a style, it is left out and
+    said so, and its stage is in the returned list of stages without a HUD.
+    The MOV stays on disk either way. ``pre_buffer_seconds`` is the project's, which says whether a
     stage's trim had a short head (``exports.overlay_short_head``). ``project``
     gives each stage's scorecard and division (``exports.hud_extras_for``),
     which a template that declares ``splitsmith-data`` keys was drawn with.
@@ -910,6 +931,7 @@ def _vouched_overlays(
     from .ui import exports as export_helpers
 
     out: list[Any] = []
+    lost: list[int] = []
     for stage_in in stages_input:
         mov = stage_in.overlay_path
         if mov is not None and mov.exists():
@@ -995,12 +1017,108 @@ def _vouched_overlays(
                         "(or has no record of which) "
                         "-- left out; run the stage's export with the overlay on to draw it again"
                     )
+                failed = None
+                if redraw:
+                    failed = _redraw_overlay(
+                        export_helpers, stage_in, record, look, project, project_dir, breakdown, extras
+                    )
+                    if failed is None and export_helpers.overlay_record_matches(
+                        export_helpers.read_overlay_settings(
+                            export_helpers.overlay_settings_file(
+                                mov.parent, mov.name.removesuffix("_overlay.mov")
+                            )
+                        ),
+                        audit_revision=current,
+                        look=look,
+                        upright=upright,
+                        short_head=short_head,
+                        hud_extras=extras,
+                        breakdown=breakdown,
+                    ):
+                        console.print(
+                            f"[yellow]note[/] stage {stage_in.stage_number}: overlay drawn again; it "
+                            f"{why.split(' -- ')[0]}",
+                            soft_wrap=True,
+                        )
+                        out.append(stage_in)
+                        continue
+                    failed = failed or "the redrawn overlay still does not match what this export asks for"
+                    why = f"{why.split(' -- ')[0]} -- left out; drawing it again failed: {failed}"
                 console.print(
                     f"[yellow]note[/] stage {stage_in.stage_number}: overlay at {mov} {why}", soft_wrap=True
                 )
                 stage_in = replace(stage_in, overlay_path=None)
+                if redraw:
+                    lost.append(stage_in.stage_number)
         out.append(stage_in)
-    return out
+    return out, lost
+
+
+def _redraw_overlay(
+    export_helpers: Any,
+    stage_in: Any,
+    record: dict[str, Any] | None,
+    look: str | None,
+    project: Any,
+    project_dir: Path | None,
+    breakdown: bool,
+    extras: Any,
+) -> str | None:
+    """Draw a stage's overlay again in the style its ``record`` names (in
+    ``look`` when an explicit ``--theme`` asks for another), through the
+    per-stage export the app's match export runs for a stale overlay: the
+    overlay only, its record written beside it. ``None`` when it drew, else
+    why not (no record says which style; no project; the export failed)."""
+    from .overlay_hud import HudOptions
+    from .ui.exports import StageExportRequest
+
+    if record is None or project is None or project_dir is None:
+        return "nothing records which style it was drawn in"
+    entry = project.stage(stage_in.stage_number)
+    primary = entry.primary()
+    if primary is None or primary.beep_time is None:
+        return "the stage has no primary video with a beep"
+    try:
+        variant = str(record["variant"])
+        request = StageExportRequest(
+            stage_number=entry.stage_number,
+            write_trim=False,
+            write_csv=False,
+            write_fcpxml=False,
+            write_report=False,
+            write_overlay=True,
+            overlay_codec=record["codec"],
+            overlay_max_height=record["max_height"],
+            overlay_max_fps=record["max_fps"],
+            overlay_theme=look or str(record["look"]),
+            overlay_variant=variant,
+            overlay_options=HudOptions(**record["options"]) if variant != "default" else HudOptions(),
+            breakdown=breakdown,
+        )
+    except (KeyError, TypeError, ValueError) as exc:
+        return f"its record is unreadable ({exc})"
+    console.print(
+        f"stage {entry.stage_number}: drawing its overlay again ({request.overlay_theme}, {variant})...",
+        soft_wrap=True,
+    )
+    source = project.resolve_video_path(project_dir, primary.path)
+    try:
+        export_helpers.export_stage(
+            request=request,
+            audit_path=stage_in.audit_path,
+            exports_dir=stage_in.overlay_path.parent,
+            source_video_path=source if source.exists() else None,
+            stage_data=export_helpers.engine_stage_data(entry),
+            beep_time_in_source=primary.beep_time,
+            pre_buffer_seconds=project.trim_pre_buffer_seconds,
+            post_buffer_seconds=project.trim_post_buffer_seconds,
+            config=Config(),
+            secondaries=[],
+            hud_extras=extras,
+        )
+    except Exception as exc:  # noqa: BLE001 -- a failed redraw is a stage without its HUD, said so
+        return str(exc).splitlines()[0] if str(exc) else type(exc).__name__
+    return None
 
 
 def _run_youtube_upload(mp4: Path, *, client: Any, channel_title: str, options: Any, again: bool) -> Any:

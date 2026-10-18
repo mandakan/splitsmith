@@ -17,6 +17,7 @@ from __future__ import annotations
 import json
 import logging
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -214,6 +215,19 @@ def overlay_short_head(beep_time_in_source: float, pre_buffer_seconds: float) ->
     (``trim.beep_in_trim``): both answer the same."""
     beep = trim.beep_in_trim(beep_time_in_source, pre_buffer_seconds)
     return beep if beep < pre_buffer_seconds else None
+
+
+def engine_stage_data(stage: StageEntry) -> StageData:
+    """A project stage as the engine's ``StageData`` for :func:`export_stage`.
+    A stage that never went through a scoreboard import has no scorecard
+    time; the engine reads it for diagnostics only, so a placeholder keeps
+    the export running."""
+    return StageData(
+        stage_number=stage.stage_number,
+        stage_name=stage.stage_name,
+        time_seconds=stage.time_seconds,
+        scorecard_updated_at=stage.scorecard_updated_at or datetime(2000, 1, 1, tzinfo=UTC),
+    )
 
 
 def hud_extras_for(project: MatchProject, stage: StageEntry, project_dir: Path | None) -> HudExtras:
