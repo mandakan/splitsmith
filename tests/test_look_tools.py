@@ -417,6 +417,32 @@ def test_each_defect_is_reported_with_its_level(user_dir: Path) -> None:
     assert report.errors >= 2
 
 
+def test_a_templates_sounds_are_counted_and_a_missing_file_is_named(user_dir: Path) -> None:
+    """``window.sounds()`` is read on the probe: what it declares is counted
+    on the template's line, and a cue naming a file the Look's ``sounds/``
+    folder lacks is a warning, since the dress pass would leave it out."""
+    look_tools.new_look("club", from_look="splitsmith", templates=True)
+    (user_dir / "club" / "sounds").mkdir()
+    (user_dir / "club" / "sounds" / "tick.wav").write_bytes(b"x")
+    prober = _Prober(
+        by_file={
+            "card.html": TemplateProbe(sounds=({"play": "tick.wav"}, {"play": "tick.wav", "at": 1})),
+            "card-rise.html": TemplateProbe(
+                duration=0.8, poster=0.8, has_seek=True, sounds=({"play": "boom.wav"}, {"bed": "tick.wav"})
+            ),
+        }
+    )
+    report = look_tools.check_look("club", prober=prober)
+    found = [(item.subject, item.level, item.message) for item in report.items]
+    assert any(
+        "card.html" in subject and level == "ok" and "2 sounds" in msg for subject, level, msg in found
+    )
+    assert any(
+        "card-rise.html" in subject and level == "warn" and "boom.wav" in msg and "sounds" in msg
+        for subject, level, msg in found
+    )
+
+
 def test_a_broken_manifest_is_one_error_naming_the_problem(user_dir: Path) -> None:
     d = user_dir / "broken"
     d.mkdir(parents=True)

@@ -25,15 +25,17 @@ import subprocess
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
 from .reel_render import AUDIO_NORMALIZE
 from .render_timeline import TimelineEntry, read_timeline, timeline_path
 
 #: The spine kinds a cue can name (``mp4_render.ItemKind``).
-CueOn = Literal["intro", "title_page", "slate", "stage", "summary", "match_summary", "closing", "outro"]
+CueOn = Literal[
+    "intro", "title_page", "slate", "stage", "summary", "match_summary", "closing", "outro", "transition"
+]
 
 Runner = Callable[..., subprocess.CompletedProcess]
 
@@ -74,12 +76,11 @@ class DressError(RuntimeError):
 
 
 def load_sound_map(look_root: Path) -> SoundMap:
-    """The ``sounds`` block of ``look_root/look.json``; every file it names
-    must be in the Look's ``sounds/`` folder."""
+    """The ``sounds`` block of ``look_root/look.json`` (none is an empty
+    map: the Look's templates may declare every sound); every file it
+    names must be in the Look's ``sounds/`` folder."""
     doc = json.loads((look_root / "look.json").read_text(encoding="utf-8"))
-    if "sounds" not in doc:
-        raise DressError(f"the Look in {look_root} has no sounds")
-    sounds = SoundMap.model_validate(doc["sounds"])
+    sounds = SoundMap.model_validate(doc.get("sounds", {}))
     folder = (look_root / "sounds").resolve()
     for cue in sounds.cues:
         name = cue.play or cue.bed or ""
@@ -104,51 +105,84 @@ class Placed:
     duck: float | None = None
 
 
+def _place(cue: SoundCue, entry: TimelineEntry, folder: Path) -> Placed | None:
+    """``cue`` on ``entry``'s clock; ``None`` for a ``"beep"`` cue on an
+    item with no beep, or a cue that would start past the item's end."""
+    if cue.at == "beep":
+        if entry.beep is None:
+            return None
+        start = entry.beep
+    else:
+        start = entry.start + cue.at
+    if start >= entry.end:
+        return None
+    if cue.bed is not None:
+        end = entry.end if cue.for_ is None else min(entry.end, start + cue.for_)
+        return Placed(
+            path=folder / cue.bed,
+            start=start,
+            length=end - start,
+            gain=cue.gain,
+            loop=True,
+            fade=min(cue.fade, end - start),
+            duck=cue.duck,
+        )
+    if cue.every is not None and cue.for_ is not None:
+        return Placed(
+            path=folder / (cue.play or ""),
+            start=start - cue.hit,
+            length=cue.for_,
+            gain=cue.gain,
+            every=cue.every,
+        )
+    return Placed(path=folder / (cue.play or ""), start=start - cue.hit, length=None, gain=cue.gain)
+
+
 def place_cues(sounds: SoundMap, timeline: Sequence[TimelineEntry], folder: Path) -> tuple[Placed, ...]:
-    """Every cue on every item of its kind, in timeline order. A ``"beep"``
-    cue skips an item with no beep; a cue that would start past its item's
-    end is dropped."""
+    """Every cue of the Look's map on every item of its kind, in timeline
+    order (see :func:`_place` for what is dropped)."""
+    placed = (_place(cue, entry, folder) for entry in timeline for cue in sounds.cues if cue.on == entry.kind)
+    return tuple(p for p in placed if p is not None)
+
+
+def _template_cue(raw: dict[str, Any], entry: TimelineEntry, folder: Path) -> SoundCue:
+    """A cue an item's template declared, checked like a ``look.json`` one
+    and against the Look's ``sounds/`` folder; raises ``ValueError`` saying
+    why it cannot play."""
+    if "on" in raw:
+        raise ValueError("a template's cue plays on its own item and names no 'on'")
+    try:
+        cue = SoundCue.model_validate({**raw, "on": entry.kind})
+    except ValidationError as exc:
+        raise ValueError(exc.errors()[0]["msg"]) from exc
+    name = cue.play or cue.bed or ""
+    path = (folder / name).resolve()
+    if path.parent != folder.resolve() or not path.is_file():
+        raise ValueError(f"sound {name!r} is not a file in the Look's sounds folder")
+    return cue
+
+
+def place_template_cues(
+    sounds: SoundMap, timeline: Sequence[TimelineEntry], folder: Path
+) -> tuple[tuple[Placed, ...], tuple[str, ...]]:
+    """Every item's cues: the Look's map first, then what the item's own
+    template declared (``TimelineEntry.cues``, on the same clock). A
+    template cue that cannot play is left out with a note naming its item;
+    it never stops the rest."""
     placed: list[Placed] = []
+    notes: list[str] = []
     for entry in timeline:
-        for cue in sounds.cues:
-            if cue.on != entry.kind:
+        placed.extend(place_cues(sounds, [entry], folder))
+        for raw in entry.cues:
+            try:
+                cue = _template_cue(raw, entry, folder)
+            except ValueError as exc:
+                notes.append(f"{entry.name}: {exc}")
                 continue
-            if cue.at == "beep":
-                if entry.beep is None:
-                    continue
-                start = entry.beep
-            else:
-                start = entry.start + cue.at
-            if start >= entry.end:
-                continue
-            if cue.bed is not None:
-                end = entry.end if cue.for_ is None else min(entry.end, start + cue.for_)
-                placed.append(
-                    Placed(
-                        path=folder / cue.bed,
-                        start=start,
-                        length=end - start,
-                        gain=cue.gain,
-                        loop=True,
-                        fade=min(cue.fade, end - start),
-                        duck=cue.duck,
-                    )
-                )
-            elif cue.every is not None and cue.for_ is not None:
-                placed.append(
-                    Placed(
-                        path=folder / (cue.play or ""),
-                        start=start - cue.hit,
-                        length=cue.for_,
-                        gain=cue.gain,
-                        every=cue.every,
-                    )
-                )
-            else:
-                placed.append(
-                    Placed(path=folder / (cue.play or ""), start=start - cue.hit, length=None, gain=cue.gain)
-                )
-    return tuple(placed)
+            spot = _place(cue, entry, folder)
+            if spot is not None:
+                placed.append(spot)
+    return tuple(placed), tuple(notes)
 
 
 def _seconds(value: float) -> str:
@@ -208,6 +242,27 @@ def dress_command(
     return tuple(args)
 
 
+def _stages_without_hud(timeline: Sequence[TimelineEntry], look_root: Path) -> tuple[str, ...]:
+    """The stages that went out without an overlay when the Look draws a HUD
+    style: the dress pass cannot draw one, but it can say so."""
+    doc = json.loads((look_root / "look.json").read_text(encoding="utf-8"))
+    if not (doc.get("slots") or {}).get("overlay"):
+        return ()
+    return tuple(
+        f"{e.name} went out without its HUD overlay: export it again to draw it"
+        for e in timeline
+        if e.kind == "stage" and e.overlay is False
+    )
+
+
+@dataclass(frozen=True)
+class DressResult:
+    path: Path
+    #: Template cues left out, each naming its item and why, and stages
+    #: that went out without the HUD the Look draws.
+    notes: tuple[str, ...] = ()
+
+
 def dressed_path(export: Path) -> Path:
     """``<stem>-dressed.mp4`` beside the export."""
     return export.with_name(export.stem + "-dressed" + export.suffix)
@@ -220,14 +275,19 @@ def dress_export(
     output_path: Path | None = None,
     ffmpeg_binary: str = "ffmpeg",
     runner: Runner = subprocess.run,
-) -> Path:
-    """Dress ``export`` in the Look's sounds and write it (atomically) to
-    ``output_path``, by default ``<stem>-dressed.mp4``."""
+) -> DressResult:
+    """Dress ``export`` in the Look's sounds (its map and what each card's
+    template declared) and write it (atomically) to ``output_path``, by
+    default ``<stem>-dressed.mp4``."""
     sidecar = timeline_path(export)
     if not sidecar.is_file():
         raise DressError(f"{export.name} has no timeline ({sidecar.name}); export it again to dress it")
     sounds = load_sound_map(look_root)
-    placed = place_cues(sounds, read_timeline(sidecar), look_root / "sounds")
+    timeline = read_timeline(sidecar)
+    placed, notes = place_template_cues(sounds, timeline, look_root / "sounds")
+    notes = (*notes, *_stages_without_hud(timeline, look_root))
+    if not placed:
+        raise DressError(f"nothing to play: no cue of the Look's lands on {export.name}")
     out = output_path or dressed_path(export)
     partial = out.with_name(f".{out.stem}.partial{out.suffix}")
     cmd = dress_command(export, placed, output_path=partial, ffmpeg_binary=ffmpeg_binary)
@@ -238,4 +298,4 @@ def dress_export(
         partial.unlink(missing_ok=True)
         tail = (exc.stderr or "").strip().splitlines()[-3:]
         raise DressError(f"ffmpeg failed: {' '.join(tail)}") from exc
-    return out
+    return DressResult(path=out, notes=notes)

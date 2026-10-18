@@ -62,7 +62,7 @@ import tempfile
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import Literal, Protocol
+from typing import Any, Literal, Protocol
 
 from PIL import Image
 
@@ -428,6 +428,7 @@ def _render_with_work_dir(
         animation a backdrop and a clip. ``False`` when a still's frame
         fails (noted); the caller draws the engine's card."""
         assert look is not None
+        prep.sounds = motion.frames.sounds
         try:
             canvas = card_backdrop(backdrop, width=sequence.width, height=sequence.height, look=look)
         except BaseException:
@@ -538,6 +539,7 @@ def _render_with_work_dir(
             if motion is None:
                 prep.skipped = True
                 return prep
+            prep.sounds = motion.frames.sounds
             try:
                 backdrop = _grab_backdrop(
                     timeline,
@@ -871,6 +873,7 @@ def _render_with_work_dir(
         prep = prepared.pop(i) if i in prepared else prepare(item)
         boundary = live.get(i)
         boundary_segment: Path | None = None
+        boundary_sounds: tuple[dict[str, Any], ...] = ()
         if boundary is not None:
             ordinal += 1
             nxt = items[i + 1]
@@ -891,6 +894,7 @@ def _render_with_work_dir(
                     kind = "fade"
                 else:
                     sting_clip = work_dir / f"{boundary.name}_sting.mov"
+                    boundary_sounds = sting.frames.sounds
             try:
                 if prep.skipped or prepared[i + 1].skipped:
                     raise _EdgeUnavailableError("a neighbouring card was skipped")
@@ -940,13 +944,23 @@ def _render_with_work_dir(
                     sting.close()
         segment = encode_item(item, prep)
         if segment is not None:
-            written.append(_timeline_entry(item, at=cursor))
+            written.append(_timeline_entry(item, at=cursor, sounds=prep.sounds))
             segments.append((segment, item.duration_seconds))
             cursor += item.duration_seconds
             if not isinstance(item, _StageItem):
                 generated = True
         if boundary_segment is not None and boundary is not None:
             segments.append((boundary_segment, boundary.duration_seconds))
+            written.append(
+                TimelineEntry(
+                    kind="transition",
+                    name=boundary.name,
+                    stage_index=None,
+                    start=cursor,
+                    end=cursor + boundary.duration_seconds,
+                    cues=boundary_sounds,
+                )
+            )
             cursor += boundary.duration_seconds
             generated = True
 
@@ -991,7 +1005,7 @@ def _credits_of(look_name: str) -> str | None:
         return None
 
 
-def _timeline_entry(item: SpineItem, *, at: float) -> TimelineEntry:
+def _timeline_entry(item: SpineItem, *, at: float, sounds: tuple[dict[str, Any], ...] = ()) -> TimelineEntry:
     """``item``'s nominal span when its segment starts ``at`` seconds into
     the stitched video: a transition took ``head_cut`` off its head, which
     the boundary before shows, so the item's own clock started that much
@@ -1000,15 +1014,24 @@ def _timeline_entry(item: SpineItem, *, at: float) -> TimelineEntry:
     end = at + item.duration_seconds + item.tail_cut_seconds
     stage_index: int | None = None
     beep: float | None = None
+    overlay: bool | None = None
     if isinstance(item, _StageItem):
         stage_index = item.index
+        overlay = item.plan.stage.overlay is not None
         beep = start + item.plan.stage.beep_offset_seconds - item.plan.head_trim_seconds
     elif isinstance(item, _SummaryItem):
         stage_index = item.stage_index
     elif isinstance(item, _StillItem) and item.kind == "slate":
         stage_index = item.backdrop_stage_index
     return TimelineEntry(
-        kind=item.kind, name=item.name, stage_index=stage_index, start=start, end=end, beep=beep
+        kind=item.kind,
+        name=item.name,
+        stage_index=stage_index,
+        start=start,
+        end=end,
+        beep=beep,
+        cues=sounds,
+        overlay=overlay,
     )
 
 
@@ -1638,6 +1661,9 @@ class _Prepared:
     clip_path: Path | None = None
     motion: CardMotion | None = None
     skipped: bool = False
+    #: The cues the item's template declared (``window.sounds()``), for the
+    #: timeline sidecar; still or animated alike.
+    sounds: tuple[dict[str, Any], ...] = ()
     #: A summary drawn by an animated template keeps its raw tail frame, so
     #: an encode that fails can still draw the engine's card over it.
     tail_frame: Path | None = None

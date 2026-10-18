@@ -125,6 +125,9 @@ class TemplateProbe:
     duration: float = 0.0
     poster: float = 0.0
     has_seek: bool = False
+    #: What ``window.sounds()`` declared (:func:`template_sounds`); one that
+    #: throws is in ``errors``.
+    sounds: tuple[dict[str, Any], ...] = ()
     families: tuple[str, ...] = ()
     overflow: tuple[tuple[str, int], ...] = ()
     #: Every request the sandbox refused (a path outside the Look, a
@@ -155,6 +158,9 @@ class TemplateFrames:
     #: closing an unstarted generator never runs its ``finally``, and a
     #: cached segment pulls no frame.
     release: Callable[[], None] = lambda: None
+    #: The cues the template's own ``window.sounds()`` declared, on its
+    #: clock (:func:`template_sounds`); the audio dress pass plays them.
+    sounds: tuple[dict[str, Any], ...] = ()
 
     def close(self) -> None:
         close = getattr(self.frames, "close", None)
@@ -482,6 +488,20 @@ _PROBE_JS = """(() => {
 #: binding. Playwright bounds ``wait_for_function`` on its own side, so a
 #: page whose main thread a template has stuck still times out, where a
 #: plain ``page.evaluate`` would wait forever (measured: #1266).
+#: The most cues one template may declare; a runaway list is cut here.
+MAX_TEMPLATE_SOUNDS = 256
+
+
+def template_sounds(value: object) -> tuple[dict[str, Any], ...]:
+    """What a template's ``sounds()`` answered, kept as cues: a list's
+    objects, the first :data:`MAX_TEMPLATE_SOUNDS` of them. Anything else
+    is no cues. Their fields are checked where they are played
+    (``audio_dress``), so a bad one costs that cue alone."""
+    if not isinstance(value, list):
+        return ()
+    return tuple(item for item in value if isinstance(item, dict))[:MAX_TEMPLATE_SOUNDS]
+
+
 _GUARD_JS = (
     """({id, kind, arg}) => {
   const box = (window.__splitsmithCalls = window.__splitsmithCalls || {});
@@ -497,6 +517,7 @@ _GUARD_JS = (
       hud: () => ("""
     + _HUD_JS
     + """),
+      sounds: () => (typeof window.sounds === 'function' ? window.sounds() : null),
       seek: (t) => typeof window.seek === 'function'
         ? Promise.resolve(window.seek(t)).then(() => null) : null,
       fit: () => Promise.resolve(window.__splitsmithFit && window.__splitsmithFit()).then(() => null),
@@ -888,6 +909,7 @@ class ChromiumRasterizer:
                 hook("seek", None, poster if at is None else at)
                 hook("fonts", None)
                 hook("fit", None)
+                sounds = template_sounds(hook("sounds", None))
                 seen = view.call("probe")
             except _HookError as exc:
                 return TemplateProbe(
@@ -906,6 +928,7 @@ class ChromiumRasterizer:
                 duration=duration,
                 poster=poster,
                 has_seek=bool(seen["hasSeek"]),
+                sounds=sounds,
                 families=tuple(seen["families"]),
                 overflow=tuple((str(t), int(b)) for t, b in seen["overflow"]),
                 unsafe=tuple((str(t), int(b)) for t, b in seen["unsafe"]),
@@ -1008,6 +1031,15 @@ class ChromiumRasterizer:
         except BaseException:
             release()
             raise
+        try:
+            sounds = template_sounds(view.call("sounds"))
+        except _HookError as exc:
+            # A sound never costs the card: the frames are still good.
+            logger.warning("%s: sounds() failed, the card plays none: %s", template.name, exc)
+            sounds = ()
+        except BaseException:
+            release()
+            raise
         shown = min(duration, max_seconds, look_sandbox.MAX_ANIMATION_SECONDS) if duration > 0 else 0.0
         count = max(1, math.ceil(shown * fps - 1e-9)) if shown > 0 else 1
         times = [round(index / fps, 6) for index in range(count)]
@@ -1038,6 +1070,7 @@ class ChromiumRasterizer:
             width=width,
             height=height,
             frames=generate(),
+            sounds=sounds,
             release=release,
         )
 

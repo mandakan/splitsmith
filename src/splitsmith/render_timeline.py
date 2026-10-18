@@ -9,6 +9,8 @@ An item's span is its *nominal* one: a transition is a crossfade centred on
 the cut, so an item starts at the cut before it and ends at the cut after
 it, which is where an animated card's own clock starts and where a stage's
 window opens. ``beep`` is the stage's beep on the same clock.
+A transition is an entry of its own (``kind`` ``"transition"``), spanning
+its crossfade, so a sting's sounds have a place too.
 """
 
 from __future__ import annotations
@@ -16,6 +18,7 @@ from __future__ import annotations
 import json
 from dataclasses import asdict, dataclass
 from pathlib import Path
+from typing import Any
 
 TIMELINE_VERSION = 1
 
@@ -28,6 +31,12 @@ class TimelineEntry:
     start: float
     end: float
     beep: float | None = None
+    #: The cues the item's own template declared (``window.sounds()``), on
+    #: its clock: 0 is ``start``. Checked where they are played.
+    cues: tuple[dict[str, Any], ...] = ()
+    #: A stage only: whether its segment carried the HUD overlay, so a
+    #: pass after the export can say a stage went out without it.
+    overlay: bool | None = None
 
 
 def timeline_path(video: Path) -> Path:
@@ -46,4 +55,4 @@ def read_timeline(path: Path) -> tuple[TimelineEntry, ...]:
     doc = json.loads(path.read_text(encoding="utf-8"))
     if doc.get("version") != TIMELINE_VERSION:
         raise ValueError(f"{path.name}: unknown timeline version {doc.get('version')!r}")
-    return tuple(TimelineEntry(**item) for item in doc["items"])
+    return tuple(TimelineEntry(**{**item, "cues": tuple(item.get("cues", ()))}) for item in doc["items"])

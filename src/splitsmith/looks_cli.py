@@ -131,7 +131,9 @@ def dress_command_cli(
     except (DressError, LookError, ValueError) as exc:
         console.print(f"[red]{exc}[/]")
         raise typer.Exit(2) from exc
-    console.print(f"Wrote {written}")
+    for note in written.notes:
+        console.print(f"[yellow]left out[/] {note}")
+    console.print(f"Wrote {written.path}")
 
 
 @looks_app.command("check")

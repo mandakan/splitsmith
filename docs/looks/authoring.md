@@ -588,9 +588,30 @@ The cues are a `sounds` block in `look.json`, naming files in the Look's own
 
 An item's clock is the one its template's `seek(t)` runs on: a card's `t = 0`
 is the cut into it, even when a transition fades it in, so a cue at the
-second a template animates something lands on that frame. The map is the same
-for every video; a template whose timing depends on its data (how many rows
-a tally counts) gets cues for the case you set them for.
+second a template animates something lands on that frame. A transition has
+a clock too (`on: "transition"`): `t = 0` is the start of the crossfade.
+
+The map in `look.json` is the same for every video. A template whose timing
+depends on its data (how many rows a tally counts, how far a cursor steps)
+declares its own cues instead, with `window.sounds()`:
+
+```js
+window.sounds = function () {
+  return [
+    {play: 'tick.wav', every: 0.114, for: COUNT, gain: 0.45},
+    {play: 'boom.wav', at: COUNT},
+  ];
+};
+```
+
+It returns cues shaped like the map's, without `on`: they play on the item
+the template drew, on its own clock, after the map's cues for that item. The
+render reads it once, when it loads the card (a still, an animated card, a
+summary or a sting alike), and writes the cues into the video's
+`-timeline.json`; `looks dress` plays them from there with the files in the
+Look's `sounds/` folder. A cue that names a missing file or a field it does
+not know is left out with a line saying which card it was on, and a
+`sounds()` that throws plays nothing: a sound never costs the card.
 
 ## Credits
 
