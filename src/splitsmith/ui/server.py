@@ -146,6 +146,7 @@ from .. import account_profile as account_profile_module
 from .. import automation as automation_settings
 from .. import backup as backup_mod
 from .. import (
+    beep_cross,
     beep_detect,
     beep_windows,
     camera_select,
@@ -3399,17 +3400,14 @@ def register_job_bodies(state: AppState) -> None:
     """
     # Cross-cam alignment is accepted as a *suggestion* (beep_source="aligned",
     # beep_reviewed=False so the SPA forces the user to verify on the waveform
-    # picker) when the peak-to-runner-up ratio of the cross-correlation clears
-    # this threshold. 1.0 means the landmark wasn't distinctive at all.
-    # Empirically calibrated on tallmilan-2026 secondaries: same-stage pairs
-    # where in-stream detection independently succeeded land at 1.23-1.34, and
-    # plausible alignments on the in-stream-failed pairs land at 1.15-1.31.
-    # Same-mic non-overlapping clips sit at ~1.00. 1.10 leaves a slim margin
-    # over the floor while still surfacing real alignments. False positives
-    # are caught by the user in the picker before "Mark reviewed"; false
-    # negatives mean the user starts from the auto-detect-failed state and
-    # places the marker by hand, which is the same UX as before this change.
-    _align_confidence_floor = 1.10
+    # picker) when the placement's contrast clears this floor
+    # (``beep_cross.MIN_CONTRAST``, #1442): the stage's shots matched over the
+    # best alignment more than 50 ms away. On the 2026-10-18 corpus none of
+    # the 171 pairs at or above it was placed more than 50 ms off.
+    _align_confidence_floor = beep_cross.MIN_CONTRAST
+    # A secondary's own detection that disagrees with a confident placement
+    # from the primary by more than this is never auto-trusted (#1442).
+    _align_disagree_s = 0.06
 
     def _try_align_secondary_to_primary(
         root: Path,
@@ -3432,7 +3430,7 @@ def register_job_bodies(state: AppState) -> None:
         so we skip it on the primary path entirely.
         """
         primary = stage.primary()
-        if primary is None or primary.beep_time is None:
+        if primary is None or primary.beep_time is None or primary.video_id == video.video_id:
             return None
         primary_audio_path = audio_helpers.primary_audio_path(root, stage.stage_number, project=proj)
         secondary_audio_path = audio_helpers.video_audio_path(root, stage.stage_number, video, project=proj)
@@ -3446,14 +3444,17 @@ def register_job_bodies(state: AppState) -> None:
             primary_audio, primary_sr = beep_detect.load_audio(primary_audio_path)
             secondary_audio, secondary_sr = beep_detect.load_audio(secondary_audio_path)
             handle.update(progress=0.45, message="Aligning to primary...")
-            result = cross_align.align_secondary_to_primary(
+            # The stage's shots, then the timer's tone (#1442): the 4 s
+            # envelope landmark ``cross_align`` used was seconds off on 32 of
+            # 194 corpus pairs.
+            placed = beep_cross.place_beep(
                 primary_audio,
                 primary_sr,
                 primary.beep_time,
                 secondary_audio,
                 secondary_sr,
             )
-        except cross_align.CrossAlignError as exc:
+        except (OSError, ValueError) as exc:
             logger.info(
                 "cross-align skipped for stage %d video %s: %s",
                 stage.stage_number,
@@ -3461,7 +3462,15 @@ def register_job_bodies(state: AppState) -> None:
                 exc,
             )
             return None
-        return result
+        if placed is None:
+            return None
+        return cross_align.CrossAlignResult(
+            secondary_beep_time=placed.time,
+            confidence=placed.contrast,
+            peak_correlation=0.0,
+            lag_seconds=placed.time - primary.beep_time,
+            method="stage_shots",
+        )
 
     def _derive_take_window(
         root: Path,
@@ -3629,6 +3638,11 @@ def register_job_bodies(state: AppState) -> None:
                 # Delta is only meaningful when both in-stream AND cross-align
                 # produced timestamps. In-stream failed here, so wipe it.
                 video.beep_alignment_delta_ms = None
+                video.beep_aligned_time = (
+                    aligned.secondary_beep_time
+                    if aligned is not None and aligned.confidence >= _align_confidence_floor
+                    else None
+                )
                 if aligned is not None and aligned.confidence >= _align_confidence_floor:
                     handle.update(
                         progress=0.55,
@@ -3667,6 +3681,7 @@ def register_job_bodies(state: AppState) -> None:
             video.beep_auto_detect_failed = False
             video.beep_alignment_confidence = None
             video.beep_alignment_delta_ms = None
+            video.beep_aligned_time = None
             video.processed["beep"] = True
             # Auto-detected beeps need explicit user review (#71) UNLESS
             # the calibrated confidence (#220 layer 3a) clears the
@@ -3703,6 +3718,11 @@ def register_job_bodies(state: AppState) -> None:
                 if check is not None and check.confidence >= _align_confidence_floor:
                     video.beep_alignment_confidence = check.confidence
                     video.beep_alignment_delta_ms = (beep.time - check.secondary_beep_time) * 1000.0
+                    video.beep_aligned_time = check.secondary_beep_time
+                    # Two answers that disagree are a question for the user,
+                    # never an auto-trusted beep (#1442).
+                    if abs(beep.time - check.secondary_beep_time) > _align_disagree_s:
+                        video.beep_reviewed = False
 
         # Persist which window was used (for the audit trail and take overview).
         if take_window is not None:
@@ -3767,6 +3787,7 @@ def register_job_bodies(state: AppState) -> None:
                 v_fresh.beep_auto_detect_failed = video.beep_auto_detect_failed
                 v_fresh.beep_alignment_confidence = video.beep_alignment_confidence
                 v_fresh.beep_alignment_delta_ms = video.beep_alignment_delta_ms
+                v_fresh.beep_aligned_time = video.beep_aligned_time
                 v_fresh.beep_window = video.beep_window
                 v_fresh.beep_window_source = video.beep_window_source
                 v_fresh.processed["beep"] = True
@@ -5622,6 +5643,9 @@ class BeepQueueItem(BaseModel):
     beep_reviewed: bool
     status: Literal["missing", "low_confidence", "unreviewed", "confirmed"]
     alt_candidates: list[BeepQueueAltCandidate]
+    # A secondary's beep found from the primary's (#1442): a candidate of
+    # its own in the review, labelled as such. ``None`` on a primary.
+    aligned_time: float | None = None
     # True once the low-res proxy exists (or always, in local mode). The
     # beep review video element streams the proxy, so the SPA renders a
     # "preview generating" placeholder instead of a broken player when
@@ -13183,6 +13207,34 @@ def create_app(
         await _maybe_chain_trim(slug, stage, video)
         return JSONResponse(project.model_dump(mode="json"))
 
+    async def _replace_secondary_beeps(slug: str, stage_number: int) -> None:
+        """A confirmed primary beep is the best reference there is for the
+        stage's other cameras (#1442): run beep detection again for every
+        secondary whose beep nobody confirmed or typed, so its proposal and
+        its "from primary" candidate come from the confirmed beep. A
+        confirmed or hand-set secondary beep is never touched."""
+        stage = state.shooter_project(slug).stage(stage_number)
+        for other in stage.videos:
+            if other.role == "primary" or other.beep_reviewed or other.beep_source == "manual":
+                continue
+            if (
+                await state.jobs.find_active(
+                    kind="detect_beep", stage_number=stage_number, shooter_slug=slug, video_id=other.video_id
+                )
+                is not None
+            ):
+                continue
+            try:
+                await state.jobs.submit(
+                    kind="detect_beep",
+                    stage_number=stage_number,
+                    shooter_slug=slug,
+                    video_id=other.video_id,
+                    args={"slug": slug, "stage_number": stage_number, "video_id": other.video_id},
+                )
+            except FeatureRequiredError as exc:
+                _log_chain_skipped("detect_beep", slug, stage_number, exc)
+
     async def _after_beep_reviewed(slug: str, stage_number: int, video: StageVideo) -> None:
         """Everything that must follow ``beep_reviewed`` flipping to True.
 
@@ -13219,6 +13271,8 @@ def create_app(
             proj_now.save(state.shooter_root(slug))
         if current_match_origin.get() == "desktop":
             return
+        if video.role == "primary":
+            await _replace_secondary_beeps(slug, stage_number)
         with _audit_rmw():
             existing_doc, audit_version = state.load_audit(slug, stage_number)
             if existing_doc is None:
@@ -17884,6 +17938,7 @@ def create_app(
                             beep_reviewed=video.beep_reviewed,
                             status=status,
                             alt_candidates=alts,
+                            aligned_time=video.beep_aligned_time if video.role != "primary" else None,
                             proxy_ready=_proxy_ready_for(_storage, _proxy_keys, video.path.as_posix()),
                             snippet_ready=_snippet_ready(slug, video.video_id),
                             trim_stale=(

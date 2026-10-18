@@ -2783,6 +2783,9 @@ export interface BeepQueueItem {
   beep_reviewed: boolean;
   status: "missing" | "low_confidence" | "unreviewed" | "confirmed";
   alt_candidates: BeepQueueAltCandidate[];
+  /** A secondary's beep found from the primary's (#1442): the stage's shots,
+   *  then the timer's tone. Optional: an older server omits it. */
+  aligned_time?: number | null;
   /** True once the low-res proxy exists (always true in local mode). The
    *  beep review video streams the proxy, so the SPA shows a "preview
    *  generating" placeholder instead of a broken player when this is false. */

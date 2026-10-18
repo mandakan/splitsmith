@@ -114,6 +114,19 @@ function renderStep() {
   );
 }
 
+describe("BeepStep candidates", () => {
+  it("lists the beep found from the primary camera, labelled, after the detected one (#1442)", async () => {
+    vi.mocked(hook.useBeepQueue).mockReturnValue(
+      queueState({ ...ITEM, role: "secondary", aligned_time: 6.2, alt_candidates: [{ time: 3, confidence: 0.2 }] }),
+    );
+    renderStep();
+    const radios = await screen.findAllByRole("radio");
+    expect(radios[1].textContent).toContain("6.20");
+    expect(radios[1].textContent).toContain("from primary");
+    expect(radios[2].textContent).toContain("candidate");
+  });
+});
+
 describe("BeepStep preview remount", () => {
   it("the remounted <video> is parked at the selected candidate's time once its metadata lands", async () => {
     vi.mocked(hook.useBeepQueue).mockReturnValue(
