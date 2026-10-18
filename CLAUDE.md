@@ -202,84 +202,14 @@ by ``playlist_id`` which wins; ``publish_at`` which implies private;
 seconds after a playlist is created; ``_add_to_playlist_with_retry``
 backs off rather than noting a failure.
 
-## Desktop app (``desktop/``, spec 2026-09-20)
+## Desktop app
 
-An Electron shell, not a second frontend: ``desktop/src/main.ts`` spawns
-``Contents/Resources/python/bin/python3.12 -m splitsmith.ui.embedded``,
-parses the ``SPLITSMITH_READY`` banner and loads the sidecar's URL. The
-runtime is python-build-standalone plus the wheel (``build-runtime.sh``),
-never PyInstaller; what ships is ``uv.lock``'s default set, and
-``scripts/ci/assert_slim_import_surface.py`` builds the local-mode app
-on a slim install because a module-level ``splitsmith.db`` import
-anywhere on the ``create_app`` path crashes exactly that install (#1057
-did it through ``ui/youtube_api.py``). The pure parts (``sidecar.ts``,
-``cliLink.ts``) have vitest tests; ``main.ts`` and ``menu.ts`` are wiring.
-ffmpeg is our own static build (``build-ffmpeg.sh``; ``--lgpl`` is the
-#986 variant, and the pipeline only ever names ``fontfile=`` so there is
-no fontconfig), published as a GitHub release the app fetches by sha256.
-Bumping it follows the ffmpeg change rule: the single-shooter frames
-were pixel-identical to Homebrew's build, the grid's action frames
-differ at edges only because two compiles of the same x264 commit make
-different rate-control choices; look at the frames, not the deltas. The
-bundle is sealed: ``PYTHONDONTWRITEBYTECODE``, precompiled bytecode,
-``NUMBA_CACHE_DIR`` under ``~/Library/Caches``. Data stays in
-``~/.splitsmith``, shared with the CLI on purpose. ``POST /api/shutdown``
-ends the sidecar process (``exit_event`` in ``embedded.py``), which is
-what makes Cmd-Q take half a second instead of the SIGTERM grace period.
-``CSC_IDENTITY_AUTO_DISCOVERY=false desktop/build.sh`` is the unsigned
-build; ``desktop/smoke.sh`` runs the built sidecar and a detection;
-``desktop/verify-signed.sh`` is what a signed build must pass;
-``desktop/release.sh [vX.Y.Z]`` is the release: it builds the tag (default
-the newest release) signed in a throwaway worktree, smokes it and uploads
-the DMG to the GitHub release, reading the ``APPLE_API_*`` notarization
-vars from ``~/.appstoreconnect/splitsmith-desktop.env``; signing stays
-local on purpose;
-``desktop/scripts/cdp-shot.mjs`` screenshots the window when Electron
-runs with ``--remote-debugging-port``. The one engine surface added for
-it is ``ui/system_api.py`` (Chromium probe and install, local only) and
-the button under ``PreviewPane``'s browser line. The update check is
-``desktop/src/updateCheck.ts`` (pure, tested) plus ``updates.ts``
-(fetch, dismissed file under userData, the sheet); the feed is the Pages
-Function ``functions/desktop/latest.json.js`` on splitsmith.app, which
-picks the newest ``v*.*.*`` release that has a ``.dmg`` attached (GitHub's
-``releases/latest`` can be an ffmpeg source release, and release-please
-publishes before the DMG exists). Moving the download behind a purchase
-changes that function only. No auto-update.
-
-Every shipped desktop build, DMG and Linux alike, bundles the wheel PyPI
-serves, never one built from a checkout: only ``publish-pypi.yml`` bakes
-the YouTube OAuth client in, and the 0.53.0 DMG shipped with empty
-constants. ``release.sh`` fetches it with ``scripts/ci/fetch_pypi_wheel.py``
-and passes ``build.sh --wheel``; release builds set
-``SPLITSMITH_REQUIRE_YOUTUBE_CLIENT=1``, which makes ``build-runtime.sh``
-run ``desktop/scripts/check_youtube_client.py`` and refuse a bundle
-without the client.
-
-Linux ships as an x86_64 AppImage and .deb, built by
-``.github/workflows/desktop-linux.yml`` in ``ubuntu:22.04`` (glibc 2.35
-floor) from the wheel PyPI serves (``scripts/ci/fetch_pypi_wheel.py``),
-chained after ``publish-pypi`` in ``release-please.yml``; PRs build and
-smoke it through ``desktop.yml`` without uploading, and a failed release
-is re-run with ``workflow_dispatch`` and the tag. ``desktop/build.sh
---linux`` builds locally; ``desktop/lib/target.sh`` is the one place a
-target is resolved (``host_target``); the Linux ffmpeg is our own
-static build (``build-ffmpeg-linux.sh``, release
-``ffmpeg-linux-x86_64-9.0.2-r1``), its tag landing in
-``desktop/build/FFMPEG_RELEASE``, never in ``build/bin`` (which ships
-verbatim into the bundle). The deb's ``linux/postinst.sh`` /
-``postrm.sh`` are electron-builder's stock scripts plus
-``linux/cli-link.sh`` (``/usr/bin/splitsmith``, a ``#!/bin/sh``
-wrapper rather than a link so terminal runs get the bundled ffmpeg: only
-the Electron sidecar sets ``SPLITSMITH_FFMPEG``, and the CLI looks next to
-its interpreter, not in ``resources/bin``; left alone when it is not ours) and must stay that way (``scripts/check-deb.sh``
-in CI); inside them ``${letters}`` is an electron-builder macro. The
-AppImage refuses with a dialog where the sandbox cannot start
-(``src/sandbox.ts``; ``appImage.executableArgs: []`` stops the stock
-desktop entry's unconditional ``--no-sandbox``); ``StartupWMClass`` is
-``splitsmith-desktop`` because the window class comes from
-package.json ``name``, and adding ``productName`` would move the
-macOS userData dir. The feed's ``?platform=linux`` waits for both the
-AppImage and the .deb; no parameter stays the macOS answer.
+An Electron shell over the Python sidecar (`splitsmith.ui.embedded`); rules in
+`.claude/rules/desktop.md` (runtime, ffmpeg, signing, the update feed, Linux
+packaging). Two apply everywhere: a module-level `splitsmith.db` import on the
+`create_app` path crashes the slim install the app ships
+(`scripts/ci/assert_slim_import_surface.py` catches it), and every shipped
+desktop build bundles the wheel PyPI serves, never one built from a checkout.
 
 ## Releasing
 
