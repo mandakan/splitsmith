@@ -22,6 +22,7 @@ from PIL import Image
 
 from .composition import SequenceFormat
 from .config import VideoMetadata
+from .grade import ResolvedGrade, lut_filter, materialize
 from .look_motion import motion_overlay_filters, write_motion_clip
 from .looks import load_look
 from .mp4_render import (
@@ -120,6 +121,7 @@ def clip_command(
     output_path: Path,
     ffmpeg_binary: str = "ffmpeg",
     source_audio: bool = True,
+    grade_lut: Path | None = None,
 ) -> tuple[str, ...]:
     """One clip. The source's own audio at real speed, cut from an unseeked
     second read by ``atrim`` (``_build_stage_command`` explains why input
@@ -129,7 +131,9 @@ def clip_command(
     rate = _rate_string(sequence)
     freeze = f",tpad=stop_mode=clone:stop_duration={clip.freeze_seconds:g}" if clip.freeze_seconds > 0 else ""
     speed = f"setpts=(PTS-STARTPTS)/{clip.speed:g}"
-    video = f"[0:v]{_fit(sequence)},{speed},fps={rate}{freeze},{UNIFORM_COLOUR}[final]"
+    # The colour grade (``splitsmith.grade``) on the footage, at the canvas size.
+    graded = f",{lut_filter(grade_lut)}" if grade_lut is not None else ""
+    video = f"[0:v]{_fit(sequence)}{graded},{speed},fps={rate}{freeze},{UNIFORM_COLOUR}[final]"
     args: list[str] = [ffmpeg_binary, "-hide_banner", "-y"]
     args += ["-ss", f"{clip.start:g}", "-t", f"{clip.seconds:g}", "-i", str(clip.source)]
     if source_audio and clip.speed == 1.0:
@@ -268,6 +272,7 @@ def render_reel(
     runner: Runner = subprocess.run,
     rasterizer: Rasterizer | None = None,
     segment_cache: SegmentCache | None = None,
+    grade: ResolvedGrade | None = None,
 ) -> ReelRenderResult:
     """Encode every item as a segment (reused from ``segment_cache`` when
     its argv and inputs are unchanged) and stitch them. No browser draws
@@ -289,6 +294,9 @@ def render_reel(
     look = load_look(look_name)
     fps = sequence.frame_rate_num / sequence.frame_rate_den
     used: set[str] = set()
+    #: The grade's blended LUT, content-named in the work dir: clips and the
+    #: frames cards sit on read it, a card's own drawing never does.
+    grade_lut = materialize(grade, work_dir) if grade is not None else None
 
     def encode(
         cmd: tuple[str, ...],
@@ -323,7 +331,11 @@ def render_reel(
         try:
             _run(
                 frame_command(
-                    card.backdrop, sequence=sequence, output_path=frame, ffmpeg_binary=ffmpeg_binary
+                    card.backdrop,
+                    sequence=sequence,
+                    output_path=frame,
+                    ffmpeg_binary=ffmpeg_binary,
+                    grade_lut=grade_lut,
                 ),
                 runner=runner,
             )
@@ -349,6 +361,7 @@ def render_reel(
                     output_path=out,
                     ffmpeg_binary=ffmpeg_binary,
                     source_audio=_has_audio_stream(item.source),
+                    grade_lut=grade_lut,
                 )
                 segments.append((encode(cmd, out), item.out_seconds))
                 continue
@@ -433,7 +446,12 @@ def render_reel(
 
 
 def frame_command(
-    ref: FrameRef, *, sequence: SequenceFormat, output_path: Path, ffmpeg_binary: str = "ffmpeg"
+    ref: FrameRef,
+    *,
+    sequence: SequenceFormat,
+    output_path: Path,
+    ffmpeg_binary: str = "ffmpeg",
+    grade_lut: Path | None = None,
 ) -> tuple[str, ...]:
     """One frame of ``ref`` cropped and scaled to the canvas, as a PNG."""
     return (
@@ -447,6 +465,6 @@ def frame_command(
         "-frames:v",
         "1",
         "-vf",
-        _fit(sequence),
+        _fit(sequence) + (f",{lut_filter(grade_lut)}" if grade_lut is not None else ""),
         str(output_path),
     )

@@ -1199,15 +1199,32 @@ def highlights(
         False, "--force", help="Render from the ready stages even while others are not done."
     ),
     config_path: Path | None = typer.Option(None, "--config", help="Optional YAML config."),
+    grade: str = typer.Option(
+        "none",
+        "--grade",
+        help="Colour grade for the footage: 'none', 'preset:<id>' (vivid, warm-film, teal-orange, "
+        "cool-steel, bleach-bypass, faded, noir) or 'user:<file>'. Cards keep their colours.",
+    ),
+    grade_strength: float | None = typer.Option(
+        None, "--grade-strength", min=0.0, max=1.0, help="0..1; default full."
+    ),
 ) -> None:
     """Render a trailer-style highlight reel of a shooter's match: the moments
     chosen (fastest draw, split, streak, reload and best stage by default),
     cut from their footage. Unlocked once every stage is audited and broken
     down."""
+    from .grade import GradeError, resolve_grade
     from .highlights import MOMENT_KINDS
     from .match_project import MatchProject
     from .reel_inputs import make_reel
     from .ui import match_exports
+
+    try:
+        # The reel draws in the default Look, which carries no grade of its own.
+        chosen_grade = resolve_grade(grade, None, strength=grade_strength)
+    except GradeError as exc:
+        console.print(f"[red]Error:[/] {escape(str(exc))}")
+        raise typer.Exit(code=2) from exc
 
     chosen: tuple[str, ...] | None = None
     if moments is not None:
@@ -1251,6 +1268,7 @@ def highlights(
         short=short,
         config=full_config.highlights,
         segment_cache=match_exports.render_segment_cache(output_config),
+        grade=chosen_grade,
     )
 
     def _print_rows() -> None:
