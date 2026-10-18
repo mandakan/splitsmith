@@ -71,3 +71,21 @@ def test_a_template_without_sounds_or_with_a_broken_one_declares_none(tmp_path: 
 )
 def test_what_a_template_answers_is_kept_only_as_a_list_of_cues(value: object, expected: tuple) -> None:
     assert template_sounds(value) == expected
+
+
+@pytest.mark.integration
+def test_the_probe_reads_a_templates_sounds_and_a_throwing_one_is_an_error(tmp_path: Path) -> None:
+    template = tmp_path / "card.html"
+    try:
+        with ChromiumRasterizer() as rasterizer:
+            template.write_text(_TALLY, encoding="utf-8")
+            good = rasterizer.probe_template(template, context=_context_fixture(), width=64, height=32)
+            template.write_text(
+                "<!doctype html><body><script>window.sounds = function () { return doom.TIC; };</script>",
+                encoding="utf-8",
+            )
+            bad = rasterizer.probe_template(template, context=_context_fixture(), width=64, height=32)
+    except RasterizerUnavailableError as exc:
+        pytest.skip(str(exc))
+    assert len(good.sounds) == 4 and good.errors == ()
+    assert bad.sounds == () and any("doom is not defined" in e for e in bad.errors)

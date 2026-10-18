@@ -125,6 +125,9 @@ class TemplateProbe:
     duration: float = 0.0
     poster: float = 0.0
     has_seek: bool = False
+    #: What ``window.sounds()`` declared (:func:`template_sounds`); one that
+    #: throws is in ``errors``.
+    sounds: tuple[dict[str, Any], ...] = ()
     families: tuple[str, ...] = ()
     overflow: tuple[tuple[str, int], ...] = ()
     #: Every request the sandbox refused (a path outside the Look, a
@@ -906,6 +909,7 @@ class ChromiumRasterizer:
                 hook("seek", None, poster if at is None else at)
                 hook("fonts", None)
                 hook("fit", None)
+                sounds = template_sounds(hook("sounds", None))
                 seen = view.call("probe")
             except _HookError as exc:
                 return TemplateProbe(
@@ -924,6 +928,7 @@ class ChromiumRasterizer:
                 duration=duration,
                 poster=poster,
                 has_seek=bool(seen["hasSeek"]),
+                sounds=sounds,
                 families=tuple(seen["families"]),
                 overflow=tuple((str(t), int(b)) for t, b in seen["overflow"]),
                 unsafe=tuple((str(t), int(b)) for t, b in seen["unsafe"]),

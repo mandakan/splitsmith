@@ -413,8 +413,11 @@ def _context(
     )
 
 
-def _judge(subject: str, results: list[tuple[str, TemplateProbe]]) -> list[CheckItem]:
-    """The findings for one template over its sample cases."""
+def _judge(
+    subject: str, results: list[tuple[str, TemplateProbe]], sounds_dir: Path | None = None
+) -> list[CheckItem]:
+    """The findings for one template over its sample cases; ``sounds_dir``
+    is the Look's ``sounds/`` folder its ``window.sounds()`` cues name."""
     items: list[CheckItem] = []
     for case, probe in results:
         if probe.errors:
@@ -461,6 +464,19 @@ def _judge(subject: str, results: list[tuple[str, TemplateProbe]]) -> list[Check
                 "own folder, the shared engine scripts and the bundled fonts, never the network",
             )
         )
+    named_sounds = {
+        str(cue.get("play") or cue.get("bed") or "") for _, probe in results for cue in probe.sounds
+    }
+    missing = sorted(name for name in named_sounds if sounds_dir is None or not (sounds_dir / name).is_file())
+    if missing:
+        items.append(
+            CheckItem(
+                subject,
+                "warn",
+                f"sounds() names {', '.join(repr(m) for m in missing)}, not in the Look's sounds folder: "
+                "the dress pass leaves those cues out",
+            )
+        )
     for case, probe in results:
         if probe.overflow:
             text, by = probe.overflow[0]
@@ -473,6 +489,8 @@ def _judge(subject: str, results: list[tuple[str, TemplateProbe]]) -> list[Check
         message = (
             f"{first.duration:g} s, poster at {first.poster:g} s, {cases}" if first.duration > 0 else cases
         )
+        if first.sounds:
+            message += f", {len(first.sounds)} sounds"
         items.append(CheckItem(subject, "ok", message))
     return items
 
@@ -733,7 +751,7 @@ def _check_hud(subject: str, look: Look, template: Path, prober: Prober) -> list
             upright.append((f"{case}, {moment}, upright", probe))
             if moment != "just after a shot":
                 results.append((f"{case}, {moment}, upright", probe))
-    items = _judge(subject, results)
+    items = _judge(subject, results, look.root / "sounds")
     if any(item.level == "error" for item in items):
         return items
     for case, probe in upright:
@@ -878,7 +896,7 @@ def check_folder(name: str, root: Path, source: Literal["shipped", "user"], *, p
                     for case, context, width, height in cases
                 ]
                 subject = f"{summary_slot} {variant} {own.name}"
-                found = _judge(subject, results)
+                found = _judge(subject, results, look.root / "sounds")
                 # An upright summary keeps its text out of what Shorts, Reels
                 # and TikTok draw over (the probe measures it on every page
                 # that carries ``data.safe_area``). Text only: a summary may
@@ -913,7 +931,7 @@ def check_folder(name: str, root: Path, source: Literal["shipped", "user"], *, p
                 )
                 for case, text, shooters in _cases(target_slot, logo)
             ]
-            items.extend(_judge(subject, results))
+            items.extend(_judge(subject, results, look.root / "sounds"))
     if borrowed:
         items.append(
             CheckItem(
