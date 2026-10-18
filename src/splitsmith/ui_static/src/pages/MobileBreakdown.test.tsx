@@ -486,5 +486,44 @@ describe("MobileBreakdown", () => {
     );
     await settle();
   });
+
+  it("switches the player to another camera; times stay seconds from the beep", async () => {
+    const writes: number[] = [];
+    const proto = HTMLMediaElement.prototype;
+    const original = Object.getOwnPropertyDescriptor(proto, "currentTime");
+    Object.defineProperty(proto, "currentTime", {
+      configurable: true,
+      get: () => writes[writes.length - 1] ?? 0,
+      set: (v: number) => writes.push(v),
+    });
+    try {
+      vi.mocked(api.getStageCoach).mockResolvedValue({
+        ...stageWith([R1]),
+        videos: [
+          { path: "trimmed/stage1.mp4", role: "primary", beep_in_clip: 5, kind: "trim" },
+          { path: "trimmed/stage1_cam2.mp4", role: "secondary", beep_in_clip: 8, kind: "trim" },
+        ],
+      } as never);
+      renderPage();
+      const camera = await screen.findByRole("group", { name: "Camera" });
+      const video = screen.getByTestId("phone-video").querySelector("video")!;
+      expect(video.getAttribute("src")).toContain("trimmed/stage1.mp4");
+      fireEvent.click(screen.getByRole("button", { name: "Cam 2" }));
+      expect(camera).toBeTruthy();
+      await waitFor(() => expect(video.getAttribute("src")).toContain("stage1_cam2.mp4"));
+      // Opening the reload (4 s after the beep) seeks Cam 2's clip, whose beep is at 8 s.
+      fireEvent.click(screen.getByRole("list", { name: "Regions" }).querySelector("button")!);
+      await waitFor(() => expect(writes[writes.length - 1]).toBe(12));
+    } finally {
+      if (original) Object.defineProperty(proto, "currentTime", original);
+    }
+  });
+
+  it("shows no camera control with one camera", async () => {
+    vi.mocked(api.getStageCoach).mockResolvedValue(stageWith([R1]));
+    renderPage();
+    await screen.findByRole("list", { name: "Regions" });
+    expect(screen.queryByRole("group", { name: "Camera" })).toBeNull();
+  });
 });
 
