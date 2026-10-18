@@ -909,6 +909,8 @@ _SHARE_WHITELIST_INSTANCES = [
     f"shooters/{SLUG}/coach/distributions",
     f"shooters/{SLUG}/videos/stream",
     f"shooters/{SLUG}/identity/logo",
+    f"shooters/{SLUG}/highlights/latest",
+    f"shooters/{SLUG}/exports/file/bromma-highlights.mp4",
     "match/stage/1/compare",
     f"match/shooters/{SLUG}/videos/stream",
     "og.png",

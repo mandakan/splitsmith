@@ -1356,6 +1356,11 @@ _SHARE_PATH_RE = re.compile(
     r"|shooters/[^/]+/videos/stream"
     # The shooter's logo (#1249): already in every video the share shows.
     r"|shooters/[^/]+/identity/logo"
+    # The highlight reel (spec 2026-10-18): the route naming the newest one
+    # and that file, in exactly the shape ``export_naming.reel_file_name``
+    # writes (``REEL_FILE_RE``). No other export is reachable from a share.
+    r"|shooters/[^/]+/highlights/latest"
+    r"|shooters/[^/]+/exports/file/[a-z0-9-]+-highlights(?:-short)?\.mp4"
     r"|match/stage/[0-9]+/compare"
     # Same registry as the "shooters/[^/]+/videos/stream" shape above -
     # this alternative also reaches the registered-video branch of
@@ -5124,6 +5129,10 @@ def register_job_bodies(state: AppState) -> None:
     state.jobs.bodies.register("shot_detect", _run_shot_detect)
     state.jobs.bodies.register("export", _run_export_for_stage)
     state.jobs.bodies.register("match_export", _run_match_export)
+    from .highlights_api import JOB_KIND as HIGHLIGHT_REEL_KIND
+    from .highlights_api import run_highlight_reel
+
+    state.jobs.bodies.register(HIGHLIGHT_REEL_KIND, functools.partial(run_highlight_reel, state=state))
 
     def _run_render_upload(handle: JobHandle, slug: str, req: MatchExportRequest, command_id: str) -> None:
         """A phone's render-and-upload request (#1100): the match export
@@ -19918,6 +19927,12 @@ def create_app(
     from .looks_api import router as looks_router
 
     app.include_router(looks_router)
+
+    # The highlight reel: readiness, the moment menu and the render job's
+    # submit route (spec 2026-10-18-highlight-reel-design, part 2).
+    from .highlights_api import router as highlights_router
+
+    app.include_router(highlights_router)
 
     # Share-link OG card PNGs (spec 2026-08-09). Same lazy-import,
     # always-registered idiom as sync_router and device_router: every

@@ -38,12 +38,15 @@ AUTO_SYNC_ENV = "SPLITSMITH_AUTO_SYNC"
 SYNC_KINDS = frozenset({"sync_match", "auto_sync"})
 #: Job kinds that encode video. One on any match holds every automatic
 #: sync (``AutoSyncCore.pick``); a manual sync is the user's call.
-RENDER_KINDS = frozenset({"match_export", "render_upload", "export", "compare-grid", "generate_proxy"})
+RENDER_KINDS = frozenset(
+    {"match_export", "render_upload", "export", "compare-grid", "generate_proxy", "highlight_reel"}
+)
 #: Job kinds whose success writes nothing that syncs (export history,
 #: renders, proxies, downloads), so they must not schedule a push.
 _UNSYNCED_JOB_KINDS = frozenset(
     {
         "match_export",
+        "highlight_reel",
         "render_upload",
         "export",
         "youtube_upload",

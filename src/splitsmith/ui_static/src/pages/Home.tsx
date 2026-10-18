@@ -38,6 +38,7 @@ import { pickDefaultShooterSlug } from "@/lib/defaultShooter";
 import { useDeploymentMode } from "@/lib/features";
 import { queueItemHref, queueOrder, reviewEntryText } from "@/lib/beepQueue";
 import { isJobActive } from "@/lib/jobs";
+import { HighlightReelCard } from "@/components/overview/HighlightReelCard";
 import { useMatchHref } from "@/lib/matchHref";
 import {
   buildOverviewRows,
@@ -314,6 +315,10 @@ export function Home() {
         <Stat label="Avg split" value={fmt(stats.avgSplit, 3)} unit={stats.avgSplit != null ? "s" : undefined} tone={stats.avgSplit == null ? "dim" : "ink"} />
         <Stat label="Scored time" value={stats.scoredTime != null ? formatClock(stats.scoredTime) : "\u2014"} tone={stats.scoredTime == null ? "dim" : "ink"} />
       </StatStrip>
+
+      {filterSlug ?? leadSlug ? (
+        <HighlightReelCard slug={(filterSlug ?? leadSlug) as string} href={href} version={triage} />
+      ) : null}
 
       {triage == null ? (
         <p className="py-6 text-center text-md text-muted">Loading stages...</p>

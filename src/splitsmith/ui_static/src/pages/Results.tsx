@@ -21,6 +21,7 @@ import { SplitsTable, type SplitsHrefs } from "@/components/results/SplitsTable"
 import { Button } from "@/components/ui/button";
 import { Chip } from "@/components/ui/Chip";
 import { PageHeader } from "@/components/ui/PageHeader";
+import { ReelLink } from "@/components/share/ReelLink";
 import { Segmented } from "@/components/ui/Segmented";
 import { Stat, StatStrip } from "@/components/ui/Stat";
 import { ApiError, api, type MatchProject, type SyncStatusResponse } from "@/lib/api";
@@ -343,6 +344,7 @@ export function Results() {
         sub={sub}
         actions={
           <>
+            {isShare && (filterSlug ?? defaultSlug) ? <ReelLink slug={(filterSlug ?? defaultSlug) as string} /> : null}
             {shareButton}
             {playAll}
           </>

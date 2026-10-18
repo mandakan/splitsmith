@@ -376,6 +376,16 @@ describe("startingPreset", () => {
   });
 });
 
+describe("lastMatchFormat after a highlight reel", () => {
+  it("looks past the reel's run to the last match export", () => {
+    const runs = [
+      { kind: "match", formats: ["highlight_reel"] },
+      { kind: "match", formats: ["fcpxml"] },
+    ];
+    expect(lastMatchFormat(runs)).toBe("fcpxml");
+  });
+});
+
 describe("lastMatchFormat", () => {
   it("reads the newest match run and skips per-stage runs", () => {
     expect(lastMatchFormat([])).toBeNull();

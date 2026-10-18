@@ -1010,6 +1010,139 @@ def _run_youtube_upload(mp4: Path, *, client: Any, channel_title: str, options: 
     )
 
 
+_BLOCKER_TEXT = {
+    "not_audited": "shots not audited yet",
+    "breakdown_not_opened": "not opened in Breakdown yet",
+    "trim_missing": "trim missing or cut for an older beep: trim the stage again",
+}
+
+
+def _list_moments(value: bool) -> None:
+    """``--list-moments``: the reel's menu by group, then exit."""
+    if not value:
+        return
+    from .highlights import BEAT_ORDER, MOMENT_GROUPS
+    from .reel_plan import MOMENT_LABELS
+
+    table = Table(title="Highlight reel moments (in play order)")
+    table.add_column("Moment")
+    table.add_column("Card")
+    table.add_column("Group")
+    for kind in BEAT_ORDER:
+        group = MOMENT_GROUPS[kind]
+        table.add_row(kind, MOMENT_LABELS[kind], "on by default" if group == "default" else group)
+    console.print(table)
+    raise typer.Exit()
+
+
+@match_app.command("highlights")
+def highlights(
+    match_path: Path = typer.Argument(..., exists=True, readable=True, help="Match folder."),
+    shooter: str | None = typer.Option(
+        None, "--shooter", help="Slug or display name. Optional when the match has one shooter."
+    ),
+    landscape: bool = typer.Option(False, "--landscape", help="16:9 instead of the upright 9:16."),
+    short: bool = typer.Option(False, "--short", help="The Shorts / Reels cut: about half as long."),
+    moments: str | None = typer.Option(
+        None,
+        "--moments",
+        help="Comma-separated moments to show (see --list-moments). Defaults to the config's.",
+    ),
+    list_moments: bool = typer.Option(
+        False,
+        "--list-moments",
+        is_eager=True,
+        callback=_list_moments,
+        help="List every moment the reel can show, and exit.",
+    ),
+    output: Path | None = typer.Option(
+        None, "--output", "-o", help="Where to write. Defaults to the shooter's exports directory."
+    ),
+    force: bool = typer.Option(
+        False, "--force", help="Render from the ready stages even while others are not done."
+    ),
+    config_path: Path | None = typer.Option(None, "--config", help="Optional YAML config."),
+) -> None:
+    """Render a trailer-style highlight reel of a shooter's match: the moments
+    chosen (fastest draw, split, streak, reload and best stage by default),
+    cut from their footage. Unlocked once every stage is audited and broken
+    down."""
+    from .highlights import MOMENT_KINDS
+    from .match_project import MatchProject
+    from .reel_inputs import make_reel
+    from .ui import match_exports
+
+    chosen: tuple[str, ...] | None = None
+    if moments is not None:
+        chosen = tuple(m.strip() for m in moments.split(",") if m.strip())
+        unknown = [m for m in chosen if m not in MOMENT_KINDS]
+        if unknown or not chosen:
+            console.print(
+                f"[red]Error:[/] --moments: unknown {', '.join(unknown) or '(none given)'}; "
+                "see --list-moments."
+            )
+            raise typer.Exit(code=2)
+
+    match = Match.load(match_path)
+    slug = match.shooters[0] if shooter is None and len(match.shooters) == 1 else None
+    if shooter is not None:
+        slug = match.resolve_shooter_slug(match_path, shooter)
+    if slug is None:
+        console.print(
+            f"[red]Error:[/] name the shooter with --shooter; slugs available: {', '.join(match.shooters)}"
+        )
+        raise typer.Exit(code=2)
+    shooter_root = Match.shooter_root(match_path, slug)
+    project = MatchProject.load(shooter_root)
+    label = project.competitor_name or slug
+    target = (
+        output.expanduser()
+        if output is not None
+        else project.exports_path(shooter_root) / f"{project.name}-highlights.mp4"
+    )
+    full_config = Config.load(config_path)
+    output_config = full_config.output
+    console.print(f"[dim]cutting the highlight reel for {escape(label)}...[/]")
+    outcome = make_reel(
+        project,
+        shooter_root,
+        label=label,
+        output=target,
+        upright=not landscape,
+        force=force,
+        moments=chosen,  # type: ignore[arg-type]  # validated against MOMENT_KINDS above
+        short=short,
+        config=full_config.highlights,
+        segment_cache=match_exports.render_segment_cache(output_config),
+    )
+
+    def _print_rows() -> None:
+        for row in outcome.blockers:
+            reason = (
+                f"{row.proposals} Breakdown proposal{'s' if row.proposals != 1 else ''} left"
+                if row.state == "proposals_left"
+                else _BLOCKER_TEXT.get(row.state, row.state)
+            )
+            console.print(f"  Stage {row.stage_number}: {reason}")
+
+    if outcome.result is None:
+        if force or not outcome.blockers:
+            console.print("[red]Error:[/] no stage is ready: audit and break down a stage first.")
+            _print_rows()
+            raise typer.Exit(code=1)
+        console.print("[yellow]The highlight reel unlocks once every stage is audited and broken down:[/]")
+        _print_rows()
+        console.print("[dim]--force renders from the ready stages now.[/]")
+        raise typer.Exit(code=1)
+    if outcome.blockers:
+        console.print("[yellow]Left out of this reel, and out of its figures:[/]")
+        _print_rows()
+    result = outcome.result
+    for note in result.degradations:
+        console.print(f"[yellow]note:[/] {escape(note)}")
+    console.print(f"[green]wrote[/] {result.output_path} ({result.duration_seconds:.1f} s)")
+
+
 @match_app.command("reclassify")
 def reclassify(
     match_path: Path = typer.Argument(..., exists=True, readable=True, help="Match folder."),

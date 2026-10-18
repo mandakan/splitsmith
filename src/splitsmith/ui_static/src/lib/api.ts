@@ -1131,7 +1131,7 @@ export interface OverlayStyleBody {
 
 export interface ExportPresetBody extends OverlayStyleBody {
   schema_version?: number;
-  mode: "single" | "trims" | "compare";
+  mode: "single" | "trims" | "compare" | "reel";
   output_format: "fcpxml" | "fcp7xml" | "mp4";
   overlay_codec: OverlayCodec;
   canvas: "uhd" | "hd";
@@ -2606,6 +2606,57 @@ export interface TriageCell {
   /** The stage's confirmed beeps' distance from their tone, ms, the largest
    *  in magnitude (spec 2026-10-17); null or absent when none is measured. */
   beep_tone_offset_ms?: number | null;
+}
+
+/** Where one stage stands for the highlight reel
+ *  (``GET /api/shooters/{slug}/highlights``, ``highlights.stage_readiness``). */
+export type HighlightReadinessState =
+  | "ready"
+  | "not_audited"
+  | "breakdown_not_opened"
+  | "proposals_left"
+  | "trim_missing"
+  | "no_video"
+  | "skipped";
+
+export interface HighlightStageReadiness {
+  stage_number: number;
+  state: HighlightReadinessState;
+  proposals: number;
+}
+
+/** One moment on the reel's menu, in play order. */
+export interface HighlightMenuItem {
+  kind: string;
+  label: string;
+  group: "default" | "stat" | "lolz";
+  default: boolean;
+}
+
+export interface HighlightReadiness {
+  unlocked: boolean;
+  ready: number;
+  total: number;
+  stages: HighlightStageReadiness[];
+  menu: HighlightMenuItem[];
+  cuts: string[];
+}
+
+/** ``GET /api/shooters/{slug}/highlights/latest``. */
+export interface LatestReel {
+  filename: string;
+  short: boolean;
+  finished_at: string;
+}
+
+/** ``POST /api/shooters/{slug}/highlights``: the reel's render request. */
+export interface HighlightReelBody {
+  moments: string[];
+  short: boolean;
+  upright: boolean;
+  force: boolean;
+  youtube_upload: boolean;
+  youtube_privacy: "unlisted" | "private" | "public";
 }
 
 /** Response from GET /api/match/triage and POST accept/attention mutations.
@@ -4439,6 +4490,23 @@ export const api = {
    *  cells and the count of flagged stages. */
   getTriage: () =>
     request<TriageResponse>("/api/match/triage"),
+
+  /** The highlight reel's readiness and its moment menu for one shooter. */
+  getHighlights: (slug: string) =>
+    request<HighlightReadiness>(`/api/shooters/${encodeURIComponent(slug)}/highlights`),
+
+  /** The newest highlight reel whose file is still there; rejects (404)
+   *  without one. Reachable on a share link. */
+  getLatestReel: (slug: string) =>
+    request<LatestReel>(`/api/shooters/${encodeURIComponent(slug)}/highlights/latest`),
+
+  /** Queue the highlight reel's render; the Job to poll. The body is spread,
+   *  never listed (``api.exportBodies.test.ts``). */
+  submitHighlightReel: (slug: string, body: HighlightReelBody) =>
+    request<Job>(`/api/shooters/${encodeURIComponent(slug)}/highlights`, {
+      method: "POST",
+      json: { ...body },
+    }),
 
   /** Cheap poll for the flagged-count badge alone, without the full
    *  triage cell list ``getTriage`` returns. Use this for the sidebar /

@@ -19,7 +19,7 @@
 
 import { Download, ExternalLink } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Navigate, useOutletContext, useParams } from "react-router-dom";
+import { Navigate, useOutletContext, useParams, useSearchParams } from "react-router-dom";
 
 import { CleanupDialog } from "@/components/CleanupDialog";
 import { DesktopGate } from "@/components/DesktopOnlyNotice";
@@ -92,6 +92,7 @@ import { requestLook, transitionLabel } from "@/lib/looks";
 import { DEFAULT_OVERLAY_STYLE, overlayStyleLabel, visibleOverlayStyle } from "@/lib/overlayStyle";
 import { refreshLooks, useLooks } from "@/lib/useLooks";
 import { useMatchHref } from "@/lib/matchHref";
+import { ReelPanel } from "@/components/export/ReelPanel";
 import { useDesktopCommands } from "@/lib/useDesktopCommands";
 import { visibleTransitionKind } from "@/lib/lookGallery";
 import { describeRenderOptions, renderOptionsSeconds, type OutputFormat } from "@/lib/renderOptions";
@@ -437,6 +438,25 @@ function ExportInner({ slug }: { slug: string }) {
     },
     [patch],
   );
+
+  // The Overview card's link lands here with ``?mode=reel``: open the reel
+  // mode, and drop the parameter only once the page is in it, so the
+  // last-used settings restored after mount cannot switch it back (they
+  // did), and a later mode switch sticks.
+  const [searchParams, setSearchParams] = useSearchParams();
+  useEffect(() => {
+    if (searchParams.get("mode") !== "reel") return;
+    // Arriving for the reel is a choice: the starting preset, applied once
+    // presets and history load, must not switch the page back to Timeline.
+    hadLastUsed.current = true;
+    if (mode !== "reel") {
+      selectMode("reel");
+      return;
+    }
+    const next = new URLSearchParams(searchParams);
+    next.delete("mode");
+    setSearchParams(next, { replace: true });
+  }, [searchParams, setSearchParams, mode, selectMode]);
 
   // A preset the match cannot run is offered greyed, like the mode option
   // itself; applying it would otherwise overwrite every other setting
@@ -863,6 +883,71 @@ function ExportInner({ slug }: { slug: string }) {
   const pageError: ErrorLine | null =
     error ?? (onDesktop && desktop.error ? { text: desktop.error, refusal: false } : null);
 
+  const reelOption = { value: "reel" as const, label: "Highlight reel" };
+  const modeSwitch = (
+    <Segmented<ExportMode>
+      label="Output mode"
+      value={mode}
+      onChange={selectMode}
+      options={
+        // A desktop mirror renders on the desktop, which does not run the
+        // reel job: the mode is not offered there.
+        onDesktop
+          ? [{ value: "single", label: "Timeline" }]
+          : [
+              { value: "single", label: "Timeline" },
+              { value: "trims", label: "Trims only" },
+              {
+                value: "compare",
+                label: "Compare grid",
+                disabled: !multiShooter,
+                title: "The compare grid needs two or more shooters on the match",
+              },
+              reelOption,
+            ]
+      }
+    />
+  );
+
+  const history = (
+    <ExportHistory
+      runs={runs}
+      exportFileUrl={(f) => api.exportFileUrl(slug, f)}
+      youtube={
+        youtubeSettings?.connected
+          ? { connected: true, onUpload: (f, again) => void uploadRow(f, again), busyFilename: uploadBusy }
+          : undefined
+      }
+    />
+  );
+
+  if (mode === "reel") {
+    // The reel has its own job and its own few choices: no stage table, cut,
+    // Look or rail, only the mode switch, the reel panel and the history,
+    // where the finished reel's download and upload are.
+    return (
+      <div className="px-7 py-5">
+        <PageHeader title="Export" sub={shooterName ?? undefined} />
+        {pageError && !pageError.refusal ? (
+          <p role="alert" className="mb-4 rounded-md border border-destructive/45 px-3 py-2 text-md text-destructive">
+            {pageError.text}
+          </p>
+        ) : null}
+        <div className="flex max-w-3xl flex-col gap-3">
+          <Section label="Output" control={modeSwitch}>
+            <ReelPanel
+              slug={slug}
+              href={href}
+              youtubeConnected={youtubeSettings?.connected === true}
+              onFinished={() => void reload()}
+            />
+          </Section>
+          {history}
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="px-7 py-5">
       <PageHeader
@@ -932,27 +1017,7 @@ function ExportInner({ slug }: { slug: string }) {
               one click while the group is folded. */}
           <Section
             label="Output"
-            control={
-              <Segmented<ExportMode>
-                label="Output mode"
-                value={mode}
-                onChange={selectMode}
-                options={
-                  onDesktop
-                    ? [{ value: "single", label: "Timeline" }]
-                    : [
-                        { value: "single", label: "Timeline" },
-                        { value: "trims", label: "Trims only" },
-                        {
-                          value: "compare",
-                          label: "Compare grid",
-                          disabled: !multiShooter,
-                          title: "The compare grid needs two or more shooters on the match",
-                        },
-                      ]
-                }
-              />
-            }
+            control={modeSwitch}
             summary={groupSummary(view, "output", summaryCtx)}
             open={openGroups.output}
             onToggle={() => toggleGroup("output")}
@@ -1054,15 +1119,7 @@ function ExportInner({ slug }: { slug: string }) {
               </div>
             </Section>
           ) : (
-            <ExportHistory
-              runs={runs}
-              exportFileUrl={(f) => api.exportFileUrl(slug, f)}
-              youtube={
-                youtubeSettings?.connected
-                  ? { connected: true, onUpload: (f, again) => void uploadRow(f, again), busyFilename: uploadBusy }
-                  : undefined
-              }
-            />
+            history
           )}
         </div>
 

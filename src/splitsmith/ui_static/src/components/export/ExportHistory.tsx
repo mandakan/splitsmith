@@ -6,6 +6,7 @@ import { Label } from "@/components/ui/Label";
 import { Menu, menuItemClass } from "@/components/ui/Menu";
 import type { ExportRun } from "@/lib/api";
 import { formatElapsed, stageLabel } from "@/lib/exportPlan";
+import { runFormatLabel } from "@/lib/highlightReel";
 import { uploadLabel, uploadableArtifact, youtubeLink } from "@/lib/youtubeRows";
 
 /** The YouTube controls a row may carry (local mode, channel connected).
@@ -61,7 +62,7 @@ export function ExportHistory({
             <li key={r.run_id} className="border-b border-rule px-3.5 py-2.5 last:border-b-0">
               <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1 text-md">
                 <span className="font-medium text-ink">{stageLabel(r.stage_numbers)}</span>
-                <span className="text-sm text-muted">{r.formats.join(", ")}</span>
+                <span className="text-sm text-muted">{r.formats.map(runFormatLabel).join(", ")}</span>
                 <span className="numeral text-sm text-muted">took {formatElapsed(r.duration_seconds)}</span>
                 {r.anomaly_count > 0 && (
                   <span className="numeral text-sm text-live">

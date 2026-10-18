@@ -69,7 +69,9 @@ export function rendersAsDesktopRequest(body: ExportPresetBody): boolean {
  *  are newest first), or null when there is none. Per-stage runs say
  *  nothing about the match video and are skipped. */
 export function lastMatchFormat(runs: { kind: string; formats: string[] }[]): OutputFormat | null {
-  const run = runs.find((r) => r.kind === "match");
+  // A highlight reel is recorded as a match run too; it is not the match
+  // export the starting preset follows.
+  const run = runs.find((r) => r.kind === "match" && !r.formats.includes("highlight_reel"));
   const format = run?.formats.find((f): f is OutputFormat => f === "mp4" || f === "fcpxml" || f === "fcp7xml");
   return format ?? null;
 }

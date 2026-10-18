@@ -12,7 +12,10 @@ from splitsmith.match_model import is_standard_start
 from splitsmith.match_summary import build_match_summary
 from splitsmith.stage_summary_data import TileShot, TileStageData
 
-from .test_ui_server_stage_edit import _seeded_match
+# ``_seeded_match`` leaves ``current_match_root`` set; its module's autouse
+# reset comes with it, or the match root leaks into the next test in the
+# worker (a bare-path request then resolved instead of 409ing).
+from .test_ui_server_stage_edit import _reset_match_root_context, _seeded_match  # noqa: F401
 
 
 def test_only_standard_reads_as_standard() -> None:

@@ -10,6 +10,7 @@ export const KIND_LABEL: Record<string, string> = {
   shot_detect: "Detect shots",
   export: "Export stage",
   match_export: "Match export",
+  highlight_reel: "Highlight reel",
   audio_extract: "Audio extract",
   model_download: "Download models",
   generate_proxy: "Generating preview",
