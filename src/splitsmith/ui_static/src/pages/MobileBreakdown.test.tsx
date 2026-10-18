@@ -4,7 +4,7 @@
  * pointercancel), a region that vanishes on reload, and a read-only mirror.
  */
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { MemoryRouter, Route, Routes } from "react-router-dom";
+import { MemoryRouter, Outlet, Route, Routes } from "react-router-dom";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ApiError, type CoachShot, type CoachStageResponse, type StageEvent } from "@/lib/api";
@@ -104,6 +104,13 @@ function renderPage() {
   );
 }
 
+/** Render the stage and start the proposal queue, as the phone does on a tap. */
+async function reviewing() {
+  const r = renderPage();
+  fireEvent.click(await screen.findByRole("button", { name: /^Review \d+ proposals?$/ }));
+  return r;
+}
+
 function padOf(name = "edge-pad") {
   const el = screen.getAllByTestId(name)[0];
   Object.defineProperty(el, "clientWidth", { value: 300, configurable: true });
@@ -127,9 +134,31 @@ beforeEach(() => {
 });
 
 describe("MobileBreakdown", () => {
-  it("asks for proposals and opens on the first one by start", async () => {
+  it("opens nothing by itself: the stage starts on its region list", async () => {
     vi.mocked(api.getStageCoach).mockResolvedValue(stageWith([R1, M1, K]));
     renderPage();
+    const list = await screen.findByRole("list", { name: "Regions" });
+    expect(list.querySelectorAll("li")).toHaveLength(3);
+    expect(list.textContent?.indexOf("Movement")).toBeLessThan(list.textContent!.indexOf("Reload"));
+    expect(screen.queryByTestId("open-region")).toBeNull();
+    expect(screen.getByRole("link", { name: /All stages/ }).getAttribute("href")).toBe("/match/m1/breakdown/anna");
+  });
+
+  it("opens a confirmed region from the list, and All regions goes back", async () => {
+    vi.mocked(api.getStageCoach).mockResolvedValue(stageWith([R1, M1, K]));
+    renderPage();
+    const list = await screen.findByRole("list", { name: "Regions" });
+    fireEvent.click(list.querySelectorAll("button")[2]);
+    expect(screen.getByTestId("open-region").textContent).toContain("Confirmed");
+    expect(screen.getByText("Confirmed region")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "All regions" }));
+    expect(await screen.findByRole("list", { name: "Regions" })).toBeTruthy();
+    expect(screen.queryByTestId("open-region")).toBeNull();
+  });
+
+  it("asks for proposals and reviews them from the first by start", async () => {
+    vi.mocked(api.getStageCoach).mockResolvedValue(stageWith([R1, M1, K]));
+    await reviewing();
     expect(await screen.findByText("Proposal 1 of 2")).toBeTruthy();
     expect(screen.getByTestId("open-region").textContent).toContain("Movement");
     expect(api.getStageCoach).toHaveBeenCalledWith("anna", 1, { seed: true });
@@ -147,7 +176,7 @@ describe("MobileBreakdown", () => {
     try {
       vi.mocked(api.getStageCoach).mockResolvedValue(stageWith([R1, M1]));
       vi.mocked(api.putStageEvents).mockImplementation(async (_s, _n, events) => stageWith(events));
-      renderPage();
+      await reviewing();
       // beep_in_clip 5: M1 starts 2 s after the beep, R1 4 s.
       await waitFor(() => expect(writes).toContain(7));
       fireEvent.click(screen.getByRole("button", { name: "Next" }));
@@ -160,7 +189,7 @@ describe("MobileBreakdown", () => {
   it("Keep confirms the open proposal, saves once and moves on", async () => {
     vi.mocked(api.getStageCoach).mockResolvedValue(stageWith([R1, M1], "v1v1v1v1v1v1v1v1"));
     vi.mocked(api.putStageEvents).mockResolvedValue(stageWith([R1, { ...M1, source: "manual" }], "v2v2v2v2v2v2v2v2"));
-    renderPage();
+    await reviewing();
     fireEvent.click(await screen.findByRole("button", { name: "Keep" }));
     await waitFor(() =>
       expect(api.putStageEvents).toHaveBeenCalledWith("anna", 1, [R1, { ...M1, source: "manual" }], "v1v1v1v1v1v1v1v1"),
@@ -174,7 +203,7 @@ describe("MobileBreakdown", () => {
   it("Delete removes it and moves on", async () => {
     vi.mocked(api.getStageCoach).mockResolvedValue(stageWith([R1, M1], "v1v1v1v1v1v1v1v1"));
     vi.mocked(api.putStageEvents).mockResolvedValue(stageWith([R1], "v2v2v2v2v2v2v2v2"));
-    renderPage();
+    await reviewing();
     fireEvent.click(await screen.findByRole("button", { name: "Delete" }));
     await waitFor(() => expect(api.putStageEvents).toHaveBeenCalledWith("anna", 1, [R1], "v1v1v1v1v1v1v1v1"));
     expect(screen.getByTestId("open-region").textContent).toContain("Reload");
@@ -183,7 +212,7 @@ describe("MobileBreakdown", () => {
   it("disables a kind that would overlap, saying why", async () => {
     const otherReload: StageEvent = { id: "r0", kind: "reload", start: 2.2, end: 2.8, source: "manual" };
     vi.mocked(api.getStageCoach).mockResolvedValue(stageWith([M1, otherReload]));
-    renderPage();
+    await reviewing();
     fireEvent.click(await screen.findByRole("button", { name: "Kind" }));
     const reload = await screen.findByRole("button", { name: "Reload" });
     expect(reload).toHaveProperty("disabled", true);
@@ -194,7 +223,7 @@ describe("MobileBreakdown", () => {
   it("edge mode saves nothing until Done, then once", async () => {
     vi.mocked(api.getStageCoach).mockResolvedValue(stageWith([R1], "v1v1v1v1v1v1v1v1"));
     vi.mocked(api.putStageEvents).mockImplementation(async (_s, _n, events) => stageWith(events, "v2v2v2v2v2v2v2v2"));
-    renderPage();
+    await reviewing();
     fireEvent.click(await screen.findByRole("button", { name: /Adjust start/ }));
     const pad = padOf();
     fireEvent.pointerDown(pad, { pointerId: 1, clientX: 100 });
@@ -213,7 +242,7 @@ describe("MobileBreakdown", () => {
 
   it("Cancel restores the region edge mode found and saves nothing", async () => {
     vi.mocked(api.getStageCoach).mockResolvedValue(stageWith([R1]));
-    renderPage();
+    await reviewing();
     fireEvent.click(await screen.findByRole("button", { name: /Adjust end/ }));
     const pad2 = padOf();
     fireEvent.pointerDown(pad2, { pointerId: 2, clientX: 100 });
@@ -229,7 +258,7 @@ describe("MobileBreakdown", () => {
   it("dragging a handle on the strip moves that edge under the finger, saved on Done", async () => {
     vi.mocked(api.getStageCoach).mockResolvedValue(stageWith([R1]));
     vi.mocked(api.putStageEvents).mockImplementation(async (_s, _n, events) => stageWith(events));
-    renderPage();
+    await reviewing();
     const handle = await screen.findByRole("button", { name: /Adjust start/ });
     // R1 is 4-5.2 s in a 16.2 s stage: its window is 2-7.2 s, 5.2 s wide.
     Object.defineProperty(screen.getByTestId("focus-strip"), "clientWidth", { value: 300, configurable: true });
@@ -248,7 +277,7 @@ describe("MobileBreakdown", () => {
   it("a second gesture in one edge session continues from where the first left the edge", async () => {
     vi.mocked(api.getStageCoach).mockResolvedValue(stageWith([R1]));
     vi.mocked(api.putStageEvents).mockImplementation(async (_s, _n, events) => stageWith(events));
-    renderPage();
+    await reviewing();
     fireEvent.click(await screen.findByRole("button", { name: /Adjust start/ }));
     const pad = padOf();
     fireEvent.pointerDown(pad, { pointerId: 1, clientX: 100 });
@@ -264,7 +293,7 @@ describe("MobileBreakdown", () => {
 
   it("Done with nothing changed saves nothing and leaves the proposal a proposal", async () => {
     vi.mocked(api.getStageCoach).mockResolvedValue(stageWith([R1]));
-    renderPage();
+    await reviewing();
     fireEvent.click(await screen.findByRole("button", { name: /Adjust start/ }));
     fireEvent.click(screen.getByRole("button", { name: "Done" }));
     await settle();
@@ -275,7 +304,7 @@ describe("MobileBreakdown", () => {
   it("Done after an edit confirms the proposal and moves on to the next one", async () => {
     vi.mocked(api.getStageCoach).mockResolvedValue(stageWith([M1, R1]));
     vi.mocked(api.putStageEvents).mockImplementation(async (_s, _n, events) => stageWith(events));
-    renderPage();
+    await reviewing();
     fireEvent.click(await screen.findByRole("button", { name: /Adjust start/ }));
     fireEvent.click(screen.getByRole("button", { name: "+1 frame" }));
     fireEvent.click(screen.getByRole("button", { name: "Done" }));
@@ -286,7 +315,7 @@ describe("MobileBreakdown", () => {
   it("a new kind confirms the proposal and moves on; the current kind changes nothing", async () => {
     vi.mocked(api.getStageCoach).mockResolvedValue(stageWith([M1, R1]));
     vi.mocked(api.putStageEvents).mockImplementation(async (_s, _n, events) => stageWith(events));
-    renderPage();
+    await reviewing();
     fireEvent.click(await screen.findByRole("button", { name: "Kind" }));
     fireEvent.click(await screen.findByRole("button", { name: /^Movement/ }));
     await settle();
@@ -302,7 +331,7 @@ describe("MobileBreakdown", () => {
 
   it("playing turns Play region into Pause, which stops it, and edge mode pauses", async () => {
     vi.mocked(api.getStageCoach).mockResolvedValue(stageWith([R1]));
-    renderPage();
+    await reviewing();
     await screen.findByRole("button", { name: "Play region" });
     const video = screen.getByTestId("phone-video").querySelector("video")!;
     const pause = vi.fn();
@@ -318,7 +347,7 @@ describe("MobileBreakdown", () => {
     const at50 = { ...stageWith([R1]), videos: [{ ...stageWith([]).videos[0], fps: 50 }] };
     vi.mocked(api.getStageCoach).mockResolvedValue(at50);
     vi.mocked(api.putStageEvents).mockImplementation(async (_s, _n, events) => stageWith(events));
-    renderPage();
+    await reviewing();
     fireEvent.click(await screen.findByRole("button", { name: /Adjust start/ }));
     fireEvent.click(screen.getByRole("button", { name: "+1 frame" }));
     fireEvent.click(screen.getByRole("button", { name: "Done" }));
@@ -328,7 +357,7 @@ describe("MobileBreakdown", () => {
 
   it("a pointercancel in edge mode restores the region and saves nothing", async () => {
     vi.mocked(api.getStageCoach).mockResolvedValue(stageWith([R1]));
-    renderPage();
+    await reviewing();
     fireEvent.click(await screen.findByRole("button", { name: /Adjust start/ }));
     const pad = padOf();
     fireEvent.pointerDown(pad, { pointerId: 1, clientX: 100 });
@@ -344,7 +373,7 @@ describe("MobileBreakdown", () => {
       .mockResolvedValueOnce(stageWith([M1, R1], "v1v1v1v1v1v1v1v1"))
       .mockResolvedValueOnce(stageWith([M1], "v3v3v3v3v3v3v3v3"));
     vi.mocked(api.putStageEvents).mockRejectedValue(new ApiError(409, "version_conflict", { code: "version_conflict" }));
-    renderPage();
+    await reviewing();
     // Keep the movement: the page moves on to the reload, then the 409's
     // reload brings back a list where another writer removed that reload.
     fireEvent.click(await screen.findByRole("button", { name: "Keep" }));
@@ -365,9 +394,40 @@ describe("MobileBreakdown", () => {
       capabilities: ["review"],
     } as never);
     vi.mocked(api.getStageCoach).mockResolvedValue(stageWith([R1]));
-    renderPage();
+    await reviewing();
     expect(await screen.findByText(/Edit regions on the desktop/)).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Keep" })).toBeNull();
     expect(screen.queryByRole("button", { name: /Adjust/ })).toBeNull();
+  });
+
+  it("without a stage, lists the shooter's stages and lets you switch shooter", async () => {
+    vi.mocked(api.getProject).mockResolvedValue({
+      ...(PROJECT as object),
+      stages: [
+        { stage_number: 2, stage_name: "Two", time_seconds: 10, skipped: false, figures: { shot_count: 9, regions: 3 } },
+        { stage_number: 1, stage_name: "One", time_seconds: 16.2, skipped: false, figures: { shot_count: 12, regions: null } },
+        { stage_number: 3, stage_name: "Three", time_seconds: 0, skipped: false, figures: null },
+      ],
+    } as never);
+    const shooters = [
+      { slug: "anna", name: "Anna" },
+      { slug: "bo", name: "Bo" },
+    ];
+    render(
+      <MemoryRouter initialEntries={["/match/m1/breakdown/anna"]}>
+        <Routes>
+          <Route element={<Outlet context={{ shooters }} />}>
+            <Route path="/match/:matchId/breakdown/:slug" element={<MobileBreakdown />} />
+          </Route>
+        </Routes>
+      </MemoryRouter>,
+    );
+    const one = await screen.findByRole("link", { name: /One/ });
+    expect(one.getAttribute("href")).toBe("/match/m1/breakdown/anna/1");
+    expect(screen.getByRole("link", { name: /Two/ }).textContent).toContain("3 regions");
+    expect(screen.queryByRole("link", { name: /Three/ })).toBeNull();
+    expect(screen.getByText("No stage time")).toBeTruthy();
+    expect(screen.getByRole("link", { name: /^BO/i }).getAttribute("href")).toBe("/match/m1/breakdown/bo");
+    expect(api.getStageCoach).not.toHaveBeenCalled();
   });
 });

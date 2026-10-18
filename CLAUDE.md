@@ -1697,7 +1697,11 @@ ignored.
 **Breakdown on a phone** (spec ``2026-10-17-mobile-breakdown-design``):
 below 768 px ``App.tsx``'s ``BreakdownRoute`` renders ``MobileBreakdown``
 (the desktop workspace stays behind ``DesktopGate``; Coach stays desktop
-only). It reviews the seeder's proposals one at a time: the queue
+only). ``/breakdown/:slug`` is the stage list (``breakdown/mobile/StageIndex``,
+``lib/breakdownIndex``, the shooter chips over it, confirmed region counts
+only: proposals are seeded when a stage opens), and a stage opens on its
+region list with nothing open; "Review N proposals" starts the queue and any
+row opens that region. It reviews the seeder's proposals one at a time: the queue
 (``lib/proposalQueue``, proposals by start), a focus strip of the open
 region plus 2 s each side (``lib/focusWindow``,
 ``components/breakdown/mobile/FocusStrip``, 44 px handles that open edge
