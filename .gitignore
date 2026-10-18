@@ -75,9 +75,10 @@ tests/fixtures/corpus/*
 *.peaks-*.json
 # And audit-mode trim params sidecars from splitsmith.ui.audio.
 *_trimmed.params.json
-# Local Claude Code state stays ignored, but project skills are shared.
+# Local Claude Code state stays ignored, but project skills and rules are shared.
 .claude/*
 !.claude/skills/
+!.claude/rules/
 
 # Wrangler local state for Cloudflare Pages deploys.
 .wrangler/
