@@ -81,6 +81,7 @@ from .composition import (
     sting_name,
     xfade_name,
 )
+from .grade import lut_filter, materialize
 from .logo_spots import LOGO_MARGIN, WATERMARK_HEIGHT, watermark_image
 from .look_brand import brand_logo_path, brand_mark_json
 from .look_motion import MotionClipError, motion_overlay_filters, write_motion_clip
@@ -319,6 +320,8 @@ def _render_with_work_dir(
         shooters[0].logo_path if "summaries" in composition.logo_spots and len(shooters) == 1 else None
     )
     watermark = _prepare_watermark(composition, overlay_theme, work_dir)
+    #: The colour grade's LUT, blended and content-named in the work dir.
+    grade_lut = materialize(composition.grade, work_dir) if composition.grade is not None else None
     segments: list[tuple[Path, float]] = []
     generated = False
     # Every item, plus two edges and the boundary per transition, plus the stitch.
@@ -549,6 +552,7 @@ def _render_with_work_dir(
                     work_dir=work_dir,
                     ffmpeg_binary=ffmpeg_binary,
                     runner=runner,
+                    grade_lut=grade_lut,
                 )
                 canvas = card_backdrop(backdrop, width=sequence.width, height=sequence.height, look=look)
             except BaseException:
@@ -581,6 +585,7 @@ def _render_with_work_dir(
                 work_dir=work_dir,
                 ffmpeg_binary=ffmpeg_binary,
                 runner=runner,
+                grade_lut=grade_lut,
             )
             if look is not None and rasterizer is not None:
                 # A Look's summary template (spec 2026-10-16); ``None`` is
@@ -614,6 +619,7 @@ def _render_with_work_dir(
                 work_dir=work_dir,
                 ffmpeg_binary=ffmpeg_binary,
                 runner=runner,
+                grade_lut=grade_lut,
             )
             if look is not None and rasterizer is not None:
                 motion = match_summary_motion(
@@ -655,6 +661,7 @@ def _render_with_work_dir(
                     lower_third=lt,
                     primary_audio=prep.primary_audio,
                     watermark=watermark,
+                    grade_lut=grade_lut,
                 )
 
             index = next_step()
@@ -816,6 +823,7 @@ def _render_with_work_dir(
                 lower_third=lower_third,
                 primary_audio=prep.primary_audio,
                 watermark=watermark,
+                grade_lut=grade_lut,
             )
             if lower_third is not None and prep.motion is not None:
                 return encode(
@@ -1117,6 +1125,7 @@ def _grab_backdrop(
     work_dir: Path,
     ffmpeg_binary: str,
     runner: Runner,
+    grade_lut: Path | None = None,
 ) -> Path | None:
     """Pull the frame a full-frame still sits on, or ``None`` when there is
     no stage to take it from or the grab produced no file.
@@ -1161,7 +1170,9 @@ def _grab_backdrop(
             "-update",
             "1",
         )
-    cmd = (ffmpeg_binary, "-hide_banner", "-y", *window, str(out))
+    # The card sits on the footage as graded, so the frame is graded too.
+    graded: tuple[str, ...] = ("-vf", lut_filter(grade_lut)) if grade_lut is not None else ()
+    cmd = (ffmpeg_binary, "-hide_banner", "-y", *window, *graded, str(out))
     try:
         _run(cmd, runner=runner)
     except FFmpegError as exc:
@@ -1735,6 +1746,7 @@ def _build_stage_command(
     lower_third: _LowerThirdInput | None = None,
     primary_audio: bool = True,
     watermark: _WatermarkInput | None = None,
+    grade_lut: Path | None = None,
 ) -> tuple[str, ...]:
     """Build the ffmpeg invocation that renders one stage to ``output_path``.
 
@@ -1865,6 +1877,7 @@ def _build_stage_command(
         lower_third=lower_third_graph,
         audio_input_index=audio_index,
         watermark=watermark_graph,
+        grade_lut=grade_lut,
     )
 
     args += ["-filter_complex", filter_graph, "-map", "[final]"]
@@ -1962,6 +1975,7 @@ def _build_stage_filter_graph(
     lower_third: _LowerThirdGraph | None = None,
     audio_input_index: int | None = None,
     watermark: tuple[int, int, int] | None = None,
+    grade_lut: Path | None = None,
 ) -> str:
     """Compose primary + cams + overlay into a single ``-filter_complex``.
 
@@ -1972,7 +1986,10 @@ def _build_stage_filter_graph(
     sits on top of all cams.
     """
     parts: list[str] = []
-    parts.append("[0:v]setpts=PTS-STARTPTS,format=yuv420p[base]")
+    # A colour grade (``splitsmith.grade``) goes on the footage, each camera
+    # before the composite, and never on the overlay, a card or a logo.
+    graded = f",{lut_filter(grade_lut)}" if grade_lut is not None else ""
+    parts.append(f"[0:v]setpts=PTS-STARTPTS{graded},format=yuv420p[base]")
 
     base_label = "base"
     for cam_idx, align in enumerate(plan.cam_alignments):
@@ -1982,7 +1999,7 @@ def _build_stage_filter_graph(
         transform = align.cam.transform
 
         # Each cam gets setpts-zeroed and scaled when needed.
-        scale_chain = "setpts=PTS-STARTPTS"
+        scale_chain = f"setpts=PTS-STARTPTS{graded}"
         if transform is not None and transform.scale != 1.0:
             target_w = int(round(sequence.width * transform.scale))
             target_h = int(round(sequence.height * transform.scale))

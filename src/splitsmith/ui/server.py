@@ -4802,6 +4802,8 @@ def register_job_bodies(state: AppState) -> None:
                 closing_card=req.closing_card,
                 made_with=req.made_with,
                 look_sounds=req.look_sounds,
+                grade=req.grade,
+                grade_strength=req.grade_strength,
                 account_brand=(
                     account_profile_module.load_brand(state.account_profile) if req.account_brand else None
                 ),

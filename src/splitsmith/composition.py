@@ -47,6 +47,7 @@ from .config import OutputConfig, Shot, StageEvent, VideoMetadata
 from .stage_summary_data import TileStageData
 
 if TYPE_CHECKING:
+    from .grade import ResolvedGrade
     from .hud_extras import HudExtras
     from .match_summary import MatchSummary
 
@@ -582,6 +583,9 @@ class Composition:
     #: Where the ``watermark`` spot puts your brand over the footage; the
     #: request layer moves it right when the HUD sits top left.
     watermark_corner: Literal["top-left", "top-right"] = "top-left"
+    #: The colour grade the footage takes (``splitsmith.grade``), resolved by
+    #: the request layer; ``None`` grades nothing, the render as it was.
+    grade: ResolvedGrade | None = None
 
 
 # --- conversions -----------------------------------------------------------
@@ -619,6 +623,7 @@ def from_stage_compositions(
     logo_spots: frozenset[str] = frozenset(),
     brand: BrandMark | None = None,
     watermark_corner: Literal["top-left", "top-right"] = "top-left",
+    grade: ResolvedGrade | None = None,
 ) -> Composition:
     """Build a :class:`Composition` from today's ``StageComposition`` inputs.
 
@@ -723,6 +728,7 @@ def from_stage_compositions(
         logo_spots=frozenset(logo_spots),
         brand=brand,
         watermark_corner=watermark_corner,
+        grade=grade,
     )
 
 

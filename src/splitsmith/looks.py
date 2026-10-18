@@ -155,6 +155,20 @@ BRAND_FILE_RE = re.compile(r"brand-[0-9a-f]{12}\.(?:png|jpg|jpeg|webp)")
 BRAND_LINE_MAX = 60
 
 
+class LookGrade(BaseModel):
+    """``look.json``'s ``grade``: the colour grade its footage takes
+    (``splitsmith.grade``), a LUT file in the Look's own folder or a shipped
+    preset, at a strength from 0 (none) to 1 (the LUT as written)."""
+
+    model_config = ConfigDict(extra="ignore", frozen=True)
+
+    #: A ``.cube`` file in the Look's folder, relative (``luts/mine.cube``).
+    lut: str | None = None
+    #: A shipped preset's id (``warm-film``); ignored when ``lut`` is set.
+    preset: str | None = None
+    strength: float = Field(default=1.0, ge=0.0, le=1.0)
+
+
 class LookBrand(BaseModel):
     """``look.json``'s ``brand``: the logo and line the title page and the
     closing card draw as their centrepiece (``look_brand``)."""
@@ -198,6 +212,8 @@ class LookManifest(BaseModel):
     styles: dict[str, str] = {}
     #: Your brand (the branding work): ``None`` draws the cards as before.
     brand: LookBrand | None = None
+    #: The colour grade its footage takes; ``None`` grades nothing.
+    grade: LookGrade | None = None
     #: A text file in the Look's folder whose text closes the YouTube
     #: description of every export drawn with it: the notice a licence of
     #: the Look's assets asks to travel with the video (:func:`look_credits`).
@@ -709,6 +725,7 @@ def look_catalog() -> list[LookInfo]:
 
 
 __all__ = [
+    "LookGrade",
     "look_has_sounds",
     "sounds_folder_has_files",
     "BRAND_DIR",
