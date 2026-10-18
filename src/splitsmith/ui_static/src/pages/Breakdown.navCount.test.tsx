@@ -128,7 +128,7 @@ function project(): MatchProject {
     compare_camera: null,
     raw_videos: [],
     origin: "local",
-    capabilities: ["edit", "review"],
+    capabilities: ["edit", "review", "breakdown"],
   } as MatchProject;
 }
 
@@ -200,7 +200,7 @@ function setUpApi() {
       },
     ],
     origin: "local",
-    capabilities: ["edit", "review"],
+    capabilities: ["edit", "review", "breakdown"],
   });
   vi.mocked(api.getProject).mockImplementation(async () => project());
   vi.mocked(api.getBeepQueue).mockResolvedValue({
@@ -209,7 +209,7 @@ function setUpApi() {
     confirmed_count: 0,
     stages: [],
     origin: "local",
-    capabilities: ["edit", "review"],
+    capabilities: ["edit", "review", "breakdown"],
   });
   vi.mocked(api.getTriageSummary).mockResolvedValue({ flagged_count: 0 });
   vi.mocked(api.listJobs).mockResolvedValue([]);

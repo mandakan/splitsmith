@@ -23,7 +23,7 @@ from collections.abc import Collection
 from datetime import UTC, datetime
 
 from pydantic import BaseModel, ConfigDict
-from sqlalchemy import delete, select
+from sqlalchemy import delete, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
@@ -190,6 +190,25 @@ class PostgresMatchStore:
                 .scalars()
                 .all()
             )
+
+    async def mark_merges_events(self, match_id: str) -> bool:
+        """Record that the desktop syncing ``match_id`` merges Breakdown's
+        regions (spec 2026-10-18-breakdown-hosted-sync-design); return
+        ``True`` when the row changed. Never cleared: the desktop says so on
+        every sync, and no route sets it back."""
+        _refuse_share_write()
+        async with self._session_factory() as session:
+            result = await session.execute(
+                update(MatchRow)
+                .where(
+                    MatchRow.user_id == self._user_id,
+                    MatchRow.match_id == match_id,
+                    MatchRow.desktop_merges_events.is_(False),
+                )
+                .values(desktop_merges_events=True)
+            )
+            await session.commit()
+            return (result.rowcount or 0) > 0
 
     async def delete(self, match_id: str) -> bool:
         """Drop the user's row for ``match_id``; return ``True`` if one went.

@@ -2433,8 +2433,10 @@ export type MatchOrigin = "hosted" | "desktop" | "local";
  *  affordances on these, never on `origin` - origin is provenance
  *  (picker flag) and media-surface behavior (#821), not writability.
  *  `comment_write` joined the table in the timestamped-comments Task 5
- *  work, granted by the same hosted/desktop origin sets as the others. */
-export type MatchCapability = "edit" | "review" | "share_manage" | "comment_write";
+ *  work, granted by the same hosted/desktop origin sets as the others.
+ *  `breakdown` is the region edit: always on a local or hosted match, on a
+ *  desktop mirror once its desktop merges regions (spec 2026-10-18). */
+export type MatchCapability = "edit" | "review" | "breakdown" | "share_manage" | "comment_write";
 
 /** True when the capability set is KNOWN and lacks `cap`. Null or
  *  undefined means "not loaded yet" and denies nothing - pages keep

@@ -625,7 +625,7 @@ function MobileBreakdownStage({ slug, stage }: { slug: string; stage: number }) 
                 </Button>
               </div>
               {readOnly ? (
-                <p className="text-sm text-muted">Edit regions on the desktop: this match is synced from it.</p>
+                <p className="text-sm text-muted">To edit regions here, update splitsmith on the desktop this match syncs from and sync it once.</p>
               ) : null}
             </>
           )}

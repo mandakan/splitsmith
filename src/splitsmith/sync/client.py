@@ -34,6 +34,7 @@ from typing import IO
 import httpx
 
 from .plan import DocItem, MediaItem, doc_identity_key
+from .pull import SYNC_FEATURES, SYNC_FEATURES_HEADER
 
 #: Chunk size for each ``.read()`` call while filling out one upload
 #: part - independent of the server-chosen ``part_size`` (which arrives
@@ -116,7 +117,11 @@ class HostedSyncClient:
 
     def ensure_match(self, match_id: str, name: str) -> None:
         """Adopt (or refresh the name of) the hosted mirror row for ``match_id``."""
-        resp = self._http.post("/api/sync/matches", json={"match_id": match_id, "name": name})
+        resp = self._http.post(
+            "/api/sync/matches",
+            json={"match_id": match_id, "name": name},
+            headers={SYNC_FEATURES_HEADER: ",".join(SYNC_FEATURES)},
+        )
         self._raise_for_status(resp, on_409="a hosted match with this id already exists and is not a mirror")
 
     def device_authorize(self, device_name: str) -> dict:

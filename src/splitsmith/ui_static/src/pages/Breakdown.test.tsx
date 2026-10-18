@@ -100,7 +100,7 @@ const PROJECT = {
   name: "M",
   competitor_name: "Anna",
   origin: "local",
-  capabilities: ["edit", "review"],
+  capabilities: ["edit", "review", "breakdown"],
   stages: [
     { stage_number: 1, stage_name: "Stage One", time_seconds: 0, skipped: false },
     { stage_number: 2, stage_name: "Stage Two", time_seconds: 16.2, skipped: false },

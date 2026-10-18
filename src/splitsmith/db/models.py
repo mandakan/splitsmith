@@ -387,6 +387,14 @@ class MatchRow(Base):
     # Set once at INSERT and never changed by a later upsert - see
     # ``PostgresMatchStore.upsert``.
     origin: Mapped[str] = mapped_column(String, nullable=False, server_default="hosted")
+    # A desktop mirror whose desktop merges Breakdown's regions (spec
+    # 2026-10-18-breakdown-hosted-sync-design): set by the sync's
+    # ``POST /api/sync/matches`` when the desktop says so, never cleared.
+    # Only then does the mirror accept a region edit (``breakdown``
+    # capability); an older desktop would push over it.
+    desktop_merges_events: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=text("false")
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         server_default=func.now(),

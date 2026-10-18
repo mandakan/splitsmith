@@ -41,7 +41,7 @@ from ..coach import FIELD_STAGE_NOTE
 from ..match_project import MatchProject
 from ..storage import Storage
 from ..sync.plan import TRIMMED_SUFFIX, WEB_SUFFIX, doc_identity_key, trim_key_for
-from ..sync.pull import PULLABLE_DOC_KINDS
+from ..sync.pull import FEATURE_EVENTS, PULLABLE_DOC_KINDS, SYNC_FEATURES_HEADER
 from ..sync.state import versions_digest
 
 if TYPE_CHECKING:
@@ -439,6 +439,12 @@ async def create_or_adopt_match(
     if existing is not None and existing.origin == "hosted":
         raise HTTPException(status_code=409, detail="match_exists_hosted")
     record = await store.upsert(body.match_id, body.name, f"matches/{body.match_id}", origin="desktop")
+    # The desktop's merge takes Breakdown's regions from hosted: from now on
+    # the mirror accepts a region edit (spec 2026-10-18). A desktop without
+    # the header never gets here, so its pushes cannot overwrite one.
+    features = {f.strip() for f in request.headers.get(SYNC_FEATURES_HEADER, "").split(",")}
+    if FEATURE_EVENTS in features and not (existing is not None and existing.desktop_merges_events):
+        await store.mark_merges_events(body.match_id)
     await _register_recent_project(request, body.match_id, body.name)
     return SyncMatchCreateResponse(match_id=record.match_id, origin=record.origin)
 

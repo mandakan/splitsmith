@@ -18,6 +18,15 @@ from .state import SyncState
 #: the next kind added inert by default.
 PULLABLE_DOC_KINDS = frozenset({"match", "project", "audit"})
 
+#: What this desktop's merge can take from hosted beyond the baseline, sent
+#: on ``POST /api/sync/matches`` (a header: an older server ignores it, where
+#: an unknown body field could be refused). ``events``: Breakdown's regions
+#: merge per region (spec 2026-10-18-breakdown-hosted-sync-design), so the
+#: mirror may accept a region edit.
+SYNC_FEATURES_HEADER = "X-Splitsmith-Sync-Features"
+FEATURE_EVENTS = "events"
+SYNC_FEATURES = (FEATURE_EVENTS,)
+
 
 @dataclass(frozen=True)
 class RemoteDoc:
