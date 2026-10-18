@@ -4,6 +4,11 @@ paths:
   - "src/splitsmith/comment_identity.py"
   - "src/splitsmith/display_name.py"
   - "src/splitsmith/coach.py"
+  - "src/splitsmith/stage_summary_data.py"
+  - "src/splitsmith/match_summary.py"
+  - "src/splitsmith/hud_extras.py"
+  - "src/splitsmith/compare/free_cell.py"
+  - "src/splitsmith/ui/capabilities.py"
   - "src/splitsmith/ui/share_og.py"
   - "src/splitsmith/ui/comments.py"
   - "src/splitsmith/db/share_guard.py"
@@ -28,14 +33,17 @@ The root CLAUDE.md repeats the three share rules that live in `ui/server.py`.
   **deliberately with no summed stage time**: IPSC ranks by hit factor, and
   accumulated raw time is not a figure the sport produces. The stage card leads
   with draw and average non-anomaly split, the numbers splitsmith computes.
-- **The split rule lives in `coach.statistic_splits`**; `share_card.stage_figures`
-  only shapes its output into a card's two headline figures. An uncoached stage
+- **The split rule lives in `coach.statistic_splits`**, and the share card, the
+  video summary and the results page all use that one definition;
+  `share_card.stage_figures` only shapes its output into a card's two headline
+  figures. An uncoached stage
   falls back to the auto-classifier's own cutoff, `coach.split_stat_split_max()`
   (`CoachAutoClassifyConfig.split_max_s`), not an independent constant, or the
   figures would jump the moment a stage got classified. The thresholds
   (`split_max_s`, `transition_max_s`) are read through
-  `coach.auto_classify_config()`, which honours a `SPLITSMITH_CONFIG` YAML.
-  `lib/splits.ts` mirrors the split cutoff as a literal and moves with it.
+  `coach.auto_classify_config()`, which honours a `SPLITSMITH_CONFIG` YAML
+  (defaults `split_max_s` 1.0, `transition_max_s` 2.0). `lib/splits.ts` mirrors
+  the split cutoff as a literal (`SPLIT_STAT_SPLIT_MAX`) and moves with it.
   `splitsmith match reclassify` re-runs the auto-classifier over stored audits
   (manual overrides survive) after a threshold change.
 - `ui/share_og.py`'s `build_stage_card` heals legacy unclassified audit docs in
@@ -72,8 +80,10 @@ The root CLAUDE.md repeats the three share rules that live in `ui/server.py`.
   read table's fullmatch.
 - `comment` is the only write-capable scope
   (`db.share_guard._WRITE_CAPABLE_SCOPES`). A plain `read` link can list the
-  thread (it is in both allowlists) but never post or delete; `scope_may_write`
-  in `_share_alias` enforces that. Every non-admitted (method, shape, scope)
+  thread (it is deliberately in both allowlists) but never post or delete;
+  `db.share_guard.scope_may_write`, called by `_share_alias`, enforces that.
+  `ui/capabilities.py`'s comment moderation and read-only POSTs are deliberately
+  absent from `_SHARE_WRITE_ROUTES`. Every non-admitted (method, shape, scope)
   combination collapses to the same opaque 404 as an unknown token.
 - **`author_handle` is server-derived** (`comment_identity.derive_handle`, or
   the signed-in viewer's own `display_name`), never client-supplied; the request

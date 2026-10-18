@@ -260,10 +260,11 @@ Preview cards, the anonymous share surface and comments: rules in
 scope, so they are here too:
 
 - Share token resolution and owner impersonation have exactly one
-  implementation, `_share_alias`; never resolve a token or read the owner's
-  tenant anywhere else (the HTML shells sub-request the anonymous API).
+  implementation, `_share_alias`; never resolve a share token or impersonate
+  the share's owner outside it (the HTML shells sub-request the anonymous API).
 - `_SHARE_PATH_RE` (GET) and `_SHARE_WRITE_ROUTES` (POST/DELETE) are separate
-  allowlists and must never merge; only the `comment` scope writes.
+  allowlists and must never merge; only the `comment` scope writes, and every
+  refused (method, shape, scope) is the same opaque 404 as an unknown token.
 - A comment's `author_handle` is server-derived, never a request field.
 
 ## Stage events, Breakdown and Coach
