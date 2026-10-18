@@ -16,12 +16,14 @@ cache key, moves whenever the LUT or the strength does.
 from __future__ import annotations
 
 import hashlib
+import io
 import re
 from dataclasses import dataclass
 from importlib import resources
 from pathlib import Path
 
 import numpy as np
+from PIL import Image
 
 from .looks import Look
 from .runtime import quote_filter_value
@@ -148,10 +150,20 @@ def blend(lut: Lut, strength: float) -> Lut:
     return Lut(size=lut.size, table=identity(lut.size).table * (1.0 - s) + lut.table * s)
 
 
+def _blended_text(resolved: ResolvedGrade) -> str:
+    return write_cube(blend(read_cube(resolved.source), resolved.strength), title=resolved.label)
+
+
+def grade_digest(resolved: ResolvedGrade) -> str:
+    """What the grade draws, as 12 hex digits: the render's file name
+    (:func:`materialize`) and the preview's cache key."""
+    return hashlib.sha256(_blended_text(resolved).encode()).hexdigest()[:12]
+
+
 def materialize(resolved: ResolvedGrade, work_dir: Path) -> Path:
     """The blended LUT the render reads, written once into ``work_dir`` as
     ``grade-<12hex>.cube``, named by what it holds."""
-    text = write_cube(blend(read_cube(resolved.source), resolved.strength), title=resolved.label)
+    text = _blended_text(resolved)
     digest = hashlib.sha256(text.encode()).hexdigest()[:12]
     work_dir.mkdir(parents=True, exist_ok=True)
     out = work_dir / f"grade-{digest}.cube"
@@ -252,9 +264,16 @@ def add_user_lut(source: Path) -> str:
         raise GradeError(f"{source.name} is not a file")
     if real.stat().st_size > MAX_BYTES:
         raise GradeError(f"{source.name} is over {MAX_BYTES // (1024 * 1024)} MB")
-    data = real.read_bytes()
+    return add_user_lut_bytes(real.read_bytes(), source.stem)
+
+
+def add_user_lut_bytes(data: bytes, stem: str) -> str:
+    """:func:`add_user_lut` for bytes already read (the app's upload);
+    ``stem`` names it, slugged, never trusted as a path."""
+    if len(data) > MAX_BYTES:
+        raise GradeError(f"the LUT is over {MAX_BYTES // (1024 * 1024)} MB")
     parse_cube(data.decode("utf-8-sig", errors="replace"))
-    name = f"{_slug(source.stem)}-{hashlib.sha256(data).hexdigest()[:12]}.cube"
+    name = f"{_slug(stem)}-{hashlib.sha256(data).hexdigest()[:12]}.cube"
     folder = user_luts_dir()
     folder.mkdir(parents=True, exist_ok=True)
     out = folder / name
@@ -270,3 +289,80 @@ def list_user_luts() -> list[str]:
     if not folder.is_dir():
         return []
     return sorted(p.name for p in folder.iterdir() if USER_LUT_RE.match(p.name) and not p.is_symlink())
+
+
+def apply_lut(image: Image.Image, lut: Lut) -> Image.Image:
+    """``image`` graded through ``lut`` (trilinear), for stills: the gallery's
+    thumbnails and the export preview's frame. The render uses ffmpeg's
+    ``lut3d`` (tetrahedral); the two differ by a level or two."""
+    rgb = np.asarray(image.convert("RGB"), dtype=np.float64) / 255.0
+    n = lut.size
+    pos = rgb * (n - 1)
+    lo = np.clip(np.floor(pos).astype(int), 0, n - 2)
+    frac = pos - lo
+    r0, g0, b0 = lo[..., 0], lo[..., 1], lo[..., 2]
+    fr, fg, fb = frac[..., 0:1], frac[..., 1:2], frac[..., 2:3]
+    t = lut.table  # [b][g][r]
+
+    def at(db: int, dg: int, dr: int) -> np.ndarray:
+        return t[b0 + db, g0 + dg, r0 + dr]
+
+    c00 = at(0, 0, 0) * (1 - fr) + at(0, 0, 1) * fr
+    c01 = at(0, 1, 0) * (1 - fr) + at(0, 1, 1) * fr
+    c10 = at(1, 0, 0) * (1 - fr) + at(1, 0, 1) * fr
+    c11 = at(1, 1, 0) * (1 - fr) + at(1, 1, 1) * fr
+    c0 = c00 * (1 - fg) + c01 * fg
+    c1 = c10 * (1 - fg) + c11 * fg
+    out = c0 * (1 - fb) + c1 * fb
+    return Image.fromarray(np.clip(np.round(out * 255.0), 0, 255).astype(np.uint8), "RGB")
+
+
+def swatch_scene(width: int = 320, height: int = 180) -> Image.Image:
+    """A drawn outdoor scene a grade shows on: blue sky, a dark tree line,
+    grass, an orange container with a red stripe, a hand's skin tone, and a
+    grey ramp from black to white along the bottom. Ours, nothing filmed."""
+    w, h = width, height
+    img = np.zeros((h, w, 3), dtype=np.float64)
+    y = np.linspace(0.0, 1.0, h)[:, None]
+    horizon, trees, ramp = int(h * 0.38), int(h * 0.48), int(h * 0.88)
+    sky = np.array([60, 120, 200]) * (1 - y[:horizon]) + np.array([175, 208, 236]) * y[:horizon] / max(
+        y[horizon], 1e-6
+    )
+    img[:horizon] = np.clip(sky, 0, 255)[:, None, :]
+    xs = np.linspace(0.0, 1.0, w)
+    wobble = (np.sin(xs * 37.0) * 0.5 + 0.5)[None, :, None]
+    img[horizon:trees] = np.array([34, 78, 38]) * (0.8 + 0.4 * wobble)
+    grass_y = np.linspace(0.0, 1.0, ramp - trees)[:, None, None]
+    img[trees:ramp] = np.array([88, 140, 58]) * (1 - grass_y) + np.array([150, 150, 82]) * grass_y
+    # The container: orange with a red stripe.
+    cx0, cx1, cy0, cy1 = int(w * 0.52), int(w * 0.92), int(h * 0.30), int(h * 0.74)
+    img[cy0:cy1, cx0:cx1] = [208, 108, 48]
+    img[int(h * 0.60) : int(h * 0.66), cx0:cx1] = [196, 28, 30]
+    # A hand.
+    img[int(h * 0.62) : ramp, int(w * 0.18) : int(w * 0.32)] = [226, 176, 140]
+    # The ramp, with pure black and white at its ends.
+    img[ramp:] = np.linspace(0.0, 255.0, w)[None, :, None]
+    img[ramp:, : max(2, w // 20)] = 0.0
+    img[ramp:, -max(2, w // 20) :] = 255.0
+    return Image.fromarray(np.clip(np.round(img), 0, 255).astype(np.uint8), "RGB")
+
+
+def preview_png(
+    resolved: ResolvedGrade | None, *, cache_dir: Path, width: int = 320, height: int = 180
+) -> bytes:
+    """The gallery's thumbnail for a grade (``None`` is the scene as drawn),
+    cached under ``cache_dir`` by what it draws."""
+    key = grade_digest(resolved) if resolved is not None else "none"
+    path = cache_dir / f"{key}-{width}x{height}.png"
+    if path.is_file():
+        return path.read_bytes()
+    scene = swatch_scene(width, height)
+    image = apply_lut(scene, blend(read_cube(resolved.source), resolved.strength)) if resolved else scene
+    buf = io.BytesIO()
+    image.save(buf, format="PNG")
+    data = buf.getvalue()
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    partial = path.with_name(f".{path.name}.partial")
+    partial.write_bytes(data)
+    partial.replace(path)
+    return data

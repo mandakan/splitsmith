@@ -36,6 +36,7 @@ from .config import StageEvent
 from .division import competitor_division
 from .events import confirmed_from_doc, reload_figures
 from .export_naming import stage_display_name, stage_file_base
+from .grade import ResolvedGrade, apply_lut, blend, read_cube
 from .hud_extras import hud_extras_from
 from .identity import ResolvedIdentity
 from .logo_placeholder import PLACEHOLDER_REVISION
@@ -122,6 +123,9 @@ class PreviewSpec:
     backdrop: Literal["footage", "demo"] = "footage"
     #: "Made with splitsmith" on the closing card.
     made_with: bool = True
+    #: What the export's colour grade draws (``grade.grade_digest``); the
+    #: grade itself is the caller's. ``None`` grades nothing.
+    grade_digest: str | None = None
     #: The export's "Use Breakdown" switch: off, the card reads no region.
     breakdown: bool = True
     #: Digest of the match summary the caller built from every stage's audit;
@@ -245,6 +249,8 @@ def preview_key(
         fields["event_logo"] = spec.event_logo
     if spec.card == "closing" and spec.made_with:
         fields["credit"] = True
+    if spec.grade_digest is not None:
+        fields["grade"] = spec.grade_digest
     if not spec.breakdown:
         fields["breakdown"] = False
     if spec.summary_digest is not None:
@@ -462,6 +468,7 @@ def render_preview(
     match_summary: MatchSummary | None = None,
     brand: composition.BrandMark | None = None,
     book: BookSnapshot = EMPTY_BOOK,
+    grade: ResolvedGrade | None = None,
 ) -> bytes:
     """The PNG for ``spec``, or :class:`PreviewError` for a 404 / 409 / 503.
     ``shooter`` is the shooter's resolved identity (#1243), drawn on the
@@ -504,6 +511,13 @@ def render_preview(
         frame = grab_frame(
             trim, seconds=seconds, at=at, ffmpeg_binary=ffmpeg_binary, out=work_dir / "frame.png"
         )
+    if frame is not None and grade is not None:
+        # The export grades the footage the cards sit on; so does the preview
+        # (in Python: the render's ``lut3d`` differs by a level or two).
+        with Image.open(frame) as still:
+            graded = apply_lut(still, blend(read_cube(grade.source), grade.strength))
+        frame = work_dir / "frame-graded.png"
+        graded.save(frame)
 
     # What the match cards and the summary say, as the export says it:
     # the bundle name on the cards (``request.project_name``), and the

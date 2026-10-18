@@ -42,11 +42,12 @@ from ..export_preview import (
     render_preview,
     summary_digest,
 )
+from ..grade import GradeError, grade_digest, resolve_grade
 from ..identity import ResolvedIdentity
 from ..logo_placeholder import placeholder_logo
 from ..logo_spots import DEFAULT_LOGO_SPOTS, LogoSpot
 from ..look_store import LookStoreError, StoredLookBody, TemplateEdit, draft_look
-from ..looks import Look, load_look, look_fingerprint
+from ..looks import Look, LookError, load_look, look_fingerprint
 from ..overlay_hud import OverlayStyleFields
 from ..overlay_raster import ChromiumRasterizer, Rasterizer, RasterizerUnavailableError
 from ..runtime import runtime
@@ -76,6 +77,10 @@ class ExportPreviewRequest(OverlayStyleFields, BaseModel):
     stage_numbers: list[int] | None = None
     #: "Made with splitsmith" on the closing card.
     made_with: bool = True
+    #: The export's colour grade and strength (``MatchExportRequest``'s);
+    #: one naming nothing real previews ungraded, never an error.
+    grade: str = Field(default="look", max_length=80)
+    grade_strength: float | None = Field(default=None, ge=0.0, le=1.0)
     #: The export's "Use Breakdown" switch: off, no region reaches the card.
     breakdown: bool = True
     #: Your account's brand on the title page and the closing card.
@@ -213,7 +218,14 @@ def export_preview(slug: str, req: ExportPreviewRequest, request: Request) -> Re
                 logo_path=placeholder_logo(logo_placeholder.BRAND, placeholder_dir),
                 line=brand.line if brand is not None else None,
             )
+    try:
+        chosen_grade = resolve_grade(
+            req.grade, load_look(req.look) if req.grade == "look" else None, strength=req.grade_strength
+        )
+    except (GradeError, LookError):
+        chosen_grade = None
     spec = PreviewSpec(
+        grade_digest=grade_digest(chosen_grade) if chosen_grade is not None else None,
         card=req.card,
         stage_number=stage_number,
         width=req.width,
@@ -298,6 +310,7 @@ def export_preview(slug: str, req: ExportPreviewRequest, request: Request) -> Re
                 ),
                 ffmpeg_binary=rt.ffmpeg_binary,
                 work_dir=Path(work),
+                grade=chosen_grade,
                 event_logo=event_logo,
                 match_summary=match_summary,
                 brand=brand,

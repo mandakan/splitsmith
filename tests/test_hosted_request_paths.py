@@ -107,3 +107,14 @@ def test_hosted_suggest_coverage_does_not_read_a_file_by_path(
     )
     assert resp.status_code == 200, resp.text
     assert resp.json() == {"covers_stages": [], "span": None}
+
+
+def test_hosted_match_export_refuses_your_own_lut(native_match: tuple[TestClient, str, str]) -> None:
+    """A ``user:`` grade names a file on the desktop that kept it."""
+    client, mid, slug = native_match
+    resp = client.post(
+        f"/api/matches/{mid}/shooters/{slug}/export/match",
+        json={"stage_numbers": [1], "grade": "user:film-0123456789ab.cube"},
+    )
+    assert resp.status_code == 400, resp.text
+    assert "desktop app only" in resp.text

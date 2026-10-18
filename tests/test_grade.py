@@ -174,3 +174,9 @@ def test_lut_add_on_the_command_line(tmp_path: Path, monkeypatch: pytest.MonkeyP
     bad = tmp_path / "bad.cube"
     bad.write_text("nonsense\n")
     assert CliRunner().invoke(app, ["looks", "lut-add", str(bad)]).exit_code == 2
+
+
+def test_the_catalog_says_which_looks_carry_a_grade(user_looks: Path) -> None:
+    _look_with(user_looks / "named", {"preset": "warm-film"})
+    by_name = {info.name: info for info in looks.look_catalog()}
+    assert by_name["named"].grade is True and by_name["splitsmith"].grade is False
