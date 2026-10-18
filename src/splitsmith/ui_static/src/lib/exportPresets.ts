@@ -8,6 +8,7 @@
  * ``uploadOptions.publishAt``. ``applyBody`` keeps them; ``settingsToBody``
  * drops them; ``isDirty`` therefore ignores them.
  */
+import { DEFAULT_GRADE } from "./grades";
 import type { ExportPresetBody, GridFreeCell, OverlayCodec } from "@/lib/api";
 import { DEFAULT_CAM_OPTIONS, fromPipLayout, type CamOptions } from "@/lib/camOptions";
 import type { ExportMode } from "@/lib/exportPlan";
@@ -126,6 +127,11 @@ export interface ExportSettings {
    *  reloads) reach the export; off, every stage exports as one nobody
    *  broke down. Both modes, every format. */
   useBreakdown: boolean;
+  /** The colour grade (``lib/grades``): ``look`` (the Look's own), ``none``,
+   *  ``preset:<id>`` or ``user:<file>``; and its strength, ``null`` the
+   *  grade's own. A single shooter's MP4. */
+  grade: string;
+  gradeStrength: number | null;
   /** Which of the Look's HUD styles draws the overlay, and its toggles
    *  (``lib/overlayStyle``); one shooter's overlay only. */
   overlayStyle: OverlayStyle;
@@ -157,6 +163,8 @@ export const DEFAULT_EXPORT_SETTINGS: ExportSettings = {
   renderOptions: DEFAULT_RENDER_OPTIONS,
   includeOverlay: false,
   useBreakdown: true,
+  grade: DEFAULT_GRADE,
+  gradeStrength: null,
   overlayStyle: DEFAULT_OVERLAY_STYLE,
   gridOverlay: false,
   gridHoldSeconds: 0,
@@ -203,6 +211,8 @@ export function settingsToBody(s: ExportSettings): ExportPresetBody {
     closing_card: s.renderOptions.closingCard,
     made_with: s.renderOptions.madeWith,
     look_sounds: s.renderOptions.lookSounds,
+    grade: s.grade,
+    grade_strength: s.gradeStrength,
     account_brand: s.renderOptions.accountBrand,
     logo_spots: normalizeSpots(s.renderOptions.logoSpots),
     stage_card_style: s.renderOptions.stageCardStyle,
@@ -272,6 +282,8 @@ export function applyBody(s: ExportSettings, body: ExportPresetBody): ExportSett
     },
     includeOverlay: body.overlay,
     useBreakdown: body.breakdown ?? true,
+    grade: body.grade ?? DEFAULT_GRADE,
+    gradeStrength: body.grade_strength ?? null,
     overlayStyle: styleFromBody(body),
     gridOverlay: body.grid_overlay,
     gridHoldSeconds: finite(body.grid_hold_seconds, 0),

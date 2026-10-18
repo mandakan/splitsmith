@@ -3,6 +3,7 @@
  * a Look tile previews, the request body from the form, the caption and
  * the one line per failure. Pure; ``PreviewPane`` does the fetching.
  */
+import { gradeFields } from "@/lib/grades";
 import { normalizeSpots } from "@/lib/logoPlan";
 import { LOGO_SPOT_CARDS } from "@/lib/logoSpots";
 import type { ExportPreviewBody, LookInfo, PreviewCard } from "@/lib/api";
@@ -102,6 +103,10 @@ export function previewBody(
   };
   // Only when off, so an untouched form keeps the request (and key) it had.
   if (!settings.useBreakdown) body.breakdown = false;
+  // The export's grade, as the export sends it (a single shooter's MP4).
+  if (settings.mode === "single") {
+    Object.assign(body, gradeFields({ choice: settings.grade, strength: settings.gradeStrength }, settings.outputFormat));
+  }
   const resolved = resolveLookChoice(looks, lookChoiceOf(settings));
   const look = nonDefault(resolved.look, DEFAULT_LOOK);
   if (look) body.look = look;

@@ -1162,6 +1162,9 @@ export interface ExportPresetBody extends OverlayStyleBody {
   made_with: boolean;
   /** The Look's sounds in a rendered MP4; a preset saved before it has none: on. */
   look_sounds?: boolean;
+  /** The colour grade (``lib/grades``) and its strength; absent is the Look's. */
+  grade?: string;
+  grade_strength?: number | null;
   /** A preset saved before the switch has none: on. */
   breakdown?: boolean;
   account_brand?: boolean;
@@ -1214,6 +1217,15 @@ export interface LookInfo {
   slots: Record<string, LookVariantInfo[]>;
   /** It carries sounds the export can mix into a rendered MP4. */
   sounds?: boolean;
+  /** It grades the footage (``look.json``'s ``grade``). */
+  grade?: boolean;
+}
+
+/** A colour grade the gallery offers (``GET /api/grades``). */
+export interface GradeInfo {
+  id: string;
+  label: string;
+  preview: string;
 }
 
 /** An RGB triple, as ``look.json`` stores a colour. */
@@ -1343,6 +1355,9 @@ export interface ExportPreviewBody extends OverlayStyleBody {
   title_division?: boolean;
   /** "Made with splitsmith" on the closing card. Server default on. */
   made_with?: boolean;
+  /** The export's colour grade and strength; the preview's frame takes it. */
+  grade?: string;
+  grade_strength?: number;
   /** "Use Breakdown": the stages' confirmed regions in the export. Server
    *  default on; off exports every stage as one nobody broke down. */
   breakdown?: boolean;
@@ -1522,6 +1537,11 @@ export interface MatchExportRequestPayload extends OverlayStyleBody {
   /** The Look's sounds mixed into the rendered MP4. Server default on; a
    *  Look without sounds is untouched either way. */
   look_sounds?: boolean;
+  /** The colour grade: ``look`` (server default), ``none``, ``preset:<id>``
+   *  or ``user:<file>``; MP4 only. */
+  grade?: string;
+  /** 0..1; absent is the grade's own (the Look's, else full). */
+  grade_strength?: number;
   /** "Use Breakdown": the stages' confirmed regions in the export. Server
    *  default on; off exports every stage as one nobody broke down. */
   breakdown?: boolean;
@@ -5492,6 +5512,16 @@ export const api = {
   markWhatsNewSeen: (ids: string[]) =>
     request<WhatsNewPayload>("/api/whats-new/seen", { method: "POST", json: { ids } }),
 
+  /** The shipped colour grade presets, each with its thumbnail. */
+  listGrades: () => request<{ presets: GradeInfo[] }>("/api/grades"),
+  /** Your own LUTs (desktop only; a 404 hosted). */
+  listUserGrades: () => request<{ user: GradeInfo[] }>("/api/grades/user"),
+  /** Keep a .cube of your own (desktop only): checked and named by its bytes. */
+  uploadGrade: (file: File) => {
+    const form = new FormData();
+    form.append("file", file, file.name);
+    return request<GradeInfo>("/api/grades", { method: "POST", body: form });
+  },
   /** The installed Looks with their slots, variants and previews (#1246). */
   listLooks: () =>
     request<{ looks: LookInfo[]; transitions?: TransitionFamilyInfo[]; fonts?: FontInfo[] }>("/api/looks"),

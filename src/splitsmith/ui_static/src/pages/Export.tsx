@@ -714,6 +714,7 @@ function ExportInner({ slug }: { slug: string }) {
         kinds: lookRequest.kinds,
         youtubeConnected: false,
         useBreakdown: sentBreakdown,
+        grade: { choice: settings.grade, strength: settings.gradeStrength },
       }),
     );
   }
@@ -747,6 +748,7 @@ function ExportInner({ slug }: { slug: string }) {
           kinds: lookRequest.kinds,
           youtubeConnected: !!youtubeSettings?.connected,
           useBreakdown: sentBreakdown,
+          grade: { choice: settings.grade, strength: settings.gradeStrength },
         }),
       );
       setJob(submitted);
