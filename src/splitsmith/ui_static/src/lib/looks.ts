@@ -77,6 +77,18 @@ function lookNamed(looks: LookInfo[], name: string): LookInfo | undefined {
 }
 
 /** The stored Look when it is installed, else the default. */
+/** Whether the Export page offers "Look sounds": the mix runs after one
+ *  shooter's rendered MP4, and only a Look carrying sounds has anything to
+ *  mix (``sounds`` in the catalog; a hosted Look never has). */
+export function lookSoundsOffered(
+  looks: LookInfo[],
+  look: string,
+  mode: string,
+  outputFormat: string,
+): boolean {
+  return mode === "single" && outputFormat === "mp4" && looks.some((l) => l.name === look && l.sounds === true);
+}
+
 export function visibleLook(looks: LookInfo[], name: string): string {
   return lookNamed(looks, name) ? name : DEFAULT_LOOK;
 }

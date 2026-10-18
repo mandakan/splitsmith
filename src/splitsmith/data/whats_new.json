@@ -1,6 +1,12 @@
 {
   "entries": [
     {
+      "id": "look-sounds",
+      "date": "2026-10-18",
+      "title": "Music and sound effects from your Look",
+      "body": "In the desktop app, a Look you made can bring its own music and effects, mixed over the stage audio of the rendered video. Turn Look sounds on or off under Look on the Export page."
+    },
+    {
       "id": "highlight-reel",
       "date": "2026-10-18",
       "title": "A highlight reel of your match",

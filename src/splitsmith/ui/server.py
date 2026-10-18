@@ -4801,6 +4801,7 @@ def register_job_bodies(state: AppState) -> None:
                 title_page_duration_seconds=req.title_page_duration_seconds,
                 closing_card=req.closing_card,
                 made_with=req.made_with,
+                look_sounds=req.look_sounds,
                 account_brand=(
                     account_profile_module.load_brand(state.account_profile) if req.account_brand else None
                 ),

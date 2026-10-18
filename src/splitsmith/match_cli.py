@@ -485,6 +485,11 @@ def export(
         "--made-with/--no-made-with",
         help="'Made with splitsmith' at the bottom of the closing card.",
     ),
+    look_sounds: bool = typer.Option(
+        True,
+        "--look-sounds/--no-look-sounds",
+        help="Mix the Look's sounds into the rendered MP4 (mp4 only; a Look without sounds is untouched).",
+    ),
     breakdown: bool = typer.Option(
         True,
         "--breakdown/--no-breakdown",
@@ -793,6 +798,7 @@ def export(
         title_page_duration_seconds=title_page_duration,
         closing_card=closing_card,
         made_with=made_with,
+        look_sounds=look_sounds,
         breakdown=breakdown,
         account_brand=load_brand(JsonAccountProfileStore()) if account_brand else None,
         logo_spots=spots,

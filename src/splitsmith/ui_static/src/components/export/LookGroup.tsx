@@ -6,7 +6,9 @@
  */
 import { LookAdvanced } from "@/components/export/LookAdvanced";
 import { LookGallery } from "@/components/export/LookGallery";
+import { Field } from "@/components/ui/Field";
 import { bareHint } from "@/lib/exportPlan";
+import { lookSoundsOffered } from "@/lib/looks";
 import type { LookFocus } from "@/lib/exportPreview";
 import type { ExportSettings } from "@/lib/exportPresets";
 import { useMatchHref } from "@/lib/matchHref";
@@ -39,6 +41,7 @@ export function LookGroup({
   const compare = settings.mode === "compare";
   const { looks, transitions } = useLooks();
   const href = useMatchHref();
+  const sounds = lookSoundsOffered(looks, settings.look, settings.mode, settings.outputFormat);
   return (
     <>
       <LookGallery
@@ -65,6 +68,21 @@ export function LookGroup({
         />
       }
       />
+      {sounds ? (
+        <Field label="Sounds" help="The Look's music and effects, mixed over the stage audio.">
+          <label className="flex items-center gap-2 text-md text-ink-2">
+            <input
+              type="checkbox"
+              aria-label="Look sounds"
+              checked={settings.renderOptions.lookSounds}
+              disabled={busy}
+              onChange={(e) => patch({ renderOptions: { ...settings.renderOptions, lookSounds: e.target.checked } })}
+              className="accent-[var(--color-ink)]"
+            />
+            Look sounds
+          </label>
+        </Field>
+      ) : null}
     </>
   );
 }

@@ -14,6 +14,7 @@ That keeps the unit tests free of project fixtures.
 
 from __future__ import annotations
 
+import logging
 import os
 import subprocess
 from collections.abc import Sequence
@@ -22,6 +23,7 @@ from pathlib import Path
 from typing import Literal
 
 from .. import composition, fcp7xml_render, fcpxml_gen, mp4_render, youtube_sidecar
+from ..audio_dress import DressError, dress_in_place
 from ..audit_data import StageExportError, audit_shots_to_engine_shots, read_audit_data
 from ..config import OutputConfig, StageRounds
 from ..events import confirmed_from_doc
@@ -71,6 +73,8 @@ TitleKind = Literal["none", "slate", "lower-third"]
 _RENDERERS_WITHOUT_TITLES: frozenset[OutputFormat] = frozenset({"fcp7xml"})
 _RENDERERS_WITHOUT_SEGMENTS: frozenset[OutputFormat] = frozenset({"fcp7xml"})
 _RENDERERS_WITHOUT_MATCH_CARDS: frozenset[OutputFormat] = frozenset({"fcpxml", "fcp7xml"})
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -360,6 +364,8 @@ class MatchExportRequestData:
     closing_card: bool = False
     #: "Made with splitsmith" at the bottom of the closing card.
     made_with: bool = True
+    #: The Look's sounds mixed into the rendered MP4 (``dress_in_place``).
+    look_sounds: bool = True
     #: Your account's brand, resolved by the caller (spec 2026-10-08); the
     #: cards draw it when the Look has no brand of its own.
     account_brand: composition.BrandMark | None = None
@@ -443,6 +449,29 @@ def render_segment_cache(config: OutputConfig) -> SegmentCache | None:
         root=runtime().cache_dir / "render-segments",
         max_bytes=int(config.render_cache_gb * 1024**3),
     )
+
+
+def _mix_look_sounds(output_path: Path, look_name: str, *, youtube_preset: bool) -> list[str]:
+    """Mix the Look's sounds into the rendered MP4 where it lies, and what the
+    run should say about it: the mix's own notes, or why it was left out. A
+    Look without sounds is untouched and says nothing; a failed mix keeps
+    the render as it was and never fails the export, whatever went wrong
+    (the render is done; a sound is never worth losing it). The audio keeps
+    the render's bitrate: the YouTube preset's 384k, else 192k."""
+    try:
+        look_root = load_look(look_name).root
+        result = dress_in_place(
+            output_path,
+            look_root,
+            ffmpeg_binary=runtime().ffmpeg_binary,
+            audio_bitrate="384k" if youtube_preset else "192k",
+        )
+    except (LookError, DressError) as exc:
+        return [f"Look sounds left out: {exc}"]
+    except Exception as exc:  # noqa: BLE001 -- the render stands; say what failed
+        logger.exception("mixing the Look's sounds into %s failed", output_path.name)
+        return [f"Look sounds left out: {type(exc).__name__}: {exc}"]
+    return list(result.notes) if result is not None else []
 
 
 def look_credits_for(name: str) -> str | None:
@@ -923,6 +952,10 @@ def export_match(
             )
             rendered_seconds = rendered.duration_seconds
             anomalies.extend(rendered.degradations)
+            if request.look_sounds:
+                anomalies.extend(
+                    _mix_look_sounds(output_path, request.overlay_theme, youtube_preset=youtube_preset_active)
+                )
     except (ValueError, FileNotFoundError, mp4_render.FFmpegError) as exc:
         raise MatchExportError(str(exc)) from exc
 

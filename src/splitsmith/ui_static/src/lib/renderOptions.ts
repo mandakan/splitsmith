@@ -35,6 +35,9 @@ export interface RenderOptions {
   closingCard: boolean;
   /** "Made with splitsmith" at the bottom of the closing card. */
   madeWith: boolean;
+  /** The Look's sounds mixed into the rendered MP4 (a Look with a
+   *  ``sounds/`` folder; single-shooter MP4 only). */
+  lookSounds: boolean;
   /** Your brand from the You page on the title page and the closing card. */
   accountBrand: boolean;
   /** Where logos go beyond the cards (``lib/logoPlan``); Polished by default. */
@@ -59,6 +62,7 @@ export const DEFAULT_RENDER_OPTIONS: RenderOptions = {
   titlePageDurationSeconds: 3,
   closingCard: false,
   madeWith: true,
+  lookSounds: true,
   accountBrand: true,
   logoSpots: [...DEFAULT_LOGO_SPOTS],
   stageCardStyle: "none",
@@ -118,6 +122,7 @@ export type MatchExportCardFields = Pick<
       | "title_page_duration_seconds"
       | "closing_card"
       | "made_with"
+      | "look_sounds"
       | "account_brand"
       | "logo_spots"
       | "summary_hold_seconds"
@@ -156,6 +161,9 @@ export function matchExportFields(
     title_page_duration_seconds: clampSeconds(options.titlePageDurationSeconds, MIN_CARD_SECONDS),
     closing_card: options.closingCard,
     made_with: options.madeWith,
+    // Sent only when off: the server mixes a Look's sounds by default, so an
+    // untouched form sends the body it always sent.
+    ...(options.lookSounds ? {} : { look_sounds: false }),
     account_brand: options.accountBrand,
     logo_spots: normalizeSpots(options.logoSpots),
     summary_hold_seconds: clampSeconds(options.summaryHoldSeconds, 0),

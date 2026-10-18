@@ -545,7 +545,11 @@ it; `looks check` says why.
 ## Sound
 
 A Look can carry sound: music under its cards and effects on their moments.
-It is mixed over a rendered video afterwards, not during the render:
+It is mixed over a rendered video afterwards, not during the render. The
+desktop app's match export does it for you: a Look with a `sounds/` folder
+shows **Look sounds** under Look on the Export page, on by default, and the
+MP4 it writes carries the mix (`--no-look-sounds` on `splitsmith match
+export` turns it off). On an export you already have:
 
 ```
 splitsmith looks dress match.mp4 --look mylook
