@@ -1,6 +1,12 @@
 {
   "entries": [
     {
+      "id": "broadcast-sound",
+      "date": "2026-10-18",
+      "title": "The Broadcast Look has sound",
+      "body": "Broadcast now plays a theme under the title page and closing card, whooshes on its cards and a stage summary that ticks as it counts up. Turn Look sounds off under Look on the Export page."
+    },
+    {
       "id": "color-grade",
       "date": "2026-10-18",
       "title": "Colour grade your video",

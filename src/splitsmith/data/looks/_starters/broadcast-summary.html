@@ -167,6 +167,15 @@
     });
   }
 
+  // Sound from the data: the board ticks while its figures count up and
+  // lands with an impact. A board with no figures does not tick, and a DQ
+  // lands without the impact: it is not a result to celebrate.
+  window.sounds = function () {
+    var cues = [];
+    if (cells.length) cues.push({ play: 'tick.m4a', every: 0.08, for: COUNT, gain: 0.35 });
+    if (!F.dq) cues.push({ play: 'impact.m4a', at: COUNT, hit: 0.09, gain: 0.9 });
+    return cues;
+  };
   window.duration = function () { return COUNT; };
   window.poster = function () { return COUNT; };
   window.seek = function (t) { paint(Math.min(1, t / COUNT)); };

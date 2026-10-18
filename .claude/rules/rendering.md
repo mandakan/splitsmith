@@ -42,7 +42,10 @@ argv test proves nothing about pixels.
   present, so a zero-card render's argv is unchanged.
 - A lower third is the one card that is not a segment: it rides the stage's own
   filter graph (`overlay_card.lower_third_filters`), upstream of the grid's
-  hold `concat`, so it never reaches a summary frame.
+  hold `concat`, so it never reaches a summary frame. Its clock is the
+  stage's (t = 0 on the cut), so its template's `window.sounds()` cues are
+  written on the stage's timeline entry
+  (`test_a_lower_thirds_template_sounds_ride_its_stage`).
 - Backdrop grabs differ by end, deliberately: a *head* grab takes the first
   frame (`-frames:v 1`); a *tail* grab reads a 0.5 s window and keeps the last
   decoded frame, because a seek to the last timestamp can come back empty. The

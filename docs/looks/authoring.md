@@ -49,7 +49,11 @@ them with `--templates` only when you mean to edit them; a copy you never
 edit freezes the cards at the day you made it. `splitsmith looks check`
 warns about such a copy once the shipped template has moved on, and
 `splitsmith looks refresh <name>` removes every unedited copy (an edited
-file is never touched). A copy of your own Look carries every file. Pick a Look on the Export page, or
+file is never touched). A copy of your own Look carries every file. Every
+copy carries the source's [sound](#sound): its `sounds` block and the files
+in its `sounds/` folder, even a copy that follows the shipped templates,
+since a sound file is something its cues play, not code that goes stale.
+Pick a Look on the Export page, or
 with `--theme <name>` on `match export` and `--overlay-theme <name>` on
 `compare export`.
 
@@ -75,6 +79,10 @@ fills every slot a template can draw:
 - **Match summary** (`table`).
 - **YouTube thumbnail.**
 - **Sting** (`push`).
+- **Sound**: a theme under the title page and closing card, whooshes on the
+  cards, a sting timed to the push, and a summary that ticks as it counts
+  up and lands on an impact. The starter brings the sound files and the
+  `sounds` block with it (see [Sound](#sound)).
 
 Between them they read every field a template can be given, each commented
 where it is read. Start there to see what a field holds, then delete what your
@@ -208,7 +216,9 @@ window.seek = function (t) { a.currentTime = t * 1000; };
 A lower third is drawn over the first seconds of a stage, so cover only a
 corner and leave the rest transparent. `data.card.text` is the stage name and
 `info` the round count. Animate the way in only; the renderer fades it out at
-the end of the card.
+the end of the card. Its clock is the stage's: `t = 0` is the cut into the
+stage, so its `window.sounds()` cues play there, over the stage's own audio.
+Keep them quiet.
 
 ## Stings
 
@@ -617,6 +627,31 @@ summary or a sting alike), and writes the cues into the video's
 Look's `sounds/` folder. A cue that names a missing file or a field it does
 not know is left out with a line saying which card it was on, and a
 `sounds()` that throws plays nothing: a sound never costs the card.
+
+### Broadcast, worked through
+
+The shipped Broadcast Look uses both, and is the one to copy from
+(`splitsmith looks new mine --starter broadcast` brings its sounds along):
+
+| Where | What | Declared in |
+|---|---|---|
+| Title page, closing card | `theme.m4a` as a bed, faded out | `look.json`: the same for every video |
+| Match summary | `whoosh.m4a` as it comes in | `look.json` |
+| Title page, slate, closing card | `whoosh.m4a` as the card rises | `broadcast-card.html`, by `data.card.slot` |
+| Lower third | `swoosh-soft.m4a`, quiet, over the stage | `broadcast-card.html` |
+| Sting | `sting.m4a` peaking as the panel covers the frame, `swoosh-soft.m4a` out | `broadcast-sting.html`, at 40 % and 80 % of the transition's length |
+| Stage summary | `tick.m4a` while the board counts up, `impact.m4a` as it lands | `broadcast-summary.html`: no figures, no ticks; a DQ lands without the impact |
+
+The rule it follows: a sound whose timing is fixed goes in the map, and a
+sound whose timing or choice depends on the card's data goes in the
+template, which knows its own animation. Each cue's `hit` is where the
+file's loudest moment sits, measured when the file was made (the Look's
+`sounds/LICENSES.md` lists them), so `at` can name the frame it belongs to.
+
+Keep sound files short, trimmed and loudness-matched: they ship with the
+Look and go into every video drawn with it. Broadcast's six files come to
+under 400 KB. If you publish a Look, use sounds whose licence lets you, and
+name a [credits](#credits) file when it asks for attribution.
 
 ## Colour grade
 

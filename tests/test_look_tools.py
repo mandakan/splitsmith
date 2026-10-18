@@ -188,6 +188,35 @@ def test_the_shipped_broadcast_look_is_the_broadcast_starter() -> None:
     assert manifest["slots"] == look_tools._STARTER_SLOTS["broadcast"]
 
 
+def _sound_bytes(root: Path) -> dict[str, bytes]:
+    return {p.name: p.read_bytes() for p in sorted((root / "sounds").glob("*"))}
+
+
+@pytest.mark.parametrize(
+    "kwargs", [{"from_look": "broadcast"}, {"starter": "broadcast"}], ids=["from", "starter"]
+)
+def test_a_copy_of_broadcast_carries_its_sounds(user_dir: Path, kwargs: dict[str, str]) -> None:
+    """A copy names Broadcast's cues and carries the files they play: sound
+    files are assets, not templates that go stale, so even a copy that
+    follows the shipped templates takes them. Without them the Export page
+    would offer no sound and the dress pass would refuse the map."""
+    from splitsmith import audio_dress
+
+    root = look_tools.new_look("mine", **kwargs)
+    shipped = looks.shipped_looks_dir() / "broadcast"
+    assert _sound_bytes(root) == _sound_bytes(shipped)
+    manifest = json.loads((root / "look.json").read_text(encoding="utf-8"))
+    assert manifest["sounds"] == json.loads((shipped / "look.json").read_text(encoding="utf-8"))["sounds"]
+    assert looks.look_has_sounds(looks.load_look("mine"))
+    assert audio_dress.load_sound_map(root).cues
+
+
+def test_a_copy_of_a_look_without_sounds_has_none(user_dir: Path) -> None:
+    root = look_tools.new_look("mine", from_look="clean")
+    assert not (root / "sounds").exists()
+    assert "sounds" not in json.loads((root / "look.json").read_text(encoding="utf-8"))
+
+
 def test_new_refuses_an_existing_look_a_shipped_name_and_a_bad_name(user_dir: Path) -> None:
     look_tools.new_look("club", from_look="clean")
     with pytest.raises(look_tools.LookToolError, match="already exists"):

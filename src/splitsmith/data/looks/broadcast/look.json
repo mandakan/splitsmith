@@ -103,5 +103,28 @@
     "transition": {
       "push": "broadcast-sting.html"
     }
+  },
+  "sounds": {
+    "cues": [
+      {
+        "bed": "theme.m4a",
+        "fade": 1.0,
+        "gain": 0.5,
+        "on": "title_page"
+      },
+      {
+        "bed": "theme.m4a",
+        "fade": 1.5,
+        "gain": 0.5,
+        "on": "closing"
+      },
+      {
+        "at": 0.07,
+        "gain": 0.8,
+        "hit": 0.07,
+        "on": "match_summary",
+        "play": "whoosh.m4a"
+      }
+    ]
   }
 }

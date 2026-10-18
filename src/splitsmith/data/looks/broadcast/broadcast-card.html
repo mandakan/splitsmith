@@ -113,6 +113,17 @@
     document.body.appendChild(credit);
   }
 
+  // Sound, on the card's own clock (t = 0 is the cut into it). Files are
+  // in the Look's sounds/ folder; hit is how far into the file its loudest
+  // moment sits, so that moment lands on at, as the card starts to rise.
+  // The lower third plays over a stage's first seconds, so it is a quieter
+  // swoosh. The theme under the title page and closing card is in
+  // look.json: the same for every video, where these follow the slot.
+  // Guide: docs/looks/authoring.md#sound
+  window.sounds = function () {
+    if (lower) return [{ play: 'swoosh-soft.m4a', at: 0.26, hit: 0.26, gain: 0.35 }];
+    return [{ play: 'whoosh.m4a', at: 0.07, hit: 0.07, gain: 0.8 }];
+  };
   window.duration = function () { return RISE; };
   window.poster = function () { return RISE; };
   window.seek = function (t) {

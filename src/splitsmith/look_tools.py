@@ -103,6 +103,34 @@ _STARTER_SLOTS: dict[str, dict[str, object]] = {
 }
 
 
+#: The shipped Look whose sounds a starter carries: its templates'
+#: ``window.sounds()`` name those files.
+_STARTER_SOUNDS: dict[str, str] = {"broadcast": "broadcast"}
+
+
+def _sound_files(root: Path) -> dict[str, Path]:
+    """The files of the Look folder ``root``'s ``sounds/`` folder, by path
+    relative to ``root``: what a copy carries even when it follows the
+    shipped templates, since a sound is an asset the cues name, not code
+    that goes stale."""
+    folder = root / "sounds"
+    if folder.is_symlink() or not folder.is_dir():
+        return {}
+    return {
+        str(p.relative_to(root)): p for p in sorted(folder.rglob("*")) if p.is_file() and not p.is_symlink()
+    }
+
+
+def _sound_map(root: Path) -> object | None:
+    """The raw ``sounds`` block of ``root``'s manifest, which
+    ``LookManifest`` does not carry (``audio_dress`` reads it on its own)."""
+    try:
+        raw = json.loads((root / MANIFEST_FILE).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    return raw.get("sounds") if isinstance(raw, dict) else None
+
+
 def _starter_files(starter: str) -> list[str]:
     """Every template file a starter's slots name, its own first."""
     files = [STARTERS[starter]]
@@ -239,13 +267,20 @@ def new_look(
         manifest = base.manifest.model_dump(exclude={"source"})
         manifest.update(name=name, label=_label(name), slots=_STARTER_SLOTS[starter])
         files = {file: shipped_looks_dir() / "_starters" / file for file in _starter_files(starter)}
+        if starter in _STARTER_SOUNDS:
+            sounds_root = shipped_looks_dir() / _STARTER_SOUNDS[starter]
+            files.update(_sound_files(sounds_root))
+            if (sound_map := _sound_map(sounds_root)) is not None:
+                manifest["sounds"] = sound_map
     else:
         source = strict_look(from_look or DEFAULT_LOOK)
         manifest = source.manifest.model_dump(exclude={"source"})
         manifest.update(name=name, label=_label(name))
+        if (sound_map := _sound_map(source.root)) is not None:
+            manifest["sounds"] = sound_map
         if source.source == "shipped" and not templates:
             manifest.update(slots={}, base=source.name)
-            files = {}
+            files = _sound_files(source.root)
         else:
             # The whole folder, not only the templates the manifest names: a
             # template may load an image or a stylesheet beside it. Its
@@ -490,7 +525,7 @@ def _judge(
             f"{first.duration:g} s, poster at {first.poster:g} s, {cases}" if first.duration > 0 else cases
         )
         if first.sounds:
-            message += f", {len(first.sounds)} sounds"
+            message += f", {len(first.sounds)} sound{'' if len(first.sounds) == 1 else 's'}"
         items.append(CheckItem(subject, "ok", message))
     return items
 

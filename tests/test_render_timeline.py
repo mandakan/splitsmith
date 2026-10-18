@@ -116,6 +116,32 @@ def test_a_cards_template_sounds_ride_its_entry(tmp_path: Path) -> None:
     assert read_timeline(timeline_path(tmp_path / "m.mp4")) == result.timeline
 
 
+def test_a_lower_thirds_template_sounds_ride_its_stage(tmp_path: Path) -> None:
+    """A lower third is drawn inside its stage's segment, not as an item of
+    its own, and its clock is the stage's (t = 0 on the cut): what its
+    template declares is written on the stage's entry."""
+    from .test_mp4_render import _FakeRasterizer
+
+    cues = ({"play": "swoosh.wav", "at": 0.25},)
+
+    class _Sounding(_FakeRasterizer):
+        def render_template_frames(self, template, **kwargs):  # type: ignore[no-untyped-def]
+            from dataclasses import replace
+
+            return replace(super().render_template_frames(template, **kwargs), sounds=cues)
+
+    result = mp4_render.render_mp4(
+        _carded_composition(tmp_path, lower_third=True),
+        output_path=tmp_path / "m.mp4",
+        work_dir=tmp_path / "work",
+        runner=MagicMock(side_effect=_ok),
+        rasterizer=_Sounding(),
+    )
+    stages = [e for e in result.timeline if e.kind == "stage"]
+    assert [e.cues for e in stages] == [cues, cues]
+    assert read_timeline(timeline_path(tmp_path / "m.mp4")) == result.timeline
+
+
 def test_a_stage_entry_says_whether_it_carried_a_hud(tmp_path: Path) -> None:
     """A stage entry records whether its segment had an overlay, so the dress
     pass can say a stage went out without its HUD; other items say nothing."""
