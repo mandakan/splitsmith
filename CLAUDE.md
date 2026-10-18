@@ -84,141 +84,46 @@ A green suite over a change is evidence the change didn't break anything known -
 - A real-time tool. All processing is offline batch.
 - A library. Single-purpose application.
 
+## Where guidance lives
+
+This file loads into every session and subagent, so it holds only what applies
+project-wide. Subsystem rules live in `.claude/rules/*.md`, each with a `paths:`
+frontmatter listing the files it covers; Claude Code loads one when a matching
+file is read or edited. The sections below say which file covers what.
+
+When you add guidance: if it is about one subsystem, put it in that rule file
+(or a new one) and add any file it governs to its `paths:`. Write the rule, the
+reason it is not obvious, and the test that pins it; leave out dates, issue
+numbers and how it was verified, which belong in the PR. A rule that lives in
+`ui/server.py` cannot be scoped (every task touches it), so it gets a one-line
+mention here. `scripts/check_claude_md.py` (CI: `claude-md.yml`) fails when
+this file passes 40 KB, a rule file is unscoped, a `paths:` glob matches
+nothing, or a named rule file does not exist.
+
 ## Detection pipeline
 
-Beep detection runs inside per-stage derived search windows for multi-stage single-take videos (ffmpeg extracts the window's audio via -ss/-t; results are offset back to source-absolute). Its candidates are ranked by a logistic regression over seven per-run features (``beep_features.candidate_features``, the one implementation both runtime and trainer use), and confidence is a calibrated head over (logit, margin) (#949, spec 2026-10-06). The numbers are ``BeepRankerConfig`` defaults in ``config.py``, pasted from ``ranker_report.json``'s ``models.lr.final_fit``; ``tests/test_beep_ranker_config.py`` fails on any drift. To retrain after adding fixtures: rebuild the manifest, run ``scripts/train_beep_ranker.py``, paste the new ``final_fit``, regenerate ``baseline.json`` (``scripts/eval_beep_detector.py --track clip --json ...``) and list every newly wrong fixture in the PR. ``ranker: heuristic`` is the old hand-written product, kept as the escape hatch. Out of fold it picks the beep on 106 of the 111 fixtures where the beep is a candidate at all; most remaining misses are the 16 fixtures where it never is (run merging, late onsets), and every confident mistake so far is one of those. Those were edge errors, not ranking errors: the ranker chose the tone's run and the rise foot landed off the tone. Every candidate's time is now the timer tone's start (``beep_tone.tone_onset``, ``BeepDetectConfig.tone_onset``; docs/METHODOLOGY.md step 4), and ``ranker: heuristic`` with ``tone_onset: false`` is the old product (``baseline_heuristic.json``). Many corpus beep labels had been confirmed from the old edge's picks, so a detector scored against them looked right where it was wrong: on 2026-10-17, 33 labels were moved onto their tones (read on spectrograms; the match projects on X9 too, each move in its audit doc's ``audit_events`` as ``beep_moved_to_tone``). Score a beep change against labels checked on a spectrogram, and re-extract a fixture's CLAP / PANN caches when its beep moves: its candidates move with it, which the caches' WAV stamp cannot see.
+Beep detection is a learned ranker over per-run candidates, timed at the timer
+tone's start; a secondary camera's beep can also be placed from the primary's.
+Shot detection is a 3-voter ensemble (envelope onsets generate candidates; CLAP
+and a GBDT over CLAP/PANN features vote) with a whole-stage decoder choosing the
+final set. The rules live in `.claude/rules/beep-detection.md` and
+`.claude/rules/shot-detection.md`, loaded with the files they cover.
 
-A secondary camera's beep is also found from the primary's
-(``beep_cross.place_beep``, #1442): the primary clip's onset pattern from its
-beep through the stage slid over the secondary's (``stage_match``; contrast
->= ``MIN_CONTRAST`` 1.2 is confident), then where the primary timer's own
-frequency starts near it (``line_onset_near``), kept only within 60 ms of the
-shots' projection. ``scripts/eval_beep_from_angle.py`` measures it over every
-corpus stage with reviewed beeps on two or more angles (2026-10-18: 171 of
-198 pairs confident, none more than 50 ms off, 133 within 5 ms; the old
-``cross_align`` envelope landmark was seconds off on 32 of 194). The beep job
-uses it for a secondary (``_try_align_secondary_to_primary``): the proposed
-beep when in-stream detection finds none, ``StageVideo.beep_aligned_time``
-(a "from primary" candidate in beep review) when it is confident, and an
-in-stream beep that disagrees with it by more than 60 ms is never
-auto-trusted. Confirming the primary's beep re-runs detection for every
-unconfirmed, not hand-set secondary of the stage (``_replace_secondary_beeps``).
+The beep job lives in `ui/server.py`: `_try_align_secondary_to_primary` places a
+secondary's beep from the primary's, and an in-stream beep that disagrees with
+that placement by more than 60 ms is never auto-trusted; confirming the
+primary's beep re-runs detection for every unconfirmed, not hand-set secondary
+(`_replace_secondary_beeps`).
 
-What each camera's audio does to detection (mono or stereo, compression, firmware changes, how to
-recognise its files) is in ``docs/cameras.md``. Read it before tuning a threshold or a voter C
-feature, and add to it, dated, whenever a measurement shows something new about a camera.
+What each camera's audio does to detection is in `docs/cameras.md`: read it
+before tuning a threshold or a feature, and add to it, dated, whenever a
+measurement shows something new about a camera.
 
-A detected shot carries **two times**: ``Shot.time_absolute`` is the shot time
-(the rise foot, ``splitsmith.rise_foot``, docs/METHODOLOGY.md) that every
-output reports, and ``Shot.feature_time`` is the detector's own leading-edge
-walk, where candidates are found and scored. Every model input reads
-``Shot.scoring_time`` (the ensemble, TTA, the build, the CLAP/PANN caches,
-the sweeps): computing features from ``time_absolute`` shifted them between
-the two Vanguard firmwares and made the September footage undetectable held
-out (#1386). ``feature_time`` is never serialized.
-
-The shot-detection pipeline is a 3-voter ensemble, not raw signal processing:
-
-- **Voter A** -- ``splitsmith.shot_detect`` envelope onsets, gated at the
-  auto-calibrated ``min_confidence`` floor (the lowest positive-shot
-  confidence across the calibration set). This is the candidate generator;
-  every other voter sees only candidates A emits.
-- **Voter B** -- threshold on the CLAP shot-vs-not-shot prompt similarity
-  differential; calibrated against labeled fixtures.
-- **Voter C** -- a ``GradientBoostingClassifier`` over hand-crafted
-  features + CLAP per-prompt similarities + PANN gunshot probability;
-  calibrated to a target recall on the same set. Trained with
-  ``sklearn`` in the build script, but shipped as one ONNX graph per
-  camera class and run through ``onnxruntime`` -- nothing under
-  ``src/`` imports sklearn or unpickles an estimator. Switches
-  to a per-stage adaptive top-(K+slack) mode when the audit JSON has
-  ``stage_rounds.expected``. The PANN gunshot-class probability used to
-  be a separate voter D; it is now a feature column on voter C so the
-  GBDT learns its interaction with the other inputs instead of casting
-  an independent vote.
-- **Consensus** -- a candidate is kept when ``vote_total + apriori_boost
-  >= consensus`` (default 2-of-3). The apriori boost biases toward
-  expected-shot-count regions when prior info is known.
-- **Whole-stage decoder** (``ensemble/decoder.py``, on by default since
-  2026-10-16) -- replaces the consensus and the headcam amplitude veto when
-  the calibration has a ``decoder`` block: one logistic recalibration over
-  the voters' signals gives each candidate P(shot), and a dynamic program
-  keeps the best-scoring *set* for the stage under a split prior (the
-  corpus's splits) and an end prior (the last shot at beep + stage time;
-  off when the clip ends early). It needs only the beep and the stage time;
-  the round count is not used (its weight tunes to 0). Fitted by the build
-  on leave-one-match-out voter C scores (``scripts/fit_stage_decoder.py``);
-  ``--decoder-only`` fits it for an existing calibration and writes only
-  that block, which is how the shipped one got it.
-  ``SPLITSMITH_STAGE_DECODER=0`` keeps the consensus (=1 forces the
-  decoder). Held out it took F1 from 94.2 to 96.0 with round counts and
-  93.3 to 95.9 without (headcams 86.5 to 92.0 blind); its worst stages are
-  a camera whose shots score low and another bay's shots that score high.
-
-The pipeline lives in ``src/splitsmith/ensemble/`` and is wired into the
-production UI's ``/api/stages/{n}/shot-detect`` endpoint. Calibration
-artifacts ship under ``src/splitsmith/data/`` (built once by
-``scripts/build_ensemble_artifacts.py``) -- ``ensemble_calibration.json``
-plus the voter C / voter E ONNX graphs it names; the FastAPI server
-lazy-loads the CLAP / PANN / GBDT models on the first detection. Re-run
-the build script after adding new audited fixtures. Set
-``SPLITSMITH_ARTIFACTS_DIR=/path/to/experimental`` to point the engine
-at a different artifact set for A/B comparisons without rebuilding the
-shipped one (see ``splitsmith.runtime`` for the full env-var list).
-
-Fixtures carry a **review status** (#1363, ``fixture_schema.review_status``):
-one snapped from another angle (``anchor`` block, ``promote-from-anchor``
-history) is ``needs_review`` until its ``review`` block says ``reviewed``;
-everything else counts as hand-audited. ``scripts/promote_secondary_angles.py``
-snaps every secondary angle that has no fixture onto its stage's reviewed
-fixture (dry run by default, ``--write`` to promote; a snap of a snap is
-refused), so the corpus holds unreviewed footage on purpose: the build trains
-on it by default and ``--reviewed-only`` (``fixture_stems(reviewed_only=True)``)
-leaves it out. Compare both before trusting a number.
-``scripts/fixture_review_inventory.py`` scores every fixture for review
-(``lab.inventory``: needing review, snapped, the promotion report's share of
-shots at the snap window's edge, and how much the stored leading edges
-disagree with a stricter onset shot to shot) into
-``build/fixture_review_inventory.json``; the lab's review queue
-(``/dev/review``) puts shot times to check first in that order, and "Approve
-to corpus" or the fixture editor's "Mark reviewed" (``lab.confirm_review``)
-writes ``review.status = reviewed``. A label pass never clears a fixture whose
-times need checking.
-
-Fixture audio is **not in git** (#1363): ``tests/fixtures/audio.lock.json``
-maps every fixture WAV to its sha256, the bytes live content-addressed in a
-public-read R2 bucket (``wav/<sha256>.wav``) and ``tests/fixtures/.gitignore``
-keeps the local copies out. One WAV is also still in git on purpose, the
-smoke fixture ``stage-shots-tallmilan-2026-stage3-s97dcec94-pin.wav`` (the slim
-wheel and both desktop smokes read it, one in a bare container). CI's python
-shards fetch the WAVs the tests read (``fetch --only tests/fixtures/audio.ci.txt``,
-cached on the lock and the list); a new test that reads a fixture WAV adds
-it to that list. ``uv run python scripts/fixture_audio.py fetch``
-before a sweep (there a missing WAV is a skipped fixture, silently);
-``push <stem>`` uploads a new or changed WAV to ``splitsmith-fixtures``
-(served at ``fixtures.splitsmith.app``) through ``wrangler r2 object put``,
-so it needs a ``wrangler login`` on the account that owns splitsmith.app, and
-records it. Never commit a fixture WAV again.
-
-The calibration build checks its inputs before it fits anything
-(``ensure_audio`` and ``scripts/feature_caches.py``): every fixture's WAV
-against the lock (missing ones fetched from R2; one the lock lacks, one R2
-cannot serve, or a local one that differs from the lock, which is a re-cut
-not pushed yet, stops the build), and its CLAP / PANN caches against that
-WAV by the ``wav_sha256`` stamped into them (an unstamped cache is checked
-once against fresh candidate times, then stamped). A stale or missing cache
-stops the build unless ``--extract``. A row-count check let a re-cut clip's
-old features through. ``--matches`` picks the corpus by match; ``--out
-build/models/<name>`` writes a **model bundle** (``ensemble.model_bundle``:
-calibration, ONNX graphs, ``heldout/`` with per-match leave-one-match-out
-figures and labelled OOF rows, and ``model.json`` naming every file and
-fixture WAV by sha256) and leaves the shipped model and the parity
-references alone. The lab's Models page lists the shipped model and every
-bundle and compares any two (``/dev/models?model=&vs=``). Choosing a
-bundle at runtime is not built.
-
-The review-time variant generator ``scripts/build_ensemble_fixture.py``
-still exists for offline comparison under ``build/ensemble-review/``.
+Fixture audio is **not in git**: `tests/fixtures/audio.lock.json` maps each WAV
+to its sha256 and the bytes live in R2 (`scripts/fixture_audio.py fetch` /
+`push <stem>`). **Never commit a fixture WAV** (the one smoke fixture already in
+git is the exception). CI fetches only the WAVs in `tests/fixtures/audio.ci.txt`,
+so **a new test that reads a fixture WAV adds it to that list**.
 
 ## Rendered cards, Looks, upright layouts, identity
 

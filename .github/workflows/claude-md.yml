@@ -1,0 +1,22 @@
+name: CLAUDE.md guard
+
+# Unfiltered on purpose: ci.yml skips Markdown-only changes and the Python
+# suite skips SPA-only ones, but either can break this check (a grown
+# CLAUDE.md, or a renamed file a rule's `paths:` glob names). It is a
+# stdlib script and takes about a second.
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: ["**"]
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: CLAUDE.md size + rule globs
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - run: python3 scripts/check_claude_md.py
