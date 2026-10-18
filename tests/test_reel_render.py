@@ -189,6 +189,37 @@ def test_render_reel_encodes_every_item_then_stitches(tmp_path, monkeypatch):
     assert result.degradations == ()
 
 
+def test_a_reused_work_dir_never_serves_a_stale_card_clip(tmp_path, monkeypatch):
+    class _Animated(_FakeFrames):
+        duration = 1.0
+
+    class _AnimatedRaster(_FakeRaster):
+        def render_template_frames(self, template, *, context, width, height, fps, max_seconds):
+            return _Animated(width, height)
+
+    def runner(cmd, **kw):
+        Path(cmd[-1]).parent.mkdir(parents=True, exist_ok=True)
+        Path(cmd[-1]).write_bytes(b"x")
+        return subprocess.CompletedProcess(cmd, 0, "", "")
+
+    written: list[Path] = []
+    monkeypatch.setattr(
+        "splitsmith.reel_render.write_motion_clip", lambda frames, *, out, **kw: written.append(out)
+    )
+    work = tmp_path / "w"
+    work.mkdir()
+    (work / "001_intro_motion.mov").write_bytes(b"an older render's clip")
+    render_reel(
+        (ReelCard("001_intro", "intro", 1.0, "Bromma"),),
+        sequence=UP,
+        output_path=tmp_path / "reel.mp4",
+        work_dir=work,
+        runner=runner,
+        rasterizer=_AnimatedRaster(),
+    )
+    assert written == [work / "001_intro_motion.mov"]
+
+
 def test_a_failed_frame_grab_holds_the_callout_on_black(tmp_path, monkeypatch):
     calls: list[list[str]] = []
 

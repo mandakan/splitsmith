@@ -344,8 +344,9 @@ def render_reel(
                 clip_path = work_dir / f"{item.name}_motion.mov"
 
                 def write(frames=motion.frames, clip_path=clip_path) -> None:
-                    if not clip_path.exists():
-                        write_motion_clip(frames, out=clip_path, fps=fps, ffmpeg_binary=ffmpeg_binary)
+                    # Always written: each card prepares once per render, and a
+                    # clip left in a reused work dir is an older render's.
+                    write_motion_clip(frames, out=clip_path, fps=fps, ffmpeg_binary=ffmpeg_binary)
 
                 cmd = card_command(
                     png,

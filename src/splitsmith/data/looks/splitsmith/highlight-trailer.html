@@ -16,7 +16,7 @@
     align-items: center; justify-content: center; text-align: center; padding: 0 6vw;
   }
   .text {
-    font-family: "Splitsmith Display"; text-transform: uppercase; line-height: 0.95;
+    font-family: "Splitsmith Display"; text-transform: uppercase; line-height: 1.12;
     font-size: 11vmin; letter-spacing: 0.02em;
   }
   .figure { font-family: "Splitsmith Mono"; font-size: 26vmin; line-height: 1; margin-top: 2vmin; }
@@ -39,19 +39,20 @@
     a.pause();
     animations.push(a);
   }
-  // The mood before the first hit: the name surfaces out of the dark with its
-  // letters drawing together, a thin rule grows, the small line arrives late,
-  // and the whole frame pushes in slowly until the cut.
+  // The mood before the first hit: the name surfaces out of the dark, a thin
+  // rule grows, the small line arrives late. Only opacity, blur and
+  // transforms animate: the text is laid out once at its final size, so no
+  // frame re-wraps it (animating letter-spacing re-flowed the lines and the
+  // words jumped between them).
   function intro(stack) {
-    var total = H.duration_seconds * 1000;
     var text = document.createElement('div');
     text.className = 'text';
     text.textContent = H.text;
     text.style.color = S.theme.ink;
     stack.appendChild(text);
     add(text, [
-      { opacity: 0, letterSpacing: '0.6em', filter: 'blur(1.2vmin)' },
-      { opacity: 1, letterSpacing: '0.04em', filter: 'blur(0)' }
+      { opacity: 0, filter: 'blur(1.2vmin)', transform: 'scale(1.08)' },
+      { opacity: 1, filter: 'blur(0)', transform: 'scale(1)' }
     ], 300, 2600, 'cubic-bezier(0.25, 0.1, 0.2, 1)');
     var bar = document.createElement('div');
     bar.className = 'bar';
@@ -67,7 +68,6 @@
       stack.appendChild(el);
       add(el, [{ opacity: 0 }, { opacity: 1 }], 2500 + 150 * i, 700, 'ease-out');
     });
-    add(stack, [{ transform: 'scale(1)' }, { transform: 'scale(1.06)' }], 0, total, 'linear');
   }
   document.addEventListener('DOMContentLoaded', function () {
     var stack = document.getElementById('stack');
