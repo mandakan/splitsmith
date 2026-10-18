@@ -115,7 +115,9 @@ class HudDataProvider:
     """One opt-in ``data`` key."""
 
     key: str
-    #: Bump when the output changes for the same inputs.
+    #: Bump when the output changes for the same inputs; the record of every
+    #: overlay drawn with it carries it (``extras_identity``), and
+    #: ``tests/test_hud_data_pins.py`` fails until you do.
     version: int
     build: Callable[[HudInputs], Any]
 
@@ -360,7 +362,8 @@ register(HudDataProvider("scoring", 2, lambda i: scoring_data(i.shots, events=i.
 register(
     HudDataProvider(
         "ammo",
-        2,
+        # 3: a reload refills to the capacity, never one over (0.78.0).
+        3,
         lambda i: ammo_plan(
             i.shots, beep_in_clip=i.beep_in_clip, events=i.events, capacity=i.extras.capacity
         ),

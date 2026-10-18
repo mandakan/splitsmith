@@ -1,0 +1,18 @@
+{
+  "ammo": {
+    "digest": "62cce409d78dcd7011e41de8d3a162d9777a24e0f0014a9f6300ab8e3c4b47a9",
+    "version": 3
+  },
+  "bursts": {
+    "digest": "4dfe7a737d4bd2f201bd85a7f0ee4a8f08cb24efcf2c39665902304253c1676d",
+    "version": 1
+  },
+  "scoring": {
+    "digest": "76f19b6c88f2eb324e75836ab7c2c53e947539c4a8cded8da3d8cb01c44b93aa",
+    "version": 2
+  },
+  "stage": {
+    "digest": "253ab7de0d7f0afa79c16042b11c6860b7a025c1f32346f23affcf0d19faa1a3",
+    "version": 1
+  }
+}

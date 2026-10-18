@@ -123,6 +123,14 @@ class OverlayStyleFields(BaseModel):
         )
 
 
+#: The version of what :func:`hud_stage_data` hands every template as
+#: ``data.stage``. Bump it when that output changes for the same shots and
+#: regions (``tests/test_hud_data_pins.py`` fails until you do): a template
+#: overlay's record carries it from version 2 on, so every overlay drawn with
+#: the old data misses once and is drawn again. Version 1 records no key, so
+#: records from before it existed match.
+STAGE_DATA_VERSION = 1
+
 #: The ``layout`` an upright overlay's record carries: the layout that
 #: keeps out of the platform safe area (issue #1394). Bump the suffix when
 #: the upright layout changes in a way the template identity cannot show
@@ -260,6 +268,10 @@ def overlay_settings(
     other record carries no such key. Passed like ``audit_revision``, read
     before the render.
 
+    A template style also records ``stage_data`` (:data:`STAGE_DATA_VERSION`)
+    once that is past 1: a rule change in ``data.stage`` moves the pixels
+    without moving any input above.
+
     An overlay drawn with the export's "Use Breakdown" off records
     ``breakdown: false``: it drew no region, so it never serves an export that
     wants them, nor one with regions an export that turned them off. On is
@@ -276,6 +288,8 @@ def overlay_settings(
     }
     if variant != DEFAULT_VARIANT:
         settings["template"] = overlay_template_identity(look, variant) if template is _READ_NOW else template
+        if STAGE_DATA_VERSION > 1:
+            settings["stage_data"] = STAGE_DATA_VERSION
     if upright:
         settings["layout"] = UPRIGHT_LAYOUT
     if short_head is not None:
@@ -478,6 +492,7 @@ __all__ = [
     "SLOW_ABOVE",
     "SpeedTier",
     "TIERED_CLASSES",
+    "STAGE_DATA_VERSION",
     "UPRIGHT_LAYOUT",
     "declared_positions",
     "hud_frame_plan",

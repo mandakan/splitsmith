@@ -1599,7 +1599,13 @@ Classic included, carries ``theme`` (``overlay_hud.overlay_theme_identity``:
 content-named file name only, so a hosted materialisation agrees), so a
 palette or font edit to the Look redraws. ``audit_revision``, ``template``
 and ``theme`` are all read *before* the render; a null ``template`` or
-``theme`` never matches. One rule decides reuse,
+``theme`` never matches. The data a template draws is code, which none of
+those see: ``data.stage`` carries ``overlay_hud.STAGE_DATA_VERSION`` (in the
+record as ``stage_data`` from 2 on) and each opt-in provider its
+``HudDataProvider.version`` (in ``hud_data``), and
+``tests/test_hud_data_pins.py`` pins their outputs on sample stages, failing
+until a changed output comes with a bumped version (the 0.78.0 reload refill
+fix did not bump, and exports kept the old ammo count). One rule decides reuse,
 ``ui/exports.overlay_record_matches``, for the match export job, the MCP
 tool and ``splitsmith match export`` alike (the CLI wants the recorded style
 and Look, like the MCP tool, unless an explicit ``--theme`` asks for another
