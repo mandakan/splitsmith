@@ -212,3 +212,37 @@ def resolve_grade(choice: str, look: Look, *, strength: float | None = None) -> 
             raise GradeError(f"no LUT of yours named {name!r}")
         return ResolvedGrade(source=path, strength=s, label=name.rsplit("-", 1)[0])
     raise GradeError(f"unknown grade {choice!r}: look, none, preset:<id> or user:<file>")
+
+
+def _slug(stem: str) -> str:
+    slug = re.sub(r"[^a-z0-9]+", "-", stem.lower()).strip("-")[:40].strip("-")
+    return slug or "lut"
+
+
+def add_user_lut(source: Path) -> str:
+    """Check ``source`` is a 3D ``.cube`` this module reads and keep a copy in
+    :func:`user_luts_dir` as ``<slug>-<12hex>.cube``, named by its bytes (the
+    same file twice is one copy). Returns the name a ``user:`` grade takes.
+    Raises :class:`GradeError` for a file it would not read."""
+    if source.is_symlink() or not source.is_file():
+        raise GradeError(f"{source.name} is not a file")
+    data = source.read_bytes()
+    if len(data) > MAX_BYTES:
+        raise GradeError(f"{source.name} is over {MAX_BYTES // (1024 * 1024)} MB")
+    parse_cube(data.decode("utf-8", errors="replace"))
+    name = f"{_slug(source.stem)}-{hashlib.sha256(data).hexdigest()[:12]}.cube"
+    folder = user_luts_dir()
+    folder.mkdir(parents=True, exist_ok=True)
+    out = folder / name
+    if not out.exists():
+        partial = folder / f".{name}.partial"
+        partial.write_bytes(data)
+        partial.replace(out)
+    return name
+
+
+def list_user_luts() -> list[str]:
+    folder = user_luts_dir()
+    if not folder.is_dir():
+        return []
+    return sorted(p.name for p in folder.iterdir() if USER_LUT_RE.match(p.name) and not p.is_symlink())

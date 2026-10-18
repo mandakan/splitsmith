@@ -137,3 +137,40 @@ def test_a_looks_lut_outside_its_folder_is_refused(user_looks: Path, tmp_path: P
     _look_with(user_looks / "sly", {"lut": "../../outside.cube"})
     with pytest.raises(GradeError, match="Look's folder"):
         grade.resolve_grade("look", looks.load_look("sly"))
+
+
+def test_your_own_lut_is_checked_and_kept_content_named(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(grade, "user_luts_dir", lambda: tmp_path / "luts")
+    source = tmp_path / "My Film Look.CUBE"
+    source.write_text(grade.write_cube(Lut(size=2, table=1.0 - grade.identity(2).table)))
+    name = grade.add_user_lut(source)
+    assert grade.USER_LUT_RE.match(name) and name.startswith("my-film-look-")
+    assert (tmp_path / "luts" / name).is_file()
+    assert grade.add_user_lut(source) == name, "the same bytes, the same file"
+    assert grade.list_user_luts() == [name]
+    resolved = grade.resolve_grade(f"user:{name}", looks.load_look("splitsmith"))
+    assert resolved is not None and resolved.source == tmp_path / "luts" / name
+
+    broken = tmp_path / "broken.cube"
+    broken.write_text("LUT_1D_SIZE 4\n")
+    with pytest.raises(GradeError, match="3D"):
+        grade.add_user_lut(broken)
+    assert grade.list_user_luts() == [name], "a refused file is never kept"
+
+
+def test_lut_add_on_the_command_line(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from typer.testing import CliRunner
+
+    from splitsmith.cli import app
+
+    monkeypatch.setattr(grade, "user_luts_dir", lambda: tmp_path / "luts")
+    source = tmp_path / "film.cube"
+    source.write_text(_cube(2, _identity_rows(2)))
+    result = CliRunner().invoke(app, ["looks", "lut-add", str(source)])
+    assert result.exit_code == 0, result.output
+    assert "--grade user:film-" in result.output
+    bad = tmp_path / "bad.cube"
+    bad.write_text("nonsense\n")
+    assert CliRunner().invoke(app, ["looks", "lut-add", str(bad)]).exit_code == 2
