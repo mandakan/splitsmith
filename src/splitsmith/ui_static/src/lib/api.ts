@@ -2648,6 +2648,8 @@ export interface HighlightReelBody {
   short: boolean;
   upright: boolean;
   force: boolean;
+  youtube_upload: boolean;
+  youtube_privacy: "unlisted" | "private" | "public";
 }
 
 /** Response from GET /api/match/triage and POST accept/attention mutations.

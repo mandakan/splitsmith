@@ -10,7 +10,7 @@ from __future__ import annotations
 import time
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.concurrency import run_in_threadpool
@@ -19,6 +19,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from .. import export_runs, youtube_sidecar
 from ..access import Feature
+from ..async_bridge import run_sync
 from ..config import DEFAULT_MOMENTS, Config, MomentKind
 from ..export_naming import reel_file_name
 from ..highlights import (
@@ -106,6 +107,9 @@ class HighlightReelRequest(BaseModel):
     short: bool = False
     upright: bool = True
     force: bool = False
+    #: Chain the YouTube upload after the render, as the match export does.
+    youtube_upload: bool = False
+    youtube_privacy: Literal["unlisted", "private", "public"] = "unlisted"
 
 
 #: Renders that write this shooter's exports and must not run beside a reel.
@@ -246,6 +250,26 @@ def run_highlight_reel(handle: Any, slug: str, request: dict[str, Any], *, state
             ],
         ),
     )
+    # The upload is its own job (#1000): its own progress and cancel, and a
+    # failed upload never fails a finished render. ``again`` because the
+    # render just rewrote the sidecar.
+    if req.youtube_upload:
+        run_sync(
+            state.jobs.submit(
+                kind="youtube_upload",
+                shooter_slug=slug,
+                args={
+                    "slug": slug,
+                    "filename": output.name,
+                    "privacy": req.youtube_privacy,
+                    "again": True,
+                    "playlist": None,
+                    "playlist_id": None,
+                    "publish_at": None,
+                    "notify_subscribers": True,
+                },
+            )
+        )
     handle.set_result(
         {
             "filename": output.name,

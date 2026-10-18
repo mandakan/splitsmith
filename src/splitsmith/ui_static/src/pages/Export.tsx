@@ -925,7 +925,12 @@ function ExportInner({ slug }: { slug: string }) {
         ) : null}
         <div className="flex max-w-3xl flex-col gap-3">
           <Section label="Output" control={modeSwitch}>
-            <ReelPanel slug={slug} href={href} onFinished={() => void reload()} />
+            <ReelPanel
+              slug={slug}
+              href={href}
+              youtubeConnected={youtubeSettings?.connected === true}
+              onFinished={() => void reload()}
+            />
           </Section>
           {history}
         </div>

@@ -78,16 +78,22 @@ export function defaultSelection(menu: HighlightMenuItem[]): Set<string> {
   return new Set(menu.filter((m) => m.default && m.group !== "lolz").map((m) => m.kind));
 }
 
+/** What happens after the render: keep the file, or upload it to YouTube. */
+export type ReelAfter = "keep" | "unlisted" | "private" | "public";
+
 export function reelBody(
   menu: HighlightMenuItem[],
   chosen: Set<string>,
-  options: { cut: ReelCut; format: ReelFormat; force: boolean },
+  options: { cut: ReelCut; format: ReelFormat; force: boolean; after?: ReelAfter },
 ): HighlightReelBody {
+  const after = options.after ?? "keep";
   return {
     moments: menu.filter((m) => chosen.has(m.kind)).map((m) => m.kind),
     short: options.cut === "short",
     upright: options.format === "portrait",
     force: options.force,
+    youtube_upload: after !== "keep",
+    youtube_privacy: after === "keep" ? "unlisted" : after,
   };
 }
 

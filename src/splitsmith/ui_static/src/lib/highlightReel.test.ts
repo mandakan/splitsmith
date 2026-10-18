@@ -100,7 +100,19 @@ describe("rendering", () => {
       short: true,
       upright: false,
       force: false,
+      youtube_upload: false,
+      youtube_privacy: "unlisted",
     });
+  });
+
+  it("asks for the YouTube upload only when the viewer chose a privacy", () => {
+    const body = reelBody(menu, new Set(["fastest_draw"]), {
+      cut: "normal",
+      format: "portrait",
+      force: false,
+      after: "private",
+    });
+    expect([body.youtube_upload, body.youtube_privacy]).toEqual([true, "private"]);
   });
 
   it("says why it cannot render", () => {

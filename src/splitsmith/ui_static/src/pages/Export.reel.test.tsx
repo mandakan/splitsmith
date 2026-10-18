@@ -25,6 +25,7 @@ vi.mock("@/lib/api", async (importOriginal) => {
       getExportRuns: vi.fn().mockResolvedValue({ runs: [] }),
       getCleanupPlan: vi.fn().mockResolvedValue({ items: [], totals_by_category: {}, total_bytes: 0, total_file_count: 0 }),
       getHighlights: vi.fn(),
+      getYouTubeSettings: vi.fn().mockRejectedValue(new Error("not connected")),
       submitHighlightReel: vi.fn(),
       pollJob: vi.fn(),
       revealFile: vi.fn(),
@@ -169,9 +170,30 @@ describe("Export highlight reel mode", () => {
       short: true,
       upright: false,
       force: false,
+      youtube_upload: false,
+      youtube_privacy: "unlisted",
     });
     expect(await screen.findByRole("status")).toHaveTextContent(/Wrote bromma-2026-highlights\.mp4 \(31\.5 s\)/);
     await waitFor(() => expect(vi.mocked(api.getExportRuns).mock.calls.length).toBeGreaterThan(runsBefore));
+  });
+
+  it("offers no YouTube upload while YouTube is not connected", async () => {
+    renderAt("/match/m1/export/mathias?mode=reel");
+    await screen.findByRole("button", { name: "Render reel" });
+    expect(screen.queryByRole("group", { name: "After render" })).toBeNull();
+  });
+
+  it("uploads to YouTube after the render when asked", async () => {
+    vi.mocked(api.getYouTubeSettings).mockResolvedValueOnce({ connected: true } as never);
+    vi.mocked(api.submitHighlightReel).mockResolvedValue(job({ status: "pending", result: null }));
+    vi.mocked(api.pollJob).mockResolvedValue(job());
+    const user = renderAt("/match/m1/export/mathias?mode=reel");
+    await user.click(await screen.findByRole("button", { name: "Upload unlisted" }));
+    await user.click(screen.getByRole("button", { name: "Render reel" }));
+    expect(vi.mocked(api.submitHighlightReel).mock.calls.at(-1)?.[1]).toMatchObject({
+      youtube_upload: true,
+      youtube_privacy: "unlisted",
+    });
   });
 
   it("offers to render the ready stages while others are unfinished", async () => {

@@ -14,6 +14,7 @@ import { Label } from "@/components/ui/Label";
 import { Segmented } from "@/components/ui/Segmented";
 import { type HighlightMenuItem, type HighlightReadiness, type Job, api, apiErrorText } from "@/lib/api";
 import {
+  type ReelAfter,
   type ReelCut,
   type ReelFormat,
   blockerFix,
@@ -30,10 +31,13 @@ const GROUP_TITLES = { default: "Highlights", stat: "More stats", lolz: "Just fo
 export function ReelPanel({
   slug,
   href,
+  youtubeConnected,
   onFinished,
 }: {
   slug: string;
   href: (...segments: string[]) => string;
+  /** YouTube is connected: offer the upload after the render. */
+  youtubeConnected: boolean;
   /** A render finished: the page re-reads its export history. */
   onFinished: () => void;
 }) {
@@ -43,6 +47,7 @@ export function ReelPanel({
   const [cut, setCut] = useState<ReelCut>("normal");
   const [format, setFormat] = useState<ReelFormat>("portrait");
   const [force, setForce] = useState(false);
+  const [after, setAfter] = useState<ReelAfter>("keep");
   const [job, setJob] = useState<Job | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -84,7 +89,10 @@ export function ReelPanel({
     if (readiness == null) return;
     setError(null);
     try {
-      const submitted = await api.submitHighlightReel(slug, reelBody(readiness.menu, chosen, { cut, format, force }));
+      const submitted = await api.submitHighlightReel(
+        slug,
+        reelBody(readiness.menu, chosen, { cut, format, force, after: youtubeConnected ? after : "keep" }),
+      );
       setJob(submitted);
       const final = await api.pollJob(submitted.id, setJob);
       setJob(final);
@@ -166,6 +174,19 @@ export function ReelPanel({
             { value: "landscape", label: "Landscape" },
           ]}
         />
+        {youtubeConnected ? (
+          <Segmented<ReelAfter>
+            label="After render"
+            value={after}
+            onChange={setAfter}
+            options={[
+              { value: "keep", label: "Keep the file" },
+              { value: "unlisted", label: "Upload unlisted" },
+              { value: "private", label: "Upload private" },
+              { value: "public", label: "Upload public" },
+            ]}
+          />
+        ) : null}
       </div>
 
       <div className="flex flex-wrap items-center gap-3">

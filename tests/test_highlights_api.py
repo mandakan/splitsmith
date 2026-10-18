@@ -196,6 +196,28 @@ def test_the_job_pulls_each_stages_clips_before_rendering(tmp_path, monkeypatch)
     assert order == [f"pull 1 {primary.video_id}", "web", "render"]
 
 
+def test_the_reel_uploads_to_youtube_when_asked(tmp_path, monkeypatch):
+    client, _root = _ready_match(tmp_path)
+    monkeypatch.setattr("splitsmith.ui.highlights_api.make_reel", _fake_make_reel([]))
+    jobs = client.app.state.splitsmith_state.jobs
+    submitted: list[dict] = []
+    real_submit = jobs.submit
+
+    async def spy(*, kind, shooter_slug=None, args=None, **kw):
+        if kind == "youtube_upload":
+            submitted.append(args)
+            return None
+        return await real_submit(kind=kind, shooter_slug=shooter_slug, args=args, **kw)
+
+    monkeypatch.setattr(jobs, "submit", spy)
+    _run_job(client, {"moments": ["fastest_draw"]})
+    assert submitted == []  # not asked: no upload
+    _run_job(client, {"moments": ["fastest_draw"], "youtube_upload": True, "youtube_privacy": "private"})
+    (args,) = submitted
+    assert args["filename"].endswith("-highlights.mp4")
+    assert (args["privacy"], args["again"]) == ("private", True)
+
+
 def test_a_reel_run_reads_back_from_the_history_route(tmp_path, monkeypatch):
     client, _root = _ready_match(tmp_path)
     monkeypatch.setattr("splitsmith.ui.highlights_api.make_reel", _fake_make_reel([]))
