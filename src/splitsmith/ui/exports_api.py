@@ -211,6 +211,15 @@ class MatchExportRequest(OverlayStyleFields, BaseModel):
     #: after the render (``audio_dress.dress_in_place``); a Look without
     #: sounds is untouched either way.
     look_sounds: bool = True
+    #: The colour grade the footage takes (``splitsmith.grade``): ``look``
+    #: (the Look's own, the default: none for a Look without one), ``none``,
+    #: ``preset:<id>`` or ``user:<file>``; the MP4 only.
+    grade: str = Field(
+        default="look",
+        pattern=r"^(look|none|preset:[a-z0-9][a-z0-9-]{0,40}|user:[a-z0-9][a-z0-9-]{0,40}-[0-9a-f]{12}\.cube)$",
+    )
+    #: 0..1; ``None`` is the grade's own (the Look's, else full).
+    grade_strength: float | None = Field(default=None, ge=0.0, le=1.0)
     #: Your account's brand on the title page and the closing card, for a
     #: Look without one of its own (spec 2026-10-08).
     account_brand: bool = True

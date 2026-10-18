@@ -490,6 +490,15 @@ def export(
         "--look-sounds/--no-look-sounds",
         help="Mix the Look's sounds into the rendered MP4 (mp4 only; a Look without sounds is untouched).",
     ),
+    grade: str = typer.Option(
+        "look",
+        "--grade",
+        help="Colour grade for the footage (mp4 only): 'look' (the Look's own), 'none', 'preset:<id>' "
+        "(vivid, warm-film, teal-orange, cool-steel, bleach-bypass, faded, noir) or 'user:<file>'.",
+    ),
+    grade_strength: float | None = typer.Option(
+        None, "--grade-strength", min=0.0, max=1.0, help="0..1; default the grade's own (the Look's, else 1)."
+    ),
     breakdown: bool = typer.Option(
         True,
         "--breakdown/--no-breakdown",
@@ -799,6 +808,8 @@ def export(
         closing_card=closing_card,
         made_with=made_with,
         look_sounds=look_sounds,
+        grade=grade,
+        grade_strength=grade_strength,
         breakdown=breakdown,
         account_brand=load_brand(JsonAccountProfileStore()) if account_brand else None,
         logo_spots=spots,

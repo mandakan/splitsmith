@@ -123,6 +123,10 @@ class ExportPresetBody(OverlayStyleFields, BaseModel):
     made_with: bool = True
     #: The Look's sounds mixed into a rendered MP4 (on unless turned off).
     look_sounds: bool = True
+    #: The colour grade: ``look`` (the Look's own), ``none``, ``preset:<id>``
+    #: or ``user:<file>``; and its strength, ``None`` for the grade's own.
+    grade: str = "look"
+    grade_strength: float | None = None
     #: "Use Breakdown": the stages' confirmed regions in the export (on unless off).
     breakdown: bool = True
     #: Your account's brand on the cards (on unless turned off).

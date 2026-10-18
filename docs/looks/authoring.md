@@ -25,6 +25,7 @@ default Look to your own templates.
 - [Checking](#checking)
 - [Previewing](#previewing)
 - [Sound](#sound)
+- [Colour grade](#colour-grade)
 - [Credits](#credits)
 - [On splitsmith.app](#on-splitsmithapp)
 
@@ -616,6 +617,31 @@ summary or a sting alike), and writes the cues into the video's
 Look's `sounds/` folder. A cue that names a missing file or a field it does
 not know is left out with a line saying which card it was on, and a
 `sounds()` that throws plays nothing: a sound never costs the card.
+
+## Colour grade
+
+A Look can grade the footage of every MP4 drawn with it: a 3D LUT (a `.cube`
+file, the format every grading tool exports) applied to each camera before
+the overlay, so the HUD, the cards and the logos keep their own colours. The
+frames the title page, the slates and the summaries sit on, and the YouTube
+thumbnail's frame, are graded too, so a card never cuts to a different
+picture.
+
+```json
+"grade": {"lut": "luts/mine.cube", "strength": 0.8}
+```
+
+names a file in the Look's own folder (no links, nothing outside it);
+`"grade": {"preset": "warm-film"}` names a built-in one: `vivid`,
+`warm-film`, `teal-orange`, `cool-steel`, `bleach-bypass`, `faded`, `noir`.
+`strength` runs from 0 (no grade) to 1 (the LUT as written). A `.cube` must be
+3D, 2 to 64 points, with a 0..1 domain.
+
+An export may choose another grade: `splitsmith match export --grade
+preset:noir --grade-strength 0.5`, `--grade none` for the footage as shot,
+or `--grade user:<name>` for a LUT of your own, kept by `splitsmith looks lut-add
+film.cube` (it checks the file and prints the name). The default is the Look's.
+Timelines (FCPXML, FCP 7 XML) carry no grade; the export says so.
 
 ## Credits
 

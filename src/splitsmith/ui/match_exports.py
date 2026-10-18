@@ -17,6 +17,7 @@ from __future__ import annotations
 import logging
 import os
 import subprocess
+import tempfile
 from collections.abc import Sequence
 from dataclasses import dataclass, field, replace
 from pathlib import Path
@@ -28,6 +29,7 @@ from ..audit_data import StageExportError, audit_shots_to_engine_shots, read_aud
 from ..config import OutputConfig, StageRounds
 from ..events import confirmed_from_doc
 from ..export_naming import match_file_base, stage_display_name, stage_file_base
+from ..grade import GradeError, ResolvedGrade, materialize, resolve_grade
 from ..identity import ResolvedIdentity
 from ..looks import DEFAULT_VARIANT, LookError, load_look, look_credits
 from ..match_model import is_standard_start
@@ -366,6 +368,9 @@ class MatchExportRequestData:
     made_with: bool = True
     #: The Look's sounds mixed into the rendered MP4 (``dress_in_place``).
     look_sounds: bool = True
+    #: The colour grade (``grade.resolve_grade``'s choice) and its strength.
+    grade: str = "look"
+    grade_strength: float | None = None
     #: Your account's brand, resolved by the caller (spec 2026-10-08); the
     #: cards draw it when the Look has no brand of its own.
     account_brand: composition.BrandMark | None = None
@@ -474,6 +479,39 @@ def _mix_look_sounds(output_path: Path, look_name: str, *, youtube_preset: bool)
     return list(result.notes) if result is not None else []
 
 
+def _resolve_export_grade(request: MatchExportRequestData, anomalies: list[str]) -> ResolvedGrade | None:
+    """The colour grade the export draws. An explicit choice that names
+    nothing real is the caller's mistake (:class:`MatchExportError`); the
+    Look's own grade that cannot be read is a note, and the export goes on
+    ungraded. Only the MP4 grades, so any other format says so."""
+    try:
+        look = load_look(request.overlay_theme)
+    except LookError as exc:
+        if request.grade != "look":
+            # An explicit choice needs no Look; the render reports the Look.
+            look = None
+        else:
+            anomalies.append(f"colour grade left out: {exc}")
+            return None
+    try:
+        resolved = resolve_grade(request.grade, look, strength=request.grade_strength)
+    except GradeError as exc:
+        if request.grade != "look":
+            raise MatchExportError(str(exc)) from exc
+        anomalies.append(f"colour grade left out: {exc}")
+        return None
+    if resolved is not None and request.output_format != "mp4":
+        if request.grade == "look":
+            # A timeline of a graded Look: nothing was asked, nothing to say.
+            return None
+        anomalies.append(
+            "colour grade ignored: only the mp4 renderer applies it "
+            f"(current renderer: {request.output_format})"
+        )
+        return None
+    return resolved
+
+
 def look_credits_for(name: str) -> str | None:
     """The notice the export's Look asks to close its description with, or
     ``None``; a Look that cannot be read here never fails the sidecar."""
@@ -506,12 +544,14 @@ def _write_thumbnail_card(comp: composition.Composition, request: MatchExportReq
     )
     frame = out.with_name(out.stem + "-frame.png")
     try:
-        grab_frame(source[0], source[1], frame, ffmpeg_binary=runtime().ffmpeg_binary)
+        with tempfile.TemporaryDirectory(prefix="splitsmith-grade-") as tmp:
+            lut = materialize(comp.grade, Path(tmp)) if comp.grade is not None else None
+            grab_frame(source[0], source[1], frame, ffmpeg_binary=runtime().ffmpeg_binary, grade_lut=lut)
         with ChromiumRasterizer() as rasterizer:
             render_thumbnail_card(frame, out, data, look=look, rasterizer=rasterizer)
     except RasterizerUnavailableError:
         return "no browser to draw the card"
-    except (OSError, subprocess.CalledProcessError, ThumbnailError) as exc:
+    except (OSError, subprocess.CalledProcessError, ThumbnailError, GradeError) as exc:
         return str(exc).splitlines()[0] if str(exc) else type(exc).__name__
     finally:
         frame.unlink(missing_ok=True)
@@ -925,6 +965,7 @@ def export_match(
         logo_spots=request.logo_spots,
         brand=request.account_brand,
         watermark_corner=request.watermark_corner,
+        grade=_resolve_export_grade(request, anomalies),
     )
     youtube_preset_active = request.youtube_preset and request.output_format == "mp4"
     if request.youtube_preset and request.output_format != "mp4":

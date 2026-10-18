@@ -111,9 +111,14 @@ def grab_frame(
     *,
     ffmpeg_binary: str = "ffmpeg",
     runner: Callable[..., subprocess.CompletedProcess[str]] = subprocess.run,
+    grade_lut: Path | None = None,
 ) -> Path:
     """One full-size PNG of ``video`` at ``at_seconds`` (output-side seek,
-    so the frame is exact). Raises ``CalledProcessError`` / ``OSError``."""
+    so the frame is exact), through the export's colour grade when it has one
+    (``grade_lut``, ``splitsmith.grade``). Raises ``CalledProcessError`` /
+    ``OSError``."""
+    from .grade import lut_filter
+
     out.parent.mkdir(parents=True, exist_ok=True)
     runner(
         [
@@ -126,6 +131,7 @@ def grab_frame(
             f"{max(0.0, at_seconds):.3f}",
             "-frames:v",
             "1",
+            *(("-vf", lut_filter(grade_lut)) if grade_lut is not None else ()),
             str(out),
         ],
         check=True,

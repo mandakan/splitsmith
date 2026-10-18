@@ -110,6 +110,22 @@ def _print_report(report: CheckReport) -> None:
     )
 
 
+@looks_app.command("lut-add")
+def lut_add_command(
+    source: Path = typer.Argument(..., exists=True, dir_okay=False, help="A 3D LUT, as a .cube file."),
+) -> None:
+    """Keep a LUT of your own for colour grades (``--grade user:<name>``)."""
+    from .grade import GradeError, add_user_lut, list_user_luts
+
+    try:
+        name = add_user_lut(source)
+    except GradeError as exc:
+        console.print(f"[red]{exc}[/]")
+        raise typer.Exit(2) from exc
+    console.print(f"Added. Grade an export with it: --grade user:{name}")
+    console.print(f"Your LUTs: {', '.join(list_user_luts())}")
+
+
 @looks_app.command("dress")
 def dress_command_cli(
     export: Path = typer.Argument(..., exists=True, dir_okay=False, help="A rendered match MP4."),
