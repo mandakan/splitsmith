@@ -1,12 +1,13 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" class="no-js">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Splitsmith</title>
-<meta name="description" content="Splitsmith reads the beep and every shot out of the audio your camera already recorded, and turns them into splits you can audit, coach and compare. Open source, for IPSC shooters.">
+<script>document.documentElement.className = "js";</script>
+<meta name="description" content="Splitsmith reads the beep and every shot out of the audio your camera already recorded, and turns them into splits you can audit, break down, coach and compare. Open source, for IPSC shooters.">
 <meta property="og:title" content="Splitsmith">
-<meta property="og:description" content="Every shot you fired is in your footage. Splitsmith gets the splits out: audit, coach, compare, export.">
+<meta property="og:description" content="Every shot you fired is in your footage. Splitsmith gets the splits out: audit, break down, coach, compare, export.">
 <meta property="og:type" content="website">
 <meta property="og:url" content="https://splitsmith.app">
 <meta property="og:image" content="https://splitsmith.app/og.png">
@@ -25,7 +26,7 @@
     --hair:rgba(255,255,255,0.08); --hair-2:rgba(255,255,255,0.14);
     --ink:#F4F4F5; --ink-2:#C9CCD2; --muted:#8E939B; --subtle:#6B7079;
     --led:#FF2D2D; --led-fill:#DC2626; --led-text:#FFB4B4; --led-glow:rgba(255,45,45,0.35);
-    --live:#FBBF24; --done:#4ADE80; --beep:#06B6D4; --manual:#A78BFA;
+    --live:#FBBF24; --done:#4ADE80; --beep:#06B6D4; --manual:#A78BFA; --draw:#F472B6;
     --display:"Antonio","Arial Narrow",Impact,sans-serif;
     --sans:"Geist",system-ui,-apple-system,"Segoe UI",sans-serif;
     --mono:"JetBrains Mono",ui-monospace,"SF Mono",Menlo,monospace;
@@ -38,6 +39,7 @@
   body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--sans);font-size:16px;line-height:1.6;-webkit-font-smoothing:antialiased;overflow-x:hidden}
   a{color:inherit;text-decoration:none}
   img{max-width:100%;display:block}
+  button{font:inherit;color:inherit}
   ::selection{background:var(--led-fill);color:#fff}
   :focus-visible{outline:2px solid var(--led);outline-offset:3px;border-radius:6px}
 
@@ -73,6 +75,8 @@
   .nav .links{display:flex;gap:2px}
   .nav .links a{padding:7px 12px;border-radius:999px;font-size:13px;color:var(--ink-2);transition:background .5s var(--ease),color .5s var(--ease)}
   .nav .links a:hover{background:var(--surface-2);color:var(--ink)}
+  .nav .links a.new{color:var(--ink)}
+  .nav .links a.new::after{content:"";display:inline-block;width:5px;height:5px;border-radius:50%;background:var(--led);margin-left:6px;vertical-align:2px;box-shadow:0 0 8px var(--led-glow)}
   .nav .cta{margin-left:6px}
   .ham{display:none;pointer-events:auto;width:40px;height:40px;border-radius:999px;border:1px solid var(--hair-2);background:rgba(10,11,13,.72);backdrop-filter:blur(18px);position:relative;cursor:pointer}
   .ham span{position:absolute;left:12px;right:12px;height:2px;background:var(--ink);border-radius:2px;transition:transform .6s var(--ease),opacity .4s var(--ease);top:19px}
@@ -82,12 +86,12 @@
   .ham[aria-expanded="true"] span:last-child{transform:rotate(-45deg)}
   .sheet{position:fixed;inset:0;z-index:35;background:rgba(5,5,5,.86);backdrop-filter:blur(30px);-webkit-backdrop-filter:blur(30px);display:none;align-items:center;justify-content:center}
   .sheet[data-open="true"]{display:flex}
-  .sheet a{display:block;font-family:var(--display);font-size:44px;text-transform:uppercase;line-height:1.1;padding:8px 0;opacity:0;transform:translateY(24px);transition:opacity .7s var(--ease),transform .7s var(--ease)}
+  .sheet a{display:block;font-family:var(--display);font-size:40px;text-transform:uppercase;line-height:1.1;padding:7px 0;opacity:0;transform:translateY(24px);transition:opacity .7s var(--ease),transform .7s var(--ease)}
   .sheet[data-open="true"] a{opacity:1;transform:none}
-  .sheet a:nth-child(2){transition-delay:.08s}.sheet a:nth-child(3){transition-delay:.16s}.sheet a:nth-child(4){transition-delay:.24s}.sheet a:nth-child(5){transition-delay:.32s}.sheet a:nth-child(6){transition-delay:.4s}
+  .sheet a:nth-child(2){transition-delay:.06s}.sheet a:nth-child(3){transition-delay:.12s}.sheet a:nth-child(4){transition-delay:.18s}.sheet a:nth-child(5){transition-delay:.24s}.sheet a:nth-child(6){transition-delay:.3s}.sheet a:nth-child(7){transition-delay:.36s}.sheet a:nth-child(8){transition-delay:.42s}
 
   /* buttons: island pills, arrow in its own well */
-  .btn{display:inline-flex;align-items:center;gap:12px;padding:10px 10px 10px 20px;border-radius:999px;border:1px solid var(--hair-2);background:var(--surface-2);color:var(--ink);font-size:14px;font-weight:500;line-height:1;transition:transform .5s var(--ease),background .5s var(--ease),border-color .5s var(--ease);will-change:transform}
+  .btn{display:inline-flex;align-items:center;gap:12px;padding:10px 10px 10px 20px;border-radius:999px;border:1px solid var(--hair-2);background:var(--surface-2);color:var(--ink);font-size:14px;font-weight:500;line-height:1;transition:transform .5s var(--ease),background .5s var(--ease),border-color .5s var(--ease);will-change:transform;cursor:pointer}
   .btn:hover{background:rgba(255,255,255,.1)}
   .btn:active{transform:scale(.98)}
   .btn .well{width:28px;height:28px;border-radius:50%;background:rgba(255,255,255,.08);display:inline-grid;place-items:center;transition:transform .5s var(--ease),background .5s var(--ease)}
@@ -95,7 +99,7 @@
   .btn.primary{background:var(--led-fill);border-color:var(--led-fill);font-family:var(--display);font-weight:700;font-size:16px;letter-spacing:.06em;text-transform:uppercase;box-shadow:0 0 0 1px rgba(255,45,45,.3),0 18px 40px -20px var(--led-glow)}
   .btn.primary:hover{background:var(--led)}
   .btn.primary .well{background:rgba(0,0,0,.28)}
-  .btn.quiet{background:transparent}
+  .btn.watch .well{background:rgba(255,45,45,.18);color:var(--led)}
   .btn svg{width:13px;height:13px}
 
   /* double bezel */
@@ -124,39 +128,102 @@
 
   /* figures strip */
   .figs{display:grid;grid-template-columns:repeat(4,1fr);gap:1px;background:var(--hair);border:1px solid var(--hair);border-radius:18px;overflow:hidden}
-  .figs div{background:var(--bg-2);padding:22px 24px}
+  .figs > div{background:var(--bg-2);padding:22px 24px}
   .figs .k{font-family:var(--mono);font-size:10px;letter-spacing:.18em;text-transform:uppercase;color:var(--muted)}
   .figs .v{font-family:var(--mono);font-size:30px;line-height:1.05;margin-top:8px;font-variant-numeric:tabular-nums}
   .figs .v small{font-size:13px;color:var(--muted)}
   .figs .d{font-size:13px;color:var(--muted);margin-top:8px}
+
+  .filters{display:grid;gap:10px;margin-bottom:22px}
+  .frow{display:flex;align-items:center;gap:10px;min-width:0}
+  .frow .k{font-family:var(--mono);font-size:10px;letter-spacing:.2em;text-transform:uppercase;color:var(--muted);flex:none;width:44px}
+  .seg{display:flex;flex-wrap:wrap;gap:2px;overflow-x:auto;scrollbar-width:none;padding:3px;border:1px solid var(--hair-2);border-radius:22px;background:var(--surface);min-width:0;max-width:100%}
+  .seg::-webkit-scrollbar{display:none}
+  .seg button{flex:none;border:0;background:transparent;padding:7px 11px;border-radius:999px;font-size:13px;color:var(--ink-2);cursor:pointer;white-space:nowrap;transition:background .4s var(--ease),color .4s var(--ease)}
+  .seg button:hover{color:var(--ink);background:var(--surface-2)}
+  .seg button[aria-pressed="true"]{background:rgba(255,255,255,.12);color:var(--ink);box-shadow:inset 0 1px 0 rgba(255,255,255,.08)}
+  .seg button:disabled{opacity:.4;cursor:default}
+  .seg button .th{display:inline-block;width:40px;height:20px;border-radius:5px;margin:-3px 8px -3px -5px;vertical-align:middle;background-size:cover;background-position:left center;box-shadow:inset 0 0 0 1px rgba(255,255,255,.14)}
+  .seg button .n{font-family:var(--mono);font-size:11px;color:var(--subtle);margin-left:6px}
+  .seg button .d{font-size:11px;color:var(--muted);margin-left:6px}
+  .gmore{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:12px;min-height:34px}
+  .gmore .c{font-family:var(--mono);font-size:11px;color:var(--subtle);letter-spacing:.06em}
+  .gmore button{border:1px solid var(--hair-2);background:var(--surface-2);border-radius:999px;padding:7px 14px;font-size:13px;color:var(--ink);cursor:pointer;display:inline-flex;align-items:center;gap:8px}
+  .gmore button:hover{background:rgba(255,255,255,.1)}
+  .gmore button svg{width:11px;height:11px;transition:transform .4s var(--ease)}
+  .gmore button[aria-expanded="true"] svg{transform:rotate(180deg)}
+  .no-js .filters,.no-js .gmore{display:none}
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(236px,1fr));gap:12px}
+  .tile{display:block;text-align:left;border:1px solid var(--hair-2);background:rgba(255,255,255,.03);border-radius:16px;padding:5px;cursor:pointer;transition:transform .5s var(--ease),border-color .5s var(--ease),background .5s var(--ease)}
+  .tile[hidden]{display:none}
+  .tile:hover{border-color:rgba(255,255,255,.28);background:rgba(255,255,255,.05);transform:translateY(-2px)}
+  .tile .im{position:relative;border-radius:11px;overflow:hidden;background:#111;aspect-ratio:16/9}
+  .tile .im img{width:100%;height:100%;object-fit:cover}
+  .tile .badge{position:absolute;top:8px;left:8px;font-family:var(--mono);font-size:9px;letter-spacing:.16em;text-transform:uppercase;padding:3px 7px;border-radius:999px;background:rgba(5,5,5,.72);border:1px solid var(--hair-2);color:var(--ink-2);backdrop-filter:blur(6px)}
+  .tile .badge::before{content:"";display:inline-block;width:5px;height:5px;border-radius:50%;background:var(--led);margin-right:6px;vertical-align:1px;box-shadow:0 0 6px var(--led-glow)}
+  .tile .cap{display:flex;justify-content:space-between;align-items:baseline;gap:8px;padding:9px 8px 5px}
+  .tile .cap b{font-size:13px;font-weight:500;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .tile .cap span{font-family:var(--mono);font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--subtle);white-space:nowrap;flex:none}
+  .gnote{margin-top:18px;font-size:13px;color:var(--subtle);max-width:80ch}
+
+  /* lightbox */
+  dialog.lb{border:0;padding:0;background:transparent;max-width:min(1040px,calc(100vw - 24px));width:100%;color:var(--ink)}
+  dialog.lb::backdrop{background:rgba(5,5,5,.86);backdrop-filter:blur(18px);-webkit-backdrop-filter:blur(18px)}
+  .lb .shell{padding:6px}
+  .lb .stage{background:#000;display:grid;place-items:center}
+  .lb .stage img{width:100%;height:auto;max-height:72vh;object-fit:contain}
+  .lb .meta{display:flex;flex-wrap:wrap;justify-content:space-between;gap:10px 18px;align-items:center;padding:14px 16px 16px}
+  .lb .meta h3{font-family:var(--display);font-size:24px;text-transform:uppercase;font-weight:700}
+  .lb .meta p{font-size:13px;color:var(--muted);margin-top:2px;max-width:60ch}
+  .lb .ctl{display:flex;gap:6px}
+  .iconbtn{width:40px;height:40px;border-radius:999px;border:1px solid var(--hair-2);background:var(--surface-2);display:grid;place-items:center;cursor:pointer}
+  .iconbtn:hover{background:rgba(255,255,255,.12)}
+  .iconbtn svg{width:15px;height:15px}
+
+  /* videos */
+  .vids{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}
+  .vid .im{position:relative;display:block;aspect-ratio:16/9;overflow:hidden;border-radius:calc(var(--r-inner) - 4px);margin:6px 6px 0}
+  .vid .im img{width:100%;height:100%;object-fit:cover;filter:saturate(.95) brightness(.8);transition:filter .6s var(--ease)}
+  .vid .im:hover img{filter:none}
+  .vid .play{position:absolute;inset:0;display:grid;place-items:center}
+  .vid .play span{width:68px;height:68px;border-radius:50%;background:var(--led-fill);display:grid;place-items:center;box-shadow:0 0 0 8px rgba(220,38,38,.18),0 20px 40px -16px var(--led-glow);transition:transform .5s var(--ease)}
+  .vid .im:hover .play span{transform:scale(1.06)}
+  .vid .play svg{width:22px;height:22px;margin-left:4px}
+  .vid .body{padding:16px 20px 20px;display:grid;gap:6px}
+  .vid .k{font-family:var(--mono);font-size:10px;letter-spacing:.2em;text-transform:uppercase;color:var(--led)}
+  .vid h3{font-family:var(--display);font-size:26px;text-transform:uppercase;font-weight:700}
+  .vid h3 a:hover{color:var(--led-text)}
+  .vid p{font-size:14px;color:var(--muted)}
+  .vid .short{font-family:var(--mono);font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-2);text-decoration:underline;text-underline-offset:3px;justify-self:start;margin-top:2px}
+  .vid .short:hover{color:var(--ink)}
 
   /* the loop: asymmetric bento */
   .bento{display:grid;grid-template-columns:repeat(12,1fr);gap:14px}
   .cell{position:relative;display:flex;flex-direction:column;gap:14px;padding:var(--r-pad);}
   .cell .core{flex:1;display:flex;flex-direction:column}
   .cell .body{padding:22px 24px 8px;display:grid;gap:8px}
-  .cell .phase{font-family:var(--mono);font-size:10px;letter-spacing:.2em;text-transform:uppercase;color:var(--led)}
   .cell h3{font-family:var(--display);font-size:26px;font-weight:700;text-transform:uppercase;letter-spacing:.01em}
   .cell p{font-size:14px;color:var(--muted);max-width:44ch}
   .cell .pic{margin-top:auto;padding:0 12px 12px}
   .cell .pic img{border-radius:12px;border:1px solid var(--hair)}
+  .cell .phase{font-family:var(--mono);font-size:10px;letter-spacing:.2em;text-transform:uppercase;color:var(--led)}
   .c-audit{grid-column:span 7}
   .c-splits{grid-column:span 5}
   .c-coach{grid-column:span 6}
   .c-compare{grid-column:span 6}
   .cell .pic + .pic{padding-top:0}
-  .c-sort{grid-column:span 12}
-  .c-sort .core{flex-direction:row;align-items:center;gap:20px}
-  .c-sort .body{flex:1}
+  .c-sort,.c-bd,.c-export{grid-column:span 12}
+  .c-sort .core,.c-bd .core,.c-export .core{flex-direction:row;align-items:center;gap:20px}
+  .c-sort .body,.c-bd .body,.c-export .body{flex:1}
   .c-sort .pic{flex:1.4;padding:12px 12px 12px 0;margin:0}
-  .c-export{grid-column:span 12}
-  .c-export .core{flex-direction:row;align-items:center;gap:20px}
-  .c-export .body{flex:1}
+  .c-bd .pic{flex:1.6;padding:12px 12px 12px 0;margin:0}
   .c-export .pic{flex:1.2;padding:12px 12px 12px 0;margin:0}
 
   /* three ways */
   .ways{display:grid;grid-template-columns:repeat(3,1fr);gap:14px}
-  .way .core{padding:26px 26px 28px;display:grid;gap:14px;height:100%}
+  .way .pair{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:6px}
+  .way .pair img{border-radius:10px;border:1px solid var(--hair);width:100%;height:auto;aspect-ratio:9/16;object-fit:cover}
+  .way .core{padding:26px 26px 28px;display:grid;gap:14px;height:100%;align-content:start}
   .way .k{font-family:var(--mono);font-size:10px;letter-spacing:.2em;text-transform:uppercase;color:var(--muted)}
   .way h3{font-family:var(--display);font-size:28px;font-weight:700;text-transform:uppercase}
   .way ul{margin:6px 0 0;padding:0;list-style:none;display:grid;gap:8px;font-size:14px;color:var(--ink-2)}
@@ -183,7 +250,6 @@
   .ticks span{font-family:var(--mono);font-size:11px;letter-spacing:.06em;text-transform:uppercase;border:1px solid var(--hair-2);border-radius:999px;padding:5px 11px;color:var(--ink-2)}
   .ticks span i{display:inline-block;width:6px;height:6px;border-radius:50%;margin-right:7px;vertical-align:1px}
 
-
   /* invite */
   .invite{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:clamp(28px,5vw,64px);align-items:center}
   .invite form{display:grid;gap:10px}
@@ -201,34 +267,51 @@
   footer .row{display:flex;flex-wrap:wrap;gap:16px 28px;align-items:center;justify-content:space-between}
   footer a:hover{color:var(--ink)}
 
-  /* reveal */
-  .rv{opacity:0;transform:translateY(28px);filter:blur(6px);transition:opacity .9s var(--ease),transform .9s var(--ease),filter .9s var(--ease)}
-  .rv.in{opacity:1;transform:none;filter:none}
+  /* reveal: only when scripts run, so the page reads with JS off */
+  .js .rv{opacity:0;transform:translateY(28px);filter:blur(6px);transition:opacity .9s var(--ease),transform .9s var(--ease),filter .9s var(--ease)}
+  .js .rv.in{opacity:1;transform:none;filter:none}
   .rv.d1{transition-delay:.08s}.rv.d2{transition-delay:.16s}.rv.d3{transition-delay:.24s}.rv.d4{transition-delay:.32s}
 
+  @media (max-width:1100px){
+    .nav .links a{padding:7px 9px}
+  }
   @media (max-width:980px){
     .hero-grid,.install,.corpus,.invite{grid-template-columns:1fr}
     .hero-visual .shell{transform:none}
     .figs{grid-template-columns:repeat(2,1fr)}
     .ways{grid-template-columns:1fr}
-    .c-audit,.c-coach,.c-splits,.c-compare,.c-export,.c-sort{grid-column:span 12}
-    .c-export .core,.c-sort .core{flex-direction:column;align-items:stretch}
-    .c-export .pic,.c-sort .pic{padding:0 12px 12px}
+    .way .pair{max-width:420px}
+    .c-audit,.c-coach,.c-splits,.c-compare,.c-export,.c-sort,.c-bd{grid-column:span 12}
+    .c-export .core,.c-sort .core,.c-bd .core{flex-direction:column;align-items:stretch}
+    .c-export .pic,.c-sort .pic,.c-bd .pic{padding:0 12px 12px}
   }
-  @media (max-width:767px){
+  @media (max-width:900px){
     .nav .links,.nav .cta{display:none}
     .ham{display:block}
     .nav .pill{padding:6px 10px 6px 14px}
+  }
+  @media (max-width:767px){
     section{padding-block:64px}
     .hero{padding-block:40px 48px}
     .hero-visual .tag{left:8px;bottom:14px}
     .figs{grid-template-columns:1fr 1fr}
     .figs .v{font-size:24px}
     :root{--r-outer:1.25rem;--r-inner:calc(1.25rem - 0.375rem)}
+    .grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+    .tile{border-radius:12px;padding:4px}
+    .tile .im{border-radius:9px}
+    .tile .cap{flex-direction:column;gap:0;padding:7px 5px 3px}
+    .tile .cap b{font-size:12px;max-width:100%}
+    .tile .cap span{font-size:9px}
+    .frow{flex-direction:column;align-items:stretch;gap:6px}
+    .frow .k{width:auto}
+    .seg{border-radius:14px;flex-wrap:nowrap}
+    .vids{grid-template-columns:1fr}
+    .lb .meta h3{font-size:20px}
   }
   @media (prefers-reduced-motion:reduce){
     *,*::before,*::after{transition:none!important;animation:none!important}
-    .rv{opacity:1;transform:none;filter:none}
+    .js .rv{opacity:1;transform:none;filter:none}
     html{scroll-behavior:auto}
   }
 </style>
@@ -241,7 +324,9 @@
   <div class="pill">
     <a class="brand" href="#top" aria-label="Splitsmith"><i></i>Splitsmith</a>
     <div class="links">
+      <a href="#videos">Videos</a>
       <a href="#loop">The loop</a>
+      <a href="#looks">Looks</a>
       <a href="#ways">Outputs</a>
       <a href="#install">Install</a>
       <a href="#hosted">Hosted</a>
@@ -253,9 +338,10 @@
 </nav>
 <div class="sheet" id="sheet" data-open="false">
   <div>
+    <a href="#videos">Videos</a>
     <a href="#loop">The loop</a>
+    <a href="#looks">Looks</a>
     <a href="#ways">Outputs</a>
-    <a href="#install">Install</a>
     <a href="#hosted">Hosted</a>
     <a href="https://github.com/mandakan/splitsmith">GitHub</a>
     <a href="#install" style="color:var(--led)">Install</a>
@@ -269,9 +355,10 @@
       <div>
         <span class="eyebrow rv"><i></i>Splits from the footage you already have</span>
         <h1 class="rv d1">The timer knows your stage time.<br><span class="led">Your camera knows every shot.</span></h1>
-        <p class="lede rv d2">Splitsmith reads the start beep and every shot out of the audio your head cam recorded, and turns them into splits you can audit shot by shot, coach against your own match, and line up next to your squad.</p>
+        <p class="lede rv d2">Splitsmith finds the start beep and every shot in your head cam's audio. Check them, break the stage down, see where the time went, and line up your squad.</p>
         <div class="acts rv d3">
           <a class="btn primary" href="#install">Install locally <span class="well"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3v9M4 8l4 4 4-4"/></svg></span></a>
+          <a class="btn watch" href="https://youtu.be/WRlgT0Bkggo" target="_blank" rel="noopener">Watch the tour <span class="well"><svg viewBox="0 0 16 16" fill="currentColor"><path d="M5 3.5v9l7-4.5z"/></svg></span></a>
           <a class="btn" href="https://github.com/mandakan/splitsmith">View on GitHub <span class="well"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12 12 4M6 4h6v6"/></svg></span></a>
         </div>
         <p class="fine rv d4">Open source <b>MIT</b> &middot; any camera with a microphone &middot; runs on your machine, nothing is uploaded &middot; <a href="#hosted" style="color:var(--muted);text-decoration:underline;text-underline-offset:3px">hosted by invitation</a></p>
@@ -285,10 +372,28 @@
 
   <section class="wrap" style="padding-top:0">
     <div class="figs rv">
-      <div><div class="k">Beep timing</div><div class="v">&plusmn;15<small> ms</small></div><div class="d">Located in the clip, then confirmed by you.</div></div>
-      <div><div class="k">Shot detection</div><div class="v">3<small> voters</small></div><div class="d">Envelope onsets, CLAP similarity and a gradient-boosted classifier vote per shot.</div></div>
+      <div><div class="k">Beep</div><div class="v">tone<small> start</small></div><div class="d">Placed on the start of your timer's tone. You confirm it.</div></div>
+      <div><div class="k">Shot detection</div><div class="v">stage<small> at once</small></div><div class="d">Each candidate is scored, then the stage's shots are picked together.</div></div>
       <div><div class="k">Per shot</div><div class="v">split<small> &middot; class</small></div><div class="d">Draw, fire, transition, movement, reload, activation.</div></div>
       <div><div class="k">Licence</div><div class="v">MIT</div><div class="d">Runs on your machine. Hosted at my.splitsmith.app <a href="#hosted" style="text-decoration:underline;text-underline-offset:3px">by invitation</a>.</div></div>
+    </div>
+  </section>
+
+  <section class="wrap" id="videos" style="padding-top:0">
+    <div class="sec-hd">
+      <span class="eyebrow rv"><i></i>See it in motion</span>
+      <h2 class="rv d1">One stage, start to finish.</h2>
+      <p class="lede rv d2">From head cam to finished video.</p>
+    </div>
+    <div class="vids">
+      <div class="vid shell rv"><div class="core">
+        <a class="im" href="https://youtu.be/WRlgT0Bkggo" target="_blank" rel="noopener" aria-label="Watch the feature tour on YouTube"><img src="img/video-tour.webp" width="800" height="450" alt="" loading="lazy"><span class="play" aria-hidden="true"><span><svg viewBox="0 0 16 16" fill="#fff"><path d="M4 2.5v11l9-5.5z"/></svg></span></span></a>
+        <div class="body"><span class="k">Feature tour</span><h3><a href="https://youtu.be/WRlgT0Bkggo" target="_blank" rel="noopener">Every shot, every split</a></h3><p>The whole loop on one run.</p><a class="short" href="https://youtu.be/FId3eWxtp3E" target="_blank" rel="noopener">Upright, as a Short</a></div>
+      </div></div>
+      <div class="vid shell rv d1"><div class="core">
+        <a class="im" href="https://youtu.be/h9B3I1Am5HU" target="_blank" rel="noopener" aria-label="Watch the trailer on YouTube"><img src="img/video-trailer.webp" width="800" height="450" alt="" loading="lazy"><span class="play" aria-hidden="true"><span><svg viewBox="0 0 16 16" fill="#fff"><path d="M4 2.5v11l9-5.5z"/></svg></span></span></a>
+        <div class="body"><span class="k">Trailer</span><h3><a href="https://youtu.be/h9B3I1Am5HU" target="_blank" rel="noopener">Head cam in. Splits out.</a></h3><p>The fast cut. The styles it flashes are in the gallery below.</p><a class="short" href="https://youtu.be/NOffWE136As" target="_blank" rel="noopener">Upright, as a Short</a></div>
+      </div></div>
     </div>
   </section>
 
@@ -296,47 +401,76 @@
     <div class="sec-hd">
       <span class="eyebrow rv"><i></i>The loop</span>
       <h2 class="rv d1">Prepare. Review. Analyse. Deliver.</h2>
-      <p class="lede rv d2">One match, the whole squad's footage, four phases. The app keeps score of where every stage is and always knows what to do next.</p>
+      <p class="lede rv d2">One match, the whole squad's footage. Every stage shows what it needs next.</p>
     </div>
     <div class="bento">
       <div class="cell shell c-sort rv">
         <div class="core">
-          <div class="body"><span class="phase">Prepare &middot; Footage</span><h3>A pile of videos, sorted</h3><p>Point Add footage at a folder or a handful of files, from one camera or several: head cam, glasses, phones, mixed in any order across subfolders. Every video is matched to the shooter and stage whose scorecard was typed right after it, with the head cam first when several cameras caught the same run. A camera with a wrong clock asks once: name one of its clips and the rest follows. Scrub a thumbnail to check a clip, then import it all or one shooter at a time. An unfinished sort waits for you on Footage. Desktop app.</p></div>
+          <div class="body"><span class="phase">Prepare &middot; Footage</span><h3>A pile of videos, sorted</h3><p>Point it at a folder from any number of cameras, in any order. Each video is matched to its shooter and stage by the scorecard times, head cam first. A camera with a wrong clock asks once: name one clip and the rest follow. Desktop app.</p></div>
           <div class="pic"><img src="img/footage-sort.png" width="910" height="581" alt="The sort review: a head cam with an unknown clock waiting for one named clip, and Anna Jonsson's runs, each on two cameras with the glasses as primary" loading="lazy"></div>
         </div>
       </div>
       <div class="cell shell c-audit rv">
         <div class="core">
-          <div class="body"><span class="phase">Review &middot; Audit</span><h3>Every shot, on the waveform</h3><p>The detector's candidates sit on the stage audio with their votes. Reject an echo, add a shot at the playhead, jump to the next flag. Confirm the beep first; the trim and detection chain from there.</p></div>
-          <div class="pic"><img src="img/waveform.png" width="746" height="400" alt="The audit waveform with thirty shot markers, two flagged, and the current-shot line" loading="lazy"></div>
+          <div class="body"><span class="phase">Review &middot; Audit</span><h3>Every shot, on the waveform</h3><p>Confirm the beep, and the shots appear on the stage audio. Reject an echo, add a missed shot, jump to the next flag. A second camera plays as an inset on the same beep; C swaps the two.</p></div>
+          <div class="pic"><img src="img/pip.webp" width="960" height="535" alt="The head cam with a second camera inset in the top right, both on the same clock" loading="lazy"></div>
+          <div class="pic"><img src="img/waveform.webp" width="1200" height="251" alt="Audit's timeline: thirty shot markers on the stage audio, two flagged, with play, zoom and the shot filter above" loading="lazy"></div>
         </div>
       </div>
       <div class="cell shell c-splits rv d1">
         <div class="core">
-          <div class="body"><span class="phase">Analyse &middot; Splits</span><h3>The shot table</h3><p>Time from beep, split, interval class, tier against your baseline. Play the stage and the table follows.</p></div>
+          <div class="body"><span class="phase">Analyse &middot; Splits</span><h3>The shot table</h3><p>Time, split and class for every shot. Play the stage and the table follows.</p></div>
           <div class="pic"><img src="img/splits-table.png" width="452" height="580" alt="Shot table: shot number, time, split and interval class chips" loading="lazy"></div>
+        </div>
+      </div>
+      <div class="cell shell c-bd rv">
+        <div class="core">
+          <div class="body"><span class="phase">Analyse &middot; Breakdown</span><h3>Draw, movement and reloads, as regions</h3><p>Breakdown proposes your draw, movement and reloads. Keep them, drag an edge to the frame, or draw your own. Exposed reload time is the part of a reload spent standing still. Review proposals on your phone too.</p></div>
+          <div class="pic"><img src="img/breakdown.webp" width="1200" height="304" alt="Breakdown's timeline with Audio, Shots, Draw, Movement, Reload and Activation lanes and dashed proposals" loading="lazy"></div>
         </div>
       </div>
       <div class="cell shell c-coach rv">
         <div class="core">
-          <div class="body"><span class="phase">Analyse &middot; Coach</span><h3>Where the seconds went</h3><p>One bar per stage sums your intervals by type against your own match. An interval over twice its type's median is an outlier, and it is named.</p></div>
-          <div class="pic"><img src="img/budget.png" width="1144" height="258" alt="The time budget: movement 18.92 s, transitions 9.66 s, draw 1.97 s, fire 1.54 s, each with its share, count and delta against the match" loading="lazy"></div>
+          <div class="body"><span class="phase">Analyse &middot; Coach</span><h3>Where the seconds went</h3><p>Your time per stage, split by type and set against your own match, with the outliers named. Leave notes and flags on shots and stages.</p></div>
+          <div class="pic"><img src="img/budget.webp" width="1144" height="396" alt="The time budget: draw 1.97 s, movement 18.92 s, transitions 9.66 s, fire 1.54 s, each with its share, count and delta against the match" loading="lazy"></div>
         </div>
       </div>
       <div class="cell shell c-compare rv d1">
         <div class="core">
-          <div class="body"><span class="phase">Analyse &middot; Compare</span><h3>Your squad, aligned to the beep</h3><p>Every shooter's run on one clock. Shot lanes, a leaderboard with the gap at each shooter's last shot, and audio from whoever you pick.</p></div>
+          <div class="body"><span class="phase">Analyse &middot; Compare</span><h3>Your squad, aligned to the beep</h3><p>Every shooter's run on one clock, with the gap at each last shot.</p></div>
           <div class="pic"><img src="img/leaderboard.png" width="340" height="162" alt="Leaderboard: Anna Jonsson 28.27 s, Mathias Axell 32.12 s, +3.85 s" loading="lazy" style="width:340px;max-width:100%"></div>
           <div class="pic"><img src="img/lanes.png" width="1144" height="176" alt="Two shooters' shot lanes on one time axis, 32.12 s and 28.27 s" loading="lazy"></div>
         </div>
       </div>
       <div class="cell shell c-export rv">
         <div class="core">
-          <div class="body"><span class="phase">Deliver &middot; Export</span><h3>Pick a look, see it on your footage</h3><p>Start from a preset or save your own, then choose the look from a gallery: title page, slates, the summary hold, the shot counter, each previewed on your own footage before you render. A stage that cannot export says why in one line and offers the fix. Out come a Final Cut timeline with a marker per shot, a rendered MP4 with the overlay burned in, a compare grid of the whole squad, or lossless trims. The MP4 can go straight to your YouTube channel.</p></div>
-          <div class="pic"><img src="img/export.png" width="1200" height="782" alt="The export page: the Look gallery with a tile per card and effect, and the rail previewing the stage slate over the shooter's own footage" loading="lazy"></div>
+          <div class="body"><span class="phase">Deliver &middot; Export</span><h3>Pick a Look, see it on your footage</h3><p>Pick a Look, then the cards, summaries, overlay and transitions, each previewed on your own footage before you render. Save it as a preset. The MP4 can go straight to YouTube.</p></div>
+          <div class="pic"><img src="img/export.webp" width="1200" height="793" alt="The export page: the Look group with Splitsmith, Broadcast and Clean, the title page and stage card choices, and the rail previewing the Broadcast title page" loading="lazy"></div>
         </div>
       </div>
     </div>
+  </section>
+
+  <section class="wrap" id="looks">
+    <div class="sec-hd">
+      <span class="eyebrow rv"><i></i>Looks</span>
+      <h2 class="rv d1">Every card, every style. At your pace.</h2>
+      <p class="lede rv d2">Every card, overlay and transition each Look draws.</p>
+    </div>
+    <div class="filters" role="group" aria-label="Filter the gallery">
+      <div class="frow"><span class="k" id="fl-look">Look</span><div class="seg" id="f-look" role="group" aria-labelledby="fl-look"></div></div>
+      <div class="frow"><span class="k" id="fl-slot">Slot</span><div class="seg" id="f-slot" role="group" aria-labelledby="fl-slot"></div></div>
+    </div>
+    <div class="grid" id="grid">
+      <a class="tile" href="img/looks/splitsmith-overlay-plate-lg.webp" aria-label="Splitsmith / Overlay, Plate, open larger"><div class="im"><img src="img/looks/splitsmith-overlay-plate.webp" alt="" width="480" height="270" loading="lazy"><span class="badge">Moves</span></div><div class="cap"><b>Overlay, Plate</b><span>Splitsmith</span></div></a>
+      <a class="tile" href="img/looks/splitsmith-overlay-pips-lg.webp" aria-label="Splitsmith / Overlay, Pips, open larger"><div class="im"><img src="img/looks/splitsmith-overlay-pips.webp" alt="" width="480" height="270" loading="lazy"><span class="badge">Moves</span></div><div class="cap"><b>Overlay, Pips</b><span>Splitsmith</span></div></a>
+      <a class="tile" href="img/looks/splitsmith-overlay-ticker-lg.webp" aria-label="Splitsmith / Overlay, Ticker, open larger"><div class="im"><img src="img/looks/splitsmith-overlay-ticker.webp" alt="" width="480" height="270" loading="lazy"><span class="badge">Moves</span></div><div class="cap"><b>Overlay, Ticker</b><span>Splitsmith</span></div></a>
+      <a class="tile" href="img/looks/splitsmith-overlay-timeline-lg.webp" aria-label="Splitsmith / Overlay, Timeline, open larger"><div class="im"><img src="img/looks/splitsmith-overlay-timeline.webp" alt="" width="480" height="270" loading="lazy"><span class="badge">Moves</span></div><div class="cap"><b>Overlay, Timeline</b><span>Splitsmith</span></div></a>
+      <a class="tile" href="img/looks/splitsmith-overlay-minimal-lg.webp" aria-label="Splitsmith / Overlay, Minimal, open larger"><div class="im"><img src="img/looks/splitsmith-overlay-minimal.webp" alt="" width="480" height="270" loading="lazy"><span class="badge">Moves</span></div><div class="cap"><b>Overlay, Minimal</b><span>Splitsmith</span></div></a>
+      <a class="tile" href="img/looks/splitsmith-overlay-classic-lg.webp" aria-label="Splitsmith / Overlay, Classic, open larger"><div class="im"><img src="img/looks/splitsmith-overlay-classic.webp" alt="" width="480" height="270" loading="lazy"></div><div class="cap"><b>Overlay, Classic</b><span>Splitsmith</span></div></a>
+    </div>
+    <div class="gmore"><span class="c" id="gcount" aria-live="polite"></span><button type="button" id="gtoggle" aria-controls="grid" aria-expanded="false" hidden></button></div>
+    <p class="gnote">Shown over a stand-in scene with sample figures. Make your own Look to change colours, fonts and logo, or, on the desktop app, the templates.</p>
   </section>
 
   <section class="wrap" id="ways">
@@ -347,18 +481,19 @@
     <div class="ways">
       <div class="way shell rv"><div class="core">
         <span class="k">In the app</span><h3>Coach and compare</h3>
-        <p class="muted" style="font-size:14px">Shot-by-shot playback with the video, the ruler and the table in sync. Per-shot notes and flags. The whole squad side by side.</p>
-        <ul><li>On your own machine, or hosted at my.splitsmith.app by invitation</li><li>Desktop sync pushes a local match to a hosted account</li><li>Share a read-only link to a match or a stage</li></ul>
+        <p class="muted" style="font-size:14px">Video, timeline and table in sync, notes on every shot, the whole squad side by side.</p>
+        <ul><li>On your own machine, or hosted at my.splitsmith.app by invitation</li><li>The desktop app keeps a synced match in step with your hosted account</li><li>On a phone: confirm beeps, audit shots and review Breakdown proposals</li><li>Share a read-only link to a match or a stage</li></ul>
       </div></div>
       <div class="way shell rv d1"><div class="core">
         <span class="k">Final Cut Pro</span><h3>A marker per shot</h3>
-        <p class="muted" style="font-size:14px">An FCPXML timeline with the stages back to back and a frame-aligned marker on every detected shot. Step through on <span class="kbd">M</span> / <span class="kbd">Shift+M</span>.</p>
-        <ul><li>Per stage or the whole match</li><li>Transitions, slates and lower thirds</li><li>FCP 7 XML for Premiere and Resolve</li></ul>
+        <p class="muted" style="font-size:14px">An FCPXML timeline, stages back to back, a marker on every shot. Step through with <span class="kbd">M</span> / <span class="kbd">Shift+M</span>.</p>
+        <ul><li>Per stage or the whole match</li><li>Transitions, slates and lower thirds</li><li>Markers for the reloads and movement you kept</li><li>Other cameras synced on the beep, one as a corner inset</li><li>FCP 7 XML for Premiere and Resolve</li></ul>
       </div></div>
       <div class="way shell rv d2"><div class="core">
         <span class="k">Rendered MP4</span><h3>Ready to post</h3>
-        <p class="muted" style="font-size:14px">A finished cut with the shot counter and splits burned in, a title page and a stage card, or every shooter in one beep-aligned grid.</p>
-        <ul><li>Presets for the whole export, yours or the built-in four</li><li>The look from a gallery, previewed on your footage</li><li>Alpha overlay with the shot clock</li><li>Compare grid with a mixed squad track</li><li>Upload to YouTube from the app: chapters, captions and thumbnail, into a playlist, scheduled if you like</li></ul>
+        <p class="muted" style="font-size:14px">A finished video with the overlay burned in, or the whole squad in one grid.</p>
+        <ul><li>Seven overlay styles: Classic, Plate, Pips, Ticker, Timeline, Minimal and Broadcast</li><li>Sixteen transitions, plus stings in your Look's colours</li><li>A summary after each stage and a match summary at the end</li><li>Upright for Shorts and Reels, clear of their captions and buttons</li><li>Your brand and the shooter's logo where you choose; an end-screen closing card</li><li>Upload to YouTube with chapters, captions and a thumbnail</li></ul>
+        <div class="pair"><img src="img/upright-hud.webp" width="540" height="960" alt="An upright export with the Minimal overlay: the split, large, and the clock above the bottom safe area" loading="lazy"><img src="img/upright-summary.webp" width="540" height="960" alt="The stage summary on an upright canvas: splits first, static and moving, then draw, reloads and the scorecard" loading="lazy"></div>
       </div></div>
     </div>
   </section>
@@ -369,9 +504,9 @@
         <span class="eyebrow rv"><i></i>Install</span>
         <h2 class="rv d1" style="margin:18px 0 20px">Two minutes to your first stage.</h2>
         <div class="steps rv d2">
-          <div class="step"><span class="n">01</span><p><b>Install and launch</b>Download the desktop app for macOS or Linux, or install with uv and open the app in your browser. The first boot fetches the detection models. Hosted at my.splitsmith.app is by invitation; a local install can sync a match up to it.</p></div>
-          <div class="step"><span class="n">02</span><p><b>Add your footage</b>A folder from any camera with a microphone: head, chest, gimbal or handheld, one camera or several. Each clip is matched to its shooter and stage from the scorecard times.</p></div>
-          <div class="step"><span class="n">03</span><p><b>Confirm the beeps, audit the shots</b>The app finds every beep and lines them up for your OK, one after the other. Each confirmed beep trims the stage and runs detection; you check what it found and the splits are yours.</p></div>
+          <div class="step"><span class="n">01</span><p><b>Install and launch</b>Download the desktop app for macOS or Linux, or install with uv and open it in your browser. The first start downloads the detection models.</p></div>
+          <div class="step"><span class="n">02</span><p><b>Add your footage</b>Any camera with a microphone, one or several. Each clip is matched to its shooter and stage by the scorecard times.</p></div>
+          <div class="step"><span class="n">03</span><p><b>Confirm the beeps, audit the shots</b>Confirm each beep it found. Detection runs, you check the shots, and the splits are yours.</p></div>
         </div>
       </div>
       <div class="shell rv d2"><div class="core">
@@ -388,7 +523,7 @@
       <div>
         <span class="eyebrow rv"><i></i>Hosted</span>
         <h2 class="rv d1" style="margin:18px 0 20px">my.splitsmith.app, by invitation.</h2>
-        <p class="lede rv d2" style="font-size:16px">The same app, hosted: upload from any device, sync a local match up, share read-only links, and let a coach or squadmate comment on your stages. Sign-in is a magic link and only invited emails get one. Leave yours and we will email an invite when there is room.</p>
+        <p class="lede rv d2" style="font-size:16px">The same app in your browser: upload from any device, sync from the desktop, share links, and let a coach or squadmate comment. Leave your email for an invite.</p>
       </div>
       <div class="shell rv d2"><div class="core" style="padding:24px 26px;position:relative">
         <form id="invite" novalidate>
@@ -409,12 +544,17 @@
       <div>
         <span class="eyebrow rv"><i></i>Detection</span>
         <h2 class="rv d1" style="margin:18px 0 20px">Trained on audited stages, not on a demo reel.</h2>
-        <p class="lede rv d2" style="font-size:16px">Every release retrains the shot ensemble on a corpus of real beep-to-last-shot audio with hand-labelled shot times, across cameras and mounts. Every stage you audit is the same kind of data. Contributing your own audited stages to the corpus is on the roadmap; today the fixtures come from the maintainer and a handful of squadmates.</p>
+        <p class="lede rv d2" style="font-size:16px">The shot detector is trained on real match audio with every shot time checked by hand, from many cameras and mounts. Today that is the maintainer's stages and a few squadmates'.</p>
       </div>
       <div class="shell rv d2"><div class="core" style="padding:22px 24px;display:grid;gap:14px">
-        <span class="k mono" style="font-size:10px;letter-spacing:.2em;text-transform:uppercase;color:var(--muted)">Interval classes</span>
-        <div class="ticks"><span><i style="background:var(--led)"></i>Draw</span><span><i style="background:var(--done)"></i>Fire</span><span><i style="background:var(--manual)"></i>Transition</span><span><i style="background:var(--beep)"></i>Movement</span><span><i style="background:var(--live)"></i>Reload</span><span><i style="background:var(--ink-2)"></i>Activation</span></div>
-        <p class="muted" style="font-size:14px">A split under 1.0 s is a split, under 2.0 s a transition, longer is movement; the auto-classifier's cutoffs, and every class is yours to override per shot in Coach.</p>
+        <span class="k mono" style="font-size:10px;letter-spacing:.2em;text-transform:uppercase;color:var(--muted)">The beep</span>
+        <p class="muted" style="font-size:14px">Placed on the start of your timer's tone, shown on a spectrogram, so Snap finds it even under a shot.</p>
+        <img src="img/beep.webp" width="1200" height="213" alt="The beep step: candidates, the timer tone in a spectrogram, and the audio, with the beep on the tone's start" loading="lazy" style="border-radius:10px;border:1px solid var(--hair);width:100%;height:auto">
+        <span class="k mono" style="font-size:10px;letter-spacing:.2em;text-transform:uppercase;color:var(--muted);margin-top:6px">Interval classes</span>
+        <div class="ticks"><span><i style="background:var(--draw)"></i>Draw</span><span><i style="background:var(--done)"></i>Fire</span><span><i style="background:var(--manual)"></i>Transition</span><span><i style="background:var(--beep)"></i>Movement</span><span><i style="background:var(--live)"></i>Reload</span><span><i style="background:var(--ink-2)"></i>Activation</span></div>
+        <p class="muted" style="font-size:14px">A gap under 1.0 s is fire, under 2.0 s a transition, longer is movement. Change any of them in Breakdown.</p>
+        <span class="k mono" style="font-size:10px;letter-spacing:.2em;text-transform:uppercase;color:var(--muted);margin-top:6px">Regions</span>
+        <p class="muted" style="font-size:14px">Draw, movement, reload and activation are also regions on the timeline, so a movement can span several shots. They give you moving and standing splits and reload times.</p>
         <span class="k mono" style="font-size:10px;letter-spacing:.2em;text-transform:uppercase;color:var(--muted);margin-top:6px">Reads</span>
         <div class="ticks"><span>MP4</span><span>MOV</span><span>MKV</span><span>.360</span><span>any ffmpeg input</span></div>
       </div></div>
@@ -425,10 +565,24 @@
     <div class="row">
       <span class="brand"><i></i>Splitsmith</span>
       <span>Open source &middot; MIT &middot; built for IPSC shooters, by one</span>
-      <span style="display:flex;gap:20px"><a href="/privacy">Privacy</a><a href="/terms">Terms</a><a href="https://github.com/mandakan/splitsmith">GitHub</a><a href="https://github.com/mandakan/splitsmith/blob/main/CHANGELOG.md">Changelog</a><a href="https://my.splitsmith.app">Sign in</a></span>
+      <span style="display:flex;gap:20px;flex-wrap:wrap"><a href="/privacy">Privacy</a><a href="/terms">Terms</a><a href="https://github.com/mandakan/splitsmith">GitHub</a><a href="https://github.com/mandakan/splitsmith/blob/main/CHANGELOG.md">Changelog</a><a href="https://my.splitsmith.app">Sign in</a></span>
     </div>
   </footer>
 </main>
+
+<dialog class="lb" id="lb" aria-labelledby="lb-title" aria-describedby="lb-desc">
+  <div class="shell"><div class="core">
+    <div class="stage"><img id="lb-img" alt="" width="960" height="540"></div>
+    <div class="meta">
+      <div><h3 id="lb-title"></h3><p id="lb-desc"></p></div>
+      <div class="ctl">
+        <button type="button" class="iconbtn" id="lb-prev" aria-label="Previous"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 3 5 8l5 5"/></svg></button>
+        <button type="button" class="iconbtn" id="lb-next" aria-label="Next"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 3 5 5-5 5"/></svg></button>
+        <button type="button" class="iconbtn" id="lb-close" aria-label="Close"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 4l8 8M12 4l-8 8"/></svg></button>
+      </div>
+    </div>
+  </div></div>
+</dialog>
 
 <script>
   (function () {
@@ -462,6 +616,93 @@
       entries.forEach(function (en) { if (en.isIntersecting) { en.target.classList.add('in'); io.unobserve(en.target); } });
     }, { rootMargin: '0px 0px -8% 0px', threshold: 0.08 });
     els.forEach(function (e) { io.observe(e); });
+  })();
+
+  /* Looks gallery: filters, "See all", lightbox. Without JS the grid above shows the first page as links. */
+  (function () {
+    var GALLERY = [{"look":"splitsmith","slot":"overlay","name":"Overlay, Plate","sub":"Splitsmith","id":"splitsmith-overlay-plate","moves":true,"title":"Splitsmith / Overlay, Plate","desc":"Plate: clock, shot count and split on a plate in the corner, animating on every shot."},{"look":"splitsmith","slot":"overlay","name":"Overlay, Pips","sub":"Splitsmith","id":"splitsmith-overlay-pips","moves":true,"title":"Splitsmith / Overlay, Pips","desc":"Pips: a dot per round, filling as you shoot, with the clock beside it."},{"look":"splitsmith","slot":"overlay","name":"Overlay, Ticker","sub":"Splitsmith","id":"splitsmith-overlay-ticker","moves":true,"title":"Splitsmith / Overlay, Ticker","desc":"Ticker: the last splits scroll past the clock."},{"look":"splitsmith","slot":"overlay","name":"Overlay, Timeline","sub":"Splitsmith","id":"splitsmith-overlay-timeline","moves":true,"title":"Splitsmith / Overlay, Timeline","desc":"Timeline: the stage as a line, a tick per shot."},{"look":"splitsmith","slot":"overlay","name":"Overlay, Minimal","sub":"Splitsmith","id":"splitsmith-overlay-minimal","moves":true,"title":"Splitsmith / Overlay, Minimal","desc":"Minimal: the split, large, and the clock, small."},{"look":"splitsmith","slot":"overlay","name":"Overlay, Classic","sub":"Splitsmith","id":"splitsmith-overlay-classic","title":"Splitsmith / Overlay, Classic","desc":"Classic: the shot count and the running clock, drawn straight by ffmpeg. The fastest render."},{"look":"splitsmith","slot":"title_page","name":"Title page","sub":"Splitsmith","id":"splitsmith-title_page","title":"Splitsmith / Title page","desc":"Opens the video: match, date, division and shooter, with your brand when you set one."},{"look":"splitsmith","slot":"slate","name":"Stage slate","sub":"Splitsmith","id":"splitsmith-slate","title":"Splitsmith / Stage slate","desc":"A full card before each stage: its number, name and round count."},{"look":"splitsmith","slot":"lower_third","name":"Lower third","sub":"Splitsmith","id":"splitsmith-lower_third","title":"Splitsmith / Lower third","desc":"The stage card as a strip over the first seconds of the run instead of a card of its own."},{"look":"splitsmith","slot":"closing","name":"Closing","sub":"Splitsmith","id":"splitsmith-closing","title":"Splitsmith / Closing","desc":"Ends the video, with Made with splitsmith unless you turn it off."},{"look":"splitsmith","slot":"closing","name":"Closing, End screen","sub":"Splitsmith","id":"splitsmith-closing-end-screen","title":"Splitsmith / Closing, End screen","desc":"Holds at least ten seconds and keeps the right side clear for YouTube's end screen elements."},{"look":"splitsmith","slot":"summary","name":"Stage summary","sub":"Splitsmith","id":"splitsmith-summary","title":"Splitsmith / Stage summary","desc":"Held after each stage: the scorecard and your splits, with draw, reloads and movement when you broke the stage down."},{"look":"splitsmith","slot":"match_summary","name":"Match summary","sub":"Splitsmith","id":"splitsmith-match-summary","title":"Splitsmith / Match summary","desc":"After the last stage: average split, best draw, rounds and a row per stage. No summed stage time."},{"look":"splitsmith","slot":"sting","name":"Wipe sting","sub":"Splitsmith","id":"splitsmith-sting-wipe","moves":true,"title":"Splitsmith / Wipe sting","desc":"Sweeps the Look's colours across the cut between stages, carrying a logo when there is one."},{"look":"clean","slot":"overlay","name":"Overlay, Plate","sub":"Clean","id":"clean-overlay-plate","moves":true,"title":"Clean / Overlay, Plate","desc":"Plate: clock, shot count and split on a plate in the corner, animating on every shot."},{"look":"clean","slot":"overlay","name":"Overlay, Pips","sub":"Clean","id":"clean-overlay-pips","moves":true,"title":"Clean / Overlay, Pips","desc":"Pips: a dot per round, filling as you shoot, with the clock beside it."},{"look":"clean","slot":"overlay","name":"Overlay, Ticker","sub":"Clean","id":"clean-overlay-ticker","moves":true,"title":"Clean / Overlay, Ticker","desc":"Ticker: the last splits scroll past the clock."},{"look":"clean","slot":"overlay","name":"Overlay, Timeline","sub":"Clean","id":"clean-overlay-timeline","moves":true,"title":"Clean / Overlay, Timeline","desc":"Timeline: the stage as a line, a tick per shot."},{"look":"clean","slot":"overlay","name":"Overlay, Minimal","sub":"Clean","id":"clean-overlay-minimal","moves":true,"title":"Clean / Overlay, Minimal","desc":"Minimal: the split, large, and the clock, small."},{"look":"clean","slot":"title_page","name":"Title page","sub":"Clean","id":"clean-title_page","title":"Clean / Title page","desc":"Opens the video: match, date, division and shooter, with your brand when you set one."},{"look":"clean","slot":"slate","name":"Stage slate","sub":"Clean","id":"clean-slate","title":"Clean / Stage slate","desc":"A full card before each stage: its number, name and round count."},{"look":"clean","slot":"lower_third","name":"Lower third","sub":"Clean","id":"clean-lower_third","title":"Clean / Lower third","desc":"The stage card as a strip over the first seconds of the run instead of a card of its own."},{"look":"clean","slot":"closing","name":"Closing","sub":"Clean","id":"clean-closing","title":"Clean / Closing","desc":"Ends the video, with Made with splitsmith unless you turn it off."},{"look":"clean","slot":"closing","name":"Closing, End screen","sub":"Clean","id":"clean-closing-end-screen","title":"Clean / Closing, End screen","desc":"Holds at least ten seconds and keeps the right side clear for YouTube's end screen elements."},{"look":"clean","slot":"sting","name":"Wipe sting","sub":"Clean","id":"clean-sting-wipe","moves":true,"title":"Clean / Wipe sting","desc":"Sweeps the Look's colours across the cut between stages, carrying a logo when there is one."},{"look":"broadcast","slot":"overlay","name":"Overlay, Broadcast","sub":"Broadcast","id":"broadcast-overlay-broadcast","moves":true,"title":"Broadcast / Overlay, Broadcast","desc":"Broadcast: a sports bar with time, rounds, split and what you are doing now; with a scorecard it adds magazine, string and hits."},{"look":"broadcast","slot":"overlay","name":"Overlay, Plate","sub":"Broadcast","id":"broadcast-overlay-plate","moves":true,"title":"Broadcast / Overlay, Plate","desc":"Plate: clock, shot count and split on a plate in the corner, animating on every shot."},{"look":"broadcast","slot":"overlay","name":"Overlay, Pips","sub":"Broadcast","id":"broadcast-overlay-pips","moves":true,"title":"Broadcast / Overlay, Pips","desc":"Pips: a dot per round, filling as you shoot, with the clock beside it."},{"look":"broadcast","slot":"overlay","name":"Overlay, Ticker","sub":"Broadcast","id":"broadcast-overlay-ticker","moves":true,"title":"Broadcast / Overlay, Ticker","desc":"Ticker: the last splits scroll past the clock."},{"look":"broadcast","slot":"overlay","name":"Overlay, Timeline","sub":"Broadcast","id":"broadcast-overlay-timeline","moves":true,"title":"Broadcast / Overlay, Timeline","desc":"Timeline: the stage as a line, a tick per shot."},{"look":"broadcast","slot":"overlay","name":"Overlay, Minimal","sub":"Broadcast","id":"broadcast-overlay-minimal","moves":true,"title":"Broadcast / Overlay, Minimal","desc":"Minimal: the split, large, and the clock, small."},{"look":"broadcast","slot":"title_page","name":"Title page","sub":"Broadcast","id":"broadcast-title_page","title":"Broadcast / Title page","desc":"Opens the video: match, date, division and shooter, with your brand when you set one."},{"look":"broadcast","slot":"title_page","name":"Title page, Rise","sub":"Broadcast","id":"broadcast-title_page-rise","title":"Broadcast / Title page, Rise","desc":"Opens the video: match, date, division and shooter, with your brand when you set one. Rise animates in."},{"look":"broadcast","slot":"slate","name":"Stage slate","sub":"Broadcast","id":"broadcast-slate","title":"Broadcast / Stage slate","desc":"A full card before each stage: its number, name and round count."},{"look":"broadcast","slot":"slate","name":"Stage slate, Rise","sub":"Broadcast","id":"broadcast-slate-rise","title":"Broadcast / Stage slate, Rise","desc":"A full card before each stage: its number, name and round count. Rise animates in."},{"look":"broadcast","slot":"lower_third","name":"Lower third","sub":"Broadcast","id":"broadcast-lower_third","title":"Broadcast / Lower third","desc":"The stage card as a strip over the first seconds of the run instead of a card of its own."},{"look":"broadcast","slot":"lower_third","name":"Lower third, Rise","sub":"Broadcast","id":"broadcast-lower_third-rise","title":"Broadcast / Lower third, Rise","desc":"The stage card as a strip over the first seconds of the run instead of a card of its own. Rise animates in."},{"look":"broadcast","slot":"closing","name":"Closing","sub":"Broadcast","id":"broadcast-closing","title":"Broadcast / Closing","desc":"Ends the video, with Made with splitsmith unless you turn it off."},{"look":"broadcast","slot":"closing","name":"Closing, Rise","sub":"Broadcast","id":"broadcast-closing-rise","title":"Broadcast / Closing, Rise","desc":"Ends the video, with Made with splitsmith unless you turn it off. Rise animates in."},{"look":"broadcast","slot":"closing","name":"Closing, End screen","sub":"Broadcast","id":"broadcast-closing-end-screen","title":"Broadcast / Closing, End screen","desc":"Holds at least ten seconds and keeps the right side clear for YouTube's end screen elements."},{"look":"broadcast","slot":"summary","name":"Stage summary, Results","sub":"Broadcast","id":"broadcast-summary-results","title":"Broadcast / Stage summary, Results","desc":"Held after each stage: the scorecard and your splits, with draw, reloads and movement when you broke the stage down."},{"look":"broadcast","slot":"match_summary","name":"Match summary, Table","sub":"Broadcast","id":"broadcast-match-summary-table","title":"Broadcast / Match summary, Table","desc":"After the last stage: average split, best draw, rounds and a row per stage. No summed stage time."},{"look":"broadcast","slot":"sting","name":"Wipe sting","sub":"Broadcast","id":"broadcast-sting-wipe","moves":true,"title":"Broadcast / Wipe sting","desc":"Sweeps the Look's colours across the cut between stages, carrying a logo when there is one."},{"look":"broadcast","slot":"sting","name":"Push sting","sub":"Broadcast","id":"broadcast-sting-push","moves":true,"title":"Broadcast / Push sting","desc":"Sweeps the Look's colours across the cut between stages, carrying a logo when there is one."},{"look":"any","slot":"transition","name":"Fade","sub":"Every Look","id":"transition-fade","moves":true,"title":"Every Look / Fade","desc":"Fades the stage into the next."},{"look":"any","slot":"transition","name":"Fade through black","sub":"Every Look","id":"transition-fadeblack","moves":true,"title":"Every Look / Fade through black","desc":"Fades to black, then into the next stage."},{"look":"any","slot":"transition","name":"Flash","sub":"Every Look","id":"transition-fadewhite","moves":true,"title":"Every Look / Flash","desc":"A white flash between the stages."},{"look":"any","slot":"transition","name":"Dissolve","sub":"Every Look","id":"transition-dissolve","moves":true,"title":"Every Look / Dissolve","desc":"A grainy dissolve into the next stage."},{"look":"any","slot":"transition","name":"Slide","sub":"Every Look","id":"transition-slide","moves":true,"title":"Every Look / Slide","desc":"The next stage slides in, pushing this one out. Four directions."},{"look":"any","slot":"transition","name":"Smooth","sub":"Every Look","id":"transition-smooth","moves":true,"title":"Every Look / Smooth","desc":"A soft-edged wipe. Four directions."},{"look":"any","slot":"transition","name":"Wipe","sub":"Every Look","id":"transition-wipe","moves":true,"title":"Every Look / Wipe","desc":"A hard-edged wipe. Four directions."},{"look":"any","slot":"transition","name":"Cover","sub":"Every Look","id":"transition-cover","moves":true,"title":"Every Look / Cover","desc":"The next stage slides in over this one. Four directions."},{"look":"any","slot":"transition","name":"Reveal","sub":"Every Look","id":"transition-reveal","moves":true,"title":"Every Look / Reveal","desc":"This stage slides away, revealing the next. Four directions."},{"look":"any","slot":"transition","name":"Wind","sub":"Every Look","id":"transition-wind","moves":true,"title":"Every Look / Wind","desc":"This stage blows away in streaks. Four directions."},{"look":"any","slot":"transition","name":"Circle","sub":"Every Look","id":"transition-circle","moves":true,"title":"Every Look / Circle","desc":"A circle opens onto the next stage, or closes on this one."},{"look":"any","slot":"transition","name":"Radial","sub":"Every Look","id":"transition-radial","moves":true,"title":"Every Look / Radial","desc":"A clock hand sweeps the next stage in."},{"look":"any","slot":"transition","name":"Zoom in","sub":"Every Look","id":"transition-zoomin","moves":true,"title":"Every Look / Zoom in","desc":"Zooms into the stage and out into the next."},{"look":"any","slot":"transition","name":"Horizontal blur","sub":"Every Look","id":"transition-hblur","moves":true,"title":"Every Look / Horizontal blur","desc":"Blurs sideways out of the stage and into the next."},{"look":"any","slot":"transition","name":"Pixelize","sub":"Every Look","id":"transition-pixelize","moves":true,"title":"Every Look / Pixelize","desc":"Breaks into blocks and re-forms as the next stage."},{"look":"any","slot":"transition","name":"Squeeze","sub":"Every Look","id":"transition-squeeze","moves":true,"title":"Every Look / Squeeze","desc":"This stage squeezes to a line, the next stretches out of it. Two directions."}];
+    var DIR = "img/looks/";
+    var LOOKS = [["splitsmith", "Splitsmith", DIR + "chip-splitsmith.webp"], ["clean", "Clean", DIR + "chip-clean.webp", "quiet, still cards"], ["broadcast", "Broadcast", DIR + "chip-broadcast.webp"], ["all", "All Looks"]];
+    var SLOTS = [["overlay", "Overlay"], ["title_page", "Title page"], ["slate", "Stage slate"], ["lower_third", "Lower third"], ["summary", "Stage summary"], ["match_summary", "Match summary"], ["closing", "Closing"], ["sting", "Stings"], ["transition", "Transitions"], ["all", "Everything"]];
+    var KEY = "ss-gallery-v3";
+    var state = { look: "splitsmith", slot: "overlay" };
+    try { var saved = JSON.parse(localStorage.getItem(KEY) || "null"); if (saved && saved.look && saved.slot) state = { look: saved.look, slot: saved.slot }; } catch (e) {}
+    var grid = document.getElementById("grid"), count = document.getElementById("gcount"), toggle = document.getElementById("gtoggle");
+    var expanded = false, shown = [];
+    var phone = window.matchMedia("(max-width:767px)");
+    function esc(s) { return String(s).replace(/[&<>"]/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]; }); }
+    function matches(it, look, slot) {
+      return (look === "all" || it.look === look || it.look === "any") && (slot === "all" || it.slot === slot);
+    }
+    function limit() {
+      var cols = getComputedStyle(grid).gridTemplateColumns.split(" ").filter(Boolean).length || 1;
+      return cols * (phone.matches ? 2 : 1);
+    }
+    function fold() {
+      var n = shown.length, cap = limit(), tiles = grid.children;
+      for (var i = 0; i < tiles.length; i++) tiles[i].hidden = !expanded && i >= cap;
+      var folds = n > cap;
+      toggle.hidden = !folds;
+      toggle.setAttribute("aria-expanded", String(expanded));
+      toggle.innerHTML = (expanded ? "Show fewer" : "See all " + n) + '<svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2.5 4.5 6 8l3.5-3.5"/></svg>';
+      count.textContent = folds && !expanded ? "Showing " + cap + " of " + n : n + (n === 1 ? " preview" : " previews");
+    }
+    toggle.addEventListener("click", function () {
+      expanded = !expanded; fold();
+      var f = document.querySelector("#looks .filters");
+      if (!expanded && f.getBoundingClientRect().top < 0) f.scrollIntoView({ block: "start" });
+    });
+    var rz; window.addEventListener("resize", function () { clearTimeout(rz); rz = setTimeout(fold, 100); });
+    function seg(el, opts, key) {
+      el.innerHTML = "";
+      opts.forEach(function (o) {
+        var b = document.createElement("button");
+        b.type = "button";
+        var n = GALLERY.filter(function (it) { return key === "look" ? matches(it, o[0], state.slot) : matches(it, state.look, o[0]); }).length;
+        b.innerHTML = (o[2] ? '<span class="th" aria-hidden="true" style="background-image:url(' + o[2] + ')"></span>' : "") + esc(o[1]) + (o[3] ? '<span class="d">' + esc(o[3]) + "</span>" : "") + '<span class="n" aria-label="' + n + ' previews">' + n + "</span>";
+        b.setAttribute("aria-pressed", String(state[key] === o[0]));
+        b.disabled = n === 0 && state[key] !== o[0];
+        b.addEventListener("click", function () { state[key] = o[0]; expanded = false; render(); el.querySelector('[aria-pressed="true"]').focus(); });
+        el.appendChild(b);
+      });
+    }
+    function render() {
+      try { localStorage.setItem(KEY, JSON.stringify(state)); } catch (e) {}
+      seg(document.getElementById("f-look"), LOOKS, "look");
+      seg(document.getElementById("f-slot"), SLOTS, "slot");
+      shown = GALLERY.filter(function (it) { return matches(it, state.look, state.slot); });
+      grid.innerHTML = "";
+      shown.forEach(function (it, i) {
+        var a = document.createElement("a");
+        a.className = "tile"; a.href = DIR + it.id + "-lg.webp";
+        a.setAttribute("aria-label", it.title + ", open larger");
+        a.innerHTML = '<div class="im"><img src="' + DIR + it.id + '.webp" alt="" width="480" height="270" loading="lazy">' +
+          (it.moves ? '<span class="badge">Moves</span>' : "") + "</div>" +
+          '<div class="cap"><b>' + esc(it.name) + "</b><span>" + esc(it.sub) + "</span></div>";
+        a.addEventListener("click", function (e) { if (!lb.showModal) return; e.preventDefault(); open(i, a); });
+        grid.appendChild(a);
+      });
+      fold();
+    }
+    var lb = document.getElementById("lb"), img = document.getElementById("lb-img"), cur = 0, opener = null;
+    function show(i) {
+      cur = (i + shown.length) % shown.length;
+      var it = shown[cur];
+      img.src = DIR + it.id + "-lg.webp"; img.alt = it.title;
+      document.getElementById("lb-title").textContent = it.title;
+      document.getElementById("lb-desc").textContent = it.desc;
+    }
+    function open(i, from) { opener = from; show(i); lb.showModal(); document.getElementById("lb-close").focus(); }
+    document.getElementById("lb-prev").addEventListener("click", function () { show(cur - 1); });
+    document.getElementById("lb-next").addEventListener("click", function () { show(cur + 1); });
+    document.getElementById("lb-close").addEventListener("click", function () { lb.close(); });
+    lb.addEventListener("close", function () { if (opener && document.contains(opener)) opener.focus(); });
+    lb.addEventListener("click", function (e) { if (e.target === lb) lb.close(); });
+    lb.addEventListener("keydown", function (e) { if (e.key === "ArrowLeft") { e.preventDefault(); show(cur - 1); } if (e.key === "ArrowRight") { e.preventDefault(); show(cur + 1); } });
+    var sx = null;
+    lb.addEventListener("touchstart", function (e) { sx = e.touches[0].clientX; }, { passive: true });
+    lb.addEventListener("touchend", function (e) { if (sx === null) return; var dx = e.changedTouches[0].clientX - sx; if (Math.abs(dx) > 50) show(cur + (dx < 0 ? 1 : -1)); sx = null; });
+    render();
   })();
 </script>
 </body>
