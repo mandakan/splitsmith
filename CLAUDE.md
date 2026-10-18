@@ -254,75 +254,6 @@ once per session when something is unseen and lives in ``RootLayout``, so
 share pages never show it; a feature's ``<NewChip feature=...>`` shows for 60
 days or until ``dismissNewChip`` is called where the feature is used.
 
-## Hosted playback streams the web rendition (#1031)
-
-The audit trim (``trimmed/stage<N>_cam_<id>_trimmed.mp4``) is a
-full-resolution scrub cache: tens of Mbit/s, ``moov`` at the tail. It is
-what the audit screen wants and the wrong thing to stream from R2, which
-is why every trim now has a ``_web.mp4`` beside it (720p, faststart,
-``WebTrimConfig`` in ``config.py``, cut *from the trim* by
-``trim.transcode_web_trim`` so the two share a window and a beep anchor).
-``ui/audio._ensure_web_trim`` cuts it whenever the trim is cut or found
-cached, best-effort: a failed transcode never fails the trim job.
-``sync.run.backfill_web_trims`` cuts missing ones before every push, so a
-match trimmed before this existed is fixed by its next sync, not a
-re-trim. ``_video_clip_anchor`` reports ``kind: "web"`` only when the
-byte path is a presigned redirect and the object exists; the clip anchor
-(Results, Coach) stays ``trim`` locally, pinned by
-``test_get_coach_entry_kind_stays_trim_locally_with_web_file``. On
-``stream_video`` the kinds mean one thing in both modes: ``web`` is the
-streaming rendition, else the trim, else the source, never a 404 (what
-Results, Coach and Compare rely on); ``trim`` never substitutes the
-rendition; ``scrub`` is the Audit players' pin (#1209): the fresh
-rendition, else the trim, else 404, never the source -- a re-cut deletes
-both while it encodes and a pinned player must error and remount, not
-play the source under trim offsets. Fresh is one rule,
-``audio.fresh_rendition`` (non-empty, not older than the trim, equal
-timestamps fresh; on a mirror the rendition alone), fed by local files,
-``storage.stat`` in the route, and the request's ``StoragePresence``
-listing (one ``trimmed/`` listing per request, which now keeps each
-object's size and ``last_modified``) for the payload's ``scrub_version``.
-``lib/useScrubSource`` asks for ``scrub`` when the video dict carries
-``scrub_version``, unless ``GlobalPrefs.full_res_scrub`` is on (local
-only; hosted has no switch) or that rendition (path + version) already
-errored on the page (#1192: a 4K trim at ~150 Mbit/s stalls software
-decode and ends after ~2 s in Chromium's low-end mode, #1191). The GOP stays 30: GOP 15
-measured +35-47 % bytes for ~10 ms of seek. Hosted Compare prefers ``trimmed/<...>_web.mp4``
-over the lossless export.
-
-Web-only mirrors (spec 2026-09-27 v1.1): a desktop mirror has no
-``_trimmed.mp4`` on R2 by default, only ``_web.mp4`` and ``.params.json``.
-On a mirror only (``_is_mirror()``, origin ``desktop``), ``kind=trim`` and
-``kind=auto`` redirect to the rendition when the full trim is absent, the
-clip anchor comes from the pushed params (``try_pull_web_trim`` +
-``trim_pre_buffer_seconds_for``), and the audit WAV is the one the desktop
-pushed (below), else cut from the rendition by a job. A hosted-native
-match keeps "``kind=trim`` never substitutes", pinned by
-``test_hosted_native_match_without_a_trim_still_404s_kind_trim``.
-
-**Requests read derived media; jobs make it** (spec
-``2026-10-14-derived-media-off-the-request-path-design``). On 2026-10-13
-three requests from one phone each cut a stage's audio themselves, one from
-a rendition another was still downloading, and the phone was served a short
-WAV. A request never runs ffmpeg, decodes a source or mirrors a large file:
-the audio and peaks routes, the beep snap and the raw-file peaks read
-through ``ui/audio.published_audit_audio`` / ``published_video_audio`` /
-``published_take_audio`` and, on a miss, ``_audio_pending`` queues one
-``derive_audio`` job (deduplicated on kind, stage, shooter, video) and
-answers 202 ``{pending, active_job, job_id}``; the SPA's ``lib/pending``
-(``whenReady``) asks again and the page says "Preparing audio". The trim
-job also cuts the audit WAV (``ensure_video_audit_wav``) and the desktop
-push carries it after the rendition (``sync/plan.audit_wav_for``, the
-``audio/`` key in ``_SYNC_MEDIA_KEY_RE``, never deletable); a stored WAV is
-current only when it is not older than the clip it was cut from. Every
-derived file is written through ``splitsmith.derived``: a unique partial,
-a check (``valid_mp4``, ``wav_problem`` against the clip's ``mvhd``
-length), a rename. A lock is opt-in (``produce(lock=True)``,
-``derived.locked``) for writers two local processes run at once; the queue
-is what coordinates. The beep preview clip stays synchronous (one clip per
-scrubbed ``t``) but publishes whole. A new route that needs a derived file
-reads it and queues its job; it never calls an ``ensure_*`` producer.
-
 ## Export presets (spec 2026-09-15)
 
 ``export_presets.ExportPresetBody`` is the one shape the API, the local
@@ -660,238 +591,33 @@ confirmed regions; a region-blind call silently flips a region-derived
 `reload`), and every output reads regions through
 `events.confirmed_from_doc`.
 
-## Hosted access tiers (spec 2026-10-03)
+## Hosted mode, sync and derived media
 
-An account has **features** (``splitsmith.access.Feature``: ``sync``,
-``share``, ``create_match``, ``raw_upload``, ``hosted_compute``); a match
-has **capabilities** (by origin). A request needs both. A tier is a named
-feature set in ``AccessConfig`` (``config.py``, overridable through
-``SPLITSMITH_CONFIG``; ``SPLITSMITH_ACCESS_DEFAULT_TIER`` on ``serve``
-sets the tier new accounts get, validated against that registry at
-boot); ``features_for`` resolves a user (env admins get
-everything, an unknown tier gets nothing). Code checks features, never
-tier names, in Python and in the SPA. Local mode never consults access.
-The backstop is ``submit_allowed`` on ``PostgresJobBackend``, wired per
-tenant in ``_build_tenant``: no ``hosted_compute``, no job, whatever the
-kind, so a new job kind is covered with no edit. A new hosted entry point
-that creates matches, uploads or submits still declares
-``Depends(require_feature(...))`` (``ui/access_gate.py``) so the refusal
-is a clean ``feature_required`` 403, and a request handler that chains a
-job after a committed write catches ``FeatureRequiredError`` and skips
-the chain rather than reporting the write as refused. The intake
-(``POST /api/v1/access-requests`` and sign-in's blocked branch) answers
-the same bytes whatever the email's state, rate-limited or not, and
-never mails the requester: only admins are alerted. Admin routes live in
-``ui/admin_access_api.py`` with the db imports inside the functions (the
-slim local install imports it). The SPA reads ``lib/access.can`` /
-``useCan`` and maps a stray refusal with ``featureRefusal``. Deploy
-facts (worker env, ``FORWARDED_ALLOW_IPS``, the waitlist cut-over) are in
-``docs/saas-readiness/11-environment-strategy.md``.
+Rules in `.claude/rules/`, loaded with the files they cover:
 
-## Hosted database connections (#1178)
+- `hosted.md` -- access tiers and features, database connections and the
+  per-loop pools, batching on the request path (presence, the picker, the
+  match bundle, the jobs poll).
+- `sync.md` -- state doc kinds and the pull allowlist, desktop auto-sync, the
+  reconciler, audit locking, the push's media, hosted deletes, the desktop
+  command queue.
+- `media.md` -- trims and web renditions, stream kinds, web-only mirrors, and
+  derived media made by jobs, never by requests.
 
-asyncpg binds a connection to the event loop that created it; using it
-from another loop crashes with "attached to a different loop" (#423).
-Hosted mode therefore runs database work on exactly two long-lived
-loops per process -- the main loop (uvicorn's, or the Procrastinate
-worker's) and the ``DbRunner`` thread's (``splitsmith.async_bridge``) --
-and ``db.engine.LoopEngines`` gives each *adopted* loop its own pooled
-engine (``pool_size=5, max_overflow=10, pool_pre_ping=True``). Any other
-loop gets the shared NullPool fallback, which never reuses a connection.
-Every sync caller (the state accessors, the job backend's thread-side
-bridges, ``youtube_api``) goes through ``run_sync``, never
-``asyncio.run``: a new ``asyncio.run(<store coroutine>)`` anywhere on
-the hosted path is a per-call connection again. Local mode builds no
-engine and installs no runner, so ``run_sync`` there is ``asyncio.run``
-as before. The pool adds no traffic of its own (no warm-up, no ping, no
-``pool_recycle``): Neon closes idle connections after five minutes and
-scales to zero, and ``pre_ping`` reconnects on the next request. The
-regression gate is ``tests/test_pooling_docker.py`` (the compose stack
-is what #423 crashed on) and proves pooling by a ``pg_stat_database.sessions``
-delta over 40 requests, not by connection count, which NullPool also keeps flat;
-SQLite in tests keeps one NullPool engine on purpose, a per-loop ``:memory:``
-engine would be a database per loop.
+Rules that reach `ui/server.py`, which is too broad to scope:
 
-Existence questions on the request path (is this source in storage? is
-this trim cached?) go through ``ui/presence.StoragePresence`` (#1180),
-one per request: it lists the tenant's ``raw/`` prefix once and each
-shooter's ``trimmed/`` prefix once and answers by set membership, with
-the same local-disk-first semantics as ``MatchProject.source_present``
-and ``audio.trim_available``. ``_audit_trim_targets`` takes it as
-``presence=``; its two callers (the shooters list, the bulk rebuild) each
-build one. A new per-angle existence check on a list route belongs on
-the index, not on ``storage.exists``: that was two R2 HEADs per angle
-and 11 s to open a match. A share request skips the
-``stages_missing_trim`` count entirely (it gates a button the anonymous
-shell never renders), pinned by ``tests/test_share_shooters_presence.py``.
-
-The hosted picker (``GET /api/me/recent-projects?detail=true``) loads every
-match's detail in two queries (#1179): ``ProjectStateStore.load_docs_for_matches``
-returns the match, project and audit docs of the whole list grouped per
-match, ``PostgresMatchStore.list`` gives the origins, and
-``_hosted_detail_from_docs`` derives each card with no I/O. A new per-match
-fact the picker needs goes into that batch, never into a per-row ``await``:
-``tests/test_recent_projects_batch.py`` pins that the route's SELECT count
-does not grow with the number of matches.
-
-The triage grid, the triage summary and the beep queue load the bound
-match once per request through ``AppState.match_bundle`` (#1181): one
-``load_docs_for_matches`` query for every shooter's project and audit
-docs, each project bound by ``_project_from_doc`` exactly as
-``shooter_project`` binds one. A route that walks every shooter takes the
-bundle, not ``shooter_project`` in a loop; ``tests/test_match_bundle_queries.py``
-pins two ``state_docs`` SELECTs per request whatever the shooter count. On
-the SPA side the shell fetches the beep queue once per load and hands it
-down as ``beepQueue`` on the outlet context; the Overview reads it there
-and fetches triage once on mount (not again when the project arrives).
-
-The jobs poll (``GET /api/me/jobs``, every 5 s per open tab) is bounded
-(#1182): hosted ``PostgresJobBackend.list`` returns every active job and
-every unacknowledged failure plus the ``RECENT_FINISHED_RETAINED`` most
-recent others (never the account's whole history -- the SyncCard's job
-echo is the only reader of terminal rows; the strip's "N of M" counts its
-own batch, ``lib/jobBatch``, never the list's terminal rows, #1190),
-and the route nulls ``result`` and ``timings`` on each entry. A job's
-result is read through ``GET /api/me/jobs/{id}`` (``pollJob``), so a new
-SPA surface that needs a result fetches the job, never the list;
-``tests/test_jobs_poll_payload.py`` pins both.
-
-## State doc kinds and the sync allowlist
-
-Adding a ``doc_kind`` to ``state_docs`` is not a local change. The sync
-pull manifest comes from ``ProjectStateStore.list_doc_meta``, which is
-deliberately kind-agnostic and therefore returns the new kind
-immediately; ``SyncClient._doc_path`` then maps anything it does not
-recognise onto the audit URL shape, so an unhandled kind fails the
-**entire** sync for that match, not the one document.
-``sync.pull.PULLABLE_DOC_KINDS`` is an allowlist for exactly that reason
--- it keeps the next kind inert by default rather than catastrophic.
-Widen it only together with a merge rule in ``sync.run._apply_pull``.
-
-The allowlist is applied in **two** places and they move together:
-``sync.pull.plan_pull`` (the client) and ``sync_api.get_doc_manifest``
-(the server). Neither is redundant. There is no client-version
-negotiation on the sync surface, so the client-side filter protects only
-clients that have already been upgraded -- a desktop install in the
-field still aborts its whole pull the first time a hosted export writes
-an ``export_runs`` row, unless the server declines to offer it. The
-server-side filter is the one that protects installs nobody controls;
-the client-side one is what protects a new client talking to an older
-server. Both are pinned:
-``tests/test_sync_api.py::test_doc_manifest_omits_kinds_a_desktop_client_cannot_pull``
-and the ``plan_pull`` cases in ``tests/test_sync_pull.py``.
-The cascade queries are the other half: ``delete_match`` filters on
-``match_id`` alone and ``delete_shooter`` on ``(match_id, slug)``, so
-both sweep a new per-shooter kind without edits -- ``list_project_docs``
-and ``list_audit_docs`` are the kind-*specific* ones and must not be
-"generalised" into the cascade's job.
-
-Two ``duration_seconds`` fields mean different things and are one
-mis-wire apart: ``export_runs.ExportRun.duration_seconds`` is wall clock
-for the job body, ``match_exports.MatchExportResult.duration_seconds`` is
-the length of the stitched timeline. Never assign one from the other.
-
-## Desktop auto-sync (spec 2026-09-27)
-
-A running desktop (app or ``splitsmith ui``) syncs every match it has
-synced before, both ways, with no clicks. ``ui/auto_sync.AutoSyncService``
-polls ``GET /api/sync/fingerprints`` (``(doc_count, version_sum)`` over
-the pullable kinds per match, compared with
-``sync.state.local_fingerprint``) and marks a match dirty from two hooks:
-an HTTP middleware on successful writes under ``/api/matches/{id}/`` and
-a job terminal listener. The pure core (``sync/auto.py``) decides when:
-pulls immediately, pushes after 45 s of quiet, never while the match has
-a job running, never while a render (``RENDER_KINDS``) runs on *any*
-match (a sync opens with the web-clip backfill, one encode per trim on
-the render's CPU), one sync at a time, backoff to 15 min, a 401 pauses until
-the token changes. Automatic runs are the ``auto_sync`` job kind (the
-``sync_match`` body), hidden from the jobs strip unless they fail.
-
-Every sync, manual or automatic, ends with the reconciler
-(``sync/reconcile.py``, pure): from the ``processed`` flags and audit docs
-it queues missing ``trim`` and ``shot_detect`` steps, which is how a beep
-confirmed on the phone gets trimmed and detected on the desktop.
-``_after_beep_reviewed`` uses the same ``video_step`` with
-``explicit=True``; a new pipeline step belongs there, not in a second
-rule. A reconcile step that fails is remembered with its inputs in
-``auto_sync.json`` and skipped until they change.
-
-Per-match state (``enabled``, the failure memo, the last run) lives in
-``<match>/auto_sync.json``, never ``sync_state.json``: ``run_sync`` saves
-that file from memory during a run and would undo a toggle. The global
-switch is ``GlobalPrefs.auto_sync_enabled``. ``SPLITSMITH_AUTO_SYNC=0``
-disables the service; ``tests/conftest.py`` sets it, and a test that
-wants the service opts back in.
-
-Audit GET/PUT carry ``_version`` (``audit_revision``, a content hash, the
-same in both modes); a PUT with a stale one is a 409 ``version_conflict``
-and both audit pages reload. It is never stored. The pull's audit
-read-merge-write holds ``AppState.audit_lock``, the lock the PUT's
-compare-and-save holds. ``find_active`` is scoped to ``current_match_id``
-when set: shooter slugs repeat across matches.
-
-Pushes are web-only unless the match's ``full_media`` flag
-(``auto_sync.json``, the SyncCard's Web / Full switch) is on:
-``build_push_plan(full_media=...)`` skips a ``_trimmed.mp4`` whose
-``_web.mp4`` exists (a clip without a rendition keeps its trim), and the
-push's gc deletes a remote full trim only when its rendition key is in
-``sync_state.items``. The hosted delete route accepts beep_review keys,
-``*_trimmed.mp4``, and a ``*_web.mp4`` only while its ``_trimmed.mp4`` is
-in storage (#1077: the gc removes a rendition whose local file a re-trim
-swept once hosted has the current trim, so a stale window is never
-preferred); the params sidecar is never deletable. The end-to-end check is
-``tests/test_sync_integration.py::test_phone_beep_confirm_reaches_the_desktop_reconciler``.
-
-Rules added by the #1067-#1078 follow-ups (Sep 2026), each pinned by tests:
-
-- **Failure parks, it does not retry on a timer** (#1070). A failed sync
-  parks the match in ``AutoSyncCore`` until a local write, a hosted
-  fingerprint that moved since the failure, a poll recovering from an
-  outage, a successful manual sync or a restart. The backoff floors the
-  retry after a release. ``status_for`` reports ``waiting_for_change``.
-- **A match deleted on hosted stays deleted** (#1088). ``run_sync`` checks
-  the manifest *before* ``ensure_match`` (which re-adopts a mirror): pushed
-  docs recorded and none on hosted means deleted, so it records
-  ``hosted_deleted_at`` in ``auto_sync.json``, raises ``SyncMirrorGone``
-  and auto-sync stops watching. ``POST /api/match/sync/republish`` is the
-  only way back (resets ``sync_state.json`` and ``sync_base/``). A 409 on
-  one doc missing from the manifest fails naming the doc, never three
-  "could not converge" retries.
-- **One auto-sync per machine, one sync per match** (#1076). ``flock`` on
-  ``~/.splitsmith/auto_sync.lock`` (the service owner; the other process
-  shows "another splitsmith window ... is syncing" and takes over when the
-  owner exits) and on ``<match>/.sync.lock`` around every sync job body.
-- **Every local audit read-modify-write runs under ``_audit_rmw()``**
-  (#1075): the lock locally, a no-op hosted. A new audit writer in
-  ``server.py`` wraps its load..save in it, or the pull can lose its edit;
-  ``tests/test_audit_lock_wiring.py`` has the probe lock to pin it (#1073).
-- **Fingerprints carry a digest** (#1072): ``versions_digest`` over
-  identity -> version, computed the same way from ``sync_state`` and from a
-  manifest. A hosted without the digest is compared on the pair, and one
-  without ``/fingerprints`` at all falls back to per-match manifests (#1071).
-- **The reconcile failure memo keys on every input** (#1069): beep, stage
-  time, and for a trim the buffers, source path and source presence.
-- **The desktop command queue** (#1100, spec 2026-09-28): the phone asks,
-  the desktop runs. Hosted: the ``desktop_commands`` table (never a
-  ``state_docs`` kind), phone routes under ``match/desktop-commands`` (a
-  REVIEW capability, mirrors only), desktop routes under
-  ``/api/sync/commands`` on a 10 min lease, ``pending_commands`` on each
-  fingerprint row. Desktop: ``ui/command_runner.CommandRunner`` inside
-  ``AutoSyncService`` (so only the owner-lock process claims); it claims
-  after that match's sync succeeds, refuses a stage whose audit revision
-  moved since the request (``sync/commands.refuse_reason``), and completes
-  only after a sync that started after the job ended. The result push uses
-  ``AutoSyncCore.request_push_now``, never a backdated ``mark_dirty``: the
-  job's own dirty mark would restart the quiet timer. A new command kind
-  is ``COMMAND_KINDS`` hosted plus ``RUNNABLE_KINDS`` and the server's
-  ``_start_desktop_command`` on the desktop. In the SPA, a desktop-synced
-  match (``origin === "desktop"`` with the review capability) asks instead
-  of detecting: ``lib/useDesktopCommands`` (polls only while a request is
-  active), ``lib/desktopCommands`` (all wording), ``DesktopCommandLine``,
-  the phone Audit's header menu and empty state, the desktop Audit
-  overflow's ``DetectShotsBadge`` ``desktop`` prop, and the Overview's
-  "Desktop requests" sheet. A new kind's phone entry goes through the same
-  hook.
+- A new hosted entry point that creates matches, uploads or submits declares
+  `Depends(require_feature(...))`; code checks features, never tier names.
+- On the hosted path a sync caller uses `run_sync`, never `asyncio.run`.
+- A route that walks every shooter takes `AppState.match_bundle`; a per-angle
+  existence check goes through the request's `StoragePresence`; a new per-match
+  picker fact joins the batch, never a per-row `await`.
+- Every local audit read-modify-write runs under `_audit_rmw()`.
+- A request never runs ffmpeg or calls an `ensure_*` producer: it reads the
+  derived file and queues its job (`_audio_pending`).
+- A new `state_docs` kind needs `PULLABLE_DOC_KINDS` (applied in both
+  `plan_pull` and `get_doc_manifest`) and a merge rule in
+  `sync.run._apply_pull`.
 
 ## UI (the SPA)
 
