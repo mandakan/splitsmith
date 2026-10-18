@@ -4,13 +4,16 @@
  * wears until you use it. Data and rules: ``lib/whatsNew``,
  * ``lib/useWhatsNew``; entries: ``data/whats_new.json``.
  */
+import { ExternalLink } from "lucide-react";
+
 import { Button } from "@/components/ui/button";
 import { Chip } from "@/components/ui/Chip";
 import { Label } from "@/components/ui/Label";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Sheet } from "@/components/ui/Sheet";
+import type { WhatsNewEntry } from "@/lib/api";
 import { closeWhatsNew, openWhatsNew, useWhatsNew } from "@/lib/useWhatsNew";
-import { byMonth, unseen } from "@/lib/whatsNew";
+import { byMonth, unseen, videoLink } from "@/lib/whatsNew";
 
 export function WhatsNewSheet() {
   const { payload, open } = useWhatsNew();
@@ -32,6 +35,7 @@ export function WhatsNewSheet() {
                 <li key={e.id} className="border-b border-rule py-3 last:border-b-0">
                   <h3 className="text-base font-medium text-ink">{e.title}</h3>
                   <p className="mt-1 text-md text-ink-2">{e.body}</p>
+                  <VideoLink entry={e} />
                 </li>
               ))}
             </ul>
@@ -44,6 +48,23 @@ export function WhatsNewSheet() {
         </Button>
       </div>
     </Sheet>
+  );
+}
+
+/** An entry's video, opened on YouTube in a new tab: a plain link, no embed. */
+function VideoLink({ entry }: { entry: WhatsNewEntry }) {
+  const link = videoLink(entry);
+  if (!link) return null;
+  return (
+    <a
+      href={link.href}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="mt-2 inline-flex items-center gap-1.5 rounded text-md text-ink underline decoration-rule underline-offset-4 hover:decoration-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-led"
+    >
+      <ExternalLink className="size-3.5" aria-hidden />
+      {link.label}
+    </a>
   );
 }
 

@@ -4,7 +4,7 @@
  * a feature's "New" chip goes when the feature is used; a failed fetch
  * shows nothing.
  */
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { NewChip, WhatsNewButton, WhatsNewSheet } from "@/components/whatsNew/WhatsNew";
@@ -80,6 +80,34 @@ describe("What's new", () => {
     });
     expect(api.markWhatsNewSeen).toHaveBeenCalledWith(["chip:look-editor"]);
     await waitFor(() => expect(screen.queryByText("New")).toBeNull());
+  });
+
+  it("links an entry's video in a new tab, and draws no link for an entry without one", async () => {
+    vi.mocked(api.getWhatsNew).mockResolvedValue({
+      entries: [
+        {
+          id: "tour",
+          date: today,
+          title: "A short tour",
+          body: "Watch it.",
+          chip: null,
+          video: { url: "https://youtu.be/WRlgT0Bkggo", label: "Watch the tour" },
+        },
+        ...PAYLOAD.entries,
+      ],
+      seen: [],
+    });
+    mountAll();
+    const dialog = await screen.findByRole("dialog", { name: "What's new" });
+    // Three entries listed, one link: the entries without a video draw none.
+    expect(dialog.querySelectorAll("li")).toHaveLength(3);
+    expect(within(dialog).getAllByRole("link")).toHaveLength(1);
+    const link = within(dialog).getByRole("link", { name: "Watch the tour" });
+    expect(link.getAttribute("href")).toBe("https://youtu.be/WRlgT0Bkggo");
+    expect(link.getAttribute("target")).toBe("_blank");
+    expect(link.getAttribute("rel")).toBe("noopener noreferrer");
+    expect(link.closest("li")?.textContent).toContain("A short tour");
+    expect(dialog.querySelector("iframe")).toBeNull();
   });
 
   it("shows nothing when the feed cannot be read", async () => {

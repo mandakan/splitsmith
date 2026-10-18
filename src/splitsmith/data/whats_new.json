@@ -1,6 +1,16 @@
 {
   "entries": [
     {
+      "id": "feature-tour-video",
+      "date": "2026-10-18",
+      "title": "A short tour of splitsmith",
+      "body": "A minute and a half on one stage: the beep and every shot found, your splits, Breakdown, Coach and the finished video with its cards.",
+      "video": {
+        "url": "https://youtu.be/WRlgT0Bkggo",
+        "label": "Watch the tour"
+      }
+    },
+    {
       "id": "beep-from-primary-camera",
       "date": "2026-10-18",
       "title": "Other cameras' beeps found from the first",
