@@ -18,6 +18,11 @@ paths:
   - "src/splitsmith/ui_static/src/lib/proposalQueue*.ts"
   - "src/splitsmith/ui_static/src/lib/breakdown*.ts"
   - "src/splitsmith/ui_static/src/lib/scrubSource*.ts"
+  - "src/splitsmith/ui_static/src/lib/useScrubSource*"
+  - "src/splitsmith/ui_static/src/lib/stageCameras*.ts"
+  - "src/splitsmith/ui_static/src/App.tsx"
+  - "src/splitsmith/ui_static/src/pages/Audit.tsx"
+  - "src/splitsmith/ui_static/src/components/audit/BeepTimeline.tsx"
 ---
 
 # Breakdown and Coach in the SPA
@@ -33,9 +38,14 @@ per-shot review control goes on `ReviewShotList`'s open row; a new per-type
 figure on `TimeBudgetCard`; a mark on the stage on `StageStrip`.
 
 Breakdown renders read-only on `capabilityDenied(project.capabilities,
-"breakdown")`, phone and desktop. **Keep** on the region card commits
-`lib/events.keepEvent` (`source` to `manual`, nothing else); dragging, nudging
-or changing kind confirm too.
+"breakdown")`, phone and desktop (on the phone through `deriveStageView`, the
+edit capability alone, so a desktop mirror on hosted reads only). **Keep** on
+the region card (auto proposals only) commits `lib/events.keepEvent` (`source`
+to `manual`, nothing else); dragging, nudging or changing kind confirm too.
+
+Coach and Breakdown players go through `useScrubSource` like Audit (the payload
+carries per-video `trim_version` / `scrub_version`); Breakdown's band menu
+"Full-resolution video" is the same `GlobalPrefs.full_res_scrub`.
 
 ## Saving regions (`lib/useStageEvents.ts`)
 
@@ -64,11 +74,13 @@ local list:
   newest local list is re-sent once on the fresh revision. Otherwise, or on a
   second 409, the server's list wins, a live drag's release is dropped and
   `onDiscard` fires once.
-- `issue` (`SaveIssue`, rendered by `components/coach/SaveNotice`): a discard is
-  muted; any other failed save reverts like a non-409 failure and offers
-  `retry`, which re-sends the failed PUT's list unless its starting regions have
-  since changed (then it is a discard), disabled while `busy`. The server's
-  message is the line's `title`, never its copy.
+- `issue` (`SaveIssue`, rendered by `components/coach/SaveNotice` in
+  Breakdown's inspector): a discard is muted; any other failed save, a failed
+  409 reload included, reverts the list like a non-409 failure, never replaces
+  the page, and offers `retry`, which re-sends the failed PUT's list unless its
+  starting regions have since changed (then it is a discard), disabled while
+  `busy`. The server's message is the line's `title`, never its copy. The next
+  successful PUT or `dismiss` clears it.
 
 ## The timeline band (`components/timeline/Timeline`)
 
@@ -83,8 +95,9 @@ local list:
 - Tracks position by percentage of the band's content div, so a track's pointer
   maths reads its own rect and needs no zoom code; a new track does the same.
   A `seekable` track scrubs through the content div's rect (no snap, pointer
-  capture, one seek per frame); presses inside `[data-audit-marker]` are
-  ignored, as are double-clicks there. `WaveformTrack` draws only the visible
+  capture, one seek per frame; `onScrubEnd` fires once the drag ends); presses
+  inside `[data-audit-marker]` are ignored, as are double-clicks there
+  (`onDoubleClick(t, shiftKey)`). `WaveformTrack` draws only the visible
   window into a viewport-sized canvas, never a full-content one.
 - `LaneEditor` owns the DOM only; geometry (clamp, snap, `MIN_EVENT_S`) is
   `lib/events.ts`.
@@ -104,9 +117,15 @@ local list:
   the edge as it will be saved. A release seeks nowhere.
 - **Every drag or scrub seek goes through `lib/coalescedSeek`** (one seek in
   flight, the latest lands on `seeked`): the workspace's `seekClip`, Audit's
-  `handleScrub`, `BeepTimeline`'s scrub. A pending request drops on `emptied` /
-  `loadstart` or when `currentSrc` moved. Every other write to an element that
-  takes coalesced seeks goes through `seekNow`.
+  `handleScrub`, `BeepTimeline`'s scrub. A seek on the 720p rendition takes
+  0.1-0.2 s, and a write that replaces the one decoding paints nothing. A
+  pending request drops on `emptied` / `loadstart` or when `currentSrc` moved.
+  Every other write to an element that takes coalesced seeks goes through
+  `seekNow` (cancel, then write: the source-swap carry, the loop wrap, a parked
+  position); an element that never takes one (PiP inset, primary audio, Results
+  player) needs nothing.
+- Arrows nudge; don't move nudges to bracket keys (behind AltGr on Nordic
+  layouts).
 - Seeks go through the workspace (`stageCameras.primaryToBig` /
   `bigToPrimary`), never `videoRef.current.currentTime` (see PiP in the root
   CLAUDE.md).
@@ -119,8 +138,9 @@ load by `useStageWorkspace`'s `link`. A stale or malformed one is ignored.
 
 ## Breakdown on a phone
 
-Spec `2026-10-17-mobile-breakdown-design`. Below 768 px `BreakdownRoute` renders
-`MobileBreakdown` (Coach stays desktop only).
+Spec `2026-10-17-mobile-breakdown-design`. Below 768 px `App.tsx`'s
+`BreakdownRoute` renders `MobileBreakdown`; the desktop workspace stays behind
+`DesktopGate`, and Coach stays desktop only.
 
 - `/breakdown/:slug` is the stage list (`StageIndex`, `lib/breakdownIndex`,
   confirmed region counts only: proposals are seeded when a stage opens). A
@@ -130,7 +150,8 @@ Spec `2026-10-17-mobile-breakdown-design`. Below 768 px `BreakdownRoute` renders
   handles open edge mode, never a drag on the strip.
 - Edge mode (`lib/edgeDrag` over `laneDrag.dragFrame`): an edge moves by the
   finger's travel on the video or the pad (one pad width is one second), each
-  frame judged from the region at finger-down. Frames are
+  frame judged from the region at finger-down, the video seeking to the
+  unsnapped edge. Frames are
   `regions.change(next, false)`; **only Done commits**. Cancel restores the
   region edge mode found; `pointercancel` the one the gesture found.
 - Add (`lib/addRegion`) puts a new manual region over the open one or in the
