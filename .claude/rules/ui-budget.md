@@ -92,8 +92,8 @@ Triage and Jobs have no pages (`/triage`, `/jobs` redirect to Overview).
   extras (the "No splits" chip, the rail's "Splits" line, `bareHint`); its
   summary hold is the scoring-only card. The compare grid is the page's third
   mode (`pages/matchExportModel.ts` owns the payload and the partial-result
-  summary). Presets and the Look
-  gallery: root CLAUDE.md "Export presets".
+  summary). Presets, the Look
+  gallery and the preview: `export-ui.md`.
 - **Account** (`pages/Account.tsx`, `components/account/*`): `Field` rows.
 
 ## Grandfathered (restyle onto the primitives whenever you touch them)
