@@ -177,6 +177,7 @@ def _overlay_on_disk(
     beep_time: float = 12.0,
     short_head: float | None = None,
     drawn_with_breakdown: bool = True,
+    exit_code: int = 0,
 ) -> Any:
     """Seed a stage with an overlay MOV and its record (``record``:
     ``current`` / ``none``, drawn in Look ``drawn_in``), change something
@@ -185,7 +186,7 @@ def _overlay_on_disk(
     composed stage and the output. Edits a copy of the shipped Looks, never
     the files. ``beep_time`` is the primary's beep in its source (under the
     5 s pre-buffer, a short-head stage) and ``short_head`` what the record
-    says about it (#1430)."""
+    says about it (#1430). ``exit_code`` is the run's expected one."""
     import shutil
 
     from splitsmith import looks
@@ -228,7 +229,7 @@ def _overlay_on_disk(
             manifest["fonts"]["mono"] = "roboto-mono"
         manifest_path.write_text(json.dumps(manifest))
     result = runner.invoke(app, ["match", "export", str(root), "--shooter", "me", "--format", "mp4", *args])
-    assert result.exit_code == 0, result.output
+    assert result.exit_code == exit_code, result.output
     return captured["comp"].stages[0], strip_ansi(result.output)
 
 
@@ -251,9 +252,90 @@ def test_overlay_nothing_vouches_for_is_left_out_and_said_so(
     (#1403): an overlay drawn from an older audit or Look, or with no record
     of what it was drawn from, is not stitched, and the run says why. Before,
     any ``_overlay.mov`` on disk was stitched unchecked."""
-    stage, output = _overlay_on_disk(tmp_path, monkeypatch, record=record, change=change)
+    stage, output = _overlay_on_disk(
+        tmp_path, monkeypatch, record=record, change=change, args=("--keep-stale-overlays",)
+    )
     assert stage.overlay is None
     assert "stage 1: overlay at" in output and "left out" in output
+
+
+def _redraws(monkeypatch: pytest.MonkeyPatch, *, fail: bool = False) -> list[Any]:
+    """Stand in for the per-stage export a redraw runs: record its request and
+    write the overlay's record as the real one would (with the extras and the
+    audit as they stand), or raise."""
+    from splitsmith.overlay_hud import overlay_data_identity, overlay_settings
+    from splitsmith.ui import exports as exports_mod
+
+    calls: list[Any] = []
+
+    def fake_export_stage(*, request, audit_path, exports_dir, hud_extras=None, **kwargs):  # type: ignore[no-untyped-def]
+        calls.append((request, hud_extras, kwargs))
+        if fail:
+            raise RuntimeError("no browser")
+        base = stage_file_base(request.stage_number, "Speed")
+        settings = overlay_settings(
+            look=request.overlay_theme,
+            variant=request.overlay_variant,
+            options=request.overlay_options,
+            codec=request.overlay_codec,
+            max_height=request.overlay_max_height,
+            max_fps=request.overlay_max_fps,
+            audit_revision=exports_mod.overlay_audit_revision(audit_path),
+            hud_data=overlay_data_identity(request.overlay_theme, request.overlay_variant, hud_extras),
+            breakdown=request.breakdown,
+        )
+        exports_mod.overlay_settings_file(exports_dir, base).write_text(json.dumps(settings))
+        return None
+
+    monkeypatch.setattr(exports_mod, "export_stage", fake_export_stage)
+    return calls
+
+
+@pytest.mark.parametrize(("record", "change"), [("current", "audit"), ("current", "palette")])
+def test_a_stale_overlay_is_drawn_again_with_its_recorded_style_and_stitched(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, record: str, change: str
+) -> None:
+    """An overlay drawn from an older audit or Look is drawn again, the way
+    its record says (style, options, format, Look) with the stage's HUD
+    extras, and stitched: the CLI no longer leaves a stage without its HUD."""
+    calls = _redraws(monkeypatch)
+    stage, output = _overlay_on_disk(tmp_path, monkeypatch, record=record, change=change)
+    assert stage.overlay is not None
+    assert "left out" not in output and "stage 1: overlay drawn again" in output
+    request, extras, kwargs = calls[0]
+    assert (request.write_overlay, request.write_trim, request.write_csv) == (True, False, False)
+    assert (request.overlay_theme, request.overlay_variant, request.overlay_codec) == (
+        "splitsmith",
+        "default",
+        "auto",
+    )
+    assert extras is not None and kwargs["beep_time_in_source"] == 12.0
+
+
+def test_an_overlay_with_no_record_is_drawn_again_as_classic(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An overlay with no record predates the records, and so the template
+    styles: it was Classic, and is drawn again as Classic."""
+    calls = _redraws(monkeypatch)
+    stage, _output = _overlay_on_disk(tmp_path, monkeypatch, record="none", change="nothing")
+    assert stage.overlay is not None
+    assert calls[0][0].overlay_variant == "default"
+
+
+def test_a_redraw_that_fails_is_left_out_loudly(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _redraws(monkeypatch, fail=True)
+    stage, output = _overlay_on_disk(tmp_path, monkeypatch, record="current", change="audit", exit_code=3)
+    assert stage.overlay is None
+    assert "no browser" in output and "without its HUD overlay: stage 1" in output
+
+
+def test_keep_stale_overlays_draws_nothing(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    calls = _redraws(monkeypatch)
+    stage, _output = _overlay_on_disk(
+        tmp_path, monkeypatch, record="current", change="audit", args=("--keep-stale-overlays",)
+    )
+    assert stage.overlay is None and calls == []
 
 
 def test_overlay_drawn_in_another_look_is_left_out_under_an_explicit_theme(
@@ -268,7 +350,7 @@ def test_overlay_drawn_in_another_look_is_left_out_under_an_explicit_theme(
         record="current",
         change="nothing",
         drawn_in="clean",
-        args=("--theme", "splitsmith"),
+        args=("--theme", "splitsmith", "--keep-stale-overlays"),
     )
     assert stage.overlay is None
     assert "drawn in Look 'clean'" in output
@@ -313,7 +395,14 @@ def test_a_short_head_overlay_drawn_before_the_fix_is_left_out_and_said_so(
     """The same stage, with a record from before #1430 (no ``short_head``: the
     beep was drawn at the pre-buffer, every tick late): left out, and the
     note says it was an older version, not an older audit or Look."""
-    stage, output = _overlay_on_disk(tmp_path, monkeypatch, record="current", change="nothing", beep_time=3.0)
+    stage, output = _overlay_on_disk(
+        tmp_path,
+        monkeypatch,
+        record="current",
+        change="nothing",
+        beep_time=3.0,
+        args=("--keep-stale-overlays",),
+    )
     assert stage.overlay is None
     assert "drawn by an older version" in output
     assert "older audit" not in output

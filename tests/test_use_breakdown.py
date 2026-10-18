@@ -161,13 +161,19 @@ def test_the_match_cli_threads_the_choice(tmp_path: Path, monkeypatch: pytest.Mo
 def test_the_match_cli_stitches_an_overlay_only_drawn_the_way_it_asks(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, drawn_with: bool, args: tuple, stitched: bool
 ) -> None:
-    """The CLI cannot redraw: an overlay drawn with the Breakdown when the
-    run asks for none (or the other way round) is left out, and the note
-    says which, and the flag that stitches it."""
+    """Told not to redraw, an overlay drawn with the Breakdown when the run
+    asks for none (or the other way round) is left out, and the note says
+    which, and the flag that stitches it. (By default it is drawn again:
+    ``test_a_stale_overlay_is_drawn_again_with_its_recorded_style_and_stitched``.)"""
     from .test_match_cli_export import _overlay_on_disk
 
     stage, output = _overlay_on_disk(
-        tmp_path, monkeypatch, record="current", change="nothing", drawn_with_breakdown=drawn_with, args=args
+        tmp_path,
+        monkeypatch,
+        record="current",
+        change="nothing",
+        drawn_with_breakdown=drawn_with,
+        args=(*args, "--keep-stale-overlays"),
     )
     assert (stage.overlay is not None) is stitched
     if not stitched:
