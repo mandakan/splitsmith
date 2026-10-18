@@ -127,8 +127,7 @@ local list:
 - Arrows nudge; don't move nudges to bracket keys (behind AltGr on Nordic
   layouts).
 - Seeks go through the workspace (`stageCameras.primaryToBig` /
-  `bigToPrimary`), never `videoRef.current.currentTime` (see PiP in the root
-  CLAUDE.md).
+  `bigToPrimary`), never `videoRef.current.currentTime` (see `pip.md`).
 
 ## Deep links
 
