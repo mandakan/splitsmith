@@ -1,6 +1,12 @@
 {
   "entries": [
     {
+      "id": "highlight-reel",
+      "date": "2026-10-18",
+      "title": "A highlight reel of your match",
+      "body": "Once every stage is audited and broken down, Highlight reel on the Export page cuts a trailer of your best moments, full length or for Shorts. The Overview shows what is left."
+    },
+    {
       "id": "feature-tour-video",
       "date": "2026-10-18",
       "title": "A short tour of splitsmith",
