@@ -3,6 +3,8 @@ paths:
   - "desktop/*.sh"
   - "desktop/*.yml"
   - "desktop/package.json"
+  - "desktop/ffmpeg-pins.lock"
+  - "desktop/entitlements.plist"
   - "desktop/src/**"
   - "desktop/lib/**"
   - "desktop/linux/**"
@@ -14,6 +16,10 @@ paths:
   - ".github/workflows/release-please.yml"
   - "src/splitsmith/ui/embedded.py"
   - "src/splitsmith/ui/system_api.py"
+  - "src/splitsmith/runtime.py"
+  - "src/splitsmith/youtube/oauth.py"
+  - "scripts/bake_youtube_client.py"
+  - "pyproject.toml"
 ---
 
 # The desktop app (`desktop/`, spec 2026-09-20)
@@ -29,9 +35,11 @@ An Electron shell, not a second frontend: `desktop/src/main.ts` spawns
 - python-build-standalone plus the wheel (`build-runtime.sh`), **never
   PyInstaller**. What ships is `uv.lock`'s default set.
 - **The slim install**: a module-level `splitsmith.db` import anywhere on the
-  `create_app` path crashes exactly that install;
+  `create_app` path crashes exactly that install (a local-only API module such as
+  `ui/youtube_api.py` importing it at top level is the usual way);
   `scripts/ci/assert_slim_import_surface.py` builds the local-mode app on a slim
-  install to catch it.
+  install to catch it. A new default dependency in `pyproject.toml` ships in
+  every bundle.
 - The bundle is sealed: `PYTHONDONTWRITEBYTECODE`, precompiled bytecode,
   `NUMBA_CACHE_DIR` under `~/Library/Caches`. Data stays in `~/.splitsmith`,
   shared with the CLI on purpose.
@@ -44,10 +52,13 @@ An Electron shell, not a second frontend: `desktop/src/main.ts` spawns
 
 Our own static build (`build-ffmpeg.sh`; `--lgpl` is the LGPL variant; the
 pipeline only ever names `fontfile=`, so there is no fontconfig), published as a
-GitHub release the app fetches by sha256. Bumping it follows the ffmpeg change
-rule: **look at the frames, not the deltas**. Two compiles of the same x264
-commit make different rate-control choices, so grid action frames can differ at
-edges while being equivalent.
+GitHub release the app fetches by sha256 (pins in `desktop/fetch-ffmpeg.sh` and
+`desktop/ffmpeg-pins.lock`). To bump it, render `scripts/render_match_frames.py`
+and `scripts/render_grid_frames.py` with the old and the new build and **look at
+the frames, not the deltas**: single-shooter frames must be pixel-identical;
+grid action frames may differ at edges only (two compiles of the same x264
+commit make different rate-control choices); text placement, colours and timing
+must not move.
 
 ## Building and releasing
 
@@ -100,10 +111,10 @@ function only. **No auto-update.**
   `#!/bin/sh` wrapper, not a symlink, so terminal runs get the bundled ffmpeg
   (only the Electron sidecar sets `SPLITSMITH_FFMPEG`, and the CLI looks next to
   its interpreter, not in `resources/bin`). It leaves an existing
-  `/usr/bin/splitsmith` alone when it is not ours.
+  `/usr/bin/splitsmith` alone, on install and removal, when it is not ours.
 - The AppImage refuses with a dialog where the sandbox cannot start
   (`src/sandbox.ts`); `appImage.executableArgs: []` stops the stock desktop
   entry's unconditional `--no-sandbox`.
 - `StartupWMClass` is `splitsmith-desktop` because the window class comes from
-  package.json `name`. **Don't add `productName`**: it would move the macOS
-  userData dir.
+  package.json `name`. **Don't add `productName` to package.json** (it would move
+  the macOS userData dir); `electron-builder.yml`'s own `productName` is fine.
