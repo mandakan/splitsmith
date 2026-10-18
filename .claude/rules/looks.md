@@ -207,5 +207,4 @@ pins a tenant must set the provider too**, or its renders see no user Looks.
   measures (`palette_sources`, deterministic k-means, empty on hosted).
   "Stands out" is OKLCh hue separation, not raw colour distance. Choosing one
   replaces the draft's colours and accent series; the neutrals stay.
-- The gallery registry is `lib/lookGallery.ts`; see the Export presets section
-  of the root CLAUDE.md.
+- The gallery registry is `lib/lookGallery.ts`; see `export-ui.md`.
