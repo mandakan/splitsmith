@@ -5,6 +5,7 @@
  * the slots.
  */
 import { LookAdvanced } from "@/components/export/LookAdvanced";
+import { GradeField } from "@/components/export/GradeField";
 import { LookGallery } from "@/components/export/LookGallery";
 import { Field } from "@/components/ui/Field";
 import { bareHint } from "@/lib/exportPlan";
@@ -68,6 +69,9 @@ export function LookGroup({
         />
       }
       />
+      {!compare && settings.outputFormat === "mp4" ? (
+        <GradeField settings={settings} patch={patch} looks={looks} busy={busy} hosted={hosted} />
+      ) : null}
       {sounds ? (
         <Field label="Sounds" help="The Look's music and effects, mixed over the stage audio.">
           <label className="flex items-center gap-2 text-md text-ink-2">

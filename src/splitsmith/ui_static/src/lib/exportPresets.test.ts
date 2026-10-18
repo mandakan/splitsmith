@@ -426,3 +426,17 @@ describe("look_sounds", () => {
     expect(applyBody(DEFAULT_EXPORT_SETTINGS, settingsToBody(offSettings)).renderOptions.lookSounds).toBe(false);
   });
 });
+
+describe("grade", () => {
+  it("is the Look's own by default, a body stored before it shipped applies that, and a choice round-trips", () => {
+    expect(DEFAULT_EXPORT_SETTINGS.grade).toBe("look");
+    expect(DEFAULT_EXPORT_SETTINGS.gradeStrength).toBeNull();
+    const legacy: Partial<ExportPresetBody> = { ...YOUTUBE };
+    delete legacy.grade;
+    delete legacy.grade_strength;
+    const chosen = { ...DEFAULT_EXPORT_SETTINGS, grade: "preset:noir", gradeStrength: 0.4 };
+    expect(applyBody(chosen, legacy as ExportPresetBody).grade).toBe("look");
+    const back = applyBody(DEFAULT_EXPORT_SETTINGS, settingsToBody(chosen));
+    expect([back.grade, back.gradeStrength]).toEqual(["preset:noir", 0.4]);
+  });
+});
