@@ -1,6 +1,12 @@
 {
   "entries": [
     {
+      "id": "beep-from-primary-camera",
+      "date": "2026-10-18",
+      "title": "Other cameras' beeps found from the first",
+      "body": "Confirm the beep on a stage's primary camera and its other cameras get a beep found from it, listed as from primary in beep review. A camera that disagrees is never confirmed on its own."
+    },
+    {
       "id": "draw-like-a-timer",
       "date": "2026-10-18",
       "title": "Draws compared like a shot timer",

@@ -1498,6 +1498,7 @@ def _stub_detect(
     *,
     candidates: list | None = None,
     gate: threading.Event | None = None,
+    confidence: float = 0.0,
 ) -> None:
     """Replace the per-video beep detector with a fast stub returning a
     deterministic BeepDetection. The endpoint is otherwise wrapped around
@@ -1522,6 +1523,7 @@ def _stub_detect(
             peak_amplitude=0.42,
             duration_ms=320.0,
             candidates=cands,
+            confidence=confidence,
         )
 
     monkeypatch.setattr(audio_helpers, "detect_primary_beep", fake)
@@ -6235,6 +6237,20 @@ def test_primary_beep_not_found_still_fails_job(tmp_path: Path, monkeypatch) -> 
     assert "no candidate" in final["error"]
 
 
+def _as_placement(fake_align):  # noqa: ANN001, ANN202
+    """The server places a secondary's beep with ``beep_cross.place_beep``
+    (#1442); these tests describe the alignment as a ``CrossAlignResult``."""
+    from splitsmith.beep_cross import BeepPlacement
+
+    def place(*args, **kwargs):  # noqa: ANN002, ANN003, ANN202
+        r = fake_align(*args, **kwargs)
+        return BeepPlacement(
+            projected=r.secondary_beep_time, contrast=r.confidence, tone=None, time=r.secondary_beep_time
+        )
+
+    return place
+
+
 def test_secondary_falls_back_to_cross_align(tmp_path: Path, monkeypatch) -> None:
     """When in-stream beep detection fails on a secondary, the worker should
     fall back to ``cross_align`` and -- if confidence clears the floor --
@@ -6242,6 +6258,7 @@ def test_secondary_falls_back_to_cross_align(tmp_path: Path, monkeypatch) -> Non
     cross-correlation result. This is the path that recovers iPhone /
     tripod-cam imports where the buzzer wasn't picked up cleanly."""
     client, _ = _seed_project_with_secondary(tmp_path)
+    from splitsmith import beep_cross as beep_cross_mod
     from splitsmith import beep_detect as bd
     from splitsmith import cross_align as ca
     from splitsmith.ui import audio as audio_helpers
@@ -6275,7 +6292,7 @@ def test_secondary_falls_back_to_cross_align(tmp_path: Path, monkeypatch) -> Non
 
     monkeypatch.setattr(audio_helpers, "detect_video_beep", boom)
     monkeypatch.setattr(bd, "load_audio", fake_load)
-    monkeypatch.setattr(ca, "align_secondary_to_primary", fake_align)
+    monkeypatch.setattr(beep_cross_mod, "place_beep", _as_placement(fake_align))
     # Pretend both audio caches are on disk so the helper proceeds past
     # its existence guard.
     monkeypatch.setattr(Path, "exists", lambda self: True)
@@ -6304,6 +6321,7 @@ def test_secondary_low_confidence_alignment_stays_soft_failed(tmp_path: Path, mo
     diagnostic so the SPA can render "tried, sub-floor" distinctly from
     "never tried"."""
     client, _ = _seed_project_with_secondary(tmp_path)
+    from splitsmith import beep_cross as beep_cross_mod
     from splitsmith import beep_detect as bd
     from splitsmith import cross_align as ca
     from splitsmith.ui import audio as audio_helpers
@@ -6331,7 +6349,7 @@ def test_secondary_low_confidence_alignment_stays_soft_failed(tmp_path: Path, mo
 
     monkeypatch.setattr(audio_helpers, "detect_video_beep", boom)
     monkeypatch.setattr(bd, "load_audio", fake_load)
-    monkeypatch.setattr(ca, "align_secondary_to_primary", fake_align)
+    monkeypatch.setattr(beep_cross_mod, "place_beep", _as_placement(fake_align))
     monkeypatch.setattr(Path, "exists", lambda self: True)
 
     sec_id = _video_id_for(client, 1, "secondary")
@@ -6358,6 +6376,7 @@ def test_secondary_in_stream_success_runs_cross_align_sanity_check(tmp_path: Pat
     confidence + delta are surfaced as diagnostics so the SPA can tell
     "we double-checked" from "we never tried"."""
     client, _ = _seed_project_with_secondary(tmp_path)
+    from splitsmith import beep_cross as beep_cross_mod
     from splitsmith import beep_detect as bd
     from splitsmith import cross_align as ca
 
@@ -6385,7 +6404,7 @@ def test_secondary_in_stream_success_runs_cross_align_sanity_check(tmp_path: Pat
         )
 
     monkeypatch.setattr(bd, "load_audio", fake_load)
-    monkeypatch.setattr(ca, "align_secondary_to_primary", fake_align)
+    monkeypatch.setattr(beep_cross_mod, "place_beep", _as_placement(fake_align))
     monkeypatch.setattr(Path, "exists", lambda self: True)
 
     sec_id = _video_id_for(client, 1, "secondary")
@@ -6411,6 +6430,7 @@ def test_secondary_in_stream_disagreement_flagged_not_overridden(tmp_path: Path,
     cross-align doesn't, so we don't auto-override. The delta is
     surfaced so the SPA can show the user a "use cross-align?" prompt."""
     client, _ = _seed_project_with_secondary(tmp_path)
+    from splitsmith import beep_cross as beep_cross_mod
     from splitsmith import beep_detect as bd
     from splitsmith import cross_align as ca
 
@@ -6435,7 +6455,7 @@ def test_secondary_in_stream_disagreement_flagged_not_overridden(tmp_path: Path,
         )
 
     monkeypatch.setattr(bd, "load_audio", fake_load)
-    monkeypatch.setattr(ca, "align_secondary_to_primary", fake_align)
+    monkeypatch.setattr(beep_cross_mod, "place_beep", _as_placement(fake_align))
     monkeypatch.setattr(Path, "exists", lambda self: True)
 
     sec_id = _video_id_for(client, 1, "secondary")
@@ -6453,6 +6473,93 @@ def test_secondary_in_stream_disagreement_flagged_not_overridden(tmp_path: Path,
     # 2.5 s disagreement, surfaced for the SPA banner.
     assert secondary["beep_alignment_confidence"] == pytest.approx(1.40)
     assert secondary["beep_alignment_delta_ms"] == pytest.approx(2500.0)
+    # The placement from the primary is the review's other candidate (#1442).
+    assert secondary["beep_aligned_time"] == pytest.approx(7.500)
+
+
+def test_a_confident_secondary_beep_that_disagrees_with_the_primary_is_not_auto_trusted(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """#1442: an in-stream beep confident enough to be auto-trusted is left
+    for review when a confident placement from the primary disagrees by more
+    than 60 ms, and auto-trusted when they agree."""
+    client, _ = _seed_project_with_secondary(tmp_path)
+    from splitsmith import beep_cross as beep_cross_mod
+    from splitsmith import beep_detect as bd
+    from splitsmith import cross_align as ca
+
+    _stub_detect(monkeypatch, beep_time=4.0)
+    primary_id = _video_id_for(client, 1, "primary")
+    _wait_for_job(
+        client, client.post(f"/api/shooters/me/stages/1/videos/{primary_id}/detect-beep").json()["id"]
+    )
+    monkeypatch.setattr(bd, "load_audio", lambda _p: (np.zeros(48000, dtype=np.float32), 48000))
+    monkeypatch.setattr(Path, "exists", lambda self: True)
+    sec_id = _video_id_for(client, 1, "secondary")
+
+    def run(placed_at: float) -> dict:
+        def fake_align(*a, **kw):  # type: ignore[no-untyped-def]
+            return ca.CrossAlignResult(
+                secondary_beep_time=placed_at, confidence=1.5, peak_correlation=0.0, lag_seconds=0.0
+            )
+
+        monkeypatch.setattr(beep_cross_mod, "place_beep", _as_placement(fake_align))
+        _stub_detect(monkeypatch, beep_time=7.0, confidence=0.99)
+        job = client.post(f"/api/shooters/me/stages/1/videos/{sec_id}/detect-beep").json()["id"]
+        assert _wait_for_job(client, job)["status"] == "succeeded"
+        proj = client.get("/api/shooters/me/project").json()
+        return next(v for v in proj["stages"][0]["videos"] if v["role"] == "secondary")
+
+    assert run(7.02)["beep_reviewed"] is True
+    disagreeing = run(7.20)
+    assert disagreeing["beep_reviewed"] is False
+    assert disagreeing["beep_time"] == pytest.approx(7.0)
+    assert disagreeing["beep_aligned_time"] == pytest.approx(7.20)
+
+
+def test_confirming_the_primary_beep_places_the_unconfirmed_secondaries_again(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """#1442: a confirmed primary beep is the best reference for the stage's
+    other cameras, so confirming it runs beep detection again for every
+    secondary nobody confirmed; a confirmed secondary is left alone."""
+    client, _ = _seed_project_with_secondary(tmp_path)
+    primary_id = _video_id_for(client, 1, "primary")
+    sec_id = _video_id_for(client, 1, "secondary")
+    shooter_root = tmp_path / "match" / "shooters" / "me"
+    project = MatchProject.load(shooter_root)
+    for v in project.stages[0].videos:
+        v.beep_time = 5.0
+        v.beep_source = "auto"
+    project.save(shooter_root)
+
+    state = client.app.state.splitsmith_state
+    submitted: list[tuple[str, str | None]] = []
+    real_submit = state.jobs.submit
+
+    async def spy(*, kind, **kw):  # noqa: ANN001, ANN003, ANN202
+        submitted.append((kind, kw.get("video_id")))
+        return await real_submit(kind=kind, **kw)
+
+    monkeypatch.setattr(state.jobs, "submit", spy)
+
+    def confirm() -> None:
+        resp = client.post(
+            f"/api/shooters/me/stages/1/videos/{primary_id}/beep/review", json={"reviewed": True}
+        )
+        assert resp.status_code == 200, resp.text
+
+    confirm()
+    assert ("detect_beep", sec_id) in submitted
+
+    submitted.clear()
+    project = MatchProject.load(shooter_root)
+    secondary = project.stages[0].find_video_by_id(sec_id)
+    assert secondary is not None
+    secondary.beep_reviewed = True
+    project.save(shooter_root)
+    confirm()
+    assert ("detect_beep", sec_id) not in submitted
 
 
 def test_secondary_soft_fail_clears_on_manual_override(tmp_path: Path, monkeypatch) -> None:

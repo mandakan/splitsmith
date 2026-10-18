@@ -88,6 +88,22 @@ A green suite over a change is evidence the change didn't break anything known -
 
 Beep detection runs inside per-stage derived search windows for multi-stage single-take videos (ffmpeg extracts the window's audio via -ss/-t; results are offset back to source-absolute). Its candidates are ranked by a logistic regression over seven per-run features (``beep_features.candidate_features``, the one implementation both runtime and trainer use), and confidence is a calibrated head over (logit, margin) (#949, spec 2026-10-06). The numbers are ``BeepRankerConfig`` defaults in ``config.py``, pasted from ``ranker_report.json``'s ``models.lr.final_fit``; ``tests/test_beep_ranker_config.py`` fails on any drift. To retrain after adding fixtures: rebuild the manifest, run ``scripts/train_beep_ranker.py``, paste the new ``final_fit``, regenerate ``baseline.json`` (``scripts/eval_beep_detector.py --track clip --json ...``) and list every newly wrong fixture in the PR. ``ranker: heuristic`` is the old hand-written product, kept as the escape hatch. Out of fold it picks the beep on 106 of the 111 fixtures where the beep is a candidate at all; most remaining misses are the 16 fixtures where it never is (run merging, late onsets), and every confident mistake so far is one of those. Those were edge errors, not ranking errors: the ranker chose the tone's run and the rise foot landed off the tone. Every candidate's time is now the timer tone's start (``beep_tone.tone_onset``, ``BeepDetectConfig.tone_onset``; docs/METHODOLOGY.md step 4), and ``ranker: heuristic`` with ``tone_onset: false`` is the old product (``baseline_heuristic.json``). Many corpus beep labels had been confirmed from the old edge's picks, so a detector scored against them looked right where it was wrong: on 2026-10-17, 33 labels were moved onto their tones (read on spectrograms; the match projects on X9 too, each move in its audit doc's ``audit_events`` as ``beep_moved_to_tone``). Score a beep change against labels checked on a spectrogram, and re-extract a fixture's CLAP / PANN caches when its beep moves: its candidates move with it, which the caches' WAV stamp cannot see.
 
+A secondary camera's beep is also found from the primary's
+(``beep_cross.place_beep``, #1442): the primary clip's onset pattern from its
+beep through the stage slid over the secondary's (``stage_match``; contrast
+>= ``MIN_CONTRAST`` 1.2 is confident), then where the primary timer's own
+frequency starts near it (``line_onset_near``), kept only within 60 ms of the
+shots' projection. ``scripts/eval_beep_from_angle.py`` measures it over every
+corpus stage with reviewed beeps on two or more angles (2026-10-18: 171 of
+198 pairs confident, none more than 50 ms off, 133 within 5 ms; the old
+``cross_align`` envelope landmark was seconds off on 32 of 194). The beep job
+uses it for a secondary (``_try_align_secondary_to_primary``): the proposed
+beep when in-stream detection finds none, ``StageVideo.beep_aligned_time``
+(a "from primary" candidate in beep review) when it is confident, and an
+in-stream beep that disagrees with it by more than 60 ms is never
+auto-trusted. Confirming the primary's beep re-runs detection for every
+unconfirmed, not hand-set secondary of the stage (``_replace_secondary_beeps``).
+
 What each camera's audio does to detection (mono or stereo, compression, firmware changes, how to
 recognise its files) is in ``docs/cameras.md``. Read it before tuning a threshold or a voter C
 feature, and add to it, dated, whenever a measurement shows something new about a camera.

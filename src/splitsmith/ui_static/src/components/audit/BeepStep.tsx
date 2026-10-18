@@ -136,6 +136,8 @@ export function BeepStep({
       time: number;
       confidence: number | null;
       detected: boolean;
+      /** Found from the primary camera's beep (#1442). */
+      fromPrimary?: boolean;
     }[] = [];
     if (item.beep_time != null)
       out.push({
@@ -143,9 +145,11 @@ export function BeepStep({
         confidence: item.beep_confidence,
         detected: true,
       });
+    const near = (t: number) => out.some((c) => Math.abs(c.time - t) < 0.005);
+    if (item.aligned_time != null && !near(item.aligned_time))
+      out.push({ time: item.aligned_time, confidence: null, detected: false, fromPrimary: true });
     for (const c of item.alt_candidates) {
-      if (item.beep_time != null && Math.abs(c.time - item.beep_time) < 0.005)
-        continue;
+      if (near(c.time)) continue;
       out.push({ time: c.time, confidence: c.confidence, detected: false });
     }
     return out;
@@ -426,7 +430,7 @@ export function BeepStep({
                       {c.confidence != null ? c.confidence.toFixed(2) : "—"}
                     </span>
                     <span className="font-sans text-sm text-muted">
-                      {c.detected ? "detected" : "candidate"}
+                      {c.detected ? "detected" : c.fromPrimary ? "from primary" : "candidate"}
                     </span>
                   </button>
                 );

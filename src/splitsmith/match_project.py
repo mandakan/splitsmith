@@ -402,6 +402,12 @@ class StageVideo(BaseModel):
     # answer disagrees with the cross-correlation by hundreds of ms or
     # more. Null when only one of the two methods produced a result.
     beep_alignment_delta_ms: float | None = None
+    # A secondary's beep found from the primary's (#1442,
+    # ``beep_cross.place_beep``: the stage's shots, then the timer's tone),
+    # whenever that placement was confident; the beep review lists it as a
+    # one-tap candidate ("from primary"). ``None`` on a primary, without a
+    # primary beep, or when the placement was not confident.
+    beep_aligned_time: float | None = None
     # Ranked alternative candidates from the most recent auto-detection run
     # (silence-preference score, descending). The production UI offers these
     # as one-click alternatives to the auto-winner so the user rarely has to

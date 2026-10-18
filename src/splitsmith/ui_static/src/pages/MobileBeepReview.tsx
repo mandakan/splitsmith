@@ -518,7 +518,11 @@ function SnippetPlayer({
   const value = tone != null ? beepValue + tone : beepValue;
   const pickLine = (t: number | null) =>
     onPick(t == null || tone == null ? t : Math.round((t - tone) * 1000) / 1000);
-  const alts = item.alt_candidates.filter((c) => item.beep_time == null || Math.abs(c.time - item.beep_time) >= 0.005);
+  // The beep found from the primary camera's (#1442) is one more candidate.
+  const fromPrimary = item.aligned_time != null ? [{ time: item.aligned_time, confidence: null }] : [];
+  const alts = [...fromPrimary, ...item.alt_candidates].filter(
+    (c) => item.beep_time == null || Math.abs(c.time - item.beep_time) >= 0.005,
+  );
   const markers: ReticleMarker[] = [
     ...(item.beep_time != null ? [{ time: item.beep_time, kind: "detected" as const }] : []),
     ...alts.map((c) => ({ time: c.time, kind: "candidate" as const })),
