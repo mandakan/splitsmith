@@ -31,9 +31,10 @@ UI — see `docs/ux-redesign/06-design-system.md`.
     `lanes.png`. Re-shoot them after a visible UI change.
   - Frames from the maintainer's own runs, each checked for other people
     and third-party marks: `pip.webp`, `beep.webp`, `upright-hud.webp`,
-    `video-tour.webp` and `video-trailer.webp` (the promo videos'
-    poster frames).
-  - `upright-summary.webp` and `img/looks/` — renders with sample data:
+    `upright-summary.webp` (the upright export's stage summary, the club
+    logo removed), `video-tour.webp` and `video-trailer.webp` (the promo
+    videos' poster frames).
+  - `img/looks/` — renders with sample data:
     the shipped Looks' previews drawn at 960x540 by
     `scripts/render_look_thumbnails.py`'s builders with its size
     constants widened (into a scratch dir, so the app's committed
