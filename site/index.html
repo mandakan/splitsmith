@@ -134,36 +134,6 @@
   .figs .v small{font-size:13px;color:var(--muted)}
   .figs .d{font-size:13px;color:var(--muted);margin-top:8px}
 
-  /* new in splitsmith */
-  .feat{display:grid;grid-template-columns:repeat(12,1fr);gap:14px}
-  .fc{display:flex;flex-direction:column}
-  .fc .core{flex:1;display:flex;flex-direction:column}
-  .fc .body{padding:22px 24px 14px;display:grid;gap:8px;align-content:start}
-  .fc .phase,.cell .phase{font-family:var(--mono);font-size:10px;letter-spacing:.2em;text-transform:uppercase;color:var(--led)}
-  .fc h3{font-family:var(--display);font-size:26px;font-weight:700;text-transform:uppercase;letter-spacing:.01em;line-height:1.05}
-  .fc p{font-size:14px;color:var(--muted);max-width:52ch}
-  .fc p b{color:var(--ink-2);font-weight:500}
-  .fc .pic{margin-top:auto;padding:0 12px 12px;position:relative}
-  .fc .pic img{border-radius:12px;border:1px solid var(--hair);width:100%;height:auto}
-  .fc .more{font-family:var(--mono);font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-2);display:inline-flex;gap:6px;align-items:center;margin-top:4px}
-  .fc .more:hover{color:var(--ink)}
-  .fc .more::after{content:"";width:6px;height:6px;border-top:1.5px solid currentColor;border-right:1.5px solid currentColor;transform:rotate(45deg)}
-  .f-bd{grid-column:span 7}.f-draw{grid-column:span 5}
-  .f-pip{grid-column:span 6}.f-det{grid-column:span 6}
-  .f-look{grid-column:span 8}.f-up{grid-column:span 4}
-  .f-bd .bdpair{display:grid;grid-template-columns:minmax(0,1fr) 128px;gap:10px;align-items:end}
-  .f-draw .chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:4px}
-  .tick{font-family:var(--mono);font-size:11px;letter-spacing:.06em;text-transform:uppercase;border:1px solid var(--hair-2);border-radius:999px;padding:4px 10px;color:var(--ink-2)}
-  .tick i{display:inline-block;width:6px;height:6px;border-radius:50%;margin-right:7px;vertical-align:1px}
-  .f-up .pair{display:grid;grid-template-columns:1fr 1fr;gap:8px}
-  .f-up .pair img{aspect-ratio:9/16;object-fit:cover}
-  .f-look .trio{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
-  .f-look .trio figure{margin:0;display:grid;gap:6px}
-  .f-look .trio img{aspect-ratio:16/9;object-fit:cover}
-  .f-look .trio figcaption{font-family:var(--mono);font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--subtle);padding-left:2px}
-  .f-look .trio figcaption b{color:var(--ink-2);font-weight:500}
-
-  /* looks gallery */
   .filters{display:grid;gap:10px;margin-bottom:22px}
   .frow{display:flex;align-items:center;gap:10px;min-width:0}
   .frow .k{font-family:var(--mono);font-size:10px;letter-spacing:.2em;text-transform:uppercase;color:var(--muted);flex:none;width:44px}
@@ -236,6 +206,7 @@
   .cell p{font-size:14px;color:var(--muted);max-width:44ch}
   .cell .pic{margin-top:auto;padding:0 12px 12px}
   .cell .pic img{border-radius:12px;border:1px solid var(--hair)}
+  .cell .phase{font-family:var(--mono);font-size:10px;letter-spacing:.2em;text-transform:uppercase;color:var(--led)}
   .c-audit{grid-column:span 7}
   .c-splits{grid-column:span 5}
   .c-coach{grid-column:span 6}
@@ -250,6 +221,8 @@
 
   /* three ways */
   .ways{display:grid;grid-template-columns:repeat(3,1fr);gap:14px}
+  .way .pair{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:6px}
+  .way .pair img{border-radius:10px;border:1px solid var(--hair);width:100%;height:auto;aspect-ratio:9/16;object-fit:cover}
   .way .core{padding:26px 26px 28px;display:grid;gap:14px;height:100%;align-content:start}
   .way .k{font-family:var(--mono);font-size:10px;letter-spacing:.2em;text-transform:uppercase;color:var(--muted)}
   .way h3{font-family:var(--display);font-size:28px;font-weight:700;text-transform:uppercase}
@@ -307,11 +280,10 @@
     .hero-visual .shell{transform:none}
     .figs{grid-template-columns:repeat(2,1fr)}
     .ways{grid-template-columns:1fr}
+    .way .pair{max-width:420px}
     .c-audit,.c-coach,.c-splits,.c-compare,.c-export,.c-sort,.c-bd{grid-column:span 12}
     .c-export .core,.c-sort .core,.c-bd .core{flex-direction:column;align-items:stretch}
     .c-export .pic,.c-sort .pic,.c-bd .pic{padding:0 12px 12px}
-    .f-bd,.f-draw,.f-pip,.f-det,.f-look,.f-up{grid-column:span 12}
-    .f-up .pair{max-width:420px}
   }
   @media (max-width:900px){
     .nav .links,.nav .cta{display:none}
@@ -335,13 +307,6 @@
     .frow .k{width:auto}
     .seg{border-radius:14px;flex-wrap:nowrap}
     .vids{grid-template-columns:1fr}
-    .fc .body{padding:18px 18px 12px}
-    .fc h3{font-size:23px}
-    .f-look .trio{grid-template-columns:1fr 1fr}
-    .f-look .trio figure:first-child{grid-column:span 2}
-    .f-bd .bdpair{grid-template-columns:1fr;justify-items:center}
-    .f-bd .bdpair img:first-child{display:none}
-    .f-bd .bdpair img.phone{width:100%;max-width:300px}
     .lb .meta h3{font-size:20px}
   }
   @media (prefers-reduced-motion:reduce){
@@ -359,9 +324,9 @@
   <div class="pill">
     <a class="brand" href="#top" aria-label="Splitsmith"><i></i>Splitsmith</a>
     <div class="links">
-      <a class="new" href="#new">New</a>
-      <a class="new" href="#looks">Looks</a>
+      <a href="#videos">Videos</a>
       <a href="#loop">The loop</a>
+      <a href="#looks">Looks</a>
       <a href="#ways">Outputs</a>
       <a href="#install">Install</a>
       <a href="#hosted">Hosted</a>
@@ -373,10 +338,9 @@
 </nav>
 <div class="sheet" id="sheet" data-open="false">
   <div>
-    <a href="#new">New</a>
-    <a href="#looks">Looks</a>
     <a href="#videos">Videos</a>
     <a href="#loop">The loop</a>
+    <a href="#looks">Looks</a>
     <a href="#ways">Outputs</a>
     <a href="#hosted">Hosted</a>
     <a href="https://github.com/mandakan/splitsmith">GitHub</a>
@@ -415,70 +379,6 @@
     </div>
   </section>
 
-  <section class="wrap" id="new" style="padding-top:0">
-    <div class="sec-hd">
-      <span class="eyebrow rv"><i></i>New in splitsmith</span>
-      <h2 class="rv d1">What the videos showed, slower.</h2>
-      <p class="lede rv d2">The last few weeks, in six lines.</p>
-    </div>
-    <div class="feat">
-      <div class="fc shell f-bd rv"><div class="core">
-        <div class="body"><span class="phase">Analyse &middot; Breakdown</span><h3>Reloads and movement, suggested</h3>
-          <p>Breakdown proposes each reload and movement on the stage, and the draw before the first shot. Keep them all, or draw your own, to the frame. Review the proposals on your phone too.</p></div>
-        <div class="pic"><div class="bdpair"><img src="img/breakdown.webp" width="1200" height="304" alt="Breakdown's timeline: audio, shots, and dashed AUTO proposals on the Draw, Movement and Reload lanes" loading="lazy"><img class="phone" src="img/breakdown-phone.webp" width="390" height="630" alt="Breakdown on a phone: the draw proposal with Delete, Kind and Keep" loading="lazy"></div></div>
-      </div></div>
-      <div class="fc shell f-draw rv d1"><div class="core">
-        <div class="body"><span class="phase">Analyse &middot; Draw</span><h3>The draw, as its own region</h3>
-          <p>Drag the Draw's start to where your hands moved. Coach then splits your draw into <b>reaction</b> and <b>presentation</b>.</p>
-          <div class="chips"><span class="tick"><i style="background:var(--draw)"></i>Draw</span><span class="tick"><i style="background:var(--beep)"></i>Movement</span><span class="tick"><i style="background:var(--live)"></i>Reload</span><span class="tick"><i style="background:var(--ink-2)"></i>Activation</span></div></div>
-        <div class="pic"><img src="img/draw.webp" width="900" height="419" alt="The Draw lane with a proposed region from the beep to the first shot" loading="lazy"></div>
-      </div></div>
-      <div class="fc shell f-pip rv"><div class="core">
-        <div class="body"><span class="phase">Review &middot; Two cameras</span><h3>Two angles in sync</h3>
-          <p>A second camera plays as an inset on the same beep, in Audit, Splits, Breakdown and Coach. One click, or C, swaps the two. Its beep is found from the first camera's.</p></div>
-        <div class="pic"><img src="img/pip.webp" width="960" height="535" alt="The head cam with a second camera inset in the top right, both on the same clock" loading="lazy"></div>
-      </div></div>
-      <div class="fc shell f-det rv d1"><div class="core">
-        <div class="body"><span class="phase">Detection</span><h3>The beep on its tone, the shots together</h3>
-          <p>The beep lands on the start of your timer's tone, and the beep step shows that tone on a spectrogram, so Snap finds it even under a shot. A stage's shots are picked together from the rhythm of real splits: fewer echoes, fewer misses.</p></div>
-        <div class="pic"><img src="img/beep.webp" width="1200" height="213" alt="The beep step: candidates, the timer tone in a spectrogram, and the audio, with the beep on the tone's start" loading="lazy"></div>
-      </div></div>
-      <div class="fc shell f-look rv"><div class="core">
-        <div class="body"><span class="phase">Deliver &middot; Looks</span><h3>Pick a Look</h3>
-          <p>A Look styles the cards, the overlay, the summaries and the transitions in one choice. Three ship with the app, Splitsmith, Clean and Broadcast, and you can make your own.</p>
-          <a class="more" href="#looks">Browse every Look</a></div>
-        <div class="pic"><div class="trio"><figure><img src="img/looks/splitsmith-summary.webp" width="480" height="270" alt="The Splitsmith Look's stage summary" loading="lazy"><figcaption><b>Splitsmith</b> stage summary</figcaption></figure><figure><img src="img/looks/clean-title_page.webp" width="480" height="270" alt="The Clean Look's title page" loading="lazy"><figcaption><b>Clean</b> title page</figcaption></figure><figure><img src="img/looks/broadcast-summary-results.webp" width="480" height="270" alt="The Broadcast Look's stage summary" loading="lazy"><figcaption><b>Broadcast</b> stage summary</figcaption></figure></div></div>
-      </div></div>
-      <div class="fc shell f-up rv d1"><div class="core">
-        <div class="body"><span class="phase">Deliver &middot; Upright</span><h3>Ready for Shorts and Reels</h3>
-          <p>Filmed upright? The export stays upright, and the overlay and the summaries keep clear of the captions and buttons Shorts and Reels draw on top.</p></div>
-        <div class="pic"><div class="pair"><img src="img/upright-hud.webp" width="540" height="960" alt="An upright export with the Minimal overlay: the split, large, and the clock above the bottom safe area" loading="lazy"><img src="img/upright-summary.webp" width="540" height="960" alt="The stage summary on an upright canvas: splits first, static and moving, then draw, reloads and the scorecard" loading="lazy"></div></div>
-      </div></div>
-    </div>
-  </section>
-
-  <section class="wrap" id="looks" style="padding-top:0">
-    <div class="sec-hd">
-      <span class="eyebrow rv"><i></i>Looks</span>
-      <h2 class="rv d1">Every card, every style. At your pace.</h2>
-      <p class="lede rv d2">The trailer flashes past them. Here is what each shipped Look draws, slot by slot, and every transition between stages. Pick one on the Export page and it previews on your own footage before you render.</p>
-    </div>
-    <div class="filters" role="group" aria-label="Filter the gallery">
-      <div class="frow"><span class="k" id="fl-look">Look</span><div class="seg" id="f-look" role="group" aria-labelledby="fl-look"></div></div>
-      <div class="frow"><span class="k" id="fl-slot">Slot</span><div class="seg" id="f-slot" role="group" aria-labelledby="fl-slot"></div></div>
-    </div>
-    <div class="grid" id="grid">
-      <a class="tile" href="img/looks/splitsmith-overlay-plate-lg.webp" aria-label="Splitsmith / Overlay, Plate, open larger"><div class="im"><img src="img/looks/splitsmith-overlay-plate.webp" alt="" width="480" height="270" loading="lazy"><span class="badge">Moves</span></div><div class="cap"><b>Overlay, Plate</b><span>Splitsmith</span></div></a>
-      <a class="tile" href="img/looks/splitsmith-overlay-pips-lg.webp" aria-label="Splitsmith / Overlay, Pips, open larger"><div class="im"><img src="img/looks/splitsmith-overlay-pips.webp" alt="" width="480" height="270" loading="lazy"><span class="badge">Moves</span></div><div class="cap"><b>Overlay, Pips</b><span>Splitsmith</span></div></a>
-      <a class="tile" href="img/looks/splitsmith-overlay-ticker-lg.webp" aria-label="Splitsmith / Overlay, Ticker, open larger"><div class="im"><img src="img/looks/splitsmith-overlay-ticker.webp" alt="" width="480" height="270" loading="lazy"><span class="badge">Moves</span></div><div class="cap"><b>Overlay, Ticker</b><span>Splitsmith</span></div></a>
-      <a class="tile" href="img/looks/splitsmith-overlay-timeline-lg.webp" aria-label="Splitsmith / Overlay, Timeline, open larger"><div class="im"><img src="img/looks/splitsmith-overlay-timeline.webp" alt="" width="480" height="270" loading="lazy"><span class="badge">Moves</span></div><div class="cap"><b>Overlay, Timeline</b><span>Splitsmith</span></div></a>
-      <a class="tile" href="img/looks/splitsmith-overlay-minimal-lg.webp" aria-label="Splitsmith / Overlay, Minimal, open larger"><div class="im"><img src="img/looks/splitsmith-overlay-minimal.webp" alt="" width="480" height="270" loading="lazy"><span class="badge">Moves</span></div><div class="cap"><b>Overlay, Minimal</b><span>Splitsmith</span></div></a>
-      <a class="tile" href="img/looks/splitsmith-overlay-classic-lg.webp" aria-label="Splitsmith / Overlay, Classic, open larger"><div class="im"><img src="img/looks/splitsmith-overlay-classic.webp" alt="" width="480" height="270" loading="lazy"></div><div class="cap"><b>Overlay, Classic</b><span>Splitsmith</span></div></a>
-    </div>
-    <div class="gmore"><span class="c" id="gcount" aria-live="polite"></span><button type="button" id="gtoggle" aria-controls="grid" aria-expanded="false" hidden></button></div>
-    <p class="gnote">Cards and overlays are drawn over a stand-in range scene here, with sample figures; an export draws them over your footage. Overlay styles and transitions loop as they move. A Look of your own can change any of it: colours, fonts, your logo, even the card templates on the desktop app.</p>
-  </section>
-
   <section class="wrap" id="videos" style="padding-top:0">
     <div class="sec-hd">
       <span class="eyebrow rv"><i></i>See it in motion</span>
@@ -492,7 +392,7 @@
       </div></div>
       <div class="vid shell rv d1"><div class="core">
         <a class="im" href="https://youtu.be/h9B3I1Am5HU" target="_blank" rel="noopener" aria-label="Watch the trailer on YouTube"><img src="img/video-trailer.webp" width="800" height="450" alt="" loading="lazy"><span class="play" aria-hidden="true"><span><svg viewBox="0 0 16 16" fill="#fff"><path d="M4 2.5v11l9-5.5z"/></svg></span></span></a>
-        <div class="body"><span class="k">Trailer</span><h3><a href="https://youtu.be/h9B3I1Am5HU" target="_blank" rel="noopener">Head cam in. Splits out.</a></h3><p>The fast cut. Every style it flashes is in the gallery above.</p><a class="short" href="https://youtu.be/NOffWE136As" target="_blank" rel="noopener">Upright, as a Short</a></div>
+        <div class="body"><span class="k">Trailer</span><h3><a href="https://youtu.be/h9B3I1Am5HU" target="_blank" rel="noopener">Head cam in. Splits out.</a></h3><p>The fast cut. Every style it flashes is in the gallery below.</p><a class="short" href="https://youtu.be/NOffWE136As" target="_blank" rel="noopener">Upright, as a Short</a></div>
       </div></div>
     </div>
   </section>
@@ -512,7 +412,8 @@
       </div>
       <div class="cell shell c-audit rv">
         <div class="core">
-          <div class="body"><span class="phase">Review &middot; Audit</span><h3>Every shot, on the waveform</h3><p>Confirm the beep first, on the timer tone's spectrogram; the trim and detection chain from there. Then the detector's shots sit on the stage audio: reject an echo, add a shot at the playhead, jump to the next flag. Other cameras play as an inset.</p></div>
+          <div class="body"><span class="phase">Review &middot; Audit</span><h3>Every shot, on the waveform</h3><p>Confirm the beep first, on the timer tone's spectrogram; the trim and detection chain from there. Then the detector's shots sit on the stage audio: reject an echo, add a shot at the playhead, jump to the next flag. A second camera plays as an inset on the same beep, here and on Splits, Breakdown and Coach; C swaps the two.</p></div>
+          <div class="pic"><img src="img/pip.webp" width="960" height="535" alt="The head cam with a second camera inset in the top right, both on the same clock" loading="lazy"></div>
           <div class="pic"><img src="img/waveform.webp" width="1200" height="251" alt="Audit's timeline: thirty shot markers on the stage audio, two flagged, with play, zoom and the shot filter above" loading="lazy"></div>
         </div>
       </div>
@@ -550,6 +451,28 @@
     </div>
   </section>
 
+  <section class="wrap" id="looks">
+    <div class="sec-hd">
+      <span class="eyebrow rv"><i></i>Looks</span>
+      <h2 class="rv d1">Every card, every style. At your pace.</h2>
+      <p class="lede rv d2">The trailer flashes past them. Here is what each shipped Look draws, slot by slot, and every transition between stages. Pick one on the Export page and it previews on your own footage before you render.</p>
+    </div>
+    <div class="filters" role="group" aria-label="Filter the gallery">
+      <div class="frow"><span class="k" id="fl-look">Look</span><div class="seg" id="f-look" role="group" aria-labelledby="fl-look"></div></div>
+      <div class="frow"><span class="k" id="fl-slot">Slot</span><div class="seg" id="f-slot" role="group" aria-labelledby="fl-slot"></div></div>
+    </div>
+    <div class="grid" id="grid">
+      <a class="tile" href="img/looks/splitsmith-overlay-plate-lg.webp" aria-label="Splitsmith / Overlay, Plate, open larger"><div class="im"><img src="img/looks/splitsmith-overlay-plate.webp" alt="" width="480" height="270" loading="lazy"><span class="badge">Moves</span></div><div class="cap"><b>Overlay, Plate</b><span>Splitsmith</span></div></a>
+      <a class="tile" href="img/looks/splitsmith-overlay-pips-lg.webp" aria-label="Splitsmith / Overlay, Pips, open larger"><div class="im"><img src="img/looks/splitsmith-overlay-pips.webp" alt="" width="480" height="270" loading="lazy"><span class="badge">Moves</span></div><div class="cap"><b>Overlay, Pips</b><span>Splitsmith</span></div></a>
+      <a class="tile" href="img/looks/splitsmith-overlay-ticker-lg.webp" aria-label="Splitsmith / Overlay, Ticker, open larger"><div class="im"><img src="img/looks/splitsmith-overlay-ticker.webp" alt="" width="480" height="270" loading="lazy"><span class="badge">Moves</span></div><div class="cap"><b>Overlay, Ticker</b><span>Splitsmith</span></div></a>
+      <a class="tile" href="img/looks/splitsmith-overlay-timeline-lg.webp" aria-label="Splitsmith / Overlay, Timeline, open larger"><div class="im"><img src="img/looks/splitsmith-overlay-timeline.webp" alt="" width="480" height="270" loading="lazy"><span class="badge">Moves</span></div><div class="cap"><b>Overlay, Timeline</b><span>Splitsmith</span></div></a>
+      <a class="tile" href="img/looks/splitsmith-overlay-minimal-lg.webp" aria-label="Splitsmith / Overlay, Minimal, open larger"><div class="im"><img src="img/looks/splitsmith-overlay-minimal.webp" alt="" width="480" height="270" loading="lazy"><span class="badge">Moves</span></div><div class="cap"><b>Overlay, Minimal</b><span>Splitsmith</span></div></a>
+      <a class="tile" href="img/looks/splitsmith-overlay-classic-lg.webp" aria-label="Splitsmith / Overlay, Classic, open larger"><div class="im"><img src="img/looks/splitsmith-overlay-classic.webp" alt="" width="480" height="270" loading="lazy"></div><div class="cap"><b>Overlay, Classic</b><span>Splitsmith</span></div></a>
+    </div>
+    <div class="gmore"><span class="c" id="gcount" aria-live="polite"></span><button type="button" id="gtoggle" aria-controls="grid" aria-expanded="false" hidden></button></div>
+    <p class="gnote">Cards and overlays are drawn over a stand-in range scene here, with sample figures; an export draws them over your footage. Overlay styles and transitions loop as they move. A Look of your own can change any of it: colours, fonts, your logo, even the card templates on the desktop app.</p>
+  </section>
+
   <section class="wrap" id="ways">
     <div class="sec-hd">
       <span class="eyebrow rv"><i></i>Outputs</span>
@@ -570,6 +493,7 @@
         <span class="k">Rendered MP4</span><h3>Ready to post</h3>
         <p class="muted" style="font-size:14px">A finished cut with the overlay burned in, cards between the stages, or every shooter in one beep-aligned grid.</p>
         <ul><li>Seven overlay styles: Classic, Plate, Pips, Ticker, Timeline, Minimal and Broadcast</li><li>Sixteen transitions, plus stings in your Look's colours</li><li>A summary after each stage and a match summary at the end</li><li>Upright for Shorts and Reels, clear of their captions and buttons</li><li>Your brand and the shooter's logo where you choose; an end-screen closing card</li><li>Upload to YouTube from the app: chapters, captions and a designed thumbnail, into a playlist, scheduled if you like</li></ul>
+        <div class="pair"><img src="img/upright-hud.webp" width="540" height="960" alt="An upright export with the Minimal overlay: the split, large, and the clock above the bottom safe area" loading="lazy"><img src="img/upright-summary.webp" width="540" height="960" alt="The stage summary on an upright canvas: splits first, static and moving, then draw, reloads and the scorecard" loading="lazy"></div>
       </div></div>
     </div>
   </section>
@@ -623,7 +547,10 @@
         <p class="lede rv d2" style="font-size:16px">Every release retrains the shot ensemble on a corpus of real beep-to-last-shot audio with hand-labelled shot times, across cameras and mounts, and fits the whole-stage decoder on top of it. Every stage you audit is the same kind of data. Contributing your own audited stages to the corpus is on the roadmap; today the fixtures come from the maintainer and a handful of squadmates.</p>
       </div>
       <div class="shell rv d2"><div class="core" style="padding:22px 24px;display:grid;gap:14px">
-        <span class="k mono" style="font-size:10px;letter-spacing:.2em;text-transform:uppercase;color:var(--muted)">Interval classes</span>
+        <span class="k mono" style="font-size:10px;letter-spacing:.2em;text-transform:uppercase;color:var(--muted)">The beep</span>
+        <p class="muted" style="font-size:14px">Placed where your timer's tone starts. The beep step shows that tone on a spectrogram, so Snap finds it even under a shot.</p>
+        <img src="img/beep.webp" width="1200" height="213" alt="The beep step: candidates, the timer tone in a spectrogram, and the audio, with the beep on the tone's start" loading="lazy" style="border-radius:10px;border:1px solid var(--hair);width:100%;height:auto">
+        <span class="k mono" style="font-size:10px;letter-spacing:.2em;text-transform:uppercase;color:var(--muted);margin-top:6px">Interval classes</span>
         <div class="ticks"><span><i style="background:var(--draw)"></i>Draw</span><span><i style="background:var(--done)"></i>Fire</span><span><i style="background:var(--manual)"></i>Transition</span><span><i style="background:var(--beep)"></i>Movement</span><span><i style="background:var(--live)"></i>Reload</span><span><i style="background:var(--ink-2)"></i>Activation</span></div>
         <p class="muted" style="font-size:14px">A split under 1.0 s is a split, under 2.0 s a transition, longer is movement; the auto-classifier's cutoffs, and every class is yours to override per shot in Breakdown.</p>
         <span class="k mono" style="font-size:10px;letter-spacing:.2em;text-transform:uppercase;color:var(--muted);margin-top:6px">Regions</span>

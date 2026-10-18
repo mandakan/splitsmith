@@ -8,10 +8,11 @@ UI — see `docs/ux-redesign/06-design-system.md`.
 ## Files
 
 - `index.html` — the page (redone 2026-09-14 on the restructured UI;
-  refreshed 2026-10-18: a New in splitsmith section, the Looks gallery,
-  the videos, Breakdown in the loop, and the copy brought up to date).
-  Order: hero, figures, New, Looks, videos, the loop, outputs, install,
-  Hosted with the invite request form, detection. Hosted is invite-only,
+  refreshed 2026-10-18: the videos, the Looks gallery, Breakdown and two
+  cameras in the loop, upright exports, and the copy brought up to date).
+  Order: hero, figures, videos, the loop, Looks, outputs, install,
+  Hosted with the invite request form, detection. Features are told where
+  they belong, never as a "new" list: visitors have not used it before. Hosted is invite-only,
   so the primary action is the local install. The page reads with
   JavaScript off: the reveal animation only applies under `html.js`, and
   the gallery falls back to its first page of tiles as plain links.
@@ -25,7 +26,7 @@ UI — see `docs/ux-redesign/06-design-system.md`.
   - UI screenshots of the demo match (`scripts/seed_demo_match.py
     --media`, a scratch `SPLITSMITH_HOME`, `SPLITSMITH_AUTO_SYNC=0`,
     1440x900 at 2x, cropped with PIL): `waveform.webp`, `breakdown.webp`,
-    `draw.webp`, `breakdown-phone.webp` (390 wide), `budget.webp`,
+    `budget.webp`,
     `export.webp`; from 2026-09-14 still: `hero-overview.png`,
     `footage-sort.png`, `splits-table.png`, `leaderboard.png`,
     `lanes.png`. Re-shoot them after a visible UI change.
