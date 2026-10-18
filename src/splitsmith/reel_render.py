@@ -15,6 +15,7 @@ import subprocess
 from collections import Counter
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
+from importlib import resources
 from pathlib import Path
 
 from PIL import Image
@@ -66,30 +67,30 @@ def _fit(sequence: SequenceFormat) -> str:
     )
 
 
-def sfx_source(kind: SfxKind | None, seconds: float) -> str:
-    """A lavfi source for ``kind``, stereo at 48 kHz, ``seconds`` long or
-    padded to it; ``None`` is silence."""
-    d = f"{seconds:g}"
-    stereo = "pan=stereo|c0=c0|c1=c0"
-    if kind == "beep":
-        return f"sine=frequency=3000:sample_rate=48000:duration=0.3,volume=0.4,{stereo},apad=whole_dur={d}"
-    if kind == "impact":
-        return (
-            "aevalsrc=exprs='0.8*sin(2*PI*(45+90*exp(-10*t))*t)*exp(-4*t)'"
-            f":sample_rate=48000:channel_layout=stereo:duration={d}"
-        )
-    if kind == "riser":
-        return (
-            f"aevalsrc=exprs='0.3*sin(2*PI*(150*t+400*t*t/{d}))*(t/{d})'"
-            f":sample_rate=48000:channel_layout=stereo:duration={d}"
-        )
-    if kind == "whoosh":
-        half = f"{seconds / 2:g}"
-        return (
-            f"anoisesrc=color=pink:amplitude=0.3:sample_rate=48000:duration={d},highpass=f=400,"
-            f"afade=t=in:d={half},afade=t=out:st={half}:d={half},{stereo}"
-        )
-    return "anullsrc=channel_layout=stereo:sample_rate=48000"
+SILENCE = "anullsrc=channel_layout=stereo:sample_rate=48000"
+
+_SFX_DIR = Path(str(resources.files("splitsmith") / "data" / "sfx"))
+#: Each stem (``data/sfx``, sources in its ``LICENSES.md``) and where its hit
+#: sits in it: the mix starts the stem that much before its cue, so the hit
+#: lands on the cut (a riser's "hit" is its last sample, a sting's after its
+#: build). Volumes are relative to the footage's own sound.
+SFX_STEMS: dict[SfxKind, tuple[Path, float]] = {
+    "impact": (_SFX_DIR / "impact.m4a", 1.2),
+    "braam": (_SFX_DIR / "braam.m4a", 1.2),
+    "whoosh": (_SFX_DIR / "whoosh.m4a", 1.0),
+    "slowmo": (_SFX_DIR / "slowmo.m4a", 0.0),
+    "riser": (_SFX_DIR / "riser.m4a", 2.2),
+    "sting": (_SFX_DIR / "sting.m4a", 6.2),
+}
+SFX_VOLUME = 0.7
+
+
+def beep_source(seconds: float) -> str:
+    """The timer's beep, a 3 kHz tone, padded to ``seconds``."""
+    return (
+        "sine=frequency=3000:sample_rate=48000:duration=0.3,volume=0.4,"
+        f"pan=stereo|c0=c0|c1=c0,apad=whole_dur={seconds:g}"
+    )
 
 
 def clip_command(
@@ -100,9 +101,10 @@ def clip_command(
     ffmpeg_binary: str = "ffmpeg",
     source_audio: bool = True,
 ) -> tuple[str, ...]:
-    """One clip. The source's own audio only at real speed with no SFX, cut
-    from an unseeked second read by ``atrim`` (``_build_stage_command``
-    explains why input ``-ss`` is not trusted for audio)."""
+    """One clip. The source's own audio at real speed, cut from an unseeked
+    second read by ``atrim`` (``_build_stage_command`` explains why input
+    ``-ss`` is not trusted for audio); a slowed clip is silent, its stem
+    is laid over the stitched reel."""
     out_seconds = clip.out_seconds
     rate = _rate_string(sequence)
     freeze = f",tpad=stop_mode=clone:stop_duration={clip.freeze_seconds:g}" if clip.freeze_seconds > 0 else ""
@@ -111,14 +113,14 @@ def clip_command(
     )
     args: list[str] = [ffmpeg_binary, "-hide_banner", "-y"]
     args += ["-ss", f"{clip.start:g}", "-t", f"{clip.seconds:g}", "-i", str(clip.source)]
-    if source_audio and clip.speed == 1.0 and clip.sfx is None:
+    if source_audio and clip.speed == 1.0:
         args += ["-i", str(clip.source)]
         audio = (
             f"[1:a]atrim=start={clip.start:g}:duration={clip.seconds:g},asetpts=PTS-STARTPTS,"
             f"{AUDIO_NORMALIZE},apad=whole_dur={out_seconds:g}[aout]"
         )
     else:
-        args += ["-f", "lavfi", "-i", sfx_source(clip.sfx, out_seconds)]
+        args += ["-f", "lavfi", "-i", SILENCE]
         audio = f"[1:a]{AUDIO_NORMALIZE},atrim=duration={out_seconds:g}[aout]"
     args += ["-filter_complex", f"{video};{audio}", "-map", "[final]", "-map", "[aout]"]
     args += ["-t", f"{out_seconds:g}", *_encode_args(sequence, youtube_preset=False), str(output_path)]
@@ -130,14 +132,15 @@ def card_command(
     clip: Path | None,
     *,
     seconds: float,
-    sfx: SfxKind | None,
+    sfx: tuple[SfxKind, ...],
     sequence: SequenceFormat,
     output_path: Path,
     ffmpeg_binary: str = "ffmpeg",
 ) -> tuple[str, ...]:
     """A card held ``seconds`` over its backdrop: a canvas-sized PNG (the
     composed still, or the backdrop under ``clip``, the template's alpha
-    MOV, last frame held), with its SFX."""
+    MOV, last frame held). Silent but for the timer's beep; its stems are
+    laid over the stitched reel."""
     rate = _rate_string(sequence)
     args: list[str] = [ffmpeg_binary, "-hide_banner", "-y", "-loop", "1", "-framerate", rate]
     args += ["-i", str(backdrop_png)]
@@ -149,10 +152,54 @@ def card_command(
     else:
         video = "[0:v]format=yuv420p,setsar=1[final]"
         audio_index = 1
-    args += ["-f", "lavfi", "-i", sfx_source(sfx, seconds)]
+    args += ["-f", "lavfi", "-i", beep_source(seconds) if "beep" in sfx else SILENCE]
     audio = f"[{audio_index}:a]{AUDIO_NORMALIZE}[aout]"
     args += ["-t", f"{seconds:g}", "-filter_complex", f"{video};{audio}", "-map", "[final]", "-map", "[aout]"]
     args += [*_encode_args(sequence, youtube_preset=False), str(output_path)]
+    return tuple(args)
+
+
+def sfx_cues(items: Sequence[ReelItem]) -> tuple[tuple[SfxKind, float], ...]:
+    """Every stem cue as (kind, seconds into the stitched reel): each item's
+    stems at the item's start. The beep is not a stem; its card draws it."""
+    cues: list[tuple[SfxKind, float]] = []
+    at = 0.0
+    for item in items:
+        cues.extend((kind, round(at, 6)) for kind in item.sfx if kind in SFX_STEMS)
+        at += item.out_seconds if isinstance(item, ReelClip) else item.seconds
+    return tuple(cues)
+
+
+def sfx_mix_command(
+    stitched: Path,
+    cues: Sequence[tuple[SfxKind, float]],
+    *,
+    output_path: Path,
+    ffmpeg_binary: str = "ffmpeg",
+) -> tuple[str, ...] | None:
+    """Lay every cue's stem over the stitched reel, its hit on the cue, with
+    its whole tail; the video is copied. ``None`` when there is no cue."""
+    if not cues:
+        return None
+    args: list[str] = [ffmpeg_binary, "-hide_banner", "-y", "-i", str(stitched)]
+    parts: list[str] = []
+    labels = ["[0:a]"]
+    for index, (kind, at) in enumerate(cues, start=1):
+        path, hit = SFX_STEMS[kind]
+        args += ["-i", str(path)]
+        start = at - hit
+        if start >= 0:
+            ms = round(start * 1000)
+            chain = f"[{index}:a]adelay={ms}|{ms}"
+        else:
+            chain = f"[{index}:a]atrim=start={-start:g},asetpts=PTS-STARTPTS"
+        parts.append(f"{chain},{AUDIO_NORMALIZE},volume={SFX_VOLUME:g}[s{index}]")
+        labels.append(f"[s{index}]")
+    parts.append(
+        f"{''.join(labels)}amix=inputs={len(labels)}:normalize=0:duration=first,alimiter=limit=0.9[aout]"
+    )
+    args += ["-filter_complex", ";".join(parts), "-map", "0:v", "-map", "[aout]"]
+    args += ["-c:v", "copy", "-c:a", "aac", "-b:a", "192k", "-movflags", "+faststart", str(output_path)]
     return tuple(args)
 
 
@@ -311,12 +358,18 @@ def render_reel(
 
     listing = work_dir / "segments.txt"
     listing.write_text("".join(f"file '{path}'\n" for path, _ in segments))
+    mix = sfx_mix_command(
+        work_dir / "stitched.mp4", sfx_cues(items), output_path=output_path, ffmpeg_binary=ffmpeg_binary
+    )
+    stitched = output_path if mix is None else work_dir / "stitched.mp4"
     _run(
         _build_concat_command(
-            list_path=listing, output_path=output_path, ffmpeg_binary=ffmpeg_binary, reencode_audio=True
+            list_path=listing, output_path=stitched, ffmpeg_binary=ffmpeg_binary, reencode_audio=True
         ),
         runner=runner,
     )
+    if mix is not None:
+        _run(mix, runner=runner)
     if segment_cache is not None:
         segment_cache.evict(keep=used)
     return ReelRenderResult(output_path, sum(seconds for _, seconds in segments), tuple(degradations))

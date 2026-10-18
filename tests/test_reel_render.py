@@ -7,12 +7,14 @@ from splitsmith.composition import SequenceFormat
 from splitsmith.config import VideoMetadata
 from splitsmith.reel_plan import FrameRef, ReelCard, ReelClip
 from splitsmith.reel_render import (
+    SFX_STEMS,
     card_command,
     clip_command,
     frame_command,
     reel_format,
     render_reel,
-    sfx_source,
+    sfx_cues,
+    sfx_mix_command,
 )
 from tests.synthetic_media import build_synthetic_video, ffmpeg_available
 
@@ -35,7 +37,7 @@ def test_reel_format_takes_the_most_common_rate():
 
 
 def test_clip_command_crops_scales_conforms_and_slows():
-    clip = ReelClip("002_cold", Path("/m/a.mp4"), 7.4, 1.2, speed=0.5, freeze_seconds=0.4, sfx="riser")
+    clip = ReelClip("002_cold", Path("/m/a.mp4"), 7.4, 1.2, speed=0.5, freeze_seconds=0.4, sfx=("slowmo",))
     argv = clip_command(clip, sequence=UP, output_path=Path("/w/out.mp4"))
     graph = argv[argv.index("-filter_complex") + 1]
     assert "crop='min(iw,ih*0.5625)':'min(ih,iw/0.5625)'" in graph
@@ -44,7 +46,8 @@ def test_clip_command_crops_scales_conforms_and_slows():
     assert "fps=30/1" in graph
     assert "tpad=stop_mode=clone:stop_duration=0.4" in graph
     assert argv[argv.index("-ss") + 1] == "7.4" and argv[argv.index("-t") + 1] == "1.2"
-    assert "aevalsrc" in " ".join(argv)  # the riser, not the source audio
+    assert "anullsrc" in " ".join(argv)  # slowed: silent, the stem plays over it
+    assert argv.count("/m/a.mp4") == 1
 
 
 def test_clip_at_real_speed_uses_the_unseeked_source_audio():
@@ -61,24 +64,56 @@ def test_clip_without_source_audio_is_silent():
     assert "anullsrc" in " ".join(argv)
 
 
-@pytest.mark.parametrize("kind", ["beep", "impact", "riser", "whoosh", None])
-def test_sfx_source_is_a_lavfi_graph(kind):
-    src = sfx_source(kind, 0.7)
-    assert "48000" in src
-    assert ("anullsrc" in src) == (kind is None)
+def test_a_card_is_silent_unless_it_is_the_timer_beep():
+    def audio(sfx):
+        argv = card_command(
+            Path("/w/bg.png"),
+            Path("/w/card.mov"),
+            seconds=0.7,
+            sfx=sfx,
+            sequence=UP,
+            output_path=Path("/w/o.mp4"),
+        )
+        assert "/w/card.mov" in argv and argv[argv.index("-t") + 1] == "0.7"
+        return " ".join(argv)
+
+    assert "sine=frequency=3000" in audio(("beep",))
+    assert "anullsrc" in audio(("impact",)) and "sine" not in audio(("impact",))
 
 
-def test_card_command_with_motion_clip_and_sfx():
-    argv = card_command(
-        Path("/w/bg.png"),
-        Path("/w/card.mov"),
-        seconds=0.7,
-        sfx="impact",
-        sequence=UP,
-        output_path=Path("/w/o.mp4"),
+def test_every_stem_ships_and_names_its_hit():
+    for kind, (path, hit) in SFX_STEMS.items():
+        assert path.is_file(), kind
+        assert hit >= 0
+
+
+def test_cues_sit_at_each_items_start_on_the_stitched_timeline():
+    items = (
+        ReelCard("001_beep", "slam", 0.6, "", sfx=("beep",)),
+        ReelClip("002_cold", Path("/m/a.mp4"), 0.0, 1.0, speed=0.5, sfx=("slowmo",)),
+        ReelCard("003_title", "title", 1.6, "T", sfx=("riser", "braam")),
+        ReelClip("004_beat", Path("/m/a.mp4"), 0.0, 1.2),
     )
-    assert "/w/card.mov" in argv and "aevalsrc" in " ".join(argv)
-    assert argv[argv.index("-t") + 1] == "0.7"
+    # The beep is drawn in its card; every other kind is a stem cue.
+    assert sfx_cues(items) == (("slowmo", 0.6), ("riser", 2.6), ("braam", 2.6))
+
+
+def test_mix_places_each_stems_hit_on_its_cue():
+    cues = (("braam", 2.6), ("riser", 2.6), ("impact", 0.5))
+    argv = sfx_mix_command(Path("/w/stitched.mp4"), cues, output_path=Path("/w/reel.mp4"))
+    graph = argv[argv.index("-filter_complex") + 1]
+    # braam hits 1.2 s in: starts 1.4 s into the reel.
+    assert "[1:a]adelay=1400|1400" in graph
+    # riser ends (2.2 s) on the cue: starts at 0.4 s.
+    assert "[2:a]adelay=400|400" in graph
+    # impact's hit at 1.2 s is before its 0.5 s cue: its first 0.7 s is cut.
+    assert "[3:a]atrim=start=0.7,asetpts=PTS-STARTPTS" in graph
+    assert "amix=inputs=4:normalize=0:duration=first" in graph
+    assert argv[argv.index("-c:v") + 1] == "copy"
+
+
+def test_no_cues_is_no_mix():
+    assert sfx_mix_command(Path("/w/s.mp4"), (), output_path=Path("/w/r.mp4")) is None
 
 
 def test_frame_command_grabs_one_cropped_frame():
@@ -125,7 +160,7 @@ def test_render_reel_encodes_every_item_then_stitches(tmp_path, monkeypatch):
 
     monkeypatch.setattr("splitsmith.reel_render._has_audio_stream", lambda p: True)
     items = (
-        ReelCard("001_title", "title", 1.6, "Bromma", lines=("Anna",), sfx="impact"),
+        ReelCard("001_title", "title", 1.6, "Bromma", lines=("Anna",), sfx=("braam",)),
         ReelClip("002_beat", Path("/m/a.mp4"), 7.4, 1.2),
         ReelCard(
             "003_callout",
@@ -145,8 +180,9 @@ def test_render_reel_encodes_every_item_then_stitches(tmp_path, monkeypatch):
         runner=runner,
         rasterizer=_FakeRaster(),
     )
-    assert len(calls) == 5  # title card, clip, frame grab, callout card, stitch
-    assert "concat" in calls[-1]
+    assert len(calls) == 6  # title card, clip, frame grab, callout card, stitch, sfx mix
+    assert "concat" in calls[-2]
+    assert "amix" in " ".join(calls[-1]) and calls[-1][-1] == str(tmp_path / "reel.mp4")
     assert result.duration_seconds == pytest.approx(1.6 + 1.2 + 1.2)
     assert result.degradations == ()
 
@@ -194,7 +230,7 @@ def test_clips_at_different_rates_stitch(tmp_path):
     fast = tmp_path / "src60.mp4"
     subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-i", str(src), "-r", "60", str(fast)], check=True)
     outs = []
-    for i, (source, speed, sfx) in enumerate([(src, 1.0, None), (fast, 0.5, "riser")]):
+    for i, (source, speed, sfx) in enumerate([(src, 1.0, ()), (fast, 0.5, ("slowmo",))]):
         out = tmp_path / f"seg{i}.mp4"
         clip = ReelClip(f"c{i}", source, 0.5, 1.0, speed=speed, freeze_seconds=0.3, sfx=sfx)
         proc = subprocess.run(
@@ -227,3 +263,10 @@ def test_clips_at_different_rates_stitch(tmp_path):
         check=True,
     )
     assert _probe_seconds(final) == pytest.approx(1.3 + 2.3, abs=0.15)
+
+    # The shipped stems decode and mix over it without changing its length.
+    mixed = tmp_path / "mixed.mp4"
+    cues = (("slowmo", 1.3), ("braam", 0.2), ("sting", 3.0), ("impact", 0.0))
+    proc = subprocess.run(sfx_mix_command(final, cues, output_path=mixed), capture_output=True, text=True)
+    assert proc.returncode == 0, proc.stderr[-2000:]
+    assert _probe_seconds(mixed) == pytest.approx(_probe_seconds(final), abs=0.05)

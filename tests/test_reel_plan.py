@@ -90,7 +90,7 @@ def test_secondary_angle_replays_in_slow_motion():
     items = _plan(ReelPicks(None, (m,), ()), footage=_footage(secondary=True))
     replay = [i for i in items if isinstance(i, ReelClip) and i.source == S1]
     assert len(replay) == 1
-    assert replay[0].speed == 0.5 and replay[0].sfx == "riser"
+    assert replay[0].speed == 0.5 and replay[0].sfx == ("slowmo",)
     assert replay[0].start == pytest.approx(4.0 + 3.0 - 1.0)
 
 

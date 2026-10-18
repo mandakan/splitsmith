@@ -14,7 +14,10 @@ from typing import Literal
 
 from .highlights import Moment, MomentKind, ReelPicks
 
-SfxKind = Literal["beep", "impact", "riser", "whoosh"]
+#: ``beep`` is the timer's tone, drawn in its card's own audio; every other
+#: kind is a shipped stem (``data/sfx``) the renderer lays over the stitched
+#: reel at the item's start, its hit on the cut (``reel_render.SFX_STEMS``).
+SfxKind = Literal["beep", "impact", "braam", "whoosh", "slowmo", "riser", "sting"]
 CardKind = Literal["title", "slam", "callout", "end"]
 
 MIN_CLIP_S = 0.3
@@ -67,7 +70,8 @@ class FrameRef:
 class ReelClip:
     """``seconds`` of ``source`` from clip-local ``start``, played at
     ``speed`` and held ``freeze_seconds`` on its last frame. The source's
-    own sound plays only at real speed with no ``sfx``."""
+    own sound plays at real speed only; a slowed clip is silent under its
+    ``sfx``."""
 
     name: str
     source: Path
@@ -75,7 +79,7 @@ class ReelClip:
     seconds: float
     speed: float = 1.0
     freeze_seconds: float = 0.0
-    sfx: SfxKind | None = None
+    sfx: tuple[SfxKind, ...] = ()
 
     @property
     def out_seconds(self) -> float:
@@ -92,7 +96,7 @@ class ReelCard:
     unit: str | None = None
     lines: tuple[str, ...] = ()
     backdrop: FrameRef | None = None
-    sfx: SfxKind | None = None
+    sfx: tuple[SfxKind, ...] = ()
 
 
 ReelItem = ReelClip | ReelCard
@@ -146,7 +150,7 @@ def plan_reel(
             unit=unit,
             lines=(stage.stage_name,),
             backdrop=FrameRef(stage.primary.path, stage.primary.beep_offset + moment.focus),
-            sfx="whoosh",
+            sfx=("whoosh",),
         )
 
     cold = picks.cold_open
@@ -154,10 +158,13 @@ def plan_reel(
     if cold is not None and cold_stage is not None:
         window = _window(cold_stage.primary, cold.focus - COLD_OPEN_LEAD_S, cold.focus)
         if window is not None:
-            items.append(ReelCard(name("beep"), "slam", BEEP_CARD_S, "", sfx="beep"))
-            items.append(ReelClip(name("cold"), cold_stage.primary.path, *window, speed=SLOW, sfx="riser"))
+            items.append(ReelCard(name("beep"), "slam", BEEP_CARD_S, "", sfx=("beep",)))
+            items.append(
+                ReelClip(name("cold"), cold_stage.primary.path, *window, speed=SLOW, sfx=("slowmo",))
+            )
             items.append(callout(cold, cold_stage))
-    items.append(ReelCard(name("title"), "title", TITLE_S, title, lines=(shooter,), sfx="impact"))
+    # The riser ends on the title's cut, where the braam hits.
+    items.append(ReelCard(name("title"), "title", TITLE_S, title, lines=(shooter,), sfx=("riser", "braam")))
 
     for moment in picks.beats:
         stage = footage.get(moment.stage_number)
@@ -166,13 +173,15 @@ def plan_reel(
         window = _window(stage.primary, moment.start, moment.end)
         if window is None:
             continue
-        items.append(ReelCard(name("slam"), "slam", SLAM_S, MOMENT_LABELS[moment.kind], sfx="impact"))
+        items.append(ReelCard(name("slam"), "slam", SLAM_S, MOMENT_LABELS[moment.kind], sfx=("impact",)))
         items.append(ReelClip(name("beat"), stage.primary.path, *window))
         items.append(callout(moment, stage))
         if stage.secondary is not None:
             replay = _window(stage.secondary, moment.focus - REPLAY_LEAD_S, moment.focus + REPLAY_TAIL_S)
             if replay is not None:
-                items.append(ReelClip(name("replay"), stage.secondary.path, *replay, speed=SLOW, sfx="riser"))
+                items.append(
+                    ReelClip(name("replay"), stage.secondary.path, *replay, speed=SLOW, sfx=("slowmo",))
+                )
 
     for stage_number, t in picks.montage:
         stage = footage.get(stage_number)
@@ -182,5 +191,6 @@ def plan_reel(
         if window is not None:
             items.append(ReelClip(name("cut"), stage.primary.path, *window))
 
-    items.append(ReelCard(name("end"), "end", END_S, title, lines=tuple(end_lines), sfx="impact"))
+    # The sting builds for 6.2 s under the montage and hits on the end card.
+    items.append(ReelCard(name("end"), "end", END_S, title, lines=tuple(end_lines), sfx=("sting",)))
     return tuple(items)
