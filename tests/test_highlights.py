@@ -1,7 +1,15 @@
 import pytest
 
 from splitsmith.config import HighlightConfig, StageEvent
-from splitsmith.highlights import Moment, StageReadiness, find_moments, reel_unlocked, stage_readiness
+from splitsmith.highlights import (
+    BEAT_ORDER,
+    Moment,
+    StageReadiness,
+    find_moments,
+    pick_reel,
+    reel_unlocked,
+    stage_readiness,
+)
 from splitsmith.match_project import StageScorecard, StageStatus
 from splitsmith.stage_summary_data import TileShot, TileStageData
 
@@ -149,6 +157,53 @@ def test_finders_tolerate_empty_and_single_shot_stages():
     found = find_moments([_stage(1, []), _stage(2, [1.1])], CFG)
     assert found["fastest_split"] == [] and found["longest_streak"] == []
     assert [m.stage_number for m in found["fastest_draw"]] == [2]
+
+
+def _m(kind, stage, figure=1.0, focus=1.0) -> Moment:
+    return Moment(kind, stage, focus - 1.0, focus + 0.5, focus, figure)
+
+
+def _found(**lists) -> dict:
+    return {k: list(lists.get(k, [])) for k in BEAT_ORDER}
+
+
+def test_beats_follow_the_order_and_prefer_unused_stages():
+    found = _found(
+        fastest_draw=[_m("fastest_draw", 1)],
+        fastest_transition=[_m("fastest_transition", 1), _m("fastest_transition", 2)],
+        fastest_split=[_m("fastest_split", 3)],
+    )
+    picks = pick_reel(found, [])
+    assert [(m.kind, m.stage_number) for m in picks.beats] == [
+        ("fastest_draw", 1),
+        ("fastest_transition", 2),
+        ("fastest_split", 3),
+    ]
+
+
+def test_a_stage_is_reused_only_when_no_other_candidate_exists():
+    found = _found(fastest_draw=[_m("fastest_draw", 1)], fastest_split=[_m("fastest_split", 1)])
+    assert [m.stage_number for m in pick_reel(found, []).beats] == [1, 1]
+
+
+def test_cold_open_is_the_fastest_split_else_the_first_beat():
+    split = _m("fastest_split", 3)
+    assert pick_reel(_found(fastest_split=[split]), []).cold_open == split
+    draw = _m("fastest_draw", 1)
+    assert pick_reel(_found(fastest_draw=[draw]), []).cold_open == draw
+    assert pick_reel(_found(), []).cold_open is None
+
+
+def test_max_beats_caps_the_list():
+    found = _found(**{k: [_m(k, i + 1)] for i, k in enumerate(BEAT_ORDER)})
+    assert len(pick_reel(found, [], max_beats=3).beats) == 3
+
+
+def test_montage_is_the_fastest_splits_in_match_order():
+    stages = [_stage(2, [1.0, 1.18, 1.50]), _stage(1, [1.0, 1.21, 1.60, 1.79])]
+    picks = pick_reel(_found(), stages, montage_cuts=3)
+    # Fastest three: 0.18 (s2 @1.18), 0.19 (s1 @1.79), 0.21 (s1 @1.21); shown in match order.
+    assert picks.montage == ((1, 1.21), (1, 1.79), (2, 1.18))
 
 
 def test_every_kind_is_present_even_when_empty():

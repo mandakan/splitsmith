@@ -167,6 +167,60 @@ def _best_stage(stages: Sequence[TileStageData]) -> list[Moment]:
     return out
 
 
+#: The order the trailer's beats play in: build up through the stage's
+#: mechanics, then speed, then the result.
+BEAT_ORDER: tuple[MomentKind, ...] = (
+    "fastest_draw",
+    "fastest_transition",
+    "fastest_reload",
+    "longest_streak",
+    "fastest_split",
+    "best_stage",
+)
+
+
+@dataclass(frozen=True)
+class ReelPicks:
+    cold_open: Moment | None
+    beats: tuple[Moment, ...]
+    #: (stage number, shot time from the beep), in match order.
+    montage: tuple[tuple[int, float], ...]
+
+
+def pick_reel(
+    found: dict[MomentKind, list[Moment]],
+    stages: Sequence[TileStageData],
+    *,
+    max_beats: int = 5,
+    montage_cuts: int = 8,
+    config: HighlightConfig | None = None,
+) -> ReelPicks:
+    """One beat per kind in ``BEAT_ORDER``, each on a stage no earlier beat
+    used when any candidate allows it, so the reel moves around the match.
+    The cold open is the fastest split; the montage the fastest splits of
+    the match, played in match order."""
+    cfg = config or HighlightConfig()
+    beats: list[Moment] = []
+    used: set[int] = set()
+    for kind in BEAT_ORDER:
+        candidates = found.get(kind, [])
+        if not candidates or len(beats) >= max_beats:
+            continue
+        chosen = next((m for m in candidates if m.stage_number not in used), candidates[0])
+        beats.append(chosen)
+        used.add(chosen.stage_number)
+    splits = found.get("fastest_split", [])
+    cold_open = splits[0] if splits else (beats[0] if beats else None)
+    shots: list[tuple[float, int, float]] = []
+    for s in stages:
+        for shot in statistic_split_shots(s.shots):
+            if shot.split >= cfg.min_split_s:
+                shots.append((shot.split, s.stage_number, shot.time_from_beep))
+    fastest = sorted(shots)[:montage_cuts]
+    montage = tuple(sorted((stage, t) for _, stage, t in fastest))
+    return ReelPicks(cold_open=cold_open, beats=tuple(beats), montage=montage)
+
+
 def find_moments(stages: Sequence[TileStageData], config: HighlightConfig) -> dict[MomentKind, list[Moment]]:
     """Every kind's candidates, best first, ties broken by stage then time.
     Every figure is an existing rule's: the Draw is ``TileStageData.draw``,
