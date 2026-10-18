@@ -1356,6 +1356,11 @@ _SHARE_PATH_RE = re.compile(
     r"|shooters/[^/]+/videos/stream"
     # The shooter's logo (#1249): already in every video the share shows.
     r"|shooters/[^/]+/identity/logo"
+    # The highlight reel (spec 2026-10-18): the route naming the newest one
+    # and that file, in exactly the shape ``export_naming.reel_file_name``
+    # writes (``REEL_FILE_RE``). No other export is reachable from a share.
+    r"|shooters/[^/]+/highlights/latest"
+    r"|shooters/[^/]+/exports/file/[a-z0-9-]+-highlights(?:-short)?\.mp4"
     r"|match/stage/[0-9]+/compare"
     # Same registry as the "shooters/[^/]+/videos/stream" shape above -
     # this alternative also reaches the registered-video branch of

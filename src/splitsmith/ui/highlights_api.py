@@ -97,6 +97,34 @@ def get_highlights(slug: str, request: Request) -> HighlightsOut:
     )
 
 
+class LatestReelOut(BaseModel):
+    filename: str
+    short: bool
+    finished_at: datetime
+
+
+@router.get("/api/shooters/{slug}/highlights/latest", response_model=LatestReelOut)
+def latest_reel(slug: str, request: Request) -> LatestReelOut:
+    """The newest reel whose file is still there, from the export history;
+    404 without one. On the share surface (``_SHARE_PATH_RE``) this is what
+    the share page plays."""
+    state = request.app.state.splitsmith_state
+    doc, _version = state.load_export_runs(slug)
+    project = state.shooter_project(slug)
+    present = project.existing_export_names(state.shooter_root(slug))
+    for run in export_runs.load_log(doc).runs:  # newest first
+        if JOB_KIND not in run.formats:
+            continue
+        for artifact in run.artifacts:
+            if artifact.kind == "match_video" and artifact.filename in present:
+                return LatestReelOut(
+                    filename=artifact.filename,
+                    short=artifact.filename.endswith("-short.mp4"),
+                    finished_at=run.finished_at,
+                )
+    raise HTTPException(status_code=404, detail="no highlight reel yet")
+
+
 class HighlightReelRequest(BaseModel):
     """What Export's reel mode sends. Plain JSON on the job, so the job
     journal needs no model for it."""

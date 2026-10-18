@@ -74,6 +74,7 @@ const You = lazyPage(() => import("@/pages/You"), "You");
 const Shooters = lazyPage(() => import("@/pages/Shooters"), "Shooters");
 const Results = lazyPage(() => import("@/pages/Results"), "Results");
 const ResultsStage = lazyPage(() => import("@/pages/ResultsStage"), "ResultsStage");
+const ShareHighlights = lazyPage(() => import("@/pages/share/ShareHighlights"), "ShareHighlights");
 const Review = lazyPage(() => import("@/pages/Review"), "Review");
 
 /* The legacy Lab page is deleted (#331 final task). Every legacy Lab URL
@@ -322,6 +323,7 @@ export function App() {
             <Route index element={<Navigate to="results" replace />} />
             <Route path="results" element={<Results />} />
             <Route path="results/:slug/:stage" element={<ResultsStage />} />
+            <Route path="highlights/:slug" element={<ShareHighlights />} />
             {/* Compare-behind-a-token (#700): read-only, desktop-only.
                 isShareView() (lib/shareView) gates the operator-only
                 affordances (Audit/Coach tabs, audit CTAs) off this

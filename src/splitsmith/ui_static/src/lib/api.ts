@@ -2642,6 +2642,13 @@ export interface HighlightReadiness {
   cuts: string[];
 }
 
+/** ``GET /api/shooters/{slug}/highlights/latest``. */
+export interface LatestReel {
+  filename: string;
+  short: boolean;
+  finished_at: string;
+}
+
 /** ``POST /api/shooters/{slug}/highlights``: the reel's render request. */
 export interface HighlightReelBody {
   moments: string[];
@@ -4487,6 +4494,11 @@ export const api = {
   /** The highlight reel's readiness and its moment menu for one shooter. */
   getHighlights: (slug: string) =>
     request<HighlightReadiness>(`/api/shooters/${encodeURIComponent(slug)}/highlights`),
+
+  /** The newest highlight reel whose file is still there; rejects (404)
+   *  without one. Reachable on a share link. */
+  getLatestReel: (slug: string) =>
+    request<LatestReel>(`/api/shooters/${encodeURIComponent(slug)}/highlights/latest`),
 
   /** Queue the highlight reel's render; the Job to poll. The body is spread,
    *  never listed (``api.exportBodies.test.ts``). */
