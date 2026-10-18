@@ -144,6 +144,10 @@ def test_export_stage_calls_helper_and_returns_paths(tmp_path: Path) -> None:
     assert kwargs["audit_path"] == audit_path
     assert kwargs["exports_dir"].name == "exports"
     assert kwargs["beep_time_in_source"] == 5.0
+    # The scorecard, division and capacity a template HUD draws, as the app's
+    # stage export passes them; without them its record never matches.
+    project = MatchProject.load(root)
+    assert kwargs["hud_extras"] == export_tools.export_helpers.hud_extras_for(project, project.stage(1), root)
     assert result["fcpxml_path"].endswith("stage1_k-vallen.fcpxml")
     assert result["events_csv_path"].endswith("stage1_k-vallen_events.csv")
     assert result["shots_written"] == 2

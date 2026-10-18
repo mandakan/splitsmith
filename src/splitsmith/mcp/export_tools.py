@@ -192,6 +192,7 @@ def export_stage_tool(
         post_buffer_seconds=project.trim_post_buffer_seconds,
         config=Config(),
         secondaries=secondaries_in,
+        hud_extras=export_helpers.hud_extras_for(project, stage, root),
     )
 
     return {
