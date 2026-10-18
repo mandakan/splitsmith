@@ -43,6 +43,7 @@ SLOT_NAMES: tuple[str, ...] = (
     "transition",
     "overlay",
     "thumbnail",
+    "highlight",
 )
 """Every slot a manifest may name. ``summary`` and ``match_summary`` are
 the single-shooter stage summary hold and match summary (spec
@@ -57,6 +58,9 @@ draws the YouTube thumbnail over an action frame (``thumbnail_card``)."""
 STING_SLOT = "transition"
 OVERLAY_SLOT = "overlay"
 THUMBNAIL_SLOT = "thumbnail"
+#: The highlight reel's cards (spec 2026-10-18-highlight-reel-design); a
+#: variant is a whole reel style (``trailer``). Shipped Looks only for now.
+HIGHLIGHT_SLOT = "highlight"
 SummarySlot = Literal["summary", "match_summary"]
 SUMMARY_SLOTS: tuple[SummarySlot, ...] = ("summary", "match_summary")
 #: Slots whose ``default`` is drawn by the engine, never by a template.
@@ -493,6 +497,16 @@ def thumbnail_template_for(look: Look) -> Path | None:
     if own is not None:
         return own
     return _shipped_default().own_template(THUMBNAIL_SLOT)
+
+
+def highlight_template_for(look: Look, variant: str = "trailer") -> Path | None:
+    """The highlight reel's card template in ``variant``: the Look's own,
+    else the shipped default Look's, else ``None``. No fallback to another
+    variant: a reel style is a whole cut, not one card."""
+    own = look.own_template(HIGHLIGHT_SLOT, variant)
+    if own is not None:
+        return own
+    return _shipped_default().own_template(HIGHLIGHT_SLOT, variant)
 
 
 def overlay_template_for(look: Look, variant: str) -> Path | None:

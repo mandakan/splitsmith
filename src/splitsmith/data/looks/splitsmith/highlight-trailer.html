@@ -1,0 +1,90 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>highlight trailer</title>
+<script>
+  // The highlight reel's trailer card: one big line slammed in, a figure
+  // that punches in under it, small lines after. seek() drives the Web
+  // Animations frame by frame; nothing reads wall-clock time.
+  document.write('<style>' + window.splitsmith.engine.css + '</style>');
+</script>
+<style>
+  html, body { margin: 0; width: 100%; height: 100%; background: transparent; overflow: hidden; }
+  .stack {
+    position: absolute; inset: 0; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; text-align: center; padding: 0 6vw;
+  }
+  .text {
+    font-family: "Splitsmith Display"; text-transform: uppercase; line-height: 0.95;
+    font-size: 11vmin; letter-spacing: 0.02em;
+  }
+  .figure { font-family: "Splitsmith Mono"; font-size: 22vmin; line-height: 1; margin-top: 2vmin; }
+  .unit { font-family: "Splitsmith Display"; font-size: 5vmin; margin-left: 1.5vmin; }
+  .line { font-family: "Splitsmith Display"; font-size: 4.5vmin; margin-top: 1.5vmin; text-transform: uppercase; }
+  .bar { width: 22vmin; height: 1.2vmin; margin: 2.5vmin auto 0; }
+</style>
+</head>
+<body>
+<div class="stack" id="stack"></div>
+<script>
+  var S = window.splitsmith;
+  var H = S.data.highlight;
+  var animations = [];
+  var settle = Math.min(H.duration_seconds, 0.8);
+  function add(el, keyframes, delayMs, durationMs) {
+    var a = el.animate(keyframes, {
+      duration: durationMs, delay: delayMs, easing: 'cubic-bezier(0.2, 0.9, 0.1, 1)', fill: 'both'
+    });
+    a.pause();
+    animations.push(a);
+  }
+  document.addEventListener('DOMContentLoaded', function () {
+    var stack = document.getElementById('stack');
+    if (H.kind === 'callout') { document.body.style.background = 'rgba(0, 0, 0, 0.35)'; }
+    if (!H.text && !H.figure) { return; }
+    if (H.text) {
+      var text = document.createElement('div');
+      text.className = 'text';
+      text.textContent = H.text;
+      text.style.color = H.kind === 'callout' ? S.theme.accent : S.theme.ink;
+      stack.appendChild(text);
+      add(text, [{ transform: 'scale(1.8)', opacity: 0 }, { transform: 'scale(1)', opacity: 1 }], 0, 260);
+    }
+    if (H.figure) {
+      var figure = document.createElement('div');
+      figure.className = 'figure';
+      figure.style.color = S.theme.ink;
+      figure.textContent = H.figure;
+      if (H.unit) {
+        var unit = document.createElement('span');
+        unit.className = 'unit';
+        unit.style.color = S.theme.muted;
+        unit.textContent = H.unit;
+        figure.appendChild(unit);
+      }
+      stack.appendChild(figure);
+      add(figure, [{ transform: 'translateY(6vmin) scale(0.6)', opacity: 0 }, { transform: 'none', opacity: 1 }], 140, 280);
+    }
+    var bar = document.createElement('div');
+    bar.className = 'bar';
+    bar.style.background = S.theme.accent;
+    stack.appendChild(bar);
+    add(bar, [{ transform: 'scaleX(0)' }, { transform: 'scaleX(1)' }], 120, 300);
+    (H.lines || []).forEach(function (line, i) {
+      var el = document.createElement('div');
+      el.className = 'line';
+      el.style.color = S.theme.ink_2;
+      el.textContent = line;
+      stack.appendChild(el);
+      add(el, [{ opacity: 0, transform: 'translateY(2vmin)' }, { opacity: 1, transform: 'none' }], 260 + 80 * i, 260);
+    });
+  });
+  window.duration = function () { return H.duration_seconds; };
+  window.poster = function () { return settle; };
+  window.seek = function (seconds) {
+    animations.forEach(function (a) { a.currentTime = seconds * 1000; });
+  };
+</script>
+</body>
+</html>

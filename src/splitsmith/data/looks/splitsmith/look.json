@@ -88,6 +88,9 @@
       "end-screen": "card-end-screen.html",
       "rise": "card-rise.html"
     },
+    "highlight": {
+      "trailer": "highlight-trailer.html"
+    },
     "lower_third": {
       "default": "card.html",
       "rise": "card-rise.html"
