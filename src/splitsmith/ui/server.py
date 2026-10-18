@@ -3215,6 +3215,7 @@ def _write_grid_youtube_sidecar(
         description_lead=(req.description_lead or "").strip() or None,
         output_video=Path(output_path.name),
         thumbnail_path=Path(thumbnail.name) if thumbnail is not None else None,
+        credits=match_export_helpers.look_credits_for(req.overlay_theme),
     )
     sidecar_path = youtube_sidecar.sidecar_path_for(output_path)
     youtube_sidecar.write_sidecar(sidecar, sidecar_path)
