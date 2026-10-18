@@ -1704,7 +1704,10 @@ region list with nothing open; "Review N proposals" starts the queue and any
 row opens that region. Add (``lib/addRegion``) puts a new manual region over
 the open one (a movement during the draw) or in the shot gap at the playhead,
 cut to the free room in its lane, and opens it in edge mode: Done saves it,
-Cancel removes it unsaved. It reviews the seeder's proposals one at a time: the queue
+Cancel removes it unsaved. With more than one camera a Camera
+``Segmented`` under ``PhoneVideo`` swaps the camera in the player (``usePip``'s
+``focus``, no inset) and hands the workspace its beep (``setBigBeep``, as
+``StageVideo`` does); the camera plays its own sound. It reviews the seeder's proposals one at a time: the queue
 (``lib/proposalQueue``, proposals by start), a focus strip of the open
 region plus 2 s each side (``lib/focusWindow``,
 ``components/breakdown/mobile/FocusStrip``, 44 px handles that open edge
