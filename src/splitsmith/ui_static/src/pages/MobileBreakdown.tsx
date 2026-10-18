@@ -1,6 +1,8 @@
 /**
  * Breakdown on a phone (spec 2026-10-17, wireframes lumet.dev/mobile-breakdown):
- * review the regions the seeder proposed, one at a time. The open region
+ * pick a shooter and a stage (``StageIndex``), then review the regions the
+ * seeder proposed one at a time, or open any region from the stage's list.
+ * Nothing opens by itself. The open region
  * sits in a focus strip (its time plus 2 s each side); Keep, Delete and
  * Kind act on it, and a handle opens edge mode, where a sideways drag on
  * the video or the pad moves that edge relative to the finger and the
@@ -18,6 +20,7 @@ import { useEffect, useRef, useState } from "react";
 import { Link, Navigate, useLocation, useOutletContext, useParams } from "react-router-dom";
 
 import { EdgePad } from "@/components/breakdown/mobile/EdgePad";
+import { StageIndex } from "@/components/breakdown/mobile/StageIndex";
 import { FocusStrip, type HandleDrag } from "@/components/breakdown/mobile/FocusStrip";
 import { PhoneVideo } from "@/components/breakdown/mobile/PhoneVideo";
 import { LANE_LABEL, LANE_TICK, LANES, sameEvents } from "@/components/coach/laneDrag";
@@ -39,13 +42,13 @@ import { nextOpenId, prevOpenId, proposals, queuePosition } from "@/lib/proposal
 import { useSnapToShots } from "@/lib/timelinePrefs";
 import { deriveStageView, useStageWorkspace } from "@/lib/useStageWorkspace";
 import { cn } from "@/lib/utils";
-import { FirstStageRedirect } from "@/pages/Breakdown";
 
 export function MobileBreakdown() {
   const { slug, stage } = useParams<{ slug?: string; stage?: string }>();
   const href = useMatchHref();
+  const shell = useOutletContext<MatchShellOutletContext | undefined>();
   if (!slug) return <Navigate to={href("breakdown")} replace />;
-  if (stage == null) return <FirstStageRedirect slug={slug} />;
+  if (stage == null) return <StageIndex slug={slug} shooters={shell?.shooters ?? []} />;
   const n = Number(stage);
   if (!Number.isFinite(n)) return <div className="px-4 py-4 text-sm text-muted">Bad stage.</div>;
   return <MobileBreakdownStage key={`${slug}-${n}`} slug={slug} stage={n} />;
@@ -84,13 +87,14 @@ function MobileBreakdownStage({ slug, stage }: { slug: string; stage: number }) 
   const [frozenWindow, setFrozenWindow] = useState<FocusWindow | null>(null);
   const view = deriveStageView(ws, slug, stage);
 
-  // Open the first proposal once the regions are there, and move on
-  // whenever the open one is gone (deleted here, or by another writer).
+  // Nothing opens by itself: the stage starts on its region list. When the
+  // open region is gone (another writer deleted it), move on to the next
+  // proposal, or back to the list when there is none.
   const events = regions.events;
   const open = events.find((e) => e.id === openId) ?? null;
   useEffect(() => {
-    if (open == null && !edit) setOpenId(nextOpenId(events, -Infinity));
-  }, [open, edit, events]);
+    if (openId != null && open == null && !edit) setOpenId(nextOpenId(events, -Infinity));
+  }, [openId, open, edit, events]);
 
   // The picture follows the open region: its start whenever another region
   // opens (the first, Keep / Delete / Done moving on, Prev / Next). Keyed on
@@ -140,6 +144,7 @@ function MobileBreakdownStage({ slug, stage }: { slug: string; stage: number }) 
   const readOnly = view.eventsReadOnly;
   const pos = queuePosition(events, openId);
   const queue = proposals(events);
+  const regionList = [...events].sort((a, b) => a.start - b.start || LANES.indexOf(a.kind) - LANES.indexOf(b.kind));
 
   const play = (from: number, to: number | null) => {
     ws.seekFromBeep(from);
@@ -298,6 +303,8 @@ function MobileBreakdownStage({ slug, stage }: { slug: string; stage: number }) 
       className="mb-0"
       ordinal={pad2(stage)}
       title={coach.stage_name || "Stage"}
+      back={{ label: "All stages", to: prefix }}
+      sub={shell?.shooters.find((s) => s.slug === slug)?.name}
       actions={
         <span className="relative inline-flex items-center gap-1">
           {view.prevStage != null ? (
@@ -385,19 +392,27 @@ function MobileBreakdownStage({ slug, stage }: { slug: string; stage: number }) 
             Done
           </Button>
         </div>
-      ) : pos ? (
+      ) : open ? (
         <div className="flex flex-col gap-1.5">
-          <div className="flex gap-1" aria-hidden>
-            {queue.map((e, i) => (
-              <i
-                key={e.id}
-                className={cn("h-1.5 flex-1 rounded-full", i === pos.index ? "bg-led" : i < pos.index ? "bg-ink" : "bg-rule")}
-              />
-            ))}
+          {pos ? (
+            <div className="flex gap-1" aria-hidden>
+              {queue.map((e, i) => (
+                <i
+                  key={e.id}
+                  className={cn("h-1.5 flex-1 rounded-full", i === pos.index ? "bg-led" : i < pos.index ? "bg-ink" : "bg-rule")}
+                />
+              ))}
+            </div>
+          ) : null}
+          <div className="flex items-center gap-2">
+            <span className="text-sm text-muted">
+              {pos ? `Proposal ${pos.index + 1} of ${pos.total}` : "Confirmed region"}
+            </span>
+            <span className="flex-1" />
+            <Button type="button" variant="ghost" className="min-h-11" onClick={() => setOpenId(null)}>
+              All regions
+            </Button>
           </div>
-          <span className="text-sm text-muted">
-            Proposal {pos.index + 1} of {pos.total}
-          </span>
         </div>
       ) : null}
 
@@ -417,11 +432,47 @@ function MobileBreakdownStage({ slug, stage }: { slug: string; stage: number }) 
       </PhoneVideo>
 
       {open == null ? (
-        <div className="flex flex-col items-start gap-2">
-          <p className="text-md text-muted">No proposals on this stage</p>
-          <Button type="button" className="min-h-11" onClick={() => (ws.isPlaying ? pause() : play(0, null))}>
-            {ws.isPlaying ? "Pause" : "Play stage"}
-          </Button>
+        <div className="flex flex-col gap-3">
+          <div className="flex flex-wrap items-center gap-2">
+            {queue.length > 0 ? (
+              <Button
+                type="button"
+                variant="primary"
+                className="min-h-11"
+                onClick={() => setOpenId(nextOpenId(events, -Infinity))}
+              >
+                Review {queue.length} {queue.length === 1 ? "proposal" : "proposals"}
+              </Button>
+            ) : (
+              <p className="text-md text-muted">No proposals on this stage</p>
+            )}
+            <span className="flex-1" />
+            <Button type="button" className="min-h-11" onClick={() => (ws.isPlaying ? pause() : play(0, null))}>
+              {ws.isPlaying ? "Pause" : "Play stage"}
+            </Button>
+          </div>
+          {regionList.length > 0 ? (
+            <ul aria-label="Regions" className="flex flex-col">
+              {regionList.map((e) => (
+                <li key={e.id}>
+                  <button
+                    type="button"
+                    className="flex min-h-12 w-full items-center gap-2 border-b border-rule py-2 text-left"
+                    onClick={() => setOpenId(e.id)}
+                  >
+                    {kindChip(e)}
+                    {e.source === "auto" ? <Chip tick="muted">Auto</Chip> : null}
+                    <span className="flex-1" />
+                    <span className="numeral text-md text-ink-2">
+                      {e.start.toFixed(2)} to {e.end.toFixed(2)} s
+                    </span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="text-sm text-muted">No regions on this stage yet.</p>
+          )}
         </div>
       ) : (
         <>
