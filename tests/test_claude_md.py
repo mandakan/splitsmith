@@ -61,3 +61,8 @@ def test_a_reference_into_docs_passes(tmp_path: Path) -> None:
     (repo / "docs").mkdir()
     (repo / "docs" / "cameras.md").write_text("")
     assert check.problems(repo) == []
+
+
+def test_non_ascii_text_fails(tmp_path: Path) -> None:
+    repo = _repo(tmp_path, root="# Root\n\nuv \u2014 never pip\n")
+    assert check.problems(repo) == ["CLAUDE.md:3: non-ASCII character"]
