@@ -103,6 +103,7 @@ from .overlay_card import (
 from .overlay_raster import ChromiumRasterizer, Rasterizer, RasterizerUnavailableError
 from .overlay_summary_cell import build_summary_still
 from .overlay_theme import ThemeName, load_theme, theme_for
+from .render_timeline import TimelineEntry, timeline_path, write_timeline
 from .runtime import runtime
 from .segment_cache import SegmentCache
 from .summary_template import match_summary_motion, stage_summary_motion
@@ -151,6 +152,9 @@ class Mp4RenderResult:
     output_path: Path
     duration_seconds: float
     degradations: tuple[str, ...] = ()
+    #: Every item written, where it sits in the video; also written beside
+    #: it as ``<stem>-timeline.json`` (:mod:`splitsmith.render_timeline`).
+    timeline: tuple[TimelineEntry, ...] = ()
 
 
 @with_card_failures(lambda r, notes: replace(r, degradations=(*r.degradations, *notes)))
@@ -859,6 +863,10 @@ def _render_with_work_dir(
         raise _EdgeUnavailableError(f"{item.name} is a clip; it has no edge render")
 
     ordinal = 0
+    #: What was actually written, for the timeline sidecar, and where the
+    #: next segment starts in the stitched video.
+    written: list[TimelineEntry] = []
+    cursor = 0.0
     for i, item in enumerate(items):
         prep = prepared.pop(i) if i in prepared else prepare(item)
         boundary = live.get(i)
@@ -932,11 +940,14 @@ def _render_with_work_dir(
                     sting.close()
         segment = encode_item(item, prep)
         if segment is not None:
+            written.append(_timeline_entry(item, at=cursor))
             segments.append((segment, item.duration_seconds))
+            cursor += item.duration_seconds
             if not isinstance(item, _StageItem):
                 generated = True
         if boundary_segment is not None and boundary is not None:
             segments.append((boundary_segment, boundary.duration_seconds))
+            cursor += boundary.duration_seconds
             generated = True
 
     list_path = work_dir / "concat.txt"
@@ -960,10 +971,34 @@ def _render_with_work_dir(
     _run(cmd, runner=runner)
     if segment_cache is not None:
         segment_cache.evict(keep=used_keys)
+    entries = tuple(written)
+    write_timeline(timeline_path(output_path), entries)
     return Mp4RenderResult(
         output_path=output_path,
         duration_seconds=total_seconds,
         degradations=(*degradations, *timeline.degradations, *killed),
+        timeline=entries,
+    )
+
+
+def _timeline_entry(item: SpineItem, *, at: float) -> TimelineEntry:
+    """``item``'s nominal span when its segment starts ``at`` seconds into
+    the stitched video: a transition took ``head_cut`` off its head, which
+    the boundary before shows, so the item's own clock started that much
+    earlier (on the cut)."""
+    start = at - item.head_cut_seconds
+    end = at + item.duration_seconds + item.tail_cut_seconds
+    stage_index: int | None = None
+    beep: float | None = None
+    if isinstance(item, _StageItem):
+        stage_index = item.index
+        beep = start + item.plan.stage.beep_offset_seconds - item.plan.head_trim_seconds
+    elif isinstance(item, _SummaryItem):
+        stage_index = item.stage_index
+    elif isinstance(item, _StillItem) and item.kind == "slate":
+        stage_index = item.backdrop_stage_index
+    return TimelineEntry(
+        kind=item.kind, name=item.name, stage_index=stage_index, start=start, end=end, beep=beep
     )
 
 
