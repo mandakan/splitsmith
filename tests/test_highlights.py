@@ -179,23 +179,28 @@ def _found(**lists) -> dict:
     return {k: list(lists.get(k, [])) for k in BEAT_ORDER}
 
 
-def test_beats_follow_the_order_and_prefer_unused_stages():
+def test_every_beat_is_the_true_best_of_its_kind_even_on_a_used_stage():
+    # "FASTEST TRANSITION" over stage 2's slower one would be a false label.
     found = _found(
         fastest_draw=[_m("fastest_draw", 1)],
-        fastest_transition=[_m("fastest_transition", 1), _m("fastest_transition", 2)],
-        fastest_split=[_m("fastest_split", 3)],
+        fastest_transition=[_m("fastest_transition", 1, 0.9), _m("fastest_transition", 2, 1.4)],
+        fastest_reload=[_m("fastest_reload", 3)],
+        fastest_split=[_m("fastest_split", 4, 0.2)],  # the cold open
     )
     picks = pick_reel(found, [])
-    assert [(m.kind, m.stage_number) for m in picks.beats] == [
-        ("fastest_draw", 1),
-        ("fastest_transition", 2),
-        ("fastest_split", 3),
+    assert [(m.kind, m.stage_number, m.figure) for m in picks.beats] == [
+        ("fastest_draw", 1, 1.0),
+        ("fastest_transition", 1, 0.9),
+        ("fastest_reload", 3, 1.0),
     ]
 
 
-def test_a_stage_gets_at_most_one_beat():
-    found = _found(fastest_draw=[_m("fastest_draw", 1)], fastest_split=[_m("fastest_split", 1)])
-    assert [m.stage_number for m in pick_reel(found, []).beats] == [1]
+def test_the_cold_open_moment_is_not_played_again_as_a_beat():
+    split = _m("fastest_split", 1, 0.17)
+    found = _found(fastest_draw=[_m("fastest_draw", 1)], fastest_split=[split, _m("fastest_split", 2, 0.3)])
+    picks = pick_reel(found, [])
+    assert picks.cold_open == split
+    assert [m.kind for m in picks.beats] == ["fastest_draw"]
 
 
 def test_cold_open_is_the_fastest_split_else_the_first_beat():

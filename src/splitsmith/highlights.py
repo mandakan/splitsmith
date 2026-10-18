@@ -221,25 +221,16 @@ def pick_reel(
     montage_cuts: int = 8,
     config: HighlightConfig | None = None,
 ) -> ReelPicks:
-    """One beat per kind in ``BEAT_ORDER``, each on a stage no earlier beat
-    used (at most one beat per stage; a kind whose every candidate sits on
-    a used stage is left out), so the reel moves around the match.
-    The cold open is the fastest split; the montage the fastest splits of
-    the match, played in match order."""
+    """One beat per kind in ``BEAT_ORDER``, always the kind's best: a label
+    says "fastest", so a slower one from an unused stage would be false,
+    and two beats may share a stage. The cold open is the fastest split
+    (else the first beat) and is not played again as a beat; the montage
+    is the fastest splits of the match, played in match order."""
     cfg = config or HighlightConfig()
-    beats: list[Moment] = []
-    used: set[int] = set()
-    for kind in BEAT_ORDER:
-        candidates = found.get(kind, [])
-        if not candidates or len(beats) >= max_beats:
-            continue
-        chosen = next((m for m in candidates if m.stage_number not in used), None)
-        if chosen is None:
-            continue
-        beats.append(chosen)
-        used.add(chosen.stage_number)
+    tops = [found[kind][0] for kind in BEAT_ORDER if found.get(kind)]
     splits = found.get("fastest_split", [])
-    cold_open = splits[0] if splits else (beats[0] if beats else None)
+    cold_open = splits[0] if splits else (tops[0] if tops else None)
+    beats = [m for m in tops if m != cold_open][:max_beats]
     shots: list[tuple[float, int, float]] = []
     for s in stages:
         for shot in statistic_split_shots(s.shots):
