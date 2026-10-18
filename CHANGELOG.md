@@ -1,5 +1,39 @@
 # Changelog
 
+## [0.79.0](https://github.com/mandakan/splitsmith/compare/v0.78.0...v0.79.0) (2026-10-18)
+
+
+### Features
+
+* **beep:** find secondary cameras' beeps from the primary's ([#1442](https://github.com/mandakan/splitsmith/issues/1442)) ([#1546](https://github.com/mandakan/splitsmith/issues/1546)) ([0512ea4](https://github.com/mandakan/splitsmith/commit/0512ea4c8f0894a10e94fbb533cbe387975c430d))
+* **breakdown:** add a region anywhere on a phone, over another one too ([#1540](https://github.com/mandakan/splitsmith/issues/1540)) ([90a275a](https://github.com/mandakan/splitsmith/commit/90a275af83e3d94f132446947c6ff5c2b27a4f78))
+* **breakdown:** pick the shooter and stage on a phone; nothing opens by itself ([#1538](https://github.com/mandakan/splitsmith/issues/1538)) ([ede18d5](https://github.com/mandakan/splitsmith/commit/ede18d51a927aa8acad665e4f99d24826fc778fe))
+* **breakdown:** switch camera on the phone ([#1541](https://github.com/mandakan/splitsmith/issues/1541)) ([aea3e27](https://github.com/mandakan/splitsmith/commit/aea3e2720567473eb05ecb6efa65729aa678952a))
+* **coach:** one Draw, the timer's; standard starts; budget from regions ([#1545](https://github.com/mandakan/splitsmith/issues/1545)) ([b7d9bf7](https://github.com/mandakan/splitsmith/commit/b7d9bf7f72884ff9c48b596da02c62085d9a20e1))
+* **highlights:** an automated highlight reel of your match ([#1560](https://github.com/mandakan/splitsmith/issues/1560)) ([50c3e26](https://github.com/mandakan/splitsmith/commit/50c3e268a2b019d9239d9aa7a8c7bcdffee2eb75))
+* **site:** New in splitsmith, a Looks gallery and the videos ([#1549](https://github.com/mandakan/splitsmith/issues/1549)) ([2fd9dc0](https://github.com/mandakan/splitsmith/commit/2fd9dc08c14c0756e4eed2ac974791f316943ca6))
+* **sync:** Breakdown regions sync both ways ([#1543](https://github.com/mandakan/splitsmith/issues/1543)) ([88fa1c3](https://github.com/mandakan/splitsmith/commit/88fa1c3eacb5db821d5c8305622193dd6ed802a6))
+* **whats-new:** link a video from an entry ([#1548](https://github.com/mandakan/splitsmith/issues/1548)) ([f18a7b6](https://github.com/mandakan/splitsmith/commit/f18a7b62e5f8d84c8ce4e65627fc429d657a4568))
+
+
+### Bug Fixes
+
+* **jobs:** a worker that does not know a job kind fails the job instead of stranding it ([#1544](https://github.com/mandakan/splitsmith/issues/1544)) ([b8b167f](https://github.com/mandakan/splitsmith/commit/b8b167f27d1d05689b0498d7513f8ee0d7585349))
+* **overlay:** redraw a template overlay when the data it draws changes ([#1542](https://github.com/mandakan/splitsmith/issues/1542)) ([4df9e2a](https://github.com/mandakan/splitsmith/commit/4df9e2af1fcc35dfd6a482e344beac1ed37238eb))
+
+
+### Documentation
+
+* **claude:** ASCII-only CLAUDE.md, enforced by the guard ([#1555](https://github.com/mandakan/splitsmith/issues/1555)) ([1d2734d](https://github.com/mandakan/splitsmith/commit/1d2734de01ee29b43922ebc9aeb32111a640929d))
+* **claude:** move desktop app section into a path-scoped rule ([#1557](https://github.com/mandakan/splitsmith/issues/1557)) ([d30b487](https://github.com/mandakan/splitsmith/commit/d30b487719ae2b9dac12362e514c7a630a0615cb))
+* **claude:** move detection into rules; guard CLAUDE.md size and rule globs ([#1554](https://github.com/mandakan/splitsmith/issues/1554)) ([be9b357](https://github.com/mandakan/splitsmith/commit/be9b3575c88634bf6d41e1264a5265c08a8ee46a))
+* **claude:** move export presets section into a path-scoped rule ([#1556](https://github.com/mandakan/splitsmith/issues/1556)) ([7fc5f4c](https://github.com/mandakan/splitsmith/commit/7fc5f4cad33724783e593db06ffa59a36ce433bb))
+* **claude:** move hosted, sync and derived media sections into path-scoped rules ([#1553](https://github.com/mandakan/splitsmith/issues/1553)) ([0813f14](https://github.com/mandakan/splitsmith/commit/0813f141bd158c92e66883f564f617af288d2c1a))
+* **claude:** move rendered cards section into path-scoped rules ([#1550](https://github.com/mandakan/splitsmith/issues/1550)) ([26cbaa4](https://github.com/mandakan/splitsmith/commit/26cbaa49b352e09cbf8e46eafb31b60902875c30))
+* **claude:** move share-link section into a path-scoped rule ([#1558](https://github.com/mandakan/splitsmith/issues/1558)) ([e010206](https://github.com/mandakan/splitsmith/commit/e0102069ed898157c4dade3e1b3c3ef22cc01abf))
+* **claude:** move stage events section into path-scoped rules ([#1551](https://github.com/mandakan/splitsmith/issues/1551)) ([6ce8ab2](https://github.com/mandakan/splitsmith/commit/6ce8ab2c02111d2da9e414f62d58dd192f7ce6d9))
+* **claude:** move UI visual budget section into path-scoped rules ([#1552](https://github.com/mandakan/splitsmith/issues/1552)) ([bab8175](https://github.com/mandakan/splitsmith/commit/bab81753aeab4743b6a30b580751b70cfbb2eda5))
+
 ## [0.78.0](https://github.com/mandakan/splitsmith/compare/v0.77.0...v0.78.0) (2026-10-17)
 
 
