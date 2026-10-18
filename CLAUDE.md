@@ -97,8 +97,8 @@ reason it is not obvious, and the test that pins it; leave out dates, issue
 numbers and how it was verified, which belong in the PR. A rule that lives in
 `ui/server.py` cannot be scoped (every task touches it), so it gets a one-line
 mention here. `scripts/check_claude_md.py` (CI: `claude-md.yml`) fails when
-this file passes 40 KB, a rule file is unscoped, a `paths:` glob matches
-nothing, or a named rule file does not exist.
+this file passes 25 KB, a rule file is unscoped, a `paths:` glob matches
+nothing, a named rule file does not exist, or a line is not ASCII.
 
 ## Detection pipeline
 

@@ -26,9 +26,9 @@ REPO = Path(__file__).resolve().parent.parent
 ROOT_DOC = REPO / "CLAUDE.md"
 RULES_DIR = REPO / ".claude" / "rules"
 
-# 34 KB when the split finished (2026-10-18). Raise it only by moving detail
+# 21 KB when the split finished (2026-10-18). Raise it only by moving detail
 # out, not by adding it here.
-MAX_ROOT_BYTES = 40_000
+MAX_ROOT_BYTES = 25_000
 
 _FRONTMATTER = re.compile(r"\A---\n(.*?)\n---\n", re.DOTALL)
 _PATH_ITEM = re.compile(r'^\s+-\s+"([^"]+)"\s*$')
