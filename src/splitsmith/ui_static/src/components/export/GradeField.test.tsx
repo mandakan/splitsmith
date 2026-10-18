@@ -5,6 +5,7 @@ import { GradeField } from "@/components/export/GradeField";
 import { api, type LookInfo } from "@/lib/api";
 import { DEFAULT_EXPORT_SETTINGS } from "@/lib/exportPresets";
 import { BUILTIN_LOOKS } from "@/lib/looks";
+import { resetGradeCatalog } from "@/lib/useGrades";
 
 vi.mock("@/lib/api", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/api")>();
@@ -18,6 +19,7 @@ const freedoom: LookInfo = { ...BUILTIN_LOOKS[0], name: "freedoom", label: "Free
 
 beforeEach(() => {
   vi.clearAllMocks();
+  resetGradeCatalog();
   vi.mocked(api.listGrades).mockResolvedValue({
     presets: [{ id: "preset:noir", label: "Noir", preview: "/api/grades/preview?grade=preset:noir" }],
   });
@@ -65,5 +67,14 @@ describe("GradeField", () => {
     fireEvent.change(input, { target: { files: [new File(["LUT_3D_SIZE 2"], "film.cube")] } });
     await waitFor(() => expect(patch).toHaveBeenCalledWith({ grade: "user:film-0123456789ab.cube" }));
     expect(await screen.findByRole("radio", { name: "film" })).toBeInTheDocument();
+  });
+
+  it("says what is wrong with a refused file in the server's words, not its status", async () => {
+    const { ApiError } = await import("@/lib/api");
+    vi.mocked(api.uploadGrade).mockRejectedValue(new ApiError(422, "a 1D LUT; a grade needs a 3D LUT (LUT_3D_SIZE)"));
+    show();
+    fireEvent.change(screen.getByLabelText("LUT file"), { target: { files: [new File(["x"], "bad.cube")] } });
+    expect(await screen.findByText("a 1D LUT; a grade needs a 3D LUT (LUT_3D_SIZE)")).toBeInTheDocument();
+    expect(screen.queryByText(/422/)).toBeNull();
   });
 });

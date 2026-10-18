@@ -3,14 +3,15 @@
  * the presets, your LUTs), a strength slider while one grades, and on the
  * desktop "Add LUT" for a .cube of your own. The rules are ``lib/grades``.
  */
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Field } from "@/components/ui/Field";
-import { api, type GradeInfo, type LookInfo } from "@/lib/api";
+import { ApiError, api, type LookInfo } from "@/lib/api";
 import type { ExportSettings } from "@/lib/exportPresets";
 import { gradeTiles, grades, selectedTile } from "@/lib/grades";
 import { previewSrc } from "@/lib/looks";
+import { addUserGrade, useGrades } from "@/lib/useGrades";
 import { cn } from "@/lib/utils";
 
 export interface GradeFieldProps {
@@ -23,28 +24,10 @@ export interface GradeFieldProps {
 }
 
 export function GradeField({ settings, patch, looks, busy, hosted }: GradeFieldProps) {
-  const [presets, setPresets] = useState<GradeInfo[]>([]);
-  const [user, setUser] = useState<GradeInfo[]>([]);
+  const { presets, user } = useGrades(hosted);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
   const input = useRef<HTMLInputElement>(null);
-
-  useEffect(() => {
-    let live = true;
-    api
-      .listGrades()
-      .then((r) => live && setPresets(r.presets))
-      .catch(() => undefined);
-    if (!hosted) {
-      api
-        .listUserGrades()
-        .then((r) => live && setUser(r.user))
-        .catch(() => undefined);
-    }
-    return () => {
-      live = false;
-    };
-  }, [hosted]);
 
   const tiles = gradeTiles(looks, settings.look, presets, user);
   const selected = selectedTile(tiles, settings.grade);
@@ -55,10 +38,11 @@ export function GradeField({ settings, patch, looks, busy, hosted }: GradeFieldP
     setUploadError(null);
     try {
       const added = await api.uploadGrade(file);
-      setUser((rows) => (rows.some((r) => r.id === added.id) ? rows : [...rows, added]));
+      addUserGrade(added);
       patch({ grade: added.id });
     } catch (err) {
-      setUploadError(err instanceof Error ? err.message : "That file could not be read as a LUT.");
+      // The server's own words (what is wrong with the file), never the status.
+      setUploadError(err instanceof ApiError ? err.detail : "That file could not be read as a LUT.");
     } finally {
       setUploading(false);
     }

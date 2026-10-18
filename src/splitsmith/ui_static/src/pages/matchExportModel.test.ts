@@ -335,6 +335,20 @@ describe("the Look on the payloads (#1246)", () => {
     expect(xml).not.toHaveProperty("stage_card_variant");
   });
 
+  it("sends a grade the gallery no longer lists as the Look's own, once the gallery has loaded", () => {
+    const base = {
+      stageNumbers: [1], headPad: 1, tailPad: 1, camOptions: S.camOptions, outputFormat: "mp4" as const,
+      transitionKind: "none" as const, transitionSeconds: 1, renderOptions: S.renderOptions, youtube: false,
+      descriptionLead: "", uploadOptions: S.uploadOptions, includeOverlay: false, overlayCodec: S.overlayCodec,
+      projectName: "M", uploadTarget: "desk" as const, youtubeConnected: false,
+    };  // prettier-ignore
+    const gone = { choice: "user:gone-0123456789ab.cube", strength: null };
+    const tiles = [{ id: "none", label: "None", preview: "" }];
+    expect(buildMatchExportPayload({ ...base, grade: gone, gradeTiles: tiles })).not.toHaveProperty("grade");
+    // Before the gallery answers, the choice goes as stored.
+    expect(buildMatchExportPayload({ ...base, grade: gone }).grade).toBe(gone.choice);
+  });
+
   it("the grid carries overlay_theme with the choice and the variants only with a card on", () => {
     const base = { stageNumbers: [1], audioFrom: "a", canvas: CANVAS_CHOICES[0], outputName: "g" };
     const plain = buildCompareGridPayload({ ...base, look });

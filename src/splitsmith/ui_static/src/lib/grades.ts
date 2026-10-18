@@ -62,7 +62,8 @@ export function gradeFields(
   tiles?: readonly GradeTile[],
 ): Pick<MatchExportRequestPayload, "grade" | "grade_strength"> {
   if (!grade || outputFormat !== "mp4") return {};
-  const choice = tiles ? selectedTile(tiles, grade.choice) : grade.choice;
+  // A choice the gallery does not list goes out as the default, never as a 400.
+  const choice = tiles && !tiles.some((t) => t.id === grade.choice) ? DEFAULT_GRADE : grade.choice;
   const out: Pick<MatchExportRequestPayload, "grade" | "grade_strength"> = {};
   if (choice !== DEFAULT_GRADE) out.grade = choice;
   if (grade.strength !== null && choice !== "none") out.grade_strength = Math.min(1, Math.max(0, grade.strength));

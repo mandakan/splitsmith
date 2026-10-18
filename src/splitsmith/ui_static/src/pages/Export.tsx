@@ -17,6 +17,8 @@
  * pre-restructure page.
  */
 
+import { gradeTiles } from "@/lib/grades";
+import { useGrades } from "@/lib/useGrades";
 import { Download, ExternalLink } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Navigate, useOutletContext, useParams, useSearchParams } from "react-router-dom";
@@ -130,6 +132,7 @@ export function Export() {
 function ExportInner({ slug }: { slug: string }) {
   const { mode: deploymentMode } = useDeploymentMode();
   const looksState = useLooks();
+  const gradeCatalog = useGrades(deploymentMode === "hosted");
   const hosted = deploymentMode === "hosted";
   const ctx = useOutletContext<MatchShellOutletContext>();
   const href = useMatchHref();
@@ -407,6 +410,11 @@ function ExportInner({ slug }: { slug: string }) {
   // A hidden switch is on for every request: off where it cannot be seen
   // would still move overlay records and preview keys for nothing.
   const sentBreakdown = breakdownShown ? useBreakdown : true;
+  // The Grade row's tiles, once its lists have answered: a stored choice it
+  // no longer lists (a deleted LUT, another machine's) goes out as the Look's.
+  const shownGradeTiles = gradeCatalog.loaded
+    ? gradeTiles(looksState.looks, settings.look, gradeCatalog.presets, gradeCatalog.user)
+    : undefined;
   const previewSettings = useMemo(
     () => (view.useBreakdown === sentBreakdown ? view : { ...view, useBreakdown: sentBreakdown }),
     [view, sentBreakdown],
@@ -715,6 +723,7 @@ function ExportInner({ slug }: { slug: string }) {
         youtubeConnected: false,
         useBreakdown: sentBreakdown,
         grade: { choice: settings.grade, strength: settings.gradeStrength },
+        gradeTiles: shownGradeTiles,
       }),
     );
   }
@@ -749,6 +758,7 @@ function ExportInner({ slug }: { slug: string }) {
           youtubeConnected: !!youtubeSettings?.connected,
           useBreakdown: sentBreakdown,
           grade: { choice: settings.grade, strength: settings.gradeStrength },
+          gradeTiles: shownGradeTiles,
         }),
       );
       setJob(submitted);

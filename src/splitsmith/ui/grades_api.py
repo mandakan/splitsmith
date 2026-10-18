@@ -75,6 +75,10 @@ def grade_preview(
 ) -> Response:
     """A grade (``look`` is that Look's own) over the swatch scene, as PNG;
     404 for a grade naming nothing real."""
+    # Whole percent: every distinct strength is a cached file, and a slider
+    # never needs finer, so the cache stays bounded.
+    if strength is not None:
+        strength = round(strength * 100) / 100
     try:
         resolved = grade.resolve_grade(
             choice, load_look(look) if choice == "look" else None, strength=strength

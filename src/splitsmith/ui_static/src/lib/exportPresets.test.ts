@@ -200,6 +200,15 @@ describe("isDirty", () => {
     expect(isDirty(applyBody(DEFAULT_EXPORT_SETTINGS, YOUTUBE), YOUTUBE)).toBe(false);
   });
 
+  it("is false for a body stored before grades existed", () => {
+    const legacy: Partial<ExportPresetBody> = { ...YOUTUBE };
+    delete legacy.grade;
+    delete legacy.grade_strength;
+    expect(isDirty(applyBody(DEFAULT_EXPORT_SETTINGS, legacy as ExportPresetBody), legacy as ExportPresetBody)).toBe(
+      false,
+    );
+  });
+
   it("is true after a recurring field changes", () => {
     const s = applyBody(DEFAULT_EXPORT_SETTINGS, YOUTUBE);
     expect(isDirty({ ...s, headPad: 2 }, YOUTUBE)).toBe(true);

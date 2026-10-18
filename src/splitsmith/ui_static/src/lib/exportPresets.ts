@@ -309,6 +309,9 @@ export function bodiesEqual(a: ExportPresetBody, b: ExportPresetBody): boolean {
 /** A field as the equality reads it: the logo spots are a list, and a body
  *  stored before they shipped reads as the default it applies as. */
 function comparable(key: keyof ExportPresetBody, value: unknown): unknown {
+  // A body stored before grades existed means the Look's own, at its strength.
+  if (key === "grade") return value ?? DEFAULT_GRADE;
+  if (key === "grade_strength") return value ?? null;
   if (key !== "logo_spots") return value;
   return normalizeSpots((value as unknown[] | undefined) ?? DEFAULT_LOGO_SPOTS).join(",");
 }

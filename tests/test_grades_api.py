@@ -13,10 +13,16 @@ from splitsmith.grade import Lut
 
 @pytest.fixture
 def client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    from splitsmith import runtime as runtime_module
+
     from .test_ui_server import _match_create_app, _MatchClient
 
     monkeypatch.setenv("SPLITSMITH_HOME", str(tmp_path / "home"))
-    return _MatchClient(_match_create_app(project_root=tmp_path / "match", project_name="Grades"))
+    # The thumbnails' cache, never the real one under ~/Library/Caches.
+    monkeypatch.setenv(runtime_module.ENV_CACHE_DIR, str(tmp_path / "cache"))
+    runtime_module._clear_runtime_cache()
+    yield _MatchClient(_match_create_app(project_root=tmp_path / "match", project_name="Grades"))
+    runtime_module._clear_runtime_cache()
 
 
 def _cube_bytes() -> bytes:
@@ -67,3 +73,11 @@ def test_your_luts_are_desktop_only() -> None:
 
     assert ("GET", "/api/grades/user") in route_scope.LOCAL_ONLY_ROUTES
     assert ("POST", "/api/grades") in route_scope.LOCAL_ONLY_ROUTES
+
+
+def test_thumbnail_strength_is_whole_percent_so_the_cache_stays_bounded(client) -> None:
+    from splitsmith.runtime import runtime
+
+    for strength in (0.5, 0.501, 0.4999):
+        assert client.get(f"/api/grades/preview?grade=preset:noir&strength={strength}").status_code == 200
+    assert len(list((runtime().cache_dir / "grade-previews").glob("*.png"))) == 1
