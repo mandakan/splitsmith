@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.81.0](https://github.com/mandakan/splitsmith/compare/v0.80.0...v0.81.0) (2026-10-18)
+
+
+### Features
+
+* **export:** a Grade row on the Export page, with your own LUTs ([#1568](https://github.com/mandakan/splitsmith/issues/1568)) ([2448130](https://github.com/mandakan/splitsmith/commit/24481300d49d110c0f3c7f11faaacdc5e60cc29d))
+* **highlights:** colour-grade the reel's footage ([#1569](https://github.com/mandakan/splitsmith/issues/1569)) ([b6b914f](https://github.com/mandakan/splitsmith/commit/b6b914f04ccbe73edbb29b9dc040cb3176a4c84e))
+* **looks:** a colour grade for the Broadcast Look ([#1571](https://github.com/mandakan/splitsmith/issues/1571)) ([2728add](https://github.com/mandakan/splitsmith/commit/2728add9faa2a4b1c08141ba7776a7f25deb2c03))
+* **looks:** the Broadcast Look has sound ([#1570](https://github.com/mandakan/splitsmith/issues/1570)) ([97e2bdd](https://github.com/mandakan/splitsmith/commit/97e2bdd8ce8517735b2e04f0bbe1ac8fd2416593))
+* **render:** colour grades from 3D LUTs, with presets and a Look's own ([#1566](https://github.com/mandakan/splitsmith/issues/1566)) ([04388cc](https://github.com/mandakan/splitsmith/commit/04388cc85b1bb464ab0f694aae7c3f6d716325db))
+
 ## [0.80.0](https://github.com/mandakan/splitsmith/compare/v0.79.0...v0.80.0) (2026-10-18)
 
 
