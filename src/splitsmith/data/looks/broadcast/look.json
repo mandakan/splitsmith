@@ -79,6 +79,10 @@
     "mono": "JetBrains Mono",
     "sans": "Geist"
   },
+  "grade": {
+    "lut": "luts/broadcast.cube",
+    "strength": 1.0
+  },
   "label": "Broadcast",
   "name": "broadcast",
   "schema_version": 1,

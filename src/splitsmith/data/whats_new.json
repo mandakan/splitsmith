@@ -1,6 +1,12 @@
 {
   "entries": [
     {
+      "id": "broadcast-grade",
+      "date": "2026-10-18",
+      "title": "A colour grade for the Broadcast Look",
+      "body": "Broadcast now grades your footage with its own crisp sports look, made to hold up under indoor light too. Change it or turn it off with Grade under Look on the Export page."
+    },
+    {
       "id": "broadcast-sound",
       "date": "2026-10-18",
       "title": "The Broadcast Look has sound",

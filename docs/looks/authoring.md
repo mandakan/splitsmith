@@ -50,9 +50,10 @@ edit freezes the cards at the day you made it. `splitsmith looks check`
 warns about such a copy once the shipped template has moved on, and
 `splitsmith looks refresh <name>` removes every unedited copy (an edited
 file is never touched). A copy of your own Look carries every file. Every
-copy carries the source's [sound](#sound): its `sounds` block and the files
-in its `sounds/` folder, even a copy that follows the shipped templates,
-since a sound file is something its cues play, not code that goes stale.
+copy carries the source's [sound](#sound) (its `sounds` block and the files
+in its `sounds/` folder) and its [grade](#colour-grade)'s LUT file, even a
+copy that follows the shipped templates, since these are files the Look
+names, not code that goes stale.
 Pick a Look on the Export page, or
 with `--theme <name>` on `match export` and `--overlay-theme <name>` on
 `compare export`.
@@ -677,6 +678,31 @@ preset:noir --grade-strength 0.5`, `--grade none` for the footage as shot,
 or `--grade user:<name>` for a LUT of your own, kept by `splitsmith looks lut-add
 film.cube` (it checks the file and prints the name). The default is the Look's.
 Timelines (FCPXML, FCP 7 XML) carry no grade; the export says so.
+
+### Broadcast's grade
+
+The shipped Broadcast Look carries its own LUT, `luts/broadcast.cube`:
+
+```json
+"grade": {"lut": "luts/broadcast.cube", "strength": 1.0}
+```
+
+It is a sports-broadcast grade: crisp, with colour lifted where it is muted
+(skin, sky, grass) and left alone where it is already loud (an orange
+barricade, a red shirt), and slightly cool shadows. It is built to hold up
+under indoor light, which a LUT cannot tell from daylight:
+
+- **Contrast on brightness only.** A curve on each colour channel stretches
+  the channels apart, and a warm tungsten or LED cast with them.
+- **No colour lift on near-grey or in deep shadow.** A lit wall indoors is a
+  slightly warm grey, and the shadows are where the noise is.
+- **No warm tint, black and white held.** A tint adds to a cast, and a
+  clipped black point crushes dim footage.
+
+The file is generated, not hand-made: its recipe is `LOOK_LUTS` in
+`scripts/build_luts.py`, from the same plain operations as the presets, and
+a test fails if the two drift apart. A Look of your own can be built the
+same way, or from any `.cube` your grading tool exports.
 
 ## Credits
 
