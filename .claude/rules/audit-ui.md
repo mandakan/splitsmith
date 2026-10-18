@@ -7,6 +7,9 @@ paths:
   - "src/splitsmith/ui_static/src/lib/auditBand*.ts"
   - "src/splitsmith/ui_static/src/lib/beepFilter*.ts"
   - "src/splitsmith/ui_static/src/lib/useBeepQueue*"
+  - "src/splitsmith/ui_static/src/components/StageTimeSection.tsx"
+  - "src/splitsmith/ui_static/src/components/BeepSection.tsx"
+  - "src/splitsmith/ui_static/src/lib/overview*.ts"
   - "src/splitsmith/beep_tone.py"
   - "src/splitsmith/ui/beep_tone_check.py"
   - "scripts/measure_beep_tones.py"
@@ -23,13 +26,18 @@ Multi-camera behaviour is in `pip.md`; the shared timeline band in
   `/beep-review` redirects there on desktop, the phone keeps
   `MobileBeepReview`. Its top row is `BeepPreview` left and the candidate
   radiogroup right, bounded by `lg:h-[max(300px,calc(100dvh-560px))]`.
-- Step 2's top row is the video (`MultiCamColumn`) and `ShotList`; on lg the row
+- Step 2's top row is the video (`MultiCamColumn`, a 16:9 letterboxed tile) and
+  `ShotList`; on lg the row
   is `max(300px,calc(100dvh-502px))`, `max(398px,...)` with two or more cameras
   (two cameras at 1440x900 end the band's Audio row at the sticky footer). Below
   lg the tile is capped at `max-h-[max(240px,calc(100dvh-620px))]`.
 - **The band's header row is Audit's only control row**: `TransportLine` is its
   `toolbar`, `LegendKey` its `actionsStart`, the help `?` its `actionsEnd`, and
-  `TransportMenuItems` its `menuExtra` in the band's one `...` menu. A new
+  `TransportMenuItems` its `menuExtra` in the band's one `...` menu (frame
+  steps, auto-step, full-resolution video, the trim / detect action, the
+  `lib/auditBand` readouts). There is no strip above the band and no transport
+  row in `MultiCamColumn`; the band's ruler and zoom replaced Audit's own (don't
+  re-add `ZoomControls`). A new
   control goes in that header if it fits one row at 1440 wide, else in that
   menu, or on `CurrentShotLine`.
 - On the band the audio track carries `WaveformTrack` and `MarkerLayer`; pins are

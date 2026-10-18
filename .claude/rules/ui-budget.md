@@ -69,7 +69,7 @@ Triage and Jobs have no pages (`/triage`, `/jobs` redirect to Overview).
   action on `CoverageMatrix`'s row menu, shooter management on `ShootersPanel`
   / `AddShooterSheet`.
 - **Coach** (`pages/Coach.tsx`, `components/coach/*`, `lib/timeBudget.ts`): the
-  budget sums each shot's split into its stored interval class; segments equal
+  budget (`timeBudget` / `matchBudget`) sums each shot's split into its stored interval class; segments equal
   the stage time to 1 ms (pinned by fixture). Budget hues are the chip ticks
   (`BUDGET_TICK`); an outlier is an interval over twice its type's match median.
   See `breakdown-ui.md` for what is Coach's and what is Breakdown's.
@@ -78,7 +78,10 @@ Triage and Jobs have no pages (`/triage`, `/jobs` redirect to Overview).
   keeps its grid (no PiP).
 - **Matches** (`pages/Pick.tsx`, `lib/matches.ts`): the Continue card names
   `RecentProjectDetail.next_step`, which both recent-project enrichers in
-  `ui/server.py` derive through `_next_step_from_statuses`. Deleting a match is
+  `ui/server.py` derive through `_next_step_from_statuses` from the same
+  per-stage status walk as `stages_audited`, so the card and the count agree:
+  first ready / in-progress stage, then the first still needing footage or
+  scores, then export. Deleting a match is
   on the row menu (every row, including "Folder not found"); hosted and desktop
   deletes are separate actions, worded by `lib/matchDelete.ts`.
 - **Export** (`pages/Export.tsx`, `components/export/*`, `lib/exportPlan.ts`):
@@ -88,7 +91,8 @@ Triage and Jobs have no pages (`/triage`, `/jobs` redirect to Overview).
   bare stage renders with its chapter and cards, losing only shot-dependent
   extras (the "No splits" chip, the rail's "Splits" line, `bareHint`); its
   summary hold is the scoring-only card. The compare grid is the page's third
-  mode (`pages/matchExportModel.ts` owns the payload). Presets and the Look
+  mode (`pages/matchExportModel.ts` owns the payload and the partial-result
+  summary). Presets and the Look
   gallery: root CLAUDE.md "Export presets".
 - **Account** (`pages/Account.tsx`, `components/account/*`): `Field` rows.
 

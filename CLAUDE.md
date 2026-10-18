@@ -905,6 +905,14 @@ Rules in `.claude/rules/`, loaded with the files they cover:
   spectrum filter and the tone offset.
 - `breakdown-ui.md` -- Breakdown and Coach, the timeline band.
 
+Three UI rules reach `ui/server.py`, which is too broad to scope:
+`_after_beep_reviewed` is the one place a beep confirm chains trim and
+detection; both recent-project enrichers derive `next_step` through
+`_next_step_from_statuses`, the same walk as `stages_audited`; and a beep's
+`beep_tone_offset_ms` is stored with the beep time it was measured for
+(`beep_tone_for`) on confirm, on the manual override and by the video
+`derive_audio` job.
+
 **Verifying a screen locally without real footage:**
 ``uv run python scripts/seed_demo_match.py ~/.claude-tmp/demo-match`` (two
 shooters and the match stage table, so Compare renders too)
