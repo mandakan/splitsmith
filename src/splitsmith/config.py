@@ -635,11 +635,48 @@ class WebTrimConfig(BaseModel):
     video_codec: str = "libx264"
 
 
+#: Every moment the highlight reel can show (``highlights``: finders, groups
+#: and the order they play in).
+MomentKind = Literal[
+    "fastest_draw",
+    "fastest_split",
+    "longest_streak",
+    "fastest_reload",
+    "best_stage",
+    "longest_burst",
+    "fastest_string",
+    "most_reloads",
+    "moving_reload",
+    "most_moving_shots",
+    "fastest_stage",
+    "top_hit_factor",
+    "fastest_transition",
+    "thinker",
+    "slowest_draw",
+    "slowest_reload",
+    "longest_stage",
+    "most_shots",
+]
+DEFAULT_MOMENTS: tuple[MomentKind, ...] = (
+    "fastest_draw",
+    "fastest_split",
+    "longest_streak",
+    "fastest_reload",
+    "best_stage",
+)
+
+
 class HighlightConfig(BaseModel):
     """Tunables of the highlight reel's moment finders (spec
     2026-10-18-highlight-reel-design). Floors are sanity, not taste: a
-    split under ``min_split_s`` is an echo detected twice, not a split."""
+    split under ``min_split_s`` is an echo detected twice, not a split.
+    ``moments`` is the menu's choice, played in ``highlights.BEAT_ORDER``."""
 
+    moments: list[MomentKind] = list(DEFAULT_MOMENTS)
+    max_beats: int = 8
+    burst_window_s: float = 1.0
+    string_shots: int = 6
+    min_pause_s: float = 1.0
     min_split_s: float = 0.10
     min_draw_s: float = 0.40
     min_reload_s: float = 0.50
@@ -752,6 +789,7 @@ class Config(BaseModel):
     beep_windows: BeepWindowConfig = Field(default_factory=BeepWindowConfig)
     beep_tone: BeepToneConfig = Field(default_factory=BeepToneConfig)
     web_trim: WebTrimConfig = Field(default_factory=WebTrimConfig)
+    highlights: HighlightConfig = Field(default_factory=HighlightConfig)
     footage_sort: FootageSortConfig = Field(default_factory=FootageSortConfig)
     access: AccessConfig = Field(default_factory=AccessConfig)
 

@@ -27,12 +27,26 @@ REPLAY_LEAD_S = 1.0
 REPLAY_TAIL_S = 0.3
 MONTAGE_LEAD_S = 0.35
 MONTAGE_TAIL_S = 0.05
-BEEP_CARD_S = 0.8
-SLAM_S = 0.7
-CALLOUT_S = 1.2
-INTRO_S = 4.6
-TITLE_S = 2.2
-END_S = 2.5
+
+
+@dataclass(frozen=True)
+class CutTiming:
+    """How long each card holds, and whether beats replay from another angle."""
+
+    intro: float
+    title: float
+    beep: float
+    slam: float
+    callout: float
+    end: float
+    replays: bool
+
+
+#: The full trailer, and the Shorts / Reels cut (about half as long: a quick
+#: intro, tighter cards, no replays; ``make_reel`` also picks fewer beats).
+NORMAL_CUT = CutTiming(intro=4.6, title=2.2, beep=0.8, slam=0.7, callout=1.2, end=2.5, replays=True)
+SHORT_CUT = CutTiming(intro=2.4, title=1.6, beep=0.6, slam=0.5, callout=0.9, end=1.8, replays=False)
+INTRO_S = NORMAL_CUT.intro
 
 MOMENT_LABELS: dict[MomentKind, str] = {
     "fastest_draw": "FASTEST DRAW",
@@ -41,6 +55,26 @@ MOMENT_LABELS: dict[MomentKind, str] = {
     "fastest_reload": "FASTEST RELOAD",
     "fastest_transition": "FASTEST TRANSITION",
     "best_stage": "BEST STAGE",
+    "longest_burst": "BURST",
+    "fastest_string": "FASTEST STRING",
+    "most_reloads": "MAG CHANGES",
+    "moving_reload": "RELOAD ON THE MOVE",
+    "most_moving_shots": "SHOTS ON THE MOVE",
+    "fastest_stage": "FASTEST STAGE",
+    "top_hit_factor": "TOP HIT FACTOR",
+    "thinker": "THE THINKER",
+    "slowest_draw": "COFFEE BREAK",
+    "slowest_reload": "MAG FUMBLE",
+    "longest_stage": "MARATHON",
+    "most_shots": "AMMO DUMP",
+}
+#: A count moment's unit; every other figure is seconds.
+_COUNT_UNITS: dict[MomentKind, str] = {
+    "longest_streak": "SHOTS",
+    "longest_burst": "SHOTS",
+    "most_moving_shots": "SHOTS",
+    "most_reloads": "MAGS",
+    "most_shots": "ROUNDS",
 }
 
 
@@ -105,10 +139,14 @@ ReelItem = ReelClip | ReelCard
 
 def figure_text(moment: Moment) -> tuple[str, str]:
     """The callout's figure and unit."""
-    if moment.kind == "longest_streak":
-        return f"{int(moment.figure)}", "SHOTS"
+    if moment.kind in _COUNT_UNITS:
+        return f"{int(moment.figure)}", _COUNT_UNITS[moment.kind]
     if moment.kind == "best_stage":
         return f"{moment.figure:.1f}", "%"
+    if moment.kind == "top_hit_factor":
+        return f"{moment.figure:.2f}", "HF"
+    if moment.kind == "moving_reload":
+        return f"{moment.figure:.2f}", "SEC EXPOSED"
     return f"{moment.figure:.2f}", "SEC"
 
 
@@ -128,10 +166,14 @@ def plan_reel(
     title: str,
     shooter: str,
     end_lines: Sequence[str],
+    short: bool = False,
 ) -> tuple[ReelItem, ...]:
-    """Cold open (the beep on black, the top moment slowed, its callout),
-    the title, one slam, clip and callout per beat with a slowed replay from
-    the stage's other camera when it has one, the montage, the end card."""
+    """The intro and the title, the cold open (the beep on black, the top
+    moment slowed, its callout), one slam, clip and callout per beat with a
+    slowed replay from the stage's other camera when it has one, the
+    montage, the end card. ``short`` is the Shorts / Reels cut
+    (``SHORT_CUT``)."""
+    cut = SHORT_CUT if short else NORMAL_CUT
     items: list[ReelItem] = []
     count = 0
 
@@ -145,11 +187,11 @@ def plan_reel(
         return ReelCard(
             name("callout"),
             "callout",
-            CALLOUT_S,
+            cut.callout,
             MOMENT_LABELS[moment.kind],
             figure=figure,
             unit=unit,
-            lines=(stage.stage_name,),
+            lines=(stage.stage_name, moment.label) if moment.label else (stage.stage_name,),
             backdrop=FrameRef(stage.primary.path, stage.primary.beep_offset + moment.focus),
             sfx=("whoosh",),
         )
@@ -157,15 +199,15 @@ def plan_reel(
     # The opening builds before anything happens: a drone under the match
     # name revealed on black, a riser into the braam on the shooter's name,
     # its tail fading so the timer's beep lands in quiet.
-    items.append(ReelCard(name("intro"), "intro", INTRO_S, title, lines=("HIGHLIGHTS",), sfx=("drone",)))
-    items.append(ReelCard(name("title"), "title", TITLE_S, shooter, sfx=("riser", "braam")))
+    items.append(ReelCard(name("intro"), "intro", cut.intro, title, lines=("HIGHLIGHTS",), sfx=("drone",)))
+    items.append(ReelCard(name("title"), "title", cut.title, shooter, sfx=("riser", "braam")))
 
     cold = picks.cold_open
     cold_stage = footage.get(cold.stage_number) if cold is not None else None
     if cold is not None and cold_stage is not None:
         window = _window(cold_stage.primary, cold.focus - COLD_OPEN_LEAD_S, cold.focus)
         if window is not None:
-            items.append(ReelCard(name("beep"), "slam", BEEP_CARD_S, "", sfx=("beep",)))
+            items.append(ReelCard(name("beep"), "slam", cut.beep, "", sfx=("beep",)))
             items.append(
                 ReelClip(name("cold"), cold_stage.primary.path, *window, speed=SLOW, sfx=("slowmo",))
             )
@@ -178,10 +220,10 @@ def plan_reel(
         window = _window(stage.primary, moment.start, moment.end)
         if window is None:
             continue
-        items.append(ReelCard(name("slam"), "slam", SLAM_S, MOMENT_LABELS[moment.kind], sfx=("impact",)))
+        items.append(ReelCard(name("slam"), "slam", cut.slam, MOMENT_LABELS[moment.kind], sfx=("impact",)))
         items.append(ReelClip(name("beat"), stage.primary.path, *window))
         items.append(callout(moment, stage))
-        if stage.secondary is not None:
+        if cut.replays and stage.secondary is not None:
             replay = _window(stage.secondary, moment.focus - REPLAY_LEAD_S, moment.focus + REPLAY_TAIL_S)
             if replay is not None:
                 items.append(
@@ -197,5 +239,5 @@ def plan_reel(
             items.append(ReelClip(name("cut"), stage.primary.path, *window))
 
     # The sting builds for 6.2 s under the montage and hits on the end card.
-    items.append(ReelCard(name("end"), "end", END_S, title, lines=tuple(end_lines), sfx=("sting",)))
+    items.append(ReelCard(name("end"), "end", cut.end, title, lines=tuple(end_lines), sfx=("sting",)))
     return tuple(items)

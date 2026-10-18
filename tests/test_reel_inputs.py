@@ -117,6 +117,35 @@ def test_force_renders_the_ready_stages_upright_or_landscape(tmp_path, monkeypat
     assert items_up[-1].kind == "end" and items_up[-1].lines
 
 
+def test_the_chosen_moments_and_the_shorts_cut_reach_the_plan(tmp_path, monkeypatch):
+    from splitsmith import reel_inputs
+
+    project, root = _project(tmp_path)
+    monkeypatch.setattr(MatchProject, "stage_statuses", lambda self, root, **kw: {1: "audited", 2: "audited"})
+    seen: dict = {}
+
+    def plan(picks, footage, **kw):
+        seen["picks"], seen["short"] = picks, kw.get("short")
+        return ()
+
+    monkeypatch.setattr(reel_inputs, "plan_reel", plan)
+    monkeypatch.setattr(reel_inputs, "render_reel", _render_spy([]))
+    reel_inputs.make_reel(
+        project,
+        root,
+        label="Anna",
+        output=tmp_path / "r.mp4",
+        force=True,
+        moments=("fastest_draw", "most_shots"),
+        short=True,
+        probe=lambda p: META,
+    )
+    kinds = {m.kind for m in seen["picks"].beats} | {seen["picks"].cold_open.kind}
+    assert kinds <= {"fastest_draw", "most_shots"}
+    assert seen["short"] is True
+    assert len(seen["picks"].montage) <= 4
+
+
 def test_a_done_stage_whose_trim_is_missing_blocks(tmp_path, monkeypatch):
     project, root = _project(tmp_path)
     a = project.stage(1).primary().video_id

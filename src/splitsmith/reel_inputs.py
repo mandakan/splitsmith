@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import Any
 
 from .coach import statistic_splits
-from .config import HighlightConfig, VideoMetadata
+from .config import HighlightConfig, MomentKind, VideoMetadata
 from .export_naming import stage_display_name
 from .fcpxml_gen import probe_video
 from .highlights import (
@@ -41,6 +41,10 @@ from .ui.audio import resolve_trim_for_read, trim_params_path, trim_pre_buffer_s
 logger = logging.getLogger(__name__)
 
 Probe = Callable[[Path], VideoMetadata]
+
+#: The Shorts / Reels cut picks fewer beats and cuts a shorter montage.
+SHORT_BEATS = 3
+SHORT_MONTAGE_CUTS = 4
 
 
 @dataclass(frozen=True)
@@ -199,20 +203,38 @@ def make_reel(
     output: Path,
     upright: bool = True,
     force: bool = False,
+    moments: Sequence[MomentKind] | None = None,
+    short: bool = False,
+    config: HighlightConfig | None = None,
     probe: Probe = probe_video,
     segment_cache: SegmentCache | None = None,
     ffmpeg_binary: str = "ffmpeg",
 ) -> ReelOutcome:
     """Find, pick, plan and render the shooter's reel. Locked (a stage not
     yet audited or broken down) renders nothing and names the blockers,
-    unless ``force``, which renders from the ready stages alone."""
+    unless ``force``, which renders from the ready stages alone.
+    ``moments`` is the menu's choice (else the config's); ``short`` the
+    Shorts / Reels cut, with fewer beats and a shorter montage."""
+    cfg = config or HighlightConfig()
     inputs = load_reel_inputs(project, root, label=label, probe=probe)
     blockers = tuple(r for r in inputs.readiness if r.state != "ready" and r.state not in OUT_OF_PLAY)
     if not inputs.stages or (not reel_unlocked(inputs.readiness) and not force):
         return ReelOutcome(blockers, None)
-    picks = pick_reel(find_moments(inputs.stages, HighlightConfig()), inputs.stages)
+    picks = pick_reel(
+        find_moments(inputs.stages, cfg),
+        inputs.stages,
+        kinds=moments,
+        max_beats=SHORT_BEATS if short else None,
+        montage_cuts=SHORT_MONTAGE_CUTS if short else 8,
+        config=cfg,
+    )
     items = plan_reel(
-        picks, inputs.footage, title=project.name, shooter=label, end_lines=end_lines(inputs.stages)
+        picks,
+        inputs.footage,
+        title=project.name,
+        shooter=label,
+        end_lines=end_lines(inputs.stages),
+        short=short,
     )
     with tempfile.TemporaryDirectory(prefix="splitsmith-reel-") as tmp:
         result = render_reel(

@@ -8,6 +8,7 @@ from splitsmith.config import VideoMetadata
 from splitsmith.reel_plan import FrameRef, ReelCard, ReelClip
 from splitsmith.reel_render import (
     SFX_STEMS,
+    SfxCue,
     card_command,
     clip_command,
     frame_command,
@@ -96,11 +97,19 @@ def test_cues_sit_at_each_items_start_on_the_stitched_timeline():
         ReelClip("004_beat", Path("/m/a.mp4"), 0.0, 1.2),
     )
     # The beep is drawn in its card; every other kind is a stem cue.
-    assert sfx_cues(items) == (("slowmo", 0.6), ("riser", 2.6), ("braam", 2.6))
+    assert [(c.kind, c.at) for c in sfx_cues(items)] == [("slowmo", 0.6), ("riser", 2.6), ("braam", 2.6)]
+
+
+def test_a_bed_lasts_exactly_as_long_as_its_card():
+    for seconds in (4.6, 2.4):
+        (cue,) = sfx_cues((ReelCard("001_intro", "intro", seconds, "T", sfx=("drone",)),))
+        assert (cue.kind, cue.at, cue.length) == ("drone", 0.0, seconds)
+    argv = sfx_mix_command(Path("/w/s.mp4"), (SfxCue("drone", 0.0, 2.4),), output_path=Path("/w/r.mp4"))
+    assert "[1:a]atrim=end=2.4,afade=t=out:st=2:d=0.4,adelay=0|0" in argv[argv.index("-filter_complex") + 1]
 
 
 def test_mix_places_each_stems_hit_on_its_cue():
-    cues = (("braam", 2.6), ("riser", 2.6), ("impact", 0.5))
+    cues = (SfxCue("braam", 2.6), SfxCue("riser", 2.6), SfxCue("impact", 0.5))
     argv = sfx_mix_command(Path("/w/stitched.mp4"), cues, output_path=Path("/w/reel.mp4"))
     graph = argv[argv.index("-filter_complex") + 1]
     # braam hits 1.2 s in: starts 1.4 s into the reel, its tail cut 2 s after
@@ -317,7 +326,7 @@ def test_clips_at_different_rates_stitch(tmp_path):
 
     # The shipped stems decode and mix over it without changing its length.
     mixed = tmp_path / "mixed.mp4"
-    cues = (("slowmo", 1.3), ("braam", 0.2), ("sting", 3.0), ("impact", 0.0))
+    cues = (SfxCue("slowmo", 1.3), SfxCue("braam", 0.2), SfxCue("sting", 3.0), SfxCue("impact", 0.0))
     proc = subprocess.run(sfx_mix_command(final, cues, output_path=mixed), capture_output=True, text=True)
     assert proc.returncode == 0, proc.stderr[-2000:]
     assert _probe_seconds(mixed) == pytest.approx(_probe_seconds(final), abs=0.05)

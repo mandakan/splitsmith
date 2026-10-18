@@ -105,7 +105,44 @@ def test_secondary_angle_replays_in_slow_motion():
     assert replay[0].start == pytest.approx(4.0 + 3.0 - 1.0)
 
 
+def test_the_shorts_cut_is_tighter_and_never_replays():
+    m = _split()
+    picks = ReelPicks(cold_open=m, beats=(m,), montage=((1, 3.0),))
+    normal = plan_reel(picks, _footage(secondary=True), title="T", shooter="A", end_lines=())
+    short = plan_reel(picks, _footage(secondary=True), title="T", shooter="A", end_lines=(), short=True)
+
+    def total(items):
+        return sum(i.out_seconds if isinstance(i, ReelClip) else i.seconds for i in items)
+
+    assert short[0].kind == "intro" and short[0].seconds == pytest.approx(2.4)
+    assert not any(isinstance(i, ReelClip) and i.source == S1 for i in short)
+    assert any(isinstance(i, ReelClip) and i.source == S1 for i in normal)
+    assert short[-1].kind == "end"
+    assert total(short) < total(normal) - 4
+
+
 def test_figure_text():
     assert figure_text(Moment("longest_streak", 1, 0, 1, 1, 7)) == ("7", "SHOTS")
     assert figure_text(Moment("best_stage", 1, 0, 1, 1, 97.46)) == ("97.5", "%")
     assert figure_text(Moment("fastest_draw", 1, 0, 1, 1, 0.94)) == ("0.94", "SEC")
+    assert figure_text(Moment("longest_burst", 1, 0, 1, 1, 5)) == ("5", "SHOTS")
+    assert figure_text(Moment("most_reloads", 1, 0, 1, 1, 4)) == ("4", "MAGS")
+    assert figure_text(Moment("most_shots", 1, 0, 1, 1, 32)) == ("32", "ROUNDS")
+    assert figure_text(Moment("top_hit_factor", 1, 0, 1, 1, 7.123)) == ("7.12", "HF")
+    assert figure_text(Moment("moving_reload", 1, 0, 1, 1, 0.21)) == ("0.21", "SEC EXPOSED")
+
+
+def test_every_kind_has_a_card_label():
+    from splitsmith.highlights import MOMENT_KINDS
+    from splitsmith.reel_plan import MOMENT_LABELS
+
+    assert set(MOMENT_LABELS) == set(MOMENT_KINDS)
+    assert MOMENT_LABELS["thinker"] == "THE THINKER"
+
+
+def test_a_moments_qualifier_prints_under_its_stage():
+    burst = Moment("longest_burst", 1, 2.4, 3.6, 3.0, 5, label="IN 1 S")
+    callout = next(
+        i for i in _plan(ReelPicks(None, (burst,), ())) if isinstance(i, ReelCard) and i.kind == "callout"
+    )
+    assert callout.lines == ("Stage 1", "IN 1 S")

@@ -36,7 +36,7 @@ from .mp4_render import (
 from .overlay_card import card_backdrop, compose_card, first_frame_image
 from .overlay_raster import ChromiumRasterizer, Rasterizer, RasterizerUnavailableError
 from .reel_cards import reel_card_motion
-from .reel_plan import INTRO_S, FrameRef, ReelCard, ReelClip, ReelItem, SfxKind
+from .reel_plan import FrameRef, ReelCard, ReelClip, ReelItem, SfxKind
 from .segment_cache import SegmentCache
 
 logger = logging.getLogger(__name__)
@@ -93,7 +93,7 @@ _SFX_DIR = Path(str(resources.files("splitsmith") / "data" / "sfx"))
 SFX_STEMS: dict[SfxKind, tuple[Path, float, float | None]] = {
     # kind: (file, hit, tail): ``tail`` caps how long it rings after its hit,
     # fading out over ``SFX_FADE_S``; ``None`` plays it whole.
-    "drone": (_SFX_DIR / "drone.m4a", 0.0, INTRO_S),
+    "drone": (_SFX_DIR / "drone.m4a", 0.0, None),  # a bed: its card's length (``BED_KINDS``)
     "impact": (_SFX_DIR / "impact.m4a", 1.2, None),
     "braam": (_SFX_DIR / "braam.m4a", 1.2, 2.0),
     "whoosh": (_SFX_DIR / "whoosh.m4a", 1.0, None),
@@ -179,20 +179,40 @@ def card_command(
     return tuple(args)
 
 
-def sfx_cues(items: Sequence[ReelItem]) -> tuple[tuple[SfxKind, float], ...]:
-    """Every stem cue as (kind, seconds into the stitched reel): each item's
-    stems at the item's start. The beep is not a stem; its card draws it."""
-    cues: list[tuple[SfxKind, float]] = []
+@dataclass(frozen=True)
+class SfxCue:
+    """A stem on the stitched reel: its hit at ``at`` seconds. ``length``
+    caps how long it plays after the hit (a bed's is its card's length);
+    ``None`` takes the stem's own cap from ``SFX_STEMS``."""
+
+    kind: SfxKind
+    at: float
+    length: float | None = None
+
+
+#: Stems that stop with their card: the drone bed under the intro, and the
+#: braam under the title (it fades by the card's end, so the timer's beep
+#: after it lands in quiet whichever cut holds the title longer).
+BED_KINDS: frozenset[SfxKind] = frozenset({"drone", "braam"})
+
+
+def sfx_cues(items: Sequence[ReelItem]) -> tuple[SfxCue, ...]:
+    """Every stem cue: each item's stems at the item's start. The beep is not
+    a stem; its card draws it."""
+    cues: list[SfxCue] = []
     at = 0.0
     for item in items:
-        cues.extend((kind, round(at, 6)) for kind in item.sfx if kind in SFX_STEMS)
-        at += item.out_seconds if isinstance(item, ReelClip) else item.seconds
+        seconds = item.out_seconds if isinstance(item, ReelClip) else item.seconds
+        for kind in item.sfx:
+            if kind in SFX_STEMS:
+                cues.append(SfxCue(kind, round(at, 6), seconds if kind in BED_KINDS else None))
+        at += seconds
     return tuple(cues)
 
 
 def sfx_mix_command(
     stitched: Path,
-    cues: Sequence[tuple[SfxKind, float]],
+    cues: Sequence[SfxCue],
     *,
     output_path: Path,
     ffmpeg_binary: str = "ffmpeg",
@@ -204,8 +224,10 @@ def sfx_mix_command(
     args: list[str] = [ffmpeg_binary, "-hide_banner", "-y", "-i", str(stitched)]
     parts: list[str] = []
     labels = ["[0:a]"]
-    for index, (kind, at) in enumerate(cues, start=1):
-        path, hit, tail = SFX_STEMS[kind]
+    for index, cue in enumerate(cues, start=1):
+        at = cue.at
+        path, hit, stem_tail = SFX_STEMS[cue.kind]
+        tail = cue.length if cue.length is not None else stem_tail
         args += ["-i", str(path)]
         filters: list[str] = []
         if tail is not None:

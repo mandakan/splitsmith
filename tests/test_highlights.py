@@ -3,6 +3,9 @@ import pytest
 from splitsmith.config import HighlightConfig, StageEvent
 from splitsmith.highlights import (
     BEAT_ORDER,
+    DEFAULT_MOMENTS,
+    MOMENT_GROUPS,
+    MOMENT_KINDS,
     Moment,
     StageReadiness,
     find_moments,
@@ -80,19 +83,35 @@ def test_events_that_are_not_a_list_count_as_none():
     assert stage_readiness(1, StageStatus.audited, doc, has_footage=True).state == "ready"
 
 
-def _stage(n: int, times: list[float], *, events=(), pct=None, standard=True, classes=None) -> TileStageData:
+def _stage(
+    n: int,
+    times: list[float],
+    *,
+    events=(),
+    pct=None,
+    hf=None,
+    stage_time=None,
+    standard=True,
+    classes=None,
+) -> TileStageData:
+    from splitsmith.events import reload_figures, shot_is_moving
+
     shots = []
     prev = 0.0
     for i, t in enumerate(times):
         cls = classes[i] if classes else ("first_shot" if i == 0 else "split")
-        shots.append(TileShot(time_from_beep=t, split=round(t - prev, 3), interval_class=cls))
+        moving = shot_is_moving(t, list(events))
+        shots.append(TileShot(time_from_beep=t, split=round(t - prev, 3), interval_class=cls, moving=moving))
         prev = t
+    card = StageScorecard(stage_pct=pct, hit_factor=hf) if pct is not None or hf is not None else None
     return TileStageData(
         label="A",
         stage_number=n,
         shots=tuple(shots),
+        stage_time_seconds=stage_time,
         events=tuple(events),
-        scorecard=StageScorecard(stage_pct=pct) if pct is not None else None,
+        reloads=tuple(reload_figures(list(events))),
+        scorecard=card,
         standard_start=standard,
     )
 
@@ -187,7 +206,9 @@ def test_every_beat_is_the_true_best_of_its_kind_even_on_a_used_stage():
         fastest_reload=[_m("fastest_reload", 3)],
         fastest_split=[_m("fastest_split", 4, 0.2)],  # the cold open
     )
-    picks = pick_reel(found, [])
+    picks = pick_reel(
+        found, [], kinds=("fastest_draw", "fastest_transition", "fastest_reload", "fastest_split")
+    )
     assert [(m.kind, m.stage_number, m.figure) for m in picks.beats] == [
         ("fastest_draw", 1, 1.0),
         ("fastest_transition", 1, 0.9),
@@ -224,11 +245,111 @@ def test_montage_is_the_fastest_splits_in_match_order():
 
 
 def test_every_kind_is_present_even_when_empty():
-    assert set(find_moments([], CFG)) == {
+    assert set(find_moments([], CFG)) == set(MOMENT_KINDS)
+    assert len(MOMENT_KINDS) == 18
+
+
+def test_the_menu_defaults_to_five_and_every_kind_has_a_group():
+    assert DEFAULT_MOMENTS == (
         "fastest_draw",
         "fastest_split",
         "longest_streak",
         "fastest_reload",
-        "fastest_transition",
         "best_stage",
-    }
+    )
+    assert tuple(CFG.moments) == DEFAULT_MOMENTS
+    assert set(MOMENT_GROUPS) == set(MOMENT_KINDS)
+    assert {
+        MOMENT_GROUPS[k] for k in ("thinker", "slowest_draw", "slowest_reload", "longest_stage", "most_shots")
+    } == {"lolz"}
+    assert MOMENT_GROUPS["fastest_transition"] == "stat"
+    assert set(BEAT_ORDER) == set(MOMENT_KINDS)
+
+
+def test_only_chosen_kinds_become_beats():
+    found = find_moments([_stage(1, [1.0, 1.2, 1.4, 1.6, 1.8], stage_time=9.0)], CFG)
+    picks = pick_reel(found, [], kinds=("fastest_split", "fastest_draw", "longest_stage"))
+    assert picks.cold_open.kind == "fastest_split"
+    assert [m.kind for m in picks.beats] == ["fastest_draw", "longest_stage"]
+    # No split chosen: the cold open is the first beat, not repeated.
+    picks = pick_reel(found, [], kinds=("longest_stage",))
+    assert picks.cold_open.kind == "longest_stage" and picks.beats == ()
+
+
+def test_slowest_draw_is_the_largest_standard_draw():
+    found = find_moments([_stage(1, [1.2]), _stage(2, [2.9]), _stage(3, [4.0], standard=False)], CFG)
+    assert [(m.stage_number, m.figure) for m in found["slowest_draw"]] == [(2, 2.9), (1, 1.2)]
+
+
+def test_longest_burst_counts_shots_inside_the_window():
+    stage = _stage(1, [1.0, 1.2, 1.4, 1.6, 2.1, 3.0, 3.2])
+    best = find_moments([stage], CFG)["longest_burst"][0]
+    assert best.figure == 4  # 1.0, 1.2, 1.4, 1.6 lie within 1.0 s; 2.1 does not
+    assert (best.focus, best.label) == (1.6, "IN 1 S")
+    assert find_moments([stage], HighlightConfig(burst_window_s=1.0))["longest_burst"][0].figure == 4
+    assert find_moments([stage], HighlightConfig(burst_window_s=0.9))["longest_burst"][0].figure == 4
+    assert find_moments([stage], HighlightConfig(burst_window_s=0.5))["longest_burst"][0].figure == 3
+
+
+def test_fastest_string_is_n_shots_in_a_row_without_a_reload_or_movement():
+    # Five quick shots after the reload: a six-shot string there must cross it.
+    times = [1.0, 1.2, 1.4, 1.6, 1.8, 2.0, 2.2, 4.0, 4.1, 4.2, 4.3, 4.4]
+    classes = ["first_shot"] + ["split"] * 6 + ["reload"] + ["split"] * 4
+    found = find_moments([_stage(1, times, classes=classes)], HighlightConfig(string_shots=6))
+    best = found["fastest_string"][0]
+    # 2.0 .. 4.3 or 1.8 .. 4.2 would cross the reload; 1.0 .. 2.0 is the best legal one.
+    assert best.figure == pytest.approx(1.0) and best.label == "6 SHOTS"
+    assert (best.start, best.focus) == (pytest.approx(1.0 - 0.4), 2.0)
+
+
+def test_mag_changes_count_confirmed_reloads_per_stage():
+    reloads = [_ev(1, "reload", 2.0, 3.5), _ev(2, "reload", 5.0, 6.2), _ev(3, "reload", 8.0, 9.9)]
+    found = find_moments([_stage(1, [1.0, 4.0, 7.0, 10.0], events=reloads), _stage(2, [1.0])], CFG)
+    best = found["most_reloads"][0]
+    assert (best.stage_number, best.figure) == (1, 3)
+    assert best.focus == 6.2  # shown on the stage's fastest reload
+
+
+def test_reload_on_the_move_is_the_least_exposed_moving_reload():
+    events = [
+        _ev(1, "movement", 2.0, 4.0),
+        _ev(2, "reload", 2.5, 3.6),  # fully inside the movement: 0 exposed
+        _ev(3, "reload", 6.0, 7.0),  # standing: never a candidate
+    ]
+    found = find_moments([_stage(1, [1.0, 5.0, 8.0], events=events)], CFG)
+    assert [(m.figure, m.focus) for m in found["moving_reload"]] == [(0.0, 3.6)]
+
+
+def test_most_shots_on_the_move():
+    events = [_ev(1, "movement", 2.0, 4.0)]
+    found = find_moments([_stage(1, [1.0, 2.5, 3.0, 3.5, 5.0], events=events)], CFG)
+    best = found["most_moving_shots"][0]
+    assert (best.figure, best.focus) == (3, 3.5)
+
+
+def test_stage_level_figures():
+    a = _stage(1, [1.0, 9.0], stage_time=9.1, hf=5.2)
+    b = _stage(2, [1.0, 30.0], stage_time=30.4, hf=7.9)
+    found = find_moments([a, b], CFG)
+    assert found["fastest_stage"][0].stage_number == 1
+    assert found["longest_stage"][0].stage_number == 2
+    assert (found["top_hit_factor"][0].stage_number, found["top_hit_factor"][0].figure) == (2, 7.9)
+    assert (found["most_shots"][0].stage_number, found["most_shots"][0].figure) == (
+        1,
+        2,
+    )  # a tie, stage 1 first
+    assert found["longest_stage"][0].focus == 30.0  # ends on the last shot
+
+
+def test_the_thinker_is_the_longest_pause_outside_movement_and_reloads():
+    times = [1.0, 1.3, 4.7, 5.0, 9.5, 9.8]
+    classes = ["first_shot", "split", "transition", "split", "movement", "split"]
+    events = [_ev(1, "movement", 5.2, 9.3)]
+    best = find_moments([_stage(1, times, classes=classes, events=events)], CFG)["thinker"][0]
+    assert (best.figure, best.focus) == (pytest.approx(3.4), 4.7)
+
+
+def test_slowest_reload_is_the_longest_confirmed_reload():
+    events = [_ev(1, "reload", 2.0, 3.0), _ev(2, "reload", 5.0, 9.1)]
+    best = find_moments([_stage(1, [1.0, 4.0, 10.0], events=events)], CFG)["slowest_reload"][0]
+    assert best.figure == pytest.approx(4.1)
