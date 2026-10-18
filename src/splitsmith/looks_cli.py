@@ -110,6 +110,30 @@ def _print_report(report: CheckReport) -> None:
     )
 
 
+@looks_app.command("dress")
+def dress_command_cli(
+    export: Path = typer.Argument(..., exists=True, dir_okay=False, help="A rendered match MP4."),
+    look: str = typer.Option(..., "--look", help="The Look whose sounds to dress it in."),
+    out: Path | None = typer.Option(None, "--out", help="Where to write it (default <name>-dressed.mp4)."),
+) -> None:
+    """Mix a Look's sounds (look.json "sounds") over a rendered export.
+
+    The export's video is copied and its own audio kept; the export is left
+    as it was. Needs the export's -timeline.json, which every MP4 render
+    writes."""
+    from .audio_dress import DressError, dress_export
+    from .runtime import runtime
+
+    try:
+        written = dress_export(
+            export, load_look(look).root, output_path=out, ffmpeg_binary=runtime().ffmpeg_binary
+        )
+    except (DressError, LookError, ValueError) as exc:
+        console.print(f"[red]{exc}[/]")
+        raise typer.Exit(2) from exc
+    console.print(f"Wrote {written}")
+
+
 @looks_app.command("check")
 def check_command(name: str = typer.Argument(..., help="The Look to check.")) -> None:
     """Load every template the Look owns in Chromium against sample cards and report problems."""

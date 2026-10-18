@@ -198,6 +198,10 @@ class LookManifest(BaseModel):
     styles: dict[str, str] = {}
     #: Your brand (the branding work): ``None`` draws the cards as before.
     brand: LookBrand | None = None
+    #: A text file in the Look's folder whose text closes the YouTube
+    #: description of every export drawn with it: the notice a licence of
+    #: the Look's assets asks to travel with the video (:func:`look_credits`).
+    credits: str | None = None
 
     @field_validator("name")
     @classmethod
@@ -418,6 +422,30 @@ def list_looks() -> list[Look]:
 
 def look_names() -> tuple[str, ...]:
     return tuple(look.name for look in list_looks())
+
+
+#: The most of a credits file a description carries; YouTube's limit for the
+#: whole description is 5000 characters.
+MAX_CREDITS_CHARS = 3000
+
+
+def look_credits(look: Look) -> str | None:
+    """The text of the Look's ``credits`` file, or ``None`` when it names
+    none. A file outside the Look's folder, a symlink, a missing or an
+    oversized one is ``None`` with a warning: credits never fail an export."""
+    name = look.manifest.credits
+    if not name:
+        return None
+    root = look.root.resolve()
+    path = look.root / name
+    if path.is_symlink() or path.resolve().parent != root or not path.is_file():
+        logger.warning("Look %s: credits %r is not a file in its folder; left out", look.name, name)
+        return None
+    text = path.read_text(encoding="utf-8", errors="replace").strip()
+    if len(text) > MAX_CREDITS_CHARS:
+        logger.warning("Look %s: credits over %d characters; left out", look.name, MAX_CREDITS_CHARS)
+        return None
+    return text or None
 
 
 def load_look(name: str) -> Look:

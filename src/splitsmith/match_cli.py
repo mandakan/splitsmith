@@ -847,6 +847,8 @@ def export(
                 (written.with_name(written.stem + "-youtube.json"), "-youtube.json"),
                 (written.with_name(written.stem + "-youtube.txt"), "-youtube.txt"),
                 (written.with_name(written.stem + "-thumbnail.jpg"), "-thumbnail.jpg"),
+                # Where each card sits, for ``looks dress``.
+                (written.with_name(written.stem + "-timeline.json"), "-timeline.json"),
             ):
                 if companion.exists():
                     companion.replace(wanted.with_name(wanted.stem + suffix))

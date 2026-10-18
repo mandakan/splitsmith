@@ -85,7 +85,7 @@ from .logo_spots import LOGO_MARGIN, WATERMARK_HEIGHT, watermark_image
 from .look_brand import brand_logo_path, brand_mark_json
 from .look_motion import MotionClipError, motion_overlay_filters, write_motion_clip
 from .look_sting import sting_motion, sting_overlay_filters
-from .looks import load_look, sting_template_for
+from .looks import LookError, load_look, look_credits, sting_template_for
 from .match_summary import MatchSummary, build_match_summary_still
 from .overlay_card import (
     LOWER_THIRD_FADE_SECONDS,
@@ -103,6 +103,7 @@ from .overlay_card import (
 from .overlay_raster import ChromiumRasterizer, Rasterizer, RasterizerUnavailableError
 from .overlay_summary_cell import build_summary_still
 from .overlay_theme import ThemeName, load_theme, theme_for
+from .render_timeline import TimelineEntry, timeline_path, write_timeline
 from .runtime import runtime
 from .segment_cache import SegmentCache
 from .summary_template import match_summary_motion, stage_summary_motion
@@ -151,6 +152,9 @@ class Mp4RenderResult:
     output_path: Path
     duration_seconds: float
     degradations: tuple[str, ...] = ()
+    #: Every item written, where it sits in the video; also written beside
+    #: it as ``<stem>-timeline.json`` (:mod:`splitsmith.render_timeline`).
+    timeline: tuple[TimelineEntry, ...] = ()
 
 
 @with_card_failures(lambda r, notes: replace(r, degradations=(*r.degradations, *notes)))
@@ -859,6 +863,10 @@ def _render_with_work_dir(
         raise _EdgeUnavailableError(f"{item.name} is a clip; it has no edge render")
 
     ordinal = 0
+    #: What was actually written, for the timeline sidecar, and where the
+    #: next segment starts in the stitched video.
+    written: list[TimelineEntry] = []
+    cursor = 0.0
     for i, item in enumerate(items):
         prep = prepared.pop(i) if i in prepared else prepare(item)
         boundary = live.get(i)
@@ -932,11 +940,14 @@ def _render_with_work_dir(
                     sting.close()
         segment = encode_item(item, prep)
         if segment is not None:
+            written.append(_timeline_entry(item, at=cursor))
             segments.append((segment, item.duration_seconds))
+            cursor += item.duration_seconds
             if not isinstance(item, _StageItem):
                 generated = True
         if boundary_segment is not None and boundary is not None:
             segments.append((boundary_segment, boundary.duration_seconds))
+            cursor += boundary.duration_seconds
             generated = True
 
     list_path = work_dir / "concat.txt"
@@ -955,15 +966,49 @@ def _render_with_work_dir(
         ffmpeg_binary=ffmpeg_binary,
         reencode_audio=generated,
         chapters_path=chapters_path,
+        comment=_credits_of(overlay_theme),
     )
     report(total_steps, "the match video", "stitching")
     _run(cmd, runner=runner)
     if segment_cache is not None:
         segment_cache.evict(keep=used_keys)
+    entries = tuple(written)
+    write_timeline(timeline_path(output_path), entries)
     return Mp4RenderResult(
         output_path=output_path,
         duration_seconds=total_seconds,
         degradations=(*degradations, *timeline.degradations, *killed),
+        timeline=entries,
+    )
+
+
+def _credits_of(look_name: str) -> str | None:
+    """The Look's credits (:func:`looks.look_credits`) for the file's
+    comment tag; a Look that cannot be read here adds none."""
+    try:
+        return look_credits(load_look(look_name))
+    except LookError:
+        return None
+
+
+def _timeline_entry(item: SpineItem, *, at: float) -> TimelineEntry:
+    """``item``'s nominal span when its segment starts ``at`` seconds into
+    the stitched video: a transition took ``head_cut`` off its head, which
+    the boundary before shows, so the item's own clock started that much
+    earlier (on the cut)."""
+    start = at - item.head_cut_seconds
+    end = at + item.duration_seconds + item.tail_cut_seconds
+    stage_index: int | None = None
+    beep: float | None = None
+    if isinstance(item, _StageItem):
+        stage_index = item.index
+        beep = start + item.plan.stage.beep_offset_seconds - item.plan.head_trim_seconds
+    elif isinstance(item, _SummaryItem):
+        stage_index = item.stage_index
+    elif isinstance(item, _StillItem) and item.kind == "slate":
+        stage_index = item.backdrop_stage_index
+    return TimelineEntry(
+        kind=item.kind, name=item.name, stage_index=stage_index, start=start, end=end, beep=beep
     )
 
 
@@ -2258,13 +2303,15 @@ def _build_concat_command(
     ffmpeg_binary: str = "ffmpeg",
     reencode_audio: bool = False,
     chapters_path: Path | None = None,
+    comment: str | None = None,
 ) -> tuple[str, ...]:
     """Build the ``concat``-demuxer invocation that stitches the segment
     temps. The video is always a stream copy. ``reencode_audio`` (set
     when generated segments are present, issue #973) encodes the audio
     once over the whole match instead, so a card's ``anullsrc`` and a
     trim's camera audio need not share a sample rate; off, the argv is
-    the plain ``-c copy`` it has always been.
+    the plain ``-c copy`` it has always been. ``comment`` (the Look's
+    credits) is written as the file's comment tag; ``None`` adds nothing.
 
     ``chapters_path`` is an ffmetadata file (:func:`chapter_metadata`)
     read as a second input whose global metadata -- the chapters -- is
@@ -2285,6 +2332,7 @@ def _build_concat_command(
         str(list_path),
         *chapter_args,
         *codec_args,
+        *(("-metadata", f"comment={comment}") if comment else ()),
         "-movflags",
         "+faststart",
         str(output_path),

@@ -27,7 +27,7 @@ from ..config import OutputConfig, StageRounds
 from ..events import confirmed_from_doc
 from ..export_naming import match_file_base, stage_display_name, stage_file_base
 from ..identity import ResolvedIdentity
-from ..looks import DEFAULT_VARIANT
+from ..looks import DEFAULT_VARIANT, LookError, load_look, look_credits
 from ..match_model import is_standard_start
 from ..match_project import MatchProject, StageScorecard
 from ..match_summary import DEFAULT_MATCH_SUMMARY_SECONDS, MatchSummary, build_match_summary
@@ -443,6 +443,15 @@ def render_segment_cache(config: OutputConfig) -> SegmentCache | None:
         root=runtime().cache_dir / "render-segments",
         max_bytes=int(config.render_cache_gb * 1024**3),
     )
+
+
+def look_credits_for(name: str) -> str | None:
+    """The notice the export's Look asks to close its description with, or
+    ``None``; a Look that cannot be read here never fails the sidecar."""
+    try:
+        return look_credits(load_look(name))
+    except LookError:
+        return None
 
 
 def _write_thumbnail_card(comp: composition.Composition, request: MatchExportRequestData, out: Path) -> str:
@@ -957,6 +966,7 @@ def export_match(
             captions_path=srt_path.relative_to(exports_dir),
             output_video=output_path.relative_to(exports_dir),
             thumbnail_path=thumbnail_path.relative_to(exports_dir) if thumbnail_path else None,
+            credits=look_credits_for(request.overlay_theme),
         )
         youtube_sidecar.write_sidecar(sidecar, sidecar_path)
         youtube_sidecar.write_paste_text(sidecar, output_path.with_name(output_path.stem + "-youtube.txt"))
