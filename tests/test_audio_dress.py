@@ -19,6 +19,7 @@ from splitsmith.audio_dress import (
     dressed_path,
     load_sound_map,
     place_cues,
+    place_template_cues,
 )
 from splitsmith.render_timeline import TimelineEntry, timeline_path, write_timeline
 
@@ -86,10 +87,18 @@ def test_a_sound_outside_the_looks_sounds_folder_is_refused(tmp_path: Path) -> N
         load_sound_map(root)
 
 
-def test_a_look_without_sounds_is_refused(tmp_path: Path) -> None:
+def test_a_look_without_a_sound_map_has_an_empty_one(tmp_path: Path) -> None:
+    """Its templates may declare every sound, so no map is no error."""
     (tmp_path / "look.json").write_text(json.dumps({"name": "x"}))
-    with pytest.raises(DressError, match="no sounds"):
-        load_sound_map(tmp_path)
+    assert load_sound_map(tmp_path) == SoundMap()
+
+
+def test_an_export_nothing_plays_on_is_refused(tmp_path: Path) -> None:
+    root = _look(tmp_path, [{"on": "closing", "play": "a.wav"}], {"a.wav": b"x"})
+    export = tmp_path / "m.mp4"
+    write_timeline(timeline_path(export), (STAGE,))
+    with pytest.raises(DressError, match="nothing to play"):
+        dress_export(export, root)
 
 
 def test_the_tick_train_is_one_input_looped(tmp_path: Path) -> None:
@@ -142,7 +151,9 @@ def test_dressing_places_sound_on_the_item_and_keeps_the_video(tmp_path: Path) -
     root = _look(tmp_path, [{"on": "summary", "bed": "tone.wav", "fade": 0.5}], {})
     _ffmpeg("-f", "lavfi", "-i", "sine=frequency=440:duration=1", str(root / "sounds" / "tone.wav"))
 
-    out = dress_export(export, root)
+    result = dress_export(export, root)
+    out = result.path
+    assert result.notes == ()
     assert out == dressed_path(export) == tmp_path / "m-dressed.mp4"
     assert _rms(out, 0.5, 2.8) < 1.0, "the stage keeps its own (silent) sound"
     assert _rms(out, 3.2, 5.0) > 1000.0, "the looped bed plays under the whole summary"
@@ -157,3 +168,54 @@ def test_dressing_places_sound_on_the_item_and_keeps_the_video(tmp_path: Path) -
         check=True, capture_output=True, text=True,
     ).stdout.strip()  # fmt: skip
     assert comment == "Art from Somewhere.", "the Look's credits stay in the dressed file"
+
+
+def test_a_templates_own_cues_play_on_its_item_beside_the_looks(tmp_path: Path) -> None:
+    """Cues an item's template declared ride its timeline entry: placed on
+    that item alone, after the Look's own, on the same clock."""
+    (tmp_path / "tick.wav").write_bytes(b"x")
+    (tmp_path / "boom.wav").write_bytes(b"x")
+    tally = TimelineEntry(
+        kind="match_summary",
+        name="match_summary",
+        stage_index=None,
+        start=30.0,
+        end=36.0,
+        cues=(
+            {"play": "tick.wav", "at": 0.0},
+            {"play": "tick.wav", "at": 0.4},
+            {"play": "boom.wav", "at": 0.8},
+        ),
+    )
+    other = TimelineEntry(kind="match_summary", name="other", stage_index=None, start=40.0, end=41.0)
+    sounds = _cues({"on": "match_summary", "bed": "music.ogg"})
+    placed, notes = place_template_cues(sounds, [tally, other], tmp_path)
+    assert [(p.path.name, p.start) for p in placed] == [
+        ("music.ogg", 30.0),
+        ("tick.wav", 30.0),
+        ("tick.wav", 30.4),
+        ("boom.wav", 30.8),
+        ("music.ogg", 40.0),
+    ]
+    assert notes == ()
+
+
+def test_a_bad_template_cue_costs_that_cue_alone(tmp_path: Path) -> None:
+    (tmp_path / "ok.wav").write_bytes(b"x")
+    card = TimelineEntry(
+        kind="transition",
+        name="boundary_000",
+        stage_index=None,
+        start=10.0,
+        end=11.5,
+        cues=(
+            {"play": "ok.wav", "at": 0.2},
+            {"play": "../../etc/passwd"},
+            {"play": "missing.wav"},
+            {"bed": "ok.wav", "play": "ok.wav"},
+            {"play": "ok.wav", "on": "stage"},
+        ),
+    )
+    placed, notes = place_template_cues(SoundMap(), [card], tmp_path)
+    assert [(p.path.name, p.start) for p in placed] == [("ok.wav", 10.2)]
+    assert len(notes) == 4 and all(n.startswith("boundary_000: ") for n in notes)

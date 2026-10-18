@@ -95,6 +95,7 @@ class _RecordingPage:
         "fonts": "document.fonts.ready",
         "probe": "probe",
         "hud": "typeof window.settle",
+        "sounds": "typeof window.sounds",
     }
     binding = None
 

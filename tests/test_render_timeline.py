@@ -31,8 +31,13 @@ def test_a_transition_keeps_each_item_on_its_cut(tmp_path: Path) -> None:
     cut's: stage A 0 .. 14.3, stage B 14.3 .. 28.6, the beep 3 s in (the
     head pad), whatever the boundary segment took off either end."""
     result = _render(tmp_path, _transitioned_composition(tmp_path), name="m", runner=_writes_output([]))
-    assert _spans(result.timeline) == [("stage_000", 0.0, 14.3), ("stage_001", 14.3, 28.6)]
-    a, b = result.timeline
+    assert _spans(result.timeline) == [
+        ("stage_000", 0.0, 14.3),
+        ("boundary_000", 13.8, 14.8),
+        ("stage_001", 14.3, 28.6),
+    ]
+    a, fade, b = result.timeline
+    assert (fade.kind, fade.stage_index, fade.cues) == ("transition", None, ())
     assert (a.kind, a.stage_index, a.beep) == ("stage", 0, pytest.approx(3.0))
     assert (b.kind, b.stage_index, b.beep) == ("stage", 1, pytest.approx(17.3))
     assert read_timeline(timeline_path(tmp_path / "m.mp4")) == result.timeline
@@ -80,4 +85,31 @@ def test_the_sidecar_is_plain_json_beside_the_video(tmp_path: Path) -> None:
         "start": 0.0,
         "end": pytest.approx(14.3),
         "beep": 3.0,
+        "cues": [],
     }
+
+
+def test_a_cards_template_sounds_ride_its_entry(tmp_path: Path) -> None:
+    """What a card's template declares through ``window.sounds()`` is
+    written on that card's entry, for the dress pass to place."""
+    from .test_mp4_render import _FakeRasterizer
+
+    cues = ({"play": "click.wav", "at": 0.5},)
+
+    class _Sounding(_FakeRasterizer):
+        def render_template_frames(self, template, **kwargs):  # type: ignore[no-untyped-def]
+            from dataclasses import replace
+
+            return replace(super().render_template_frames(template, **kwargs), sounds=cues)
+
+    result = mp4_render.render_mp4(
+        _carded_composition(tmp_path),
+        output_path=tmp_path / "m.mp4",
+        work_dir=tmp_path / "work",
+        runner=MagicMock(side_effect=_ok),
+        rasterizer=_Sounding(),
+    )
+    by_kind = {e.kind: e for e in result.timeline}
+    assert by_kind["title_page"].cues == cues and by_kind["closing"].cues == cues
+    assert by_kind["stage"].cues == () and by_kind["intro"].cues == ()
+    assert read_timeline(timeline_path(tmp_path / "m.mp4")) == result.timeline
