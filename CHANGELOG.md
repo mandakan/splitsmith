@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.80.0](https://github.com/mandakan/splitsmith/compare/v0.79.0...v0.80.0) (2026-10-18)
+
+
+### Features
+
+* **export:** the app's MP4 export mixes in the Look's sounds ([#1565](https://github.com/mandakan/splitsmith/issues/1565)) ([4bb90d7](https://github.com/mandakan/splitsmith/commit/4bb90d79688c4e83091dba9d21701d90f1d4746b))
+* **looks:** a template declares its own sounds ([#1563](https://github.com/mandakan/splitsmith/issues/1563)) ([3cb3d9b](https://github.com/mandakan/splitsmith/commit/3cb3d9b8e49fa0681500ff5fda1b7c085ccc23c2))
+* **looks:** dress an export in a Look's sounds, and carry its credits ([#1561](https://github.com/mandakan/splitsmith/issues/1561)) ([20c6dc5](https://github.com/mandakan/splitsmith/commit/20c6dc51f3ef989f142038e178b62e01f3879f0f))
+
+
+### Bug Fixes
+
+* **cli:** draw a stale overlay again instead of leaving the stage without its HUD ([#1564](https://github.com/mandakan/splitsmith/issues/1564)) ([10e9009](https://github.com/mandakan/splitsmith/commit/10e90093fb07975c85427c6351fa6377f7d07ecc))
+
 ## [0.79.0](https://github.com/mandakan/splitsmith/compare/v0.78.0...v0.79.0) (2026-10-18)
 
 
