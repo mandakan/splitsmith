@@ -440,11 +440,19 @@ function ExportInner({ slug }: { slug: string }) {
   );
 
   // The Overview card's link lands here with ``?mode=reel``: open the reel
-  // mode once, then drop the parameter so a later mode switch sticks.
+  // mode, and drop the parameter only once the page is in it, so the
+  // last-used settings restored after mount cannot switch it back (they
+  // did), and a later mode switch sticks.
   const [searchParams, setSearchParams] = useSearchParams();
   useEffect(() => {
     if (searchParams.get("mode") !== "reel") return;
-    if (mode !== "reel") selectMode("reel");
+    // Arriving for the reel is a choice: the starting preset, applied once
+    // presets and history load, must not switch the page back to Timeline.
+    hadLastUsed.current = true;
+    if (mode !== "reel") {
+      selectMode("reel");
+      return;
+    }
     const next = new URLSearchParams(searchParams);
     next.delete("mode");
     setSearchParams(next, { replace: true });

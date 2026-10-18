@@ -25,6 +25,7 @@ vi.mock("@/lib/api", async (importOriginal) => {
       getExportRuns: vi.fn().mockResolvedValue({ runs: [] }),
       getCleanupPlan: vi.fn().mockResolvedValue({ items: [], totals_by_category: {}, total_bytes: 0, total_file_count: 0 }),
       getHighlights: vi.fn(),
+      getExportPresets: vi.fn().mockResolvedValue({ presets: [] }),
       getYouTubeSettings: vi.fn().mockRejectedValue(new Error("not connected")),
       submitHighlightReel: vi.fn(),
       pollJob: vi.fn(),
@@ -146,6 +147,24 @@ describe("Export highlight reel mode", () => {
   it("opens straight into the mode from the Overview card's link", async () => {
     renderAt("/match/m1/export/mathias?mode=reel");
     expect(await screen.findByRole("button", { name: "Render reel" })).toBeInTheDocument();
+  });
+
+  it("stays in the mode when the page's starting preset arrives later", async () => {
+    vi.mocked(api.getExportPresets).mockResolvedValue({
+      presets: [
+        {
+          preset_id: "youtube",
+          name: "YouTube match video",
+          builtin: true,
+          body: { mode: "single", output_format: "mp4" },
+        },
+      ],
+    } as never);
+    renderAt("/match/m1/export/mathias?mode=reel");
+    expect(await screen.findByRole("button", { name: "Render reel" })).toBeInTheDocument();
+    await waitFor(() => expect(api.getExportPresets).toHaveBeenCalled());
+    await new Promise((r) => setTimeout(r, 50));
+    expect(screen.getByRole("button", { name: "Render reel" })).toBeInTheDocument();
   });
 
   it("will not render with no moment chosen, and says so", async () => {

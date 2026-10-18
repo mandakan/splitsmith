@@ -9,6 +9,8 @@ import {
   readinessLine,
   reelBody,
   renderBlock,
+  resultLine,
+  runFormatLabel,
   showReelCard,
 } from "@/lib/highlightReel";
 
@@ -40,6 +42,20 @@ describe("readinessLine", () => {
   it("counts ready stages until every one is done", () => {
     expect(readinessLine(readiness())).toBe("5 of 8 stages ready");
     expect(readinessLine(readiness({ unlocked: true, ready: 8 }))).toBe("Every stage is ready");
+  });
+});
+
+describe("wording", () => {
+  it("names the reel's run in the history and words the finished render", () => {
+    expect(runFormatLabel("highlight_reel")).toBe("Highlight reel");
+    expect(runFormatLabel("mp4")).toBe("mp4");
+    expect(resultLine({ filename: "a-highlights.mp4", duration_seconds: 19, left_out: [] })).toBe(
+      "Wrote a-highlights.mp4 (19.0 s). Download or upload it from the export history.",
+    );
+    expect(resultLine({ filename: "a.mp4", duration_seconds: 19, left_out: [6] })).toContain("without stage 6.");
+    expect(resultLine({ filename: "a.mp4", duration_seconds: 19, left_out: [6, 7] })).toContain(
+      "without stages 6, 7.",
+    );
   });
 });
 
@@ -119,7 +135,7 @@ describe("rendering", () => {
     const r = readiness();
     expect(renderBlock(r, new Set(), false)).toBe("Choose at least one moment.");
     expect(renderBlock(r, new Set(["fastest_draw"]), false)).toBe(
-      "Finish every stage first, or switch on Render anyway.",
+      "Finish every stage first, or choose Render the ready ones.",
     );
     expect(renderBlock(r, new Set(["fastest_draw"]), true)).toBeNull();
     expect(renderBlock(readiness({ ready: 0 }), new Set(["fastest_draw"]), true)).toBe("No stage is ready yet.");

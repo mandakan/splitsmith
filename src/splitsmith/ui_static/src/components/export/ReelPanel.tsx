@@ -24,6 +24,7 @@ import {
   readinessLine,
   reelBody,
   renderBlock,
+  resultLine,
 } from "@/lib/highlightReel";
 
 const GROUP_TITLES = { default: "Highlights", stat: "More stats", lolz: "Just for fun" } as const;
@@ -208,9 +209,7 @@ export function ReelPanel({
       ) : null}
       {result ? (
         <p role="status" className="text-md text-ink">
-          Wrote {result.filename} (<span className="numeral">{result.duration_seconds.toFixed(1)}</span> s)
-          {result.left_out.length > 0 ? ` without stage ${result.left_out.join(", ")}` : ""}. It is in the export
-          history below the page, ready to upload.
+          {resultLine(result)}
         </p>
       ) : null}
     </div>

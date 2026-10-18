@@ -97,11 +97,26 @@ export function reelBody(
   };
 }
 
+/** A history row's format as the page names it: the reel's run carries
+ *  its job kind, every other format is shown as stored. */
+export function runFormatLabel(format: string): string {
+  return format === "highlight_reel" ? "Highlight reel" : format;
+}
+
+/** The finished render's line under the Render button. */
+export function resultLine(result: { filename: string; duration_seconds: number; left_out: number[] }): string {
+  const without =
+    result.left_out.length === 0
+      ? ""
+      : ` without stage${result.left_out.length === 1 ? "" : "s"} ${result.left_out.join(", ")}`;
+  return `Wrote ${result.filename} (${result.duration_seconds.toFixed(1)} s)${without}. Download or upload it from the export history.`;
+}
+
 /** Why Render is disabled, or ``null`` when it is not. */
 export function renderBlock(r: HighlightReadiness, chosen: Set<string>, force: boolean): string | null {
   if (chosen.size === 0) return "Choose at least one moment.";
   if (r.unlocked) return null;
   if (r.ready === 0) return "No stage is ready yet.";
-  if (!force) return "Finish every stage first, or switch on Render anyway.";
+  if (!force) return "Finish every stage first, or choose Render the ready ones.";
   return null;
 }
