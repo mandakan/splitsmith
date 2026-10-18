@@ -10,6 +10,7 @@ import { MemoryRouter, Outlet, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { api, type ExportOverview, type HighlightReadiness, type Job, type MatchProject } from "@/lib/api";
+import { DEFAULT_EXPORT_SETTINGS, settingsToBody } from "@/lib/exportPresets";
 import { ConfirmProvider } from "@/components/useConfirm";
 import { Export } from "@/pages/Export";
 
@@ -133,7 +134,11 @@ function renderAt(path: string, shell: { origin?: string; capabilities?: string[
 }
 
 beforeEach(() => {
+  // No test leaks into the next: the remembered settings and the presets
+  // a test set are reset (``clearAllMocks`` keeps implementations).
+  window.localStorage.clear();
   deployment.mode = "local";
+  vi.mocked(api.getExportPresets).mockResolvedValue({ presets: [] });
   vi.mocked(api.getProject).mockResolvedValue(PROJECT);
   vi.mocked(api.getExportOverview).mockResolvedValue(OVERVIEW);
   vi.mocked(api.getHighlights).mockResolvedValue(readiness());
@@ -164,7 +169,8 @@ describe("Export highlight reel mode", () => {
           preset_id: "youtube",
           name: "YouTube match video",
           builtin: true,
-          body: { mode: "single", output_format: "mp4" },
+          // A whole body, as the server always answers (every field defaults).
+          body: { ...settingsToBody(DEFAULT_EXPORT_SETTINGS), mode: "single" },
         },
       ],
     } as never);
