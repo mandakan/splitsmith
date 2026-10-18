@@ -512,6 +512,10 @@ def _render_with_work_dir(
                     max_seconds=item.lower_third.duration_seconds,
                     shooters=shooters,
                 )
+                if lt_motion is not None:
+                    # The lower third rides the stage's segment on the stage's
+                    # clock (t = 0 on the cut), so its sounds are the stage's.
+                    prep.sounds = lt_motion.frames.sounds
                 if lt_motion is not None and not lt_motion.animated:
                     image = first_frame_image(lt_motion)
                     if image is not None:

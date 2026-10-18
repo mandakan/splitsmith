@@ -44,7 +44,10 @@ def shipped_template_paths() -> list[str]:
 
 
 def main() -> None:
-    history: dict[str, str] = {}
+    # Start from what is recorded: a squash merge leaves a branch's
+    # intermediate versions out of main's history, and a user's unedited
+    # copy of one must still be recognised.
+    history: dict[str, str] = json.loads(OUT.read_text(encoding="utf-8")) if OUT.is_file() else {}
     for path in shipped_template_paths():
         name = Path(path).name
         for sha in _git("log", "--format=%H", "--", path).decode().split():

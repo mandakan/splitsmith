@@ -71,6 +71,16 @@
     $('edge').style.left = p < 0.5 ? 'calc(' + (x + 100) + 'vw - 1.6vh)' : x + 'vw';
     $('edge').style.display = x <= -100 || x >= 100 ? 'none' : 'block';
   }
+  // Sound, timed to the sweep, so it follows the transition's length: the
+  // riser peaks as the panel covers the frame (40 %), a softer swoosh
+  // carries it out at its fastest (80 %). A cue's hit may start the file
+  // before the transition does; it is mixed from there.
+  window.sounds = function () {
+    return [
+      { play: 'sting.m4a', at: 0.4 * LENGTH, hit: 0.59, gain: 0.8 },
+      { play: 'swoosh-soft.m4a', at: 0.8 * LENGTH, hit: 0.26, gain: 0.5 }
+    ];
+  };
   var now = LENGTH / 2;
   window.duration = function () { return LENGTH; };
   window.poster = function () { return LENGTH / 2; };

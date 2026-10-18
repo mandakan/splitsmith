@@ -128,6 +128,16 @@ fonts, brand, one HTML template per card slot) plus its templates.
   current shipped ones; `--templates` copies them. Don't "simplify" this into
   copying: a copied `card.html` froze the cards before the brand, the event logo
   and the credit existed.
+- **Every copy carries the source's sound**, the template-following one too:
+  the raw `sounds` block (`LookManifest` ignores it, so `model_dump` drops it;
+  `look_tools._sound_map` reads it from the file) and the `sounds/` folder's
+  files. A starter takes a shipped Look's (`_STARTER_SOUNDS`). Without them a
+  copy names cues for files it lacks: no Look sounds offered, `looks dress`
+  refuses the map. `tests/test_look_tools.py::test_a_copy_of_broadcast_carries_its_sounds`.
+- A shipped Look's sound is CC0 with its source in `sounds/LICENSES.md`, and
+  every file is played by some cue (`tests/test_broadcast_sounds.py`): a file
+  there ships in the wheel to everyone, and a CC-BY one would need a credits
+  file on every export.
 - `data/looks/_history.json` records every shipped template version by sha256;
   **a changed shipped template must be recorded**
   (`scripts/record_template_history.py`; `tests/test_look_tools.py` fails
