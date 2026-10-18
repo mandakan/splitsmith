@@ -54,9 +54,18 @@ def _region(n: int, kind: str, start: float, end: float, source: str = "manual")
 _STAGES: list[tuple[list[TileShot], list[StageEvent]]] = [
     (
         _shots(
-            ("first_shot", 1.12), ("split", 0.24), ("split", 0.26), ("transition", 0.71), ("split", 0.22),
-            ("split", 0.25), ("reload", 1.64), ("split", 0.27), ("movement", 1.9), ("split", 0.23),
-            ("transition", 0.66), ("split", 0.25),
+            ("first_shot", 1.12),
+            ("split", 0.24),
+            ("split", 0.26),
+            ("transition", 0.71),
+            ("split", 0.22),
+            ("split", 0.25),
+            ("reload", 1.64),
+            ("split", 0.27),
+            ("movement", 1.9),
+            ("split", 0.23),
+            ("transition", 0.66),
+            ("split", 0.25),
         ),
         [
             _region(1, "draw", 0.3, 1.12),
@@ -80,7 +89,16 @@ _EXTRAS = [
     HudExtras(
         stage_name="Sample",
         stage_number=3,
-        scorecard=StageScorecard(hit_factor=5.0, stage_points=90, stage_pct=80.0, alphas=8, charlies=3, deltas=1, misses=1, no_shoots=1),
+        scorecard=StageScorecard(
+            hit_factor=5.0,
+            stage_points=90,
+            stage_pct=80.0,
+            alphas=8,
+            charlies=3,
+            deltas=1,
+            misses=1,
+            no_shoots=1,
+        ),
         division="Production Optics",
         capacity=3,
         burst_split_max=0.5,
@@ -128,9 +146,13 @@ def test_a_changed_output_comes_with_a_new_version() -> None:
         if old is None:
             problems.append(f"{key}: not pinned yet; record the pins")
         elif cur["version"] == old["version"] and cur["digest"] != old["digest"]:
-            problems.append(f"{key}: its output changed at version {cur['version']}; bump {owner}, then record")
+            problems.append(
+                f"{key}: its output changed at version {cur['version']}; bump {owner}, then record"
+            )
         elif cur["version"] != old["version"] and cur["digest"] == old["digest"]:
-            problems.append(f"{key}: version moved but its output did not; record the pins (or undo the bump)")
+            problems.append(
+                f"{key}: version moved but its output did not; record the pins (or undo the bump)"
+            )
         elif cur["version"] != old["version"]:
             problems.append(f"{key}: new version {cur['version']}; record the pins")
     assert not [k for k in pinned if k not in now], "a pinned key no longer exists"
