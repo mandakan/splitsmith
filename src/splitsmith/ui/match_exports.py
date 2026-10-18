@@ -486,8 +486,13 @@ def _resolve_export_grade(request: MatchExportRequestData, anomalies: list[str])
     ungraded. Only the MP4 grades, so any other format says so."""
     try:
         look = load_look(request.overlay_theme)
-    except LookError:
-        return None
+    except LookError as exc:
+        if request.grade != "look":
+            # An explicit choice needs no Look; the render reports the Look.
+            look = None
+        else:
+            anomalies.append(f"colour grade left out: {exc}")
+            return None
     try:
         resolved = resolve_grade(request.grade, look, strength=request.grade_strength)
     except GradeError as exc:
@@ -496,6 +501,9 @@ def _resolve_export_grade(request: MatchExportRequestData, anomalies: list[str])
         anomalies.append(f"colour grade left out: {exc}")
         return None
     if resolved is not None and request.output_format != "mp4":
+        if request.grade == "look":
+            # A timeline of a graded Look: nothing was asked, nothing to say.
+            return None
         anomalies.append(
             "colour grade ignored: only the mp4 renderer applies it "
             f"(current renderer: {request.output_format})"

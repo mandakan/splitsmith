@@ -45,7 +45,7 @@ def test_a_cube_reads_red_fastest_and_round_trips() -> None:
         ("LUT_1D_SIZE 4\n0 0 0\n", "3D"),
         (_cube(2, _identity_rows(2)[:-1]), "8 rows"),
         (_cube(2, ["0 0 x"] + _identity_rows(2)[1:]), "number"),
-        (_cube(2, _identity_rows(2), header="DOMAIN_MIN 0 0 0\nDOMAIN_MAX 2 2 2\n"), "domain"),
+        (_cube(2, _identity_rows(2), header="DOMAIN_MIN 0 0 0\nDOMAIN_MAX 2 2 2\n"), "0..1 input range"),
         (_cube(70, []), "size"),
         ("0 0 0\n", "LUT_3D_SIZE"),
     ],

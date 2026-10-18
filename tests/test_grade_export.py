@@ -77,10 +77,16 @@ def test_an_explicit_grade_naming_nothing_is_an_error(
     assert "no grade preset named 'nope'" in result.output
 
 
+@pytest.mark.parametrize("unreadable", [False, True])
 def test_a_looks_broken_grade_is_a_note_and_the_render_goes_on(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, user_looks: Path
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, user_looks: Path, unreadable: bool
 ) -> None:
-    _graded_look(user_looks / "broken", {"lut": "luts/missing.cube"})
+    """Missing, or present but not a LUT (the review's critical finding: it
+    failed every export inside the render)."""
+    _graded_look(user_looks / "broken", {"lut": "luts/mine.cube"})
+    if unreadable:
+        (user_looks / "broken" / "luts").mkdir()
+        (user_looks / "broken" / "luts" / "mine.cube").write_text("LUT_3D_INPUT_RANGE 0 4\nLUT_3D_SIZE 2\n")
     result, comp = _export(tmp_path, monkeypatch, "--theme", "broken")
     assert result.exit_code == 0, result.output
     assert comp.grade is None

@@ -28,11 +28,13 @@ from .runtime import quote_filter_value
 from .user_config import user_config_dir
 
 #: The largest LUT a ``.cube`` may declare: 65 points is the common ceiling
-#: of grading tools; past it a table is megabytes of rows for nothing.
-MAX_SIZE = 64
+#: of grading tools (ffmpeg's ``lut3d`` reads it); past it a table is
+#: megabytes of rows for nothing.
+MAX_SIZE = 65
 MIN_SIZE = 2
-#: The largest ``.cube`` read, in bytes (a 64-point table is about 7 MB).
-MAX_BYTES = 10 * 1024 * 1024
+#: The largest ``.cube`` read, in bytes: a 65-point table written with ten
+#: decimals, as Resolve writes it, is about 11 MB.
+MAX_BYTES = 16 * 1024 * 1024
 #: Shipped preset ids and content-named user LUT files.
 _PRESET_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,40}$")
 USER_LUT_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,40}-[0-9a-f]{12}\.cube$")
@@ -67,21 +69,26 @@ def identity(size: int) -> Lut:
 
 
 def parse_cube(text: str) -> Lut:
-    """A ``.cube`` 3D LUT (the Adobe / Resolve text format). Refuses a 1D LUT,
-    a size outside :data:`MIN_SIZE`..:data:`MAX_SIZE`, a domain other than
-    0..1, a row that is not three numbers and a row count that is not
-    ``size**3``; output values are clamped to 0..1."""
+    """A ``.cube`` 3D LUT (the Adobe / Resolve text format), as grading tools
+    write it: a BOM, comments (whole lines or after a row), ``TITLE`` and
+    0..1 input ranges (``DOMAIN_MIN`` / ``DOMAIN_MAX``,
+    ``LUT_3D_INPUT_RANGE``, ``LUT_1D_INPUT_RANGE``) are read. Refuses a 1D
+    LUT, a video-range one, a size outside :data:`MIN_SIZE`..:data:`MAX_SIZE`,
+    another input range, a row that is not three finite numbers and a row
+    count that is not ``size**3``; output values are clamped to 0..1."""
     size: int | None = None
     rows: list[list[float]] = []
-    for raw in text.splitlines():
-        line = raw.strip()
-        if not line or line.startswith("#"):
+    for raw in text.lstrip("\ufeff").splitlines():
+        line = raw.split("#", 1)[0].strip()
+        if not line:
             continue
         head = line.split()[0]
         if head == "TITLE":
             continue
         if head == "LUT_1D_SIZE":
             raise GradeError("a 1D LUT; a grade needs a 3D LUT (LUT_3D_SIZE)")
+        if head in ("LUT_IN_VIDEO_RANGE", "LUT_OUT_VIDEO_RANGE"):
+            raise GradeError("a video range LUT; export it as full range (data levels)")
         if head == "LUT_3D_SIZE":
             try:
                 size = int(line.split()[1])
@@ -90,22 +97,28 @@ def parse_cube(text: str) -> Lut:
             if not MIN_SIZE <= size <= MAX_SIZE:
                 raise GradeError(f"LUT size {size} is outside {MIN_SIZE}..{MAX_SIZE}")
             continue
-        if head in ("DOMAIN_MIN", "DOMAIN_MAX"):
-            want = 0.0 if head == "DOMAIN_MIN" else 1.0
+        if head in ("DOMAIN_MIN", "DOMAIN_MAX", "LUT_3D_INPUT_RANGE", "LUT_1D_INPUT_RANGE"):
             try:
-                values = [float(v) for v in line.split()[1:4]]
+                values = [float(v) for v in line.split()[1:]]
             except ValueError as exc:
-                raise GradeError(f"{head} is not three numbers: {line!r}") from exc
-            if len(values) != 3 or any(abs(v - want) > 1e-6 for v in values):
-                raise GradeError(f"only a 0..1 domain is supported, not {line!r}")
+                raise GradeError(f"{head} is not numbers: {line!r}") from exc
+            if head == "DOMAIN_MIN":
+                want = [0.0] * 3
+            elif head == "DOMAIN_MAX":
+                want = [1.0] * 3
+            else:
+                want = [0.0, 1.0]
+            if len(values) != len(want) or any(abs(v - w) > 1e-6 for v, w in zip(values, want, strict=True)):
+                raise GradeError(f"only a 0..1 input range is supported, not {line!r}")
             continue
-        parts = line.split()
         try:
-            values = [float(v) for v in parts]
+            values = [float(v) for v in line.split()]
         except ValueError as exc:
             raise GradeError(f"a row that is not a number: {line!r}") from exc
         if len(values) != 3:
             raise GradeError(f"a row that is not three numbers: {line!r}")
+        if not all(np.isfinite(values)):
+            raise GradeError(f"a row that is not finite numbers: {line!r}")
         rows.append(values)
     if size is None:
         raise GradeError("no LUT_3D_SIZE: not a 3D .cube file")
@@ -120,7 +133,7 @@ def read_cube(path: Path) -> Lut:
         raise GradeError(f"{path.name} is not a file")
     if path.stat().st_size > MAX_BYTES:
         raise GradeError(f"{path.name} is over {MAX_BYTES // (1024 * 1024)} MB")
-    return parse_cube(path.read_text(encoding="utf-8", errors="replace"))
+    return parse_cube(path.read_text(encoding="utf-8-sig", errors="replace"))
 
 
 def write_cube(lut: Lut, *, title: str = "splitsmith") -> str:
@@ -187,12 +200,20 @@ def _look_grade(look: Look, strength: float | None) -> ResolvedGrade | None:
         source = preset_path(spec.preset)
     else:
         return None
-    return ResolvedGrade(
-        source=source, strength=spec.strength if strength is None else strength, label=look.name
-    )
+    return _checked(source, spec.strength if strength is None else strength, look.name)
 
 
-def resolve_grade(choice: str, look: Look, *, strength: float | None = None) -> ResolvedGrade | None:
+def _checked(source: Path, strength: float, label: str) -> ResolvedGrade | None:
+    """The grade, once its LUT has been read (so a file that cannot be is a
+    :class:`GradeError` here, never in the render); ``None`` at strength 0,
+    which is no grade at all."""
+    read_cube(source)
+    if strength <= 0.0:
+        return None
+    return ResolvedGrade(source=source, strength=min(1.0, strength), label=label)
+
+
+def resolve_grade(choice: str, look: Look | None, *, strength: float | None = None) -> ResolvedGrade | None:
     """The grade an export asked for: ``look`` (the Look's own, else none),
     ``none``, ``preset:<id>`` or ``user:<file>``. ``strength`` overrides the
     Look's (and the default 1.0). Raises :class:`GradeError` for a choice
@@ -200,17 +221,17 @@ def resolve_grade(choice: str, look: Look, *, strength: float | None = None) -> 
     if choice == "none":
         return None
     if choice == "look":
-        return _look_grade(look, strength)
+        return _look_grade(look, strength) if look is not None else None
     s = 1.0 if strength is None else strength
     if choice.startswith("preset:"):
         name = choice.removeprefix("preset:")
-        return ResolvedGrade(source=preset_path(name), strength=s, label=name)
+        return _checked(preset_path(name), s, name)
     if choice.startswith("user:"):
         name = choice.removeprefix("user:")
         path = user_luts_dir() / name
         if not USER_LUT_RE.match(name) or path.is_symlink() or not path.is_file():
             raise GradeError(f"no LUT of yours named {name!r}")
-        return ResolvedGrade(source=path, strength=s, label=name.rsplit("-", 1)[0])
+        return _checked(path, s, name.rsplit("-", 1)[0])
     raise GradeError(f"unknown grade {choice!r}: look, none, preset:<id> or user:<file>")
 
 
@@ -224,12 +245,15 @@ def add_user_lut(source: Path) -> str:
     :func:`user_luts_dir` as ``<slug>-<12hex>.cube``, named by its bytes (the
     same file twice is one copy). Returns the name a ``user:`` grade takes.
     Raises :class:`GradeError` for a file it would not read."""
-    if source.is_symlink() or not source.is_file():
+    # The user named this file themselves: a link is followed. The copy kept
+    # is the bytes, never a link.
+    real = source.resolve()
+    if not real.is_file():
         raise GradeError(f"{source.name} is not a file")
-    data = source.read_bytes()
-    if len(data) > MAX_BYTES:
+    if real.stat().st_size > MAX_BYTES:
         raise GradeError(f"{source.name} is over {MAX_BYTES // (1024 * 1024)} MB")
-    parse_cube(data.decode("utf-8", errors="replace"))
+    data = real.read_bytes()
+    parse_cube(data.decode("utf-8-sig", errors="replace"))
     name = f"{_slug(source.stem)}-{hashlib.sha256(data).hexdigest()[:12]}.cube"
     folder = user_luts_dir()
     folder.mkdir(parents=True, exist_ok=True)
