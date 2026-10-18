@@ -604,7 +604,8 @@ notice in a text file in the Look's folder and name it in `look.json`:
 
 Every export drawn with the Look closes its YouTube description (the
 `-youtube.json` and `-youtube.txt` beside the video) with that text, after the
-chapters. Typographic quotes and the copyright sign are written in ASCII and
+chapters, and an MP4 render writes it into the file's own comment tag too, so
+the notice travels with the video. Typographic quotes and the copyright sign are written in ASCII and
 angle brackets are left out, since YouTube refuses a description holding them.
 The file must sit in the Look's own folder and stay under 3000 characters
 (YouTube allows 5000 for the whole description); otherwise it is left out with

@@ -95,3 +95,24 @@ def test_the_grid_sidecar_closes_with_the_credits_too() -> None:
     sidecar = youtube_sidecar.build_grid_sidecar(match_name="M", chapters=[], credits="Art from Somewhere.")
     assert sidecar.description.endswith("\n\nArt from Somewhere.")
     assert "Somewhere" not in youtube_sidecar.build_grid_sidecar(match_name="M", chapters=[]).description
+
+
+def test_the_rendered_mp4_carries_the_credits_in_its_comment_tag(user_looks: Path, tmp_path: Path) -> None:
+    """The notice travels inside the file too, not only in a description a
+    re-upload leaves behind; a Look without credits stitches as before."""
+    from .test_mp4_render import _render, _transitioned_composition, _writes_output
+
+    _user_look(user_looks, credits="CREDITS.txt", text="Art from Somewhere.")
+    calls: list[list[str]] = []
+    _render(tmp_path, _transitioned_composition(tmp_path), name="m", runner=_writes_output(calls))
+    assert "-metadata" not in calls[-1]
+    calls.clear()
+    _render(
+        tmp_path,
+        _transitioned_composition(tmp_path),
+        name="n",
+        runner=_writes_output(calls),
+        overlay_theme="mine",
+    )
+    stitch = calls[-1]
+    assert stitch[stitch.index("-metadata") + 1] == "comment=Art from Somewhere."

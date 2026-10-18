@@ -85,7 +85,7 @@ from .logo_spots import LOGO_MARGIN, WATERMARK_HEIGHT, watermark_image
 from .look_brand import brand_logo_path, brand_mark_json
 from .look_motion import MotionClipError, motion_overlay_filters, write_motion_clip
 from .look_sting import sting_motion, sting_overlay_filters
-from .looks import load_look, sting_template_for
+from .looks import LookError, load_look, look_credits, sting_template_for
 from .match_summary import MatchSummary, build_match_summary_still
 from .overlay_card import (
     LOWER_THIRD_FADE_SECONDS,
@@ -966,6 +966,7 @@ def _render_with_work_dir(
         ffmpeg_binary=ffmpeg_binary,
         reencode_audio=generated,
         chapters_path=chapters_path,
+        comment=_credits_of(overlay_theme),
     )
     report(total_steps, "the match video", "stitching")
     _run(cmd, runner=runner)
@@ -979,6 +980,15 @@ def _render_with_work_dir(
         degradations=(*degradations, *timeline.degradations, *killed),
         timeline=entries,
     )
+
+
+def _credits_of(look_name: str) -> str | None:
+    """The Look's credits (:func:`looks.look_credits`) for the file's
+    comment tag; a Look that cannot be read here adds none."""
+    try:
+        return look_credits(load_look(look_name))
+    except LookError:
+        return None
 
 
 def _timeline_entry(item: SpineItem, *, at: float) -> TimelineEntry:
@@ -2293,13 +2303,15 @@ def _build_concat_command(
     ffmpeg_binary: str = "ffmpeg",
     reencode_audio: bool = False,
     chapters_path: Path | None = None,
+    comment: str | None = None,
 ) -> tuple[str, ...]:
     """Build the ``concat``-demuxer invocation that stitches the segment
     temps. The video is always a stream copy. ``reencode_audio`` (set
     when generated segments are present, issue #973) encodes the audio
     once over the whole match instead, so a card's ``anullsrc`` and a
     trim's camera audio need not share a sample rate; off, the argv is
-    the plain ``-c copy`` it has always been.
+    the plain ``-c copy`` it has always been. ``comment`` (the Look's
+    credits) is written as the file's comment tag; ``None`` adds nothing.
 
     ``chapters_path`` is an ffmetadata file (:func:`chapter_metadata`)
     read as a second input whose global metadata -- the chapters -- is
@@ -2320,6 +2332,7 @@ def _build_concat_command(
         str(list_path),
         *chapter_args,
         *codec_args,
+        *(("-metadata", f"comment={comment}") if comment else ()),
         "-movflags",
         "+faststart",
         str(output_path),

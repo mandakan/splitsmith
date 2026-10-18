@@ -129,7 +129,8 @@ def test_dressing_places_sound_on_the_item_and_keeps_the_video(tmp_path: Path) -
     _ffmpeg(
         "-f", "lavfi", "-i", "color=black:s=320x180:r=30:d=6",
         "-f", "lavfi", "-i", "anullsrc=r=48000:cl=stereo",
-        "-t", "6", "-c:v", "libx264", "-c:a", "aac", "-shortest", str(export),
+        "-t", "6", "-c:v", "libx264", "-c:a", "aac", "-shortest",
+        "-metadata", "comment=Art from Somewhere.", str(export),
     )  # fmt: skip
     write_timeline(
         timeline_path(export),
@@ -151,3 +152,8 @@ def test_dressing_places_sound_on_the_item_and_keeps_the_video(tmp_path: Path) -
         check=True, capture_output=True, text=True,
     ).stdout.strip()  # fmt: skip
     assert copied == "h264,180"
+    comment = subprocess.run(
+        ["ffprobe", "-v", "error", "-show_entries", "format_tags=comment", "-of", "csv=p=0", str(out)],
+        check=True, capture_output=True, text=True,
+    ).stdout.strip()  # fmt: skip
+    assert comment == "Art from Somewhere.", "the Look's credits stay in the dressed file"
