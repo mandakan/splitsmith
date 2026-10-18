@@ -25,15 +25,45 @@ from functools import lru_cache
 from importlib import resources
 from pathlib import Path
 from typing import Protocol
+from urllib.parse import urlsplit
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
 from . import user_config
 
 MAX_TITLE = 48
 MAX_BODY = 200
+MAX_VIDEO_LABEL = 40
+#: The only hosts a video link may name: the sheet links out, never embeds.
+VIDEO_HOSTS = frozenset({"youtu.be", "www.youtube.com", "youtube.com"})
 CHIP_PREFIX = "chip:"
 _ID = r"^[a-z0-9][a-z0-9-]{0,47}$"
+
+
+class WhatsNewVideo(BaseModel):
+    """A video the sheet links to under an entry's body, opened in a new tab."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    url: str
+    #: The link's text, a few words ("Watch the tour").
+    label: str = Field(min_length=1, max_length=MAX_VIDEO_LABEL)
+
+    @field_validator("url")
+    @classmethod
+    def _https_youtube(cls, url: str) -> str:
+        parts = urlsplit(url)
+        # netloc == host rules out a port, a user or a mixed-case host.
+        if parts.scheme != "https" or parts.netloc not in VIDEO_HOSTS:
+            raise ValueError(f"a video link is an https URL on {', '.join(sorted(VIDEO_HOSTS))}")
+        return url
+
+    @field_validator("label")
+    @classmethod
+    def _ascii_label(cls, label: str) -> str:
+        if not label.isascii():
+            raise ValueError("a video label is ASCII")
+        return label
 
 
 class WhatsNewEntry(BaseModel):
@@ -45,6 +75,9 @@ class WhatsNewEntry(BaseModel):
     body: str = Field(min_length=1)
     #: The feature's "New" chip key, when the change has a place to point at.
     chip: str | None = Field(default=None, pattern=_ID)
+    #: A video about the change, linked under the body. Clients that predate
+    #: it ignore the key.
+    video: WhatsNewVideo | None = None
 
 
 class _File(BaseModel):
@@ -107,9 +140,12 @@ __all__ = [
     "CHIP_PREFIX",
     "MAX_BODY",
     "MAX_TITLE",
+    "MAX_VIDEO_LABEL",
     "PrefsWhatsNewStore",
+    "VIDEO_HOSTS",
     "WhatsNewEntry",
     "WhatsNewStore",
+    "WhatsNewVideo",
     "first_seen",
     "known_ids",
     "load_entries",

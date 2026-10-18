@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { WhatsNewEntry } from "@/lib/api";
-import { CHIP_DAYS, byMonth, chipActive, unseen } from "@/lib/whatsNew";
+import { CHIP_DAYS, byMonth, chipActive, unseen, videoLink } from "@/lib/whatsNew";
 
 const entry = (id: string, date: string, chip?: string): WhatsNewEntry => ({
   id,
@@ -47,5 +47,31 @@ describe("chipActive", () => {
 
   it("stays off while the feed is unknown", () => {
     expect(chipActive(null, null, "look-editor", today)).toBe(false);
+  });
+});
+
+describe("videoLink", () => {
+  const withVideo = (url: string, label = "Watch the tour"): WhatsNewEntry => ({
+    ...entry("tour", "2026-10-18"),
+    video: { url, label },
+  });
+
+  it("links an https YouTube video", () => {
+    expect(videoLink(withVideo("https://youtu.be/WRlgT0Bkggo"))).toEqual({
+      href: "https://youtu.be/WRlgT0Bkggo",
+      label: "Watch the tour",
+    });
+    expect(videoLink(withVideo("https://www.youtube.com/watch?v=x"))?.href).toBe("https://www.youtube.com/watch?v=x");
+  });
+
+  it("draws nothing without a video, or for a link it should not draw", () => {
+    expect(videoLink(entry("plain", "2026-10-18"))).toBeNull();
+    expect(videoLink({ ...entry("plain", "2026-10-18"), video: null })).toBeNull();
+    expect(videoLink(withVideo("http://youtu.be/x"))).toBeNull();
+    expect(videoLink(withVideo("https://vimeo.com/1"))).toBeNull();
+    expect(videoLink(withVideo("https://youtu.be:8443/x"))).toBeNull();
+    expect(videoLink(withVideo("javascript:alert(1)"))).toBeNull();
+    expect(videoLink(withVideo("not a url"))).toBeNull();
+    expect(videoLink(withVideo("https://youtu.be/x", ""))).toBeNull();
   });
 });

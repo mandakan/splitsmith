@@ -44,3 +44,22 @@ export function chipActive(
   const ageDays = (today.getTime() - new Date(`${entry.date}T00:00:00Z`).getTime()) / 86_400_000;
   return ageDays <= CHIP_DAYS;
 }
+
+/** The hosts an entry's video may link to; ``whats_new.VIDEO_HOSTS`` is the same list. */
+const VIDEO_HOSTS = new Set(["youtu.be", "www.youtube.com", "youtube.com"]);
+
+/** The link the sheet draws under an entry's body, or null. The server
+ *  already refuses anything but an https YouTube URL; the same rule holds
+ *  here so the sheet never draws a link it was not meant to. */
+export function videoLink(entry: WhatsNewEntry): { href: string; label: string } | null {
+  const video = entry.video;
+  if (!video || !video.label) return null;
+  let url: URL;
+  try {
+    url = new URL(video.url);
+  } catch {
+    return null;
+  }
+  if (url.protocol !== "https:" || !VIDEO_HOSTS.has(url.host)) return null;
+  return { href: url.href, label: video.label };
+}

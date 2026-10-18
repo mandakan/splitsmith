@@ -1,6 +1,16 @@
 {
   "entries": [
     {
+      "id": "feature-tour-video",
+      "date": "2026-10-18",
+      "title": "A short tour of splitsmith",
+      "body": "A video of about a minute and a half shows splitsmith from your footage to your splits. Open it on YouTube from the link below.",
+      "video": {
+        "url": "https://youtu.be/WRlgT0Bkggo",
+        "label": "Watch the tour"
+      }
+    },
+    {
       "id": "beep-from-primary-camera",
       "date": "2026-10-18",
       "title": "Other cameras' beeps found from the first",

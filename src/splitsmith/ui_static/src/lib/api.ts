@@ -1288,6 +1288,15 @@ export interface WhatsNewEntry {
   body: string;
   /** The feature's "New" chip key, or null. */
   chip: string | null;
+  /** A video about the change (an https YouTube link the server checked),
+   *  linked under the body. Null or absent on most entries. */
+  video?: WhatsNewVideo | null;
+}
+
+/** A What's new entry's video link. */
+export interface WhatsNewVideo {
+  url: string;
+  label: string;
 }
 
 /** ``GET /api/whats-new``: the entries and what this user has seen. */

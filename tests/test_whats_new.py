@@ -71,6 +71,82 @@ def test_each_entry_reads_like_the_others(entry: whats_new.WhatsNewEntry) -> Non
     assert not re.search(r"\b(we|our|us)\b", lowered), "address the user, not the team"
 
 
+@pytest.mark.parametrize("entry", [e for e in ENTRIES if e.video], ids=lambda e: e.id)
+def test_a_video_label_reads_like_a_title(entry: whats_new.WhatsNewEntry) -> None:
+    label = entry.video.label
+    assert len(label) <= whats_new.MAX_VIDEO_LABEL
+    assert not label.endswith("."), "a link is a phrase"
+    assert " -- " not in label and " - " not in label and "!" not in label
+    lowered = label.lower()
+    assert not [w for w in SLOP if w in lowered], "no slop or hype"
+
+
+def _entry_with_video(video: dict) -> dict:
+    return {"id": "tour", "date": "2026-10-18", "title": "A tour", "body": "Watch it.", "video": video}
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://youtu.be/WRlgT0Bkggo",
+        "https://www.youtube.com/watch?v=WRlgT0Bkggo",
+        "https://youtube.com/watch?v=x",
+    ],
+)
+def test_a_video_is_an_https_youtube_link(url: str) -> None:
+    entry = whats_new.WhatsNewEntry.model_validate(_entry_with_video({"url": url, "label": "Watch the tour"}))
+    assert entry.video is not None and entry.video.url == url
+    assert entry.model_dump(mode="json")["video"] == {"url": url, "label": "Watch the tour"}
+
+
+@pytest.mark.parametrize(
+    "video",
+    [
+        {"url": "http://youtu.be/WRlgT0Bkggo", "label": "Watch the tour"},
+        {"url": "https://vimeo.com/123", "label": "Watch the tour"},
+        {"url": "https://youtu.be.evil.example/x", "label": "Watch the tour"},
+        {"url": "https://user@youtu.be/x", "label": "Watch the tour"},
+        {"url": "https://youtu.be:8443/x", "label": "Watch the tour"},
+        {"url": "javascript:alert(1)", "label": "Watch the tour"},
+        {"url": "https://youtu.be/x", "label": "x" * (whats_new.MAX_VIDEO_LABEL + 1)},
+        {"url": "https://youtu.be/x", "label": ""},
+        {"url": "https://youtu.be/x", "label": "Watch the tour \N{HORIZONTAL ELLIPSIS}"},
+        {"url": "https://youtu.be/x", "label": "Watch", "thumbnail": "https://youtu.be/t.jpg"},
+    ],
+    ids=[
+        "http",
+        "wrong-host",
+        "lookalike-host",
+        "userinfo",
+        "port",
+        "javascript",
+        "overlong",
+        "empty",
+        "non-ascii",
+        "extra-key",
+    ],
+)
+def test_a_bad_video_is_refused(video: dict) -> None:
+    with pytest.raises(ValueError):
+        whats_new.WhatsNewEntry.model_validate(_entry_with_video(video))
+
+
+def test_an_entry_without_a_video_has_none() -> None:
+    entry = whats_new.WhatsNewEntry.model_validate(
+        {"id": "plain", "date": "2026-10-18", "title": "Plain", "body": "No video."}
+    )
+    assert entry.video is None
+
+
+def test_the_route_passes_a_video_through(client) -> None:
+    by_id = {e["id"]: e for e in client.get("/api/whats-new").json()["entries"]}
+    assert by_id["feature-tour-video"]["video"] == {
+        "url": "https://youtu.be/WRlgT0Bkggo",
+        "label": "Watch the tour",
+    }
+    assert by_id["beep-from-primary-camera"].get("video") is None
+
+
 def test_a_chip_key_is_a_slug_and_used_once() -> None:
     chips = [e.chip for e in ENTRIES if e.chip]
     assert len(set(chips)) == len(chips)
