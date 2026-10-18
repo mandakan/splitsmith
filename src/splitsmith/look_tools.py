@@ -103,32 +103,37 @@ _STARTER_SLOTS: dict[str, dict[str, object]] = {
 }
 
 
-#: The shipped Look whose sounds a starter carries: its templates'
-#: ``window.sounds()`` name those files.
-_STARTER_SOUNDS: dict[str, str] = {"broadcast": "broadcast"}
+#: The shipped Look whose sounds and grade a starter carries: its
+#: templates' ``window.sounds()`` name those files.
+_STARTER_ASSETS: dict[str, str] = {"broadcast": "broadcast"}
 
 
-def _sound_files(root: Path) -> dict[str, Path]:
-    """The files of the Look folder ``root``'s ``sounds/`` folder, by path
-    relative to ``root``: what a copy carries even when it follows the
-    shipped templates, since a sound is an asset the cues name, not code
-    that goes stale."""
-    folder = root / "sounds"
-    if folder.is_symlink() or not folder.is_dir():
-        return {}
-    return {
-        str(p.relative_to(root)): p for p in sorted(folder.rglob("*")) if p.is_file() and not p.is_symlink()
-    }
-
-
-def _sound_map(root: Path) -> object | None:
-    """The raw ``sounds`` block of ``root``'s manifest, which
-    ``LookManifest`` does not carry (``audio_dress`` reads it on its own)."""
+def _raw_manifest(root: Path) -> dict[str, object]:
     try:
         raw = json.loads((root / MANIFEST_FILE).read_text(encoding="utf-8"))
     except (OSError, ValueError):
-        return None
-    return raw.get("sounds") if isinstance(raw, dict) else None
+        return {}
+    return raw if isinstance(raw, dict) else {}
+
+
+def _asset_files(root: Path) -> dict[str, Path]:
+    """The Look folder ``root``'s sound files and the LUT its grade names, by
+    path relative to ``root``: what a copy carries even when it follows the
+    shipped templates, since these are files the manifest names, not code
+    that goes stale. Links are never followed out of the folder."""
+    files: dict[str, Path] = {}
+    folder = root / "sounds"
+    if folder.is_dir() and not folder.is_symlink():
+        for path in sorted(folder.rglob("*")):
+            if path.is_file() and not path.is_symlink():
+                files[str(path.relative_to(root))] = path
+    grade = _raw_manifest(root).get("grade")
+    lut = grade.get("lut") if isinstance(grade, dict) else None
+    if isinstance(lut, str):
+        path = root / lut
+        if path.is_file() and not path.is_symlink() and root.resolve() in path.resolve().parents:
+            files[str(path.resolve().relative_to(root.resolve()))] = path
+    return files
 
 
 def _starter_files(starter: str) -> list[str]:
@@ -267,20 +272,25 @@ def new_look(
         manifest = base.manifest.model_dump(exclude={"source"})
         manifest.update(name=name, label=_label(name), slots=_STARTER_SLOTS[starter])
         files = {file: shipped_looks_dir() / "_starters" / file for file in _starter_files(starter)}
-        if starter in _STARTER_SOUNDS:
-            sounds_root = shipped_looks_dir() / _STARTER_SOUNDS[starter]
-            files.update(_sound_files(sounds_root))
-            if (sound_map := _sound_map(sounds_root)) is not None:
-                manifest["sounds"] = sound_map
+        if starter in _STARTER_ASSETS:
+            # The shipped folder itself: a user Look of the same name shadows
+            # it for load_look, and the starter's templates name these files.
+            assets = shipped_looks_dir() / _STARTER_ASSETS[starter]
+            files.update(_asset_files(assets))
+            for key in ("sounds", "grade"):
+                if (block := _raw_manifest(assets).get(key)) is not None:
+                    manifest[key] = block
     else:
         source = strict_look(from_look or DEFAULT_LOOK)
         manifest = source.manifest.model_dump(exclude={"source"})
         manifest.update(name=name, label=_label(name))
-        if (sound_map := _sound_map(source.root)) is not None:
+        # ``LookManifest`` does not carry ``sounds`` (``audio_dress`` reads it
+        # on its own), so model_dump above dropped it.
+        if (sound_map := _raw_manifest(source.root).get("sounds")) is not None:
             manifest["sounds"] = sound_map
         if source.source == "shipped" and not templates:
             manifest.update(slots={}, base=source.name)
-            files = _sound_files(source.root)
+            files = _asset_files(source.root)
         else:
             # The whole folder, not only the templates the manifest names: a
             # template may load an image or a stylesheet beside it. Its

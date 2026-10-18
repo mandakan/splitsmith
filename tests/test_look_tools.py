@@ -211,6 +211,22 @@ def test_a_copy_of_broadcast_carries_its_sounds(user_dir: Path, kwargs: dict[str
     assert audio_dress.load_sound_map(root).cues
 
 
+@pytest.mark.parametrize(
+    "kwargs", [{"from_look": "broadcast"}, {"starter": "broadcast"}], ids=["from", "starter"]
+)
+def test_a_copy_of_broadcast_grades_with_its_lut(user_dir: Path, kwargs: dict[str, str]) -> None:
+    """A copy keeps the Look's grade and carries the LUT it names: without
+    the file the copy's exports would go out ungraded, with only a note."""
+    from splitsmith import grade
+
+    root = look_tools.new_look("mine", **kwargs)
+    shipped = looks.shipped_looks_dir() / "broadcast"
+    lut = Path("luts") / "broadcast.cube"
+    assert (root / lut).read_bytes() == (shipped / lut).read_bytes()
+    resolved = grade.resolve_grade("look", looks.load_look("mine"))
+    assert resolved is not None and resolved.source == (root / "luts" / "broadcast.cube").resolve()
+
+
 def test_a_copy_of_a_look_without_sounds_has_none(user_dir: Path) -> None:
     root = look_tools.new_look("mine", from_look="clean")
     assert not (root / "sounds").exists()
