@@ -5,7 +5,7 @@
  * `lib/highlightReel`; this maps it to primitives and runs the job.
  */
 import { Loader2 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 
 import { Button } from "@/components/ui/button";
@@ -51,6 +51,13 @@ export function ReelPanel({
   const [after, setAfter] = useState<ReelAfter>("keep");
   const [job, setJob] = useState<Job | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // In flight from the click until the job is known: a ref, so a second
+  // click in the same tick cannot slip past it (two clicks queued two).
+  const submitting = useRef(false);
+  const [sending, setSending] = useState(false);
+  // A render that failed: the job found a stage it could not use, which
+  // readiness cannot see, so leaving stages out is offered from now on.
+  const [failedOnce, setFailedOnce] = useState(false);
 
   useEffect(() => {
     let live = true;
@@ -87,7 +94,9 @@ export function ReelPanel({
   }
 
   async function render() {
-    if (readiness == null) return;
+    if (readiness == null || submitting.current) return;
+    submitting.current = true;
+    setSending(true);
     setError(null);
     try {
       const submitted = await api.submitHighlightReel(
@@ -97,10 +106,15 @@ export function ReelPanel({
       setJob(submitted);
       const final = await api.pollJob(submitted.id, setJob);
       setJob(final);
-      if (final.status === "failed") setError(final.error ?? "The reel could not be rendered.");
-      else onFinished();
+      if (final.status === "failed") {
+        setError(final.error ?? "The reel could not be rendered.");
+        setFailedOnce(true);
+      } else onFinished();
     } catch (e) {
       setError(apiErrorText(e, "The reel could not be queued."));
+    } finally {
+      submitting.current = false;
+      setSending(false);
     }
   }
 
@@ -123,7 +137,7 @@ export function ReelPanel({
             })}
           </ul>
         ) : null}
-        {!readiness.unlocked && readiness.ready > 0 ? (
+        {(!readiness.unlocked || failedOnce) && readiness.ready > 0 ? (
           <div className="mt-2">
             <Segmented<"wait" | "force">
               label="Unfinished stages"
@@ -191,7 +205,7 @@ export function ReelPanel({
       </div>
 
       <div className="flex flex-wrap items-center gap-3">
-        <Button variant="primary" disabled={block != null || running} onClick={() => void render()}>
+        <Button variant="primary" disabled={block != null || running || sending} onClick={() => void render()}>
           {running ? <Loader2 className="size-3.5 animate-spin" aria-hidden="true" /> : null}
           Render reel
         </Button>

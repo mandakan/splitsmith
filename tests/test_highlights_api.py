@@ -218,6 +218,71 @@ def test_the_reel_uploads_to_youtube_when_asked(tmp_path, monkeypatch):
     assert (args["privacy"], args["again"]) == ("private", True)
 
 
+def test_a_stage_the_job_finds_unusable_fails_with_the_way_out(tmp_path, monkeypatch):
+    """The route counts a trimmed stage as ready; the job checks the file. A
+    stale trim found there must say which stage and how to leave it out."""
+    from splitsmith.highlights import StageReadiness
+    from splitsmith.reel_inputs import ReelOutcome
+
+    from .test_ui_server import _wait_for_job
+
+    client, _root = _ready_match(tmp_path)
+    monkeypatch.setattr(
+        "splitsmith.ui.highlights_api.make_reel",
+        lambda *a, **kw: ReelOutcome((StageReadiness(2, "trim_missing"),), None),
+    )
+    submitted = client.post("/api/shooters/me/highlights", json={"moments": ["fastest_draw"]})
+    job = _wait_for_job(client, submitted.json()["id"])
+    assert job["status"] == "failed"
+    assert "stage 2" in job["error"] and "Render the ready ones" in job["error"]
+
+
+def test_two_submits_at_once_queue_one_reel(monkeypatch):
+    """Two clicks on one server loop: the second must find the first's job,
+    even with the readiness read (a database read hosted) between the dedupe
+    and the submit."""
+    import asyncio
+    import time
+    from types import SimpleNamespace
+
+    from splitsmith.highlights import StageReadiness
+    from splitsmith.ui import highlights_api
+
+    class Jobs:
+        def __init__(self) -> None:
+            self.active: dict | None = None
+            self.submitted = 0
+
+        async def find_active(self, *, kind, shooter_slug):
+            return self.active if kind == highlights_api.JOB_KIND else None
+
+        async def submit(self, *, kind, shooter_slug, args):
+            self.submitted += 1
+            self.active = SimpleNamespace(model_dump=lambda mode=None, n=self.submitted: {"id": f"job-{n}"})
+            return self.active
+
+    def slow_rows(state, slug):
+        time.sleep(0.2)  # the window between the dedupe and the submit
+        return (StageReadiness(1, "ready"),)
+
+    monkeypatch.setattr(highlights_api, "stage_rows", slow_rows)
+    jobs = Jobs()
+    request = SimpleNamespace(
+        app=SimpleNamespace(state=SimpleNamespace(splitsmith_state=SimpleNamespace(jobs=jobs)))
+    )
+    body = highlights_api.HighlightReelRequest(moments=["fastest_draw"])
+
+    async def both():
+        return await asyncio.gather(
+            highlights_api.submit_highlight_reel("me", body, request),
+            highlights_api.submit_highlight_reel("me", body, request),
+        )
+
+    responses = asyncio.run(both())
+    assert jobs.submitted == 1
+    assert [r.body for r in responses][0] == [r.body for r in responses][1]
+
+
 def test_a_reel_run_reads_back_from_the_history_route(tmp_path, monkeypatch):
     client, _root = _ready_match(tmp_path)
     monkeypatch.setattr("splitsmith.ui.highlights_api.make_reel", _fake_make_reel([]))

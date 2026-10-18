@@ -13,6 +13,13 @@ import { api, type ExportOverview, type HighlightReadiness, type Job, type Match
 import { ConfirmProvider } from "@/components/useConfirm";
 import { Export } from "@/pages/Export";
 
+const deployment = vi.hoisted(() => ({ mode: "local" as "hosted" | "local" }));
+
+vi.mock("@/lib/features", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/features")>();
+  return { ...actual, useDeploymentMode: vi.fn(() => ({ mode: deployment.mode, resolved: true })) };
+});
+
 vi.mock("@/lib/api", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/api")>();
   return {
@@ -94,7 +101,7 @@ function job(over: Partial<Job> = {}): Job {
   };
 }
 
-function Shell() {
+function Shell({ origin = "local", capabilities = ["edit", "review"] }: { origin?: string; capabilities?: string[] }) {
   return (
     <Outlet
       context={{
@@ -102,20 +109,20 @@ function Shell() {
         health: { project_root: "/m/bromma" },
         shooters: [],
         refresh: () => {},
-        origin: "local",
-        capabilities: ["edit", "review"],
+        origin,
+        capabilities,
       }}
     />
   );
 }
 
-function renderAt(path: string) {
+function renderAt(path: string, shell: { origin?: string; capabilities?: string[] } = {}) {
   const user = userEvent.setup();
   render(
     <MemoryRouter initialEntries={[path]}>
       <ConfirmProvider>
         <Routes>
-          <Route path="/match/:matchId" element={<Shell />}>
+          <Route path="/match/:matchId" element={<Shell {...shell} />}>
             <Route path="export/:slug" element={<Export />} />
           </Route>
         </Routes>
@@ -126,6 +133,7 @@ function renderAt(path: string) {
 }
 
 beforeEach(() => {
+  deployment.mode = "local";
   vi.mocked(api.getProject).mockResolvedValue(PROJECT);
   vi.mocked(api.getExportOverview).mockResolvedValue(OVERVIEW);
   vi.mocked(api.getHighlights).mockResolvedValue(readiness());
@@ -194,6 +202,36 @@ describe("Export highlight reel mode", () => {
     });
     expect(await screen.findByRole("status")).toHaveTextContent(/Wrote bromma-2026-highlights\.mp4 \(31\.5 s\)/);
     await waitFor(() => expect(vi.mocked(api.getExportRuns).mock.calls.length).toBeGreaterThan(runsBefore));
+  });
+
+  it("sends one render however fast Render is clicked", async () => {
+    vi.mocked(api.submitHighlightReel).mockReturnValue(new Promise(() => {}));
+    const user = renderAt("/match/m1/export/mathias?mode=reel");
+    const render = await screen.findByRole("button", { name: "Render reel" });
+    await user.click(render);
+    await user.click(render);
+    expect(api.submitHighlightReel).toHaveBeenCalledTimes(1);
+  });
+
+  it("offers to leave stages out after a render that could not use one", async () => {
+    vi.mocked(api.submitHighlightReel).mockResolvedValue(job({ status: "pending", result: null }));
+    vi.mocked(api.pollJob).mockResolvedValue(
+      job({ status: "failed", result: null, error: "the reel could not use stage 2 (its trim is missing)." }),
+    );
+    const user = renderAt("/match/m1/export/mathias?mode=reel");
+    expect(screen.queryByRole("button", { name: "Render the ready ones" })).toBeNull();
+    await user.click(await screen.findByRole("button", { name: "Render reel" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent(/stage 2/);
+    await user.click(screen.getByRole("button", { name: "Render the ready ones" }));
+    await user.click(screen.getByRole("button", { name: "Render reel" }));
+    expect(vi.mocked(api.submitHighlightReel).mock.calls.at(-1)?.[1]).toMatchObject({ force: true });
+  });
+
+  it("is not offered on a desktop mirror, which cannot render it", async () => {
+    deployment.mode = "hosted";
+    renderAt("/match/m1/export/mathias", { origin: "desktop", capabilities: ["review"] });
+    await screen.findByRole("group", { name: "Output mode" });
+    expect(screen.queryByRole("button", { name: /highlight reel/i })).toBeNull();
   });
 
   it("offers no YouTube upload while YouTube is not connected", async () => {

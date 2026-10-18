@@ -890,8 +890,10 @@ function ExportInner({ slug }: { slug: string }) {
       value={mode}
       onChange={selectMode}
       options={
+        // A desktop mirror renders on the desktop, which does not run the
+        // reel job: the mode is not offered there.
         onDesktop
-          ? [{ value: "single", label: "Timeline" }, reelOption]
+          ? [{ value: "single", label: "Timeline" }]
           : [
               { value: "single", label: "Timeline" },
               { value: "trims", label: "Trims only" },

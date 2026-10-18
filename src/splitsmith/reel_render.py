@@ -406,18 +406,27 @@ def render_reel(
 
     listing = work_dir / "segments.txt"
     listing.write_text("".join(f"file '{path}'\n" for path, _ in segments))
+    # The reel lands under its name only whole: history and the share page
+    # serve it by that name, so a failed step must leave the previous reel.
+    # The partial sits beside it (one filesystem for the rename) and keeps
+    # the .mp4 suffix ffmpeg picks its muxer by.
+    partial = output_path.with_name(f".{output_path.stem}.partial{output_path.suffix}")
     mix = sfx_mix_command(
-        work_dir / "stitched.mp4", sfx_cues(items), output_path=output_path, ffmpeg_binary=ffmpeg_binary
+        work_dir / "stitched.mp4", sfx_cues(items), output_path=partial, ffmpeg_binary=ffmpeg_binary
     )
-    stitched = output_path if mix is None else work_dir / "stitched.mp4"
-    _run(
-        _build_concat_command(
-            list_path=listing, output_path=stitched, ffmpeg_binary=ffmpeg_binary, reencode_audio=True
-        ),
-        runner=runner,
-    )
-    if mix is not None:
-        _run(mix, runner=runner)
+    stitched = partial if mix is None else work_dir / "stitched.mp4"
+    try:
+        _run(
+            _build_concat_command(
+                list_path=listing, output_path=stitched, ffmpeg_binary=ffmpeg_binary, reencode_audio=True
+            ),
+            runner=runner,
+        )
+        if mix is not None:
+            _run(mix, runner=runner)
+        partial.replace(output_path)
+    finally:
+        partial.unlink(missing_ok=True)
     if segment_cache is not None:
         segment_cache.evict(keep=used)
     return ReelRenderResult(output_path, sum(seconds for _, seconds in segments), tuple(degradations))

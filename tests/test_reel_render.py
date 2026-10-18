@@ -193,7 +193,9 @@ def test_render_reel_encodes_every_item_then_stitches(tmp_path, monkeypatch):
     )
     assert len(calls) == 6  # title card, clip, frame grab, callout card, stitch, sfx mix
     assert "concat" in calls[-2]
-    assert "amix" in " ".join(calls[-1]) and calls[-1][-1] == str(tmp_path / "reel.mp4")
+    # The mix writes beside the reel, then the whole file is renamed in.
+    assert "amix" in " ".join(calls[-1]) and calls[-1][-1] == str(tmp_path / ".reel.partial.mp4")
+    assert (tmp_path / "reel.mp4").exists() and not (tmp_path / ".reel.partial.mp4").exists()
     assert result.duration_seconds == pytest.approx(1.6 + 1.2 + 1.2)
     assert result.degradations == ()
 
@@ -227,6 +229,38 @@ def test_a_reused_work_dir_never_serves_a_stale_card_clip(tmp_path, monkeypatch)
         rasterizer=_AnimatedRaster(),
     )
     assert written == [work / "001_intro_motion.mov"]
+
+
+def test_a_failed_render_never_leaves_a_file_under_the_reels_name(tmp_path, monkeypatch):
+    """History and the share page serve the reel by its name: a render that
+    fails at its last step must not leave a truncated file there, nor touch
+    the previous reel."""
+    from splitsmith.mp4_render import FFmpegError
+
+    def runner(cmd, **kw):
+        out = Path(cmd[-1])
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_bytes(b"partial")
+        if "amix" in " ".join(cmd):
+            raise subprocess.CalledProcessError(1, cmd, "", "mix failed")
+        return subprocess.CompletedProcess(cmd, 0, "", "")
+
+    monkeypatch.setattr("splitsmith.reel_render._has_audio_stream", lambda p: True)
+    output = tmp_path / "out" / "bromma-highlights.mp4"
+    output.parent.mkdir()
+    output.write_bytes(b"the previous reel")
+    items = (ReelCard("001_title", "title", 1.6, "Bromma", sfx=("braam",)),)
+    with pytest.raises(FFmpegError):
+        render_reel(
+            items,
+            sequence=UP,
+            output_path=output,
+            work_dir=tmp_path / "w",
+            runner=runner,
+            rasterizer=_FakeRaster(),
+        )
+    assert output.read_bytes() == b"the previous reel"
+    assert sorted(p.name for p in output.parent.iterdir()) == ["bromma-highlights.mp4"]
 
 
 def test_a_failed_frame_grab_holds_the_callout_on_black(tmp_path, monkeypatch):

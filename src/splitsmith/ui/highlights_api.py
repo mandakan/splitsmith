@@ -7,7 +7,9 @@ and hosted; the render job is what touches footage.
 
 from __future__ import annotations
 
+import asyncio
 import time
+import weakref
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Literal
@@ -152,7 +154,11 @@ async def submit_highlight_reel(slug: str, req: HighlightReelRequest, request: R
     """Queue the reel. A reel already running for the shooter is answered
     with that job (as the match export does); a locked match is refused
     here, naming its stages, rather than failing as a job."""
-    state = request.app.state.splitsmith_state
+    async with _submit_lock():
+        return await _submit(request.app.state.splitsmith_state, slug, req)
+
+
+async def _submit(state: Any, slug: str, req: HighlightReelRequest) -> JSONResponse:
     existing = await state.jobs.find_active(kind=JOB_KIND, shooter_slug=slug)
     if existing is not None:
         return JSONResponse(existing.model_dump(mode="json"))
@@ -187,6 +193,30 @@ async def submit_highlight_reel(slug: str, req: HighlightReelRequest, request: R
 
 
 JOB_KIND = "highlight_reel"
+#: How a failed job names a blocker, in the page's words.
+_BLOCKER_WORDS = {
+    "trim_missing": "its trim is missing or cut for an older beep",
+    "not_audited": "shots not audited",
+    "breakdown_not_opened": "not opened in Breakdown",
+    "proposals_left": "Breakdown proposals left",
+}
+#: One submit at a time per event loop, so the dedupe and the submit cannot
+#: interleave (two clicks queued two renders of the same file). Per loop
+#: because an asyncio lock cannot hand off between loops; a server runs
+#: its requests on one.
+_SUBMIT_LOCKS: weakref.WeakKeyDictionary[asyncio.AbstractEventLoop, asyncio.Lock] = (
+    weakref.WeakKeyDictionary()
+)
+
+
+def _submit_lock() -> asyncio.Lock:
+    loop = asyncio.get_running_loop()
+    lock = _SUBMIT_LOCKS.get(loop)
+    if lock is None:
+        lock = _SUBMIT_LOCKS[loop] = asyncio.Lock()
+    return lock
+
+
 #: Every reel's YouTube tags.
 REEL_TAGS = ["IPSC", "practical shooting", "highlights", "splitsmith"]
 
@@ -242,8 +272,15 @@ def run_highlight_reel(handle: Any, slug: str, request: dict[str, Any], *, state
         ffmpeg_binary=runtime().ffmpeg_binary,
     )
     if outcome.result is None:
-        names = ", ".join(f"stage {r.stage_number} ({r.state})" for r in outcome.blockers) or "no stage"
-        raise RuntimeError(f"no reel: nothing is ready ({names})")
+        # The route counts a trimmed stage as ready; this job checks the file,
+        # so a trim gone or cut for an older beep is first found here.
+        names = ", ".join(
+            f"stage {r.stage_number} ({_BLOCKER_WORDS.get(r.state, r.state)})" for r in outcome.blockers
+        )
+        raise RuntimeError(
+            f"the reel could not use {names or 'any stage'}. Trim it again, or choose Render the ready ones "
+            "to leave it out."
+        )
 
     handle.update(progress=0.95, message="Saving")
     sidecar_path = youtube_sidecar.sidecar_path_for(output)
