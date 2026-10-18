@@ -102,6 +102,17 @@ def match_file_base(project_name: str) -> str:
     return f"{slugify(project_name, fallback='match')}-match"
 
 
+#: A highlight reel's basename (spec 2026-10-18-highlight-reel-design): the
+#: share surface admits exactly this shape.
+REEL_FILE_RE = re.compile(r"^[a-z0-9-]+-highlights(-short)?\.mp4$")
+
+
+def reel_file_name(project_name: str, *, short: bool = False) -> str:
+    """The highlight reel's MP4 in ``exports/``: ``<match>-highlights.mp4``,
+    ``-highlights-short.mp4`` for the Shorts cut."""
+    return f"{slugify(project_name, fallback='match')}-highlights{'-short' if short else ''}.mp4"
+
+
 def is_match_export(filename: str) -> bool:
     """Whether a basename in ``exports/`` is a match-level deliverable.
 

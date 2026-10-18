@@ -193,6 +193,10 @@ class ReelOutcome:
     #: Stages keeping the reel locked; on a forced reel, the stages it left out.
     blockers: tuple[StageReadiness, ...]
     result: ReelRenderResult | None
+    #: The stage numbers the reel was drawn from (the ready ones).
+    stages: tuple[int, ...] = ()
+    #: The end card's figures (best draw, average split, rounds).
+    end_lines: tuple[str, ...] = ()
 
 
 def make_reel(
@@ -228,12 +232,13 @@ def make_reel(
         montage_cuts=SHORT_MONTAGE_CUTS if short else 8,
         config=cfg,
     )
+    figures = end_lines(inputs.stages)
     items = plan_reel(
         picks,
         inputs.footage,
         title=project.name,
         shooter=label,
-        end_lines=end_lines(inputs.stages),
+        end_lines=figures,
         short=short,
     )
     with tempfile.TemporaryDirectory(prefix="splitsmith-reel-") as tmp:
@@ -245,4 +250,6 @@ def make_reel(
             ffmpeg_binary=ffmpeg_binary,
             segment_cache=segment_cache,
         )
-    return ReelOutcome(blockers, result)
+    return ReelOutcome(
+        blockers, result, stages=tuple(s.stage_number for s in inputs.stages), end_lines=figures
+    )

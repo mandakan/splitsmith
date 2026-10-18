@@ -5124,6 +5124,10 @@ def register_job_bodies(state: AppState) -> None:
     state.jobs.bodies.register("shot_detect", _run_shot_detect)
     state.jobs.bodies.register("export", _run_export_for_stage)
     state.jobs.bodies.register("match_export", _run_match_export)
+    from .highlights_api import JOB_KIND as HIGHLIGHT_REEL_KIND
+    from .highlights_api import run_highlight_reel
+
+    state.jobs.bodies.register(HIGHLIGHT_REEL_KIND, functools.partial(run_highlight_reel, state=state))
 
     def _run_render_upload(handle: JobHandle, slug: str, req: MatchExportRequest, command_id: str) -> None:
         """A phone's render-and-upload request (#1100): the match export
