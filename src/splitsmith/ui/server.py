@@ -15206,7 +15206,13 @@ def create_app(
             if not isinstance(shots, list):
                 continue
             triples.append((stg.stage_number, stg.stage_name, shots))
-        result = coach_distributions_module.match_distributions(stages=triples, config=cfg)
+        result = coach_distributions_module.match_distributions(
+            stages=triples,
+            config=cfg,
+            non_standard_starts=frozenset(
+                s.stage_number for s in project.stages if not match_model.is_standard_start(s.start)
+            ),
+        )
         # ``coaching_note`` is private text, same as on the coach GET
         # (``_build_coach_response``) -- this route is on ``_SHARE_PATH_RE``,
         # so a share read gets every top-shot and flagged entry with its
@@ -17020,6 +17026,7 @@ def create_app(
                         time_seconds=0.0,
                         stage_rounds=sd.stage_rounds,
                         placeholder=sd.placeholder,
+                        start=sd.start,
                     )
                 )
         if req.selected_competitor_id is not None:

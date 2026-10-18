@@ -1,6 +1,12 @@
 {
   "entries": [
     {
+      "id": "draw-like-a-timer",
+      "date": "2026-10-18",
+      "title": "Draws compared like a shot timer",
+      "body": "Draw is the time from the beep to your first shot everywhere. Untick Std start under Edit stages for a table start or an unloaded gun to keep that stage out of draw comparisons."
+    },
+    {
       "id": "breakdown-syncs-both-ways",
       "date": "2026-10-18",
       "title": "Edit Breakdown regions on splitsmith.app",
@@ -52,7 +58,7 @@
       "id": "breakdown-draw-region",
       "date": "2026-10-17",
       "title": "Mark the draw, even on the move",
-      "body": "Breakdown has a Draw lane, suggested before every first shot. Drag its start to where your hands moved and keep it: your Draw time is then the draw itself, not the time to the first shot."
+      "body": "Breakdown has a Draw lane, suggested before every first shot. Drag its start to where your hands moved and keep it: Coach then splits your Draw into reaction and presentation."
     },
     {
       "id": "breakdown-on-phone",

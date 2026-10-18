@@ -19,7 +19,7 @@ this module reads, allocates above, and writes back. Allocating
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -64,6 +64,9 @@ class SubmittedStage(BaseModel):
     stage_number: int | None = None
     stage_name: str
     stage_rounds: StageRounds | None = None
+    #: ``standard`` or ``non_standard`` (#1528). ``None`` keeps the stage's
+    #: current start, so an older client's submission never resets it.
+    start: Literal["standard", "non_standard"] | None = None
 
 
 class StageListDiff(BaseModel):
@@ -149,18 +152,21 @@ def diff_stage_list(
                     stage_name=name,
                     stage_rounds=row.stage_rounds,
                     placeholder=True,
+                    start=row.start or "standard",
                 )
             )
             next_number += 1
             continue
         current = by_number[row.stage_number]
-        if name != current.stage_name or row.stage_rounds != current.stage_rounds:
+        start = row.start or current.start
+        if name != current.stage_name or row.stage_rounds != current.stage_rounds or start != current.start:
             diff.renamed.append(
                 MatchStageDefinition(
                     stage_number=current.stage_number,
                     stage_name=name,
                     stage_rounds=row.stage_rounds,
                     placeholder=current.placeholder,
+                    start=start,
                 )
             )
         else:
@@ -493,6 +499,7 @@ async def apply_stage_edit(
                 if update is not None:
                     stage.stage_name = update.stage_name
                     stage.stage_rounds = update.stage_rounds
+                    stage.start = update.start
             live_numbers = {s.stage_number for s in project.stages}
             for definition in diff.added:
                 # Idempotence guard, not defensive noise: see the docstring.
@@ -510,6 +517,7 @@ async def apply_stage_edit(
                         time_seconds=0.0,
                         stage_rounds=definition.stage_rounds,
                         placeholder=True,
+                        start=definition.start,
                     )
                 )
             project.stages.sort(key=lambda s: s.stage_number)
@@ -546,6 +554,7 @@ async def apply_stage_edit(
         if update is not None:
             definition.stage_name = update.stage_name
             definition.stage_rounds = update.stage_rounds
+            definition.start = update.start
     match_numbers = {s.stage_number for s in match.stages}
     match.stages.extend(s for s in diff.added if s.stage_number not in match_numbers)
     match.stages.sort(key=lambda s: s.stage_number)

@@ -41,17 +41,17 @@ def _draw_tile(*, with_movement: bool) -> TileStageData:
 
 
 @pytest.mark.parametrize("with_movement", [False, True])
-def test_a_confirmed_draw_is_the_stages_draw_everywhere(with_movement: bool) -> None:
-    """Spec 2026-10-17: the draw region's length, not the first shot's time;
-    the figures and the engine card's Draw element say the same. A movement
-    beside it is a region of its own and changes nothing here."""
+def test_the_draw_is_the_timer_draw_whatever_the_draw_region_says(with_movement: bool) -> None:
+    """#1528: the Draw is what a shot timer reports, the first shot's time
+    from the beep, even with a confirmed draw region whose start was moved;
+    the figures and the engine card's Draw element say the same."""
     tile = _draw_tile(with_movement=with_movement)
-    assert stage_summary_figures(tile).draw == 0.98
+    assert stage_summary_figures(tile).draw == 2.31
     draws = [e for g in _groups(tile) for e in g.elements if e.caption == "Draw"]
-    assert [e.text for e in draws] == ["0.98"]
+    assert [e.text for e in draws] == ["2.31"]
 
 
-def test_the_upright_card_reads_the_draw_region_too() -> None:
+def test_the_upright_card_shows_the_timer_draw_too() -> None:
     from splitsmith.overlay_summary_cell import summary_groups, upright_summary_scale
 
     tile = _draw_tile(with_movement=False)
@@ -63,7 +63,7 @@ def test_the_upright_card_reads_the_draw_region_too() -> None:
         cell_height=1920,
         upright=True,
     )
-    assert [e.text for g in groups for e in g.elements if e.caption == "Draw"] == ["0.98"]
+    assert [e.text for g in groups for e in g.elements if e.caption == "Draw"] == ["2.31"]
 
 
 def test_without_the_breakdown_the_loaders_read_no_regions(tmp_path: Path) -> None:
@@ -100,11 +100,11 @@ def test_every_tile_builder_carries_the_stages_regions() -> None:
     assert missing == []
 
 
-def test_the_match_summary_reads_the_draw_region_too() -> None:
+def test_the_match_summary_shows_the_timer_draw_too() -> None:
     from splitsmith.match_summary import build_match_summary
 
     summary = build_match_summary([("Skolhuset", _draw_tile(with_movement=True))], title="M", label="Me")
-    assert summary.rows[0].draw == 0.98 and summary.best_draw == 0.98
+    assert summary.rows[0].draw == 2.31 and summary.best_draw == 2.31
 
 
 def test_figures_match_the_engine_card_on_a_stage_with_regions(tmp_path: Path) -> None:

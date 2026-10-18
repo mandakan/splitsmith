@@ -45,9 +45,14 @@ export function TimeBudgetCard({ budget, onSelectShot, className }: TimeBudgetCa
       </div>
       {budget.segments.map((s) => (
         <div key={s.cls} className={cn(GRID, "numeral border-t border-rule py-1.5 text-md text-ink-2")}>
-          <span className="inline-flex items-center gap-2 font-sans text-ink">
+          <span className="inline-flex flex-wrap items-center gap-x-2 font-sans text-ink">
             <i aria-hidden className={hueSwatch(BUDGET_TICK[s.cls])} />
             {BUDGET_LABEL[s.cls]}
+            {s.parts ? (
+              <span className="numeral w-full pl-4 text-sm text-muted">
+                reaction {s.parts.reaction.toFixed(2)} · presentation {s.parts.presentation.toFixed(2)}
+              </span>
+            ) : null}
           </span>
           <span className="text-right">{s.seconds.toFixed(2)}</span>
           <span className="text-right">{Math.round(s.share * 100)} %</span>

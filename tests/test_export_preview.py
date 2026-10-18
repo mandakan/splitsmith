@@ -603,14 +603,14 @@ def test_the_default_summary_previews_the_engine_card(tmp_path: Path, retro_look
     assert raster.frame_requests == [] and any(h.startswith("<!doctype html>") for h in raster.htmls)
 
 
-def test_the_previews_match_summary_reads_a_confirmed_draw(tmp_path: Path) -> None:
-    """Spec 2026-10-17: Best draw and the stage row are the draw region's
-    length, as the export's match summary prints them."""
+def test_the_previews_match_summary_shows_the_timer_draw(tmp_path: Path) -> None:
+    """#1528: Best draw and the stage row are the first shot's time from the
+    beep, a draw region with a moved start or not, as the export prints them."""
     project, _root = _project(tmp_path)
     doc = {
         **AUDIT,
         "events": [{"id": "evt-1", "kind": "draw", "start": 0.5, "end": 1.42, "source": "manual"}],
     }
     summary = ep.match_summary_for(project, {3: doc}, title="T", label="M", work_dir=tmp_path / "work")
-    assert summary.rows[0].draw == pytest.approx(0.92)
-    assert summary.best_draw == pytest.approx(0.92)
+    assert summary.rows[0].draw == pytest.approx(1.42)
+    assert summary.best_draw == pytest.approx(1.42)

@@ -113,7 +113,9 @@ def build_match_summary(
             split_stages += 1
             rounds += tile.shot_count
             every_split.extend(splits)
-            if draw is not None:
+            # Best draw compares like with like: a table start or an
+            # unloaded gun is not a draw to rank beside a holstered one (#1528).
+            if draw is not None and tile.standard_start:
                 draws.append(draw)
         scored = card is not None and not dq
         if scored:

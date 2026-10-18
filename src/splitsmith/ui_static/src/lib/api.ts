@@ -252,6 +252,9 @@ export interface StageEntry {
    *  rather than imported from a scoreboard. Preserved across scoreboard
    *  syncs so a manual value isn't clobbered. */
   time_seconds_manual: boolean;
+  /** ``standard`` or ``non_standard`` (#1528), the match's setting copied to
+   *  every shooter. Optional: an older server omits it (standard). */
+  start?: string;
   /** Lifecycle status computed by the backend (see :class:`StageStatus`).
    *  Optional in the type because legacy responses may omit it; callers
    *  should fall back via :func:`deriveStageStatus` when missing. */
@@ -547,6 +550,9 @@ export interface MatchStageDefinition {
   stage_name: string;
   stage_rounds: StageRounds | null;
   placeholder: boolean;
+  /** ``standard`` (holstered and loaded) or ``non_standard`` (#1528).
+   *  Optional: an older server omits it, which reads as standard. */
+  start?: string;
 }
 
 /** Response from GET /api/match/stages, mirrors ``MatchStagesResponse``. */
@@ -561,6 +567,8 @@ export interface StageEditRow {
   stage_number: number | null;
   stage_name: string;
   stage_rounds?: StageRounds | null;
+  /** Omitted keeps the stage's start (#1528). */
+  start?: "standard" | "non_standard";
 }
 
 /** What a stage-list edit did to one shooter, mirrors

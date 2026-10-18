@@ -134,6 +134,23 @@ class MatchStageDefinition(BaseModel):
     #: ingest of "I shot N stages, let me start now"). Mirrors the legacy
     #: ``StageEntry.placeholder`` flag.
     placeholder: bool = False
+    #: How the stage starts (#1528): ``standard`` (holstered and loaded) or
+    #: ``non_standard`` (a table start, an unloaded gun, hands on the
+    #: head...). Draw comparisons across stages (Coach's baseline, Best draw)
+    #: count standard starts only. A string so finer kinds can follow; any
+    #: value but ``standard`` reads as non-standard (:func:`is_standard_start`).
+    start: str = "standard"
+
+
+#: The start every stage has until the user says otherwise (#1528).
+STANDARD_START = "standard"
+NON_STANDARD_START = "non_standard"
+
+
+def is_standard_start(start: str | None) -> bool:
+    """Whether a stage's start compares with every other standard start's
+    Draw. Unknown values (a kind a newer version wrote) are not standard."""
+    return (start or STANDARD_START) == STANDARD_START
 
 
 class ShooterStageData(BaseModel):
@@ -571,6 +588,7 @@ def legacy_to_match_view(project: MatchProject) -> tuple[Match, Shooter]:
                 stage_name=s.stage_name,
                 stage_rounds=s.stage_rounds,
                 placeholder=s.placeholder,
+                start=s.start,
             )
             for s in project.stages
         ],
@@ -770,6 +788,7 @@ def plan_merge(
                 stage_name=s.stage_name,
                 stage_rounds=s.stage_rounds,
                 placeholder=s.placeholder,
+                start=s.start,
             )
             if existing is None:
                 stages_by_number[s.stage_number] = candidate

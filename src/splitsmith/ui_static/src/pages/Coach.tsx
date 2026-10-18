@@ -225,7 +225,15 @@ function CoachMatchInner({ slug }: { slug: string }) {
         setAnnotations(annot);
         setCoachShots(
           proj.stages
-            .map((s) => ({ stageNumber: s.stage_number, stageName: s.stage_name, shots: coachByStage.get(s.stage_number)?.shots ?? [] }))
+            .map((s) => ({
+              stageNumber: s.stage_number,
+              stageName: s.stage_name,
+              shots: coachByStage.get(s.stage_number)?.shots ?? [],
+              // The budget gives confirmed regions their seconds and compares
+              // standard starts' Draws only (#1528).
+              events: coachByStage.get(s.stage_number)?.events ?? [],
+              standardStart: (s.start ?? "standard") === "standard",
+            }))
             .filter((s) => s.shots.length > 0),
         );
       } catch (e) {
@@ -714,7 +722,11 @@ function CoachStageInner({ stage, slug }: { stage: number; slug: string }) {
   const ws = useStageWorkspace(slug, stage, { peaks: false, link: search });
   const { project, coach, baselines, distributions, error, regions } = ws;
 
-  const budget = useMemo(() => timeBudget(coach?.shots ?? [], distributions), [coach, distributions]);
+  const standardStart = (project?.stages.find((s) => s.stage_number === stage)?.start ?? "standard") === "standard";
+  const budget = useMemo(
+    () => timeBudget(coach?.shots ?? [], distributions, { events: regions.events, standardStart }),
+    [coach, distributions, regions.events, standardStart],
+  );
   // Display only: the region figures count the confirmed regions, as the
   // exports and the share figures do (``reviewFigures``). Regions are
   // Breakdown's to change. Computed above the early returns below: a hook
@@ -823,6 +835,8 @@ function CoachStageInner({ stage, slug }: { stage: number; slug: string }) {
           <StatStrip aria-label="Figures">
             <Stat label="Avg split" value={figures.avgSplit != null ? figures.avgSplit.toFixed(2) : dash} unit={figures.avgSplit != null ? "s" : undefined} tone={figures.avgSplit == null ? "dim" : "ink"} />
             <Stat label="Draw" value={figures.draw != null ? figures.draw.toFixed(2) : dash} unit={figures.draw != null ? "s" : undefined} tone={figures.draw == null ? "dim" : "ink"} />
+            {figures.reaction != null ? <Stat label="Reaction" value={figures.reaction.toFixed(2)} unit="s" /> : null}
+            {figures.presentation != null ? <Stat label="Presentation" value={figures.presentation.toFixed(2)} unit="s" /> : null}
             {figures.reloads > 0 ? <Stat label="Exposed reload" value={figures.exposedReload.toFixed(2)} unit="s" /> : null}
             <Stat label="On the move" value={String(figures.movingShots)} unit={figures.movingShots === 1 ? "shot" : "shots"} />
           </StatStrip>

@@ -236,7 +236,9 @@ def test_a_landscape_record_is_unchanged_and_still_matches(variant: str) -> None
     from splitsmith.ui.exports import overlay_record_matches
 
     record = _record(variant=variant)
+    # ``stage_data`` is every style's since the timer draw (#1528, version 2).
     keys = {"look", "variant", "options", "codec", "max_height", "max_fps", "audit_revision", "theme"}
+    keys |= {"stage_data"}
     assert set(record) == keys | ({"template"} if variant != "default" else set())
     assert overlay_record_matches(record, audit_revision="rev-1", wanted=_record(variant=variant))
     assert overlay_record_matches(record, audit_revision="rev-1")

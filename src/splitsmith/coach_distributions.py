@@ -254,12 +254,16 @@ def match_distributions(
     config: CoachAutoClassifyConfig,
     classes: tuple[IntervalClass, ...] = DEFAULT_HISTOGRAM_CLASSES,
     top_n: int = 5,
+    non_standard_starts: frozenset[int] = frozenset(),
 ) -> MatchDistributionsResponse:
     """Aggregate distributions across an entire match.
 
     ``stages`` is a list of ``(stage_number, stage_name, shots)`` tuples.
     Stages with no shots are skipped entirely; they don't contribute
     empty buckets that misrepresent the shooter's average.
+    ``non_standard_starts`` names the stages that do not start holstered and
+    loaded (#1528): their draws stay out of ``first_shot_seconds``, the
+    Draw's baseline, so a table start never reads as a slow draw.
     """
     aggregate: dict[IntervalClass, list[float]] = {cls: [] for cls in classes}
     first_shot_seconds: list[float] = []
@@ -277,7 +281,7 @@ def match_distributions(
         # flagged list. Re-deriving classes via the same pure helper is
         # cheaper than threading state out of stage_distributions.
         grouped, first_shot_s = _gaps_by_class_for_stage(shots, config)
-        if first_shot_s is not None:
+        if first_shot_s is not None and stage_number not in non_standard_starts:
             first_shot_seconds.append(first_shot_s)
 
         for cls, entries in grouped.items():

@@ -170,35 +170,19 @@ def test_the_breakdown_switch_decides_what_reaches_the_template(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, breakdown: bool
 ) -> None:
     """An export with "Use Breakdown" off draws the stage as one nobody broke
-    down: no regions, no shot moving, shot 1's split the time from the beep."""
+    down: no regions, no shot moving. Shot 1's split is the timer draw, the
+    time from the beep, either way (#1528)."""
     _Encoder(monkeypatch)
     fake = _FakeRasterizer()
     _render(tmp_path, fake, events=_BREAKDOWN, variant="plate", breakdown=breakdown)
     stage = fake.timelines[0]["context"].data["stage"]
     if breakdown:
         assert [e["kind"] for e in stage["events"]] == ["movement", "draw"]
-        assert stage["shots"][0]["split"] == pytest.approx(0.2) and stage["shots"][0]["moving"]
+        assert stage["shots"][0]["split"] == pytest.approx(0.3) and stage["shots"][0]["moving"]
     else:
         assert stage["events"] == [] and stage["reloads"] == []
         assert stage["shots"][0]["split"] == pytest.approx(0.3)
         assert not any(s["moving"] for s in stage["shots"])
-
-
-@pytest.mark.parametrize("breakdown", [True, False])
-def test_the_breakdown_switch_decides_classics_draw(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, breakdown: bool
-) -> None:
-    _Encoder(monkeypatch)
-    seen: list[float | None] = []
-    real = overlay_render.build_frame_states
-
-    def spy(**kwargs: Any) -> Any:
-        seen.append(kwargs.get("draw_seconds"))
-        return real(**kwargs)
-
-    monkeypatch.setattr(overlay_render, "build_frame_states", spy)
-    _render(tmp_path, _FakeRasterizer(), events=_BREAKDOWN, breakdown=breakdown)
-    assert seen == ([pytest.approx(0.2)] if breakdown else [None])
 
 
 def test_the_options_and_position_reach_the_template(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

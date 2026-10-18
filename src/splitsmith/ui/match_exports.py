@@ -28,6 +28,7 @@ from ..events import confirmed_from_doc
 from ..export_naming import match_file_base, stage_display_name, stage_file_base
 from ..identity import ResolvedIdentity
 from ..looks import DEFAULT_VARIANT
+from ..match_model import is_standard_start
 from ..match_project import MatchProject, StageScorecard
 from ..match_summary import DEFAULT_MATCH_SUMMARY_SECONDS, MatchSummary, build_match_summary
 from ..overlay_theme import ThemeName
@@ -117,6 +118,9 @@ class MatchStageInput:
     stage_time_seconds: float | None = None
     stage_time_is_manual: bool = False
     stage_rounds: StageRounds | None = None
+    #: ``StageEntry.start`` is standard (#1528): the match summary's Best
+    #: draw counts only such stages.
+    standard_start: bool = True
 
 
 @dataclass(frozen=True)
@@ -239,6 +243,7 @@ def stage_inputs_for_project(
                 stage_time_seconds=stage.time_seconds if stage.time_seconds > 0 else None,
                 stage_time_is_manual=stage.time_seconds_manual,
                 stage_rounds=stage.stage_rounds,
+                standard_start=is_standard_start(stage.start),
             )
         )
     return inputs
@@ -800,8 +805,8 @@ def export_match(
                             stage_time_is_manual=stage_input.stage_time_is_manual,
                             scorecard=stage_input.scorecard,
                             stage_rounds=stage_input.stage_rounds,
-                            # The Draw (a draw region's length, spec 2026-10-17).
                             events=load_stage_events(stage_input.audit_path, breakdown=request.breakdown),
+                            standard_start=stage_input.standard_start,
                         ),
                     )
                     for stage_input in stages

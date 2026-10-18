@@ -1,22 +1,27 @@
 /**
  * The Coach review page's figures (#1374, epic #1370). Coach reviews a
  * stage; it edits notes and flags only, so every figure here is display:
- * the average split by the shared rule (``statisticSplits``), the draw (a
- * confirmed draw region's length, else the first shot's time from the beep:
- * ``drawSeconds``), and the region figures over the
+ * the average split by the shared rule (``statisticSplits``), the draw (what
+ * a shot timer reports, the first shot's time from the beep: ``drawSeconds``,
+ * #1528) and its split at a moved draw region (``drawParts``), and the region
+ * figures over the
  * confirmed regions only (``confirmedEvents``), the ones every export and
  * the share figures count. A proposal nobody kept never moves a figure.
  * Pure, no React.
  */
 import type { CoachShot, StageEvent } from "@/lib/api";
-import { confirmedEvents, drawSeconds, summarize } from "@/lib/events";
+import { confirmedEvents, drawParts, drawSeconds, summarize } from "@/lib/events";
 import { statisticSplits } from "@/lib/splits";
 
 export interface ReviewFigures {
   /** Mean of the statistic splits; null when the stage has none. */
   avgSplit: number | null;
-  /** A confirmed draw region's length, else the first shot's time from the beep; null without either. */
+  /** The timer draw: the first shot's time from the beep; null without shots. */
   draw: number | null;
+  /** Beep to the hands moving: a confirmed draw region's start, when it was moved off the beep. */
+  reaction: number | null;
+  /** The hands moving to the first shot, when ``reaction`` is set; the two sum to ``draw``. */
+  presentation: number | null;
   /** Shots inside a confirmed movement region. */
   movingShots: number;
   /** Confirmed reloads. */
@@ -28,6 +33,8 @@ export interface ReviewFigures {
 export function reviewFigures(shots: readonly CoachShot[], events: readonly StageEvent[]): ReviewFigures {
   const ordered = [...shots].sort((a, b) => a.time_from_beep - b.time_from_beep);
   const splits = statisticSplits(ordered);
+  const first = ordered.length ? ordered[0].time_from_beep : null;
+  const parts = drawParts(first, [...events]);
   const summary = summarize(
     ordered.map((s) => s.time_from_beep),
     confirmedEvents([...events]),
@@ -35,7 +42,9 @@ export function reviewFigures(shots: readonly CoachShot[], events: readonly Stag
   );
   return {
     avgSplit: splits.length ? splits.reduce((a, b) => a + b, 0) / splits.length : null,
-    draw: drawSeconds(ordered.length ? ordered[0].time_from_beep : null, [...events]),
+    draw: drawSeconds(first, [...events]),
+    reaction: parts?.reaction ?? null,
+    presentation: parts?.presentation ?? null,
     movingShots: summary.moving_shots,
     reloads: summary.reloads,
     exposedReload: summary.exposed_reload_s,

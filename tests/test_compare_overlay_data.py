@@ -292,9 +292,9 @@ def test_confirmed_reloads_and_movement_reach_the_grid_tile(tmp_path, with_proje
 
 
 @pytest.mark.parametrize("with_project", [False, True])
-def test_a_confirmed_draw_is_the_grid_tiles_draw(tmp_path, with_project):
-    """Spec 2026-10-17: the grid's Draw is the draw region's length, from
-    both of ``_load_tile``'s returns; a proposed draw changes nothing."""
+def test_the_grid_tiles_draw_is_the_timer_draw(tmp_path, with_project):
+    """#1528: the grid's Draw is the first shot's time from the beep, from
+    both of ``_load_tile``'s returns, a confirmed draw region or not."""
     root = tmp_path / "ann"
     if with_project:
         _write_project(root)
@@ -303,7 +303,7 @@ def test_a_confirmed_draw_is_the_grid_tiles_draw(tmp_path, with_project):
     doc["events"] = [{"id": "evt-1", "kind": "draw", "start": 1.33, "end": 2.31, "source": "manual"}]
     audit.write_text(json.dumps(doc))
     tile = overlay_data.load_overlay_data([_bundle(tmp_path, "ann", audit=audit)])[("ann", 1)]
-    assert tile.draw == pytest.approx(0.98)
+    assert tile.draw == pytest.approx(2.31)
     doc["events"][0]["source"] = "auto"
     audit.write_text(json.dumps(doc))
     tile = overlay_data.load_overlay_data([_bundle(tmp_path, "ann", audit=audit)])[("ann", 1)]

@@ -124,12 +124,12 @@ class OverlayStyleFields(BaseModel):
 
 
 #: The version of what :func:`hud_stage_data` hands every template as
-#: ``data.stage``. Bump it when that output changes for the same shots and
-#: regions (``tests/test_hud_data_pins.py`` fails until you do): a template
-#: overlay's record carries it from version 2 on, so every overlay drawn with
-#: the old data misses once and is drawn again. Version 1 records no key, so
-#: records from before it existed match.
-STAGE_DATA_VERSION = 1
+#: ``data.stage``, and of the per-shot rules Classic draws by too. Bump it
+#: when that output changes for the same shots and regions
+#: (``tests/test_hud_data_pins.py`` fails until you do): every overlay's
+#: record carries it from version 2 on, so every overlay drawn with the old
+#: data misses once and is drawn again. Version 1 recorded no key.
+STAGE_DATA_VERSION = 2  # 2: shot 1's split is the timer draw again (#1528)
 
 #: The ``layout`` an upright overlay's record carries: the layout that
 #: keeps out of the platform safe area (issue #1394). Bump the suffix when
@@ -268,9 +268,10 @@ def overlay_settings(
     other record carries no such key. Passed like ``audit_revision``, read
     before the render.
 
-    A template style also records ``stage_data`` (:data:`STAGE_DATA_VERSION`)
-    once that is past 1: a rule change in ``data.stage`` moves the pixels
-    without moving any input above.
+    Every style records ``stage_data`` (:data:`STAGE_DATA_VERSION`) once that
+    is past 1: a rule change in what the overlay draws per shot moves the
+    pixels without moving any input above. Classic reads the same rules
+    (version 2, #1528, moved shot 1's split for both).
 
     An overlay drawn with the export's "Use Breakdown" off records
     ``breakdown: false``: it drew no region, so it never serves an export that
@@ -288,8 +289,8 @@ def overlay_settings(
     }
     if variant != DEFAULT_VARIANT:
         settings["template"] = overlay_template_identity(look, variant) if template is _READ_NOW else template
-        if STAGE_DATA_VERSION > 1:
-            settings["stage_data"] = STAGE_DATA_VERSION
+    if STAGE_DATA_VERSION > 1:
+        settings["stage_data"] = STAGE_DATA_VERSION
     if upright:
         settings["layout"] = UPRIGHT_LAYOUT
     if short_head is not None:
@@ -361,8 +362,7 @@ def hud_stage_data(
         "shots": [
             {
                 "t": _clip(beep_in_clip, shot.time_from_beep),
-                # Shot 1's split is the draw: a confirmed draw region's
-                # length when there is one (spec 2026-10-17).
+                # Shot 1's split is the draw a shot timer reports (#1528).
                 "split": round(draw_seconds(shot.split, regions) if index == 0 else shot.split, 6),
                 "cls": shot.interval_class,
                 "label": CLASS_LABELS.get(shot.interval_class) if shot.interval_class else None,

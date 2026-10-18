@@ -1371,7 +1371,20 @@ a draw. A region starting before the beep (what moving a beep later leaves
 behind) starts at the beep instead, or is skipped when it ends there; any
 other corrupt known region still fails it. The stage's **Draw figure**
 is ``events.draw_seconds`` (TS ``drawSeconds``, ``cases.json`` ``draws``):
-a confirmed draw region's length, else the first shot's time from the beep.
+what a shot timer reports, the first shot's time from the beep, whatever the
+regions say (#1528; on 2026-10-17 it was briefly the region's length). A
+confirmed draw region whose start was moved splits it into reaction and
+presentation (``events.draw_parts`` / ``drawParts``), which Coach shows
+beside the Draw and in the budget's Draw row. A stage has a **start**
+(``MatchStageDefinition.start`` copied to ``StageEntry.start`` like
+``stage_rounds``, set through the stage editor's "Std start" column, kept
+across a scoreboard re-import): ``standard`` (holstered and loaded) or
+``non_standard``; any other value reads as non-standard
+(``match_model.is_standard_start``). Draws are compared across stages only
+between standard starts: the match summary's Best draw
+(``TileStageData.standard_start``), Coach's Draw baseline
+(``match_distributions(non_standard_starts=)``) and the budget's Draw delta
+and outliers (``timeBudget``'s ``standardStart``).
 Every Draw surface reads it: ``TileStageData.draw`` (the summary card, its
 figures, the match summary, the compare cell; every tile builder carries
 the stage's confirmed ``events`` for it), ``share_card.stage_figures(...,
@@ -1585,9 +1598,9 @@ the existing style-toggle seam), palette ``reload`` (``#FBBF24``),
 All five template styles draw them; Classic (drawtext) and the compare
 grid's sprite overlay draw no regions. A reload or a draw on the move
 draws split on the stage bar (it in the top half, the movement under it,
-``hud.js`` ``pieces``). Shot 1's split is the Draw on every overlay: a
-confirmed draw region's length (``hud_stage_data``'s first ``split``,
-Classic's ``build_frame_states(draw_seconds=)``). On an
+``hud.js`` ``pieces``). Shot 1's split is the Draw on every overlay, the
+timer draw (``hud_stage_data``'s first ``split``, Classic's
+``build_frame_states``). On an
 upright page the context also carries ``data.safe_area`` (see "The upright
 HUD"). The
 stage-event helpers the five styles share (the stage bar and its bands,
