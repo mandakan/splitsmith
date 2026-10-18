@@ -19919,6 +19919,12 @@ def create_app(
 
     app.include_router(looks_router)
 
+    # The highlight reel: readiness, the moment menu and the render job's
+    # submit route (spec 2026-10-18-highlight-reel-design, part 2).
+    from .highlights_api import router as highlights_router
+
+    app.include_router(highlights_router)
+
     # Share-link OG card PNGs (spec 2026-08-09). Same lazy-import,
     # always-registered idiom as sync_router and device_router: every
     # route 404s outside hosted mode (see share_og._hosted_gate).

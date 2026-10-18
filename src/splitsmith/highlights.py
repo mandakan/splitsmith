@@ -8,13 +8,13 @@ left.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
 from typing import Any, Literal, get_args
 
 from .coach import statistic_split_shots
 from .config import DEFAULT_MOMENTS, HighlightConfig, MomentKind
-from .match_project import StageStatus
+from .match_project import MatchProject, StageStatus
 from .stage_summary_data import TileStageData
 
 ReadinessState = Literal[
@@ -63,6 +63,31 @@ def stage_readiness(
     if not has_footage:
         return StageReadiness(stage_number, "trim_missing")
     return StageReadiness(stage_number, "ready")
+
+
+def readiness_for_project(
+    project: MatchProject,
+    statuses: Mapping[int, StageStatus],
+    audit_docs: Mapping[int, dict[str, Any] | None],
+) -> tuple[StageReadiness, ...]:
+    """Every stage's readiness from what a request can see: the project and
+    its audit docs, never a trim (hosted keeps them in storage). A stage
+    counts as having footage once its primary has a beep and was trimmed;
+    the render job checks the file itself and reports ``trim_missing``."""
+    rows = []
+    for stage in project.stages:
+        primary = stage.primary()
+        trimmed = bool(primary and primary.beep_time is not None and primary.processed.get("trim"))
+        rows.append(
+            stage_readiness(
+                stage.stage_number,
+                statuses.get(stage.stage_number, StageStatus.todo),
+                audit_docs.get(stage.stage_number),
+                has_video=primary is not None,
+                has_footage=trimmed,
+            )
+        )
+    return tuple(rows)
 
 
 #: States that leave a stage out of the reel without blocking it.
