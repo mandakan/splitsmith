@@ -104,6 +104,28 @@ describe("previewCaption / previewLine", () => {
 });
 
 
+describe("previewBody and the colour grade", () => {
+  const graded: LookInfo = { ...BUILTIN_LOOKS[0], name: "freedoom", label: "Freedoom", source: "user", grade: true };
+  const looks = [BUILTIN_LOOKS[0], graded];
+  const base = { ...DEFAULT_EXPORT_SETTINGS, look: "freedoom", outputFormat: "mp4" as const };
+
+  it("sends a chosen grade for one shooter's MP4, and nothing for an untouched one", () => {
+    expect(previewBody({ ...base, grade: "preset:noir", gradeStrength: 0.5 }, "title", 1, "", looks)).toMatchObject({
+      grade: "preset:noir",
+      grade_strength: 0.5,
+    });
+    expect(previewBody(base, "title", 1, "", looks)).not.toHaveProperty("grade");
+  });
+
+  it("previews a graded Look ungraded where the export will not grade it", () => {
+    expect(previewBody({ ...base, mode: "compare" }, "title", 1, "", looks).grade).toBe("none");
+    expect(previewBody({ ...base, outputFormat: "fcpxml" }, "title", 1, "", looks).grade).toBe("none");
+    expect(previewBody({ ...base, outputFormat: "fcpxml", look: "splitsmith" }, "title", 1, "", looks)).not.toHaveProperty(
+      "grade",
+    );
+  });
+});
+
 describe("previewBody with a Look (#1246)", () => {
   const two = [{ name: "default", preview: null }, { name: "rise", preview: null }];
   const CLEAN: LookInfo[] = [

@@ -1,6 +1,12 @@
 {
   "entries": [
     {
+      "id": "color-grade",
+      "date": "2026-10-18",
+      "title": "Colour grade your video",
+      "body": "Pick a grade under Look on the Export page, or your Look's own, and set its strength. In the desktop app, Add LUT takes a .cube file of your own. The overlay and cards keep their colours."
+    },
+    {
       "id": "look-sounds",
       "date": "2026-10-18",
       "title": "Music and sound effects from your Look",

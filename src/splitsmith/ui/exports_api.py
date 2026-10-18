@@ -620,6 +620,9 @@ def check_match_export(state: Any, slug: str, req: MatchExportRequest) -> None:
         for field in ("intro_path", "outro_path"):
             if getattr(req, field):
                 raise HTTPException(status_code=400, detail=f"{field} is not available in hosted mode")
+        # Your own LUTs are files on the desktop that uploaded them.
+        if req.grade.startswith("user:"):
+            raise HTTPException(status_code=400, detail="your own LUTs grade exports in the desktop app only")
     project = state.shooter_project(slug)
     if not req.stage_numbers:
         raise HTTPException(status_code=400, detail="stage_numbers cannot be empty")

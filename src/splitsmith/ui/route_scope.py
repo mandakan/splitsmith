@@ -56,6 +56,9 @@ LOCAL_ONLY_ROUTES: frozenset[tuple[str, str]] = frozenset(
         ("GET", "/api/looks/{name}/fonts"),
         ("POST", "/api/looks/{name}/fonts"),
         ("GET", "/api/looks/{name}/fonts/{file}"),
+        # Your own colour grade LUTs: files on this machine, like a Look's fonts.
+        ("GET", "/api/grades/user"),
+        ("POST", "/api/grades"),
         ("POST", "/api/shooters/{slug}/videos/reveal"),
         # Merges legacy project folders named by path.
         ("POST", "/api/match/merge/plan"),

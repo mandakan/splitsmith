@@ -76,6 +76,8 @@ const matchPayload: Required<MatchExportRequestPayload> = {
   closing_card: true,
   made_with: false,
   look_sounds: false,
+  grade: "preset:noir",
+  grade_strength: 0.5,
   breakdown: false,
   account_brand: false,
   logo_spots: ["wipe"],

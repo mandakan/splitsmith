@@ -19932,6 +19932,11 @@ def create_app(
 
     app.include_router(looks_router)
 
+    # The colour grade gallery: presets, your LUTs and their thumbnails.
+    from .grades_api import router as grades_router
+
+    app.include_router(grades_router)
+
     # The highlight reel: readiness, the moment menu and the render job's
     # submit route (spec 2026-10-18-highlight-reel-design, part 2).
     from .highlights_api import router as highlights_router

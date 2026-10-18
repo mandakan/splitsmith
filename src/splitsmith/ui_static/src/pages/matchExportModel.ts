@@ -5,6 +5,7 @@
  * result without going through React.
  */
 
+import { gradeFields, type GradeChoice, type GradeTile } from "@/lib/grades";
 import type {
   CompareGridRequestPayload,
   CompareGridResult,
@@ -213,6 +214,10 @@ export interface MatchExportPayloadInput {
   look?: LookChoice;
   /** The MP4 kinds the catalog offers (``requestLook``), for the kind filter. */
   kinds?: readonly string[];
+  /** The colour grade (``lib/grades``); sent only when not the defaults. */
+  grade?: GradeChoice;
+  /** The Grade row's tiles, so a choice it no longer lists sends the default. */
+  gradeTiles?: readonly GradeTile[];
 }
 
 /** The single-shooter match-export request body, for either the desk
@@ -257,5 +262,6 @@ export function buildMatchExportPayload(input: MatchExportPayloadInput): MatchEx
     overlay_max_fps: null,
     project_name: input.projectName,
     ...(input.useBreakdown === false ? { breakdown: false } : {}),
+    ...gradeFields(input.grade, outputFormat, input.gradeTiles),
   };
 }

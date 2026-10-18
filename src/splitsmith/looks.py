@@ -652,6 +652,9 @@ class LookInfo(BaseModel):
     #: It carries sounds (:func:`look_has_sounds`): the Export page offers
     #: the switch that mixes them into a rendered MP4.
     sounds: bool = False
+    #: It grades the footage (``look.json``'s ``grade``): the Export page offers
+    #: "the Look's grade" among the grades.
+    grade: bool = False
 
 
 def _preview_url(look: Look, slot: str, variant: str) -> str | None:
@@ -719,6 +722,7 @@ def look_catalog() -> list[LookInfo]:
                 preview=_preview_url(look, "look", DEFAULT_VARIANT),
                 slots=slots,
                 sounds=look_has_sounds(look),
+                grade=look.manifest.grade is not None,
             )
         )
     return out

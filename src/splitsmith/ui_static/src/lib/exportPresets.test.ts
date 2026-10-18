@@ -200,6 +200,15 @@ describe("isDirty", () => {
     expect(isDirty(applyBody(DEFAULT_EXPORT_SETTINGS, YOUTUBE), YOUTUBE)).toBe(false);
   });
 
+  it("is false for a body stored before grades existed", () => {
+    const legacy: Partial<ExportPresetBody> = { ...YOUTUBE };
+    delete legacy.grade;
+    delete legacy.grade_strength;
+    expect(isDirty(applyBody(DEFAULT_EXPORT_SETTINGS, legacy as ExportPresetBody), legacy as ExportPresetBody)).toBe(
+      false,
+    );
+  });
+
   it("is true after a recurring field changes", () => {
     const s = applyBody(DEFAULT_EXPORT_SETTINGS, YOUTUBE);
     expect(isDirty({ ...s, headPad: 2 }, YOUTUBE)).toBe(true);
@@ -424,5 +433,19 @@ describe("look_sounds", () => {
     const offSettings = { ...DEFAULT_EXPORT_SETTINGS, renderOptions: off };
     expect(settingsToBody(offSettings).look_sounds).toBe(false);
     expect(applyBody(DEFAULT_EXPORT_SETTINGS, settingsToBody(offSettings)).renderOptions.lookSounds).toBe(false);
+  });
+});
+
+describe("grade", () => {
+  it("is the Look's own by default, a body stored before it shipped applies that, and a choice round-trips", () => {
+    expect(DEFAULT_EXPORT_SETTINGS.grade).toBe("look");
+    expect(DEFAULT_EXPORT_SETTINGS.gradeStrength).toBeNull();
+    const legacy: Partial<ExportPresetBody> = { ...YOUTUBE };
+    delete legacy.grade;
+    delete legacy.grade_strength;
+    const chosen = { ...DEFAULT_EXPORT_SETTINGS, grade: "preset:noir", gradeStrength: 0.4 };
+    expect(applyBody(chosen, legacy as ExportPresetBody).grade).toBe("look");
+    const back = applyBody(DEFAULT_EXPORT_SETTINGS, settingsToBody(chosen));
+    expect([back.grade, back.gradeStrength]).toEqual(["preset:noir", 0.4]);
   });
 });
