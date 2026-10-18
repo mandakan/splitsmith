@@ -34,6 +34,9 @@ class TimelineEntry:
     #: The cues the item's own template declared (``window.sounds()``), on
     #: its clock: 0 is ``start``. Checked where they are played.
     cues: tuple[dict[str, Any], ...] = ()
+    #: A stage only: whether its segment carried the HUD overlay, so a
+    #: pass after the export can say a stage went out without it.
+    overlay: bool | None = None
 
 
 def timeline_path(video: Path) -> Path:

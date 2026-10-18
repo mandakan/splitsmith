@@ -10,7 +10,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from splitsmith import mp4_render
+from splitsmith import composition, mp4_render
 from splitsmith.render_timeline import TimelineEntry, read_timeline, timeline_path
 
 from .test_mp4_render import (
@@ -86,6 +86,7 @@ def test_the_sidecar_is_plain_json_beside_the_video(tmp_path: Path) -> None:
         "end": pytest.approx(14.3),
         "beep": 3.0,
         "cues": [],
+        "overlay": False,
     }
 
 
@@ -113,3 +114,17 @@ def test_a_cards_template_sounds_ride_its_entry(tmp_path: Path) -> None:
     assert by_kind["title_page"].cues == cues and by_kind["closing"].cues == cues
     assert by_kind["stage"].cues == () and by_kind["intro"].cues == ()
     assert read_timeline(timeline_path(tmp_path / "m.mp4")) == result.timeline
+
+
+def test_a_stage_entry_says_whether_it_carried_a_hud(tmp_path: Path) -> None:
+    """A stage entry records whether its segment had an overlay, so the dress
+    pass can say a stage went out without its HUD; other items say nothing."""
+    import dataclasses
+
+    comp = _transitioned_composition(tmp_path, kind=None)
+    hud = composition.ConnectedClip(asset=comp.stages[0].primary, label="HUD", role="overlay")
+    comp = dataclasses.replace(
+        comp, stages=(dataclasses.replace(comp.stages[0], overlay=hud), comp.stages[1])
+    )
+    result = _render(tmp_path, comp, name="m", runner=_writes_output([]))
+    assert [(e.name, e.overlay) for e in result.timeline] == [("stage_000", True), ("stage_001", False)]

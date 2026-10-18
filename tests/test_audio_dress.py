@@ -219,3 +219,27 @@ def test_a_bad_template_cue_costs_that_cue_alone(tmp_path: Path) -> None:
     placed, notes = place_template_cues(SoundMap(), [card], tmp_path)
     assert [(p.path.name, p.start) for p in placed] == [("ok.wav", 10.2)]
     assert len(notes) == 4 and all(n.startswith("boundary_000: ") for n in notes)
+
+
+def test_a_stage_without_its_hud_is_named_when_the_look_draws_one(tmp_path: Path) -> None:
+    """The export went out with a stage missing the HUD the Look draws (a
+    stale overlay left out): the dress pass says so, it never fixes it."""
+    root = _look(tmp_path, [{"on": "stage", "play": "a.wav", "at": "beep"}], {"a.wav": b"x"})
+    manifest = json.loads((root / "look.json").read_text())
+    manifest["slots"] = {"overlay": {"doom": "hud.html"}}
+    (root / "look.json").write_text(json.dumps(manifest))
+    export = tmp_path / "m.mp4"
+    with_hud = TimelineEntry(
+        kind="stage", name="stage_000", stage_index=0, start=0, end=5, beep=0, overlay=True
+    )
+    bare = TimelineEntry(kind="stage", name="stage_001", stage_index=1, start=5, end=9, beep=5, overlay=False)
+    write_timeline(timeline_path(export), (with_hud, bare))
+
+    def writes(argv, **kwargs):  # type: ignore[no-untyped-def]
+        Path(argv[-1]).write_bytes(b"mp4")
+
+    result = dress_export(export, root, runner=writes)
+    assert result.notes == ("stage_001 went out without its HUD overlay: export it again to draw it",)
+
+    plain = _look(tmp_path / "plain", [{"on": "stage", "play": "a.wav", "at": "beep"}], {"a.wav": b"x"})
+    assert dress_export(export, plain, runner=writes).notes == ()

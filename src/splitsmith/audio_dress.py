@@ -242,10 +242,24 @@ def dress_command(
     return tuple(args)
 
 
+def _stages_without_hud(timeline: Sequence[TimelineEntry], look_root: Path) -> tuple[str, ...]:
+    """The stages that went out without an overlay when the Look draws a HUD
+    style: the dress pass cannot draw one, but it can say so."""
+    doc = json.loads((look_root / "look.json").read_text(encoding="utf-8"))
+    if not (doc.get("slots") or {}).get("overlay"):
+        return ()
+    return tuple(
+        f"{e.name} went out without its HUD overlay: export it again to draw it"
+        for e in timeline
+        if e.kind == "stage" and e.overlay is False
+    )
+
+
 @dataclass(frozen=True)
 class DressResult:
     path: Path
-    #: Template cues left out, each naming its item and why.
+    #: Template cues left out, each naming its item and why, and stages
+    #: that went out without the HUD the Look draws.
     notes: tuple[str, ...] = ()
 
 
@@ -269,7 +283,9 @@ def dress_export(
     if not sidecar.is_file():
         raise DressError(f"{export.name} has no timeline ({sidecar.name}); export it again to dress it")
     sounds = load_sound_map(look_root)
-    placed, notes = place_template_cues(sounds, read_timeline(sidecar), look_root / "sounds")
+    timeline = read_timeline(sidecar)
+    placed, notes = place_template_cues(sounds, timeline, look_root / "sounds")
+    notes = (*notes, *_stages_without_hud(timeline, look_root))
     if not placed:
         raise DressError(f"nothing to play: no cue of the Look's lands on {export.name}")
     out = output_path or dressed_path(export)

@@ -1014,15 +1014,24 @@ def _timeline_entry(item: SpineItem, *, at: float, sounds: tuple[dict[str, Any],
     end = at + item.duration_seconds + item.tail_cut_seconds
     stage_index: int | None = None
     beep: float | None = None
+    overlay: bool | None = None
     if isinstance(item, _StageItem):
         stage_index = item.index
+        overlay = item.plan.stage.overlay is not None
         beep = start + item.plan.stage.beep_offset_seconds - item.plan.head_trim_seconds
     elif isinstance(item, _SummaryItem):
         stage_index = item.stage_index
     elif isinstance(item, _StillItem) and item.kind == "slate":
         stage_index = item.backdrop_stage_index
     return TimelineEntry(
-        kind=item.kind, name=item.name, stage_index=stage_index, start=start, end=end, beep=beep, cues=sounds
+        kind=item.kind,
+        name=item.name,
+        stage_index=stage_index,
+        start=start,
+        end=end,
+        beep=beep,
+        cues=sounds,
+        overlay=overlay,
     )
 
 
