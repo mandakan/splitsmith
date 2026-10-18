@@ -9422,7 +9422,9 @@ def create_app(
 
                 match_capabilities = share_scope_capabilities(current_share_scope.get())
             else:
-                match_capabilities = capabilities_for_origin(owner_row.origin)
+                match_capabilities = capabilities_for_origin(
+                    owner_row.origin, merges_events=bool(getattr(owner_row, "desktop_merges_events", False))
+                )
             needed = required_capability(request.method, rest)
             if needed is not None and needed not in match_capabilities:
                 return JSONResponse(status_code=403, content={"detail": "read_only_mirror"})

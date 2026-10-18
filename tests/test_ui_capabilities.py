@@ -8,6 +8,7 @@ from __future__ import annotations
 import pytest
 
 from splitsmith.ui.capabilities import (
+    BREAKDOWN,
     COMMENT_WRITE,
     EDIT,
     REVIEW,
@@ -22,12 +23,19 @@ def test_origin_capability_sets() -> None:
     # hosted and desktop both grant COMMENT_WRITE: an authenticated owner
     # moderates (DELETEs) a comment someone else posted on their own match
     # through the same route a comment-scoped share token posts through.
-    assert capabilities_for_origin("hosted") == {EDIT, REVIEW, SHARE_MANAGE, COMMENT_WRITE}
+    assert capabilities_for_origin("hosted") == {EDIT, REVIEW, BREAKDOWN, SHARE_MANAGE, COMMENT_WRITE}
     assert capabilities_for_origin("desktop") == {REVIEW, SHARE_MANAGE, COMMENT_WRITE}
-    assert capabilities_for_origin("local") == {EDIT, REVIEW}
+    # A mirror takes region edits once its desktop merges them (spec 2026-10-18).
+    assert capabilities_for_origin("desktop", merges_events=True) == {
+        REVIEW,
+        BREAKDOWN,
+        SHARE_MANAGE,
+        COMMENT_WRITE,
+    }
+    assert capabilities_for_origin("local") == {EDIT, REVIEW, BREAKDOWN}
     # None means "no aliased match bound" (legacy bare-path local traffic)
     # and gets the local set - same fallback get_project uses for origin.
-    assert capabilities_for_origin(None) == {EDIT, REVIEW}
+    assert capabilities_for_origin(None) == {EDIT, REVIEW, BREAKDOWN}
 
 
 def test_share_scope_capability_sets() -> None:
@@ -110,9 +118,11 @@ def test_share_scope_capability_sets() -> None:
         # A shot id outside [A-Za-z0-9._-] is not addressable by id.
         ("PATCH", "shooters/anna/stages/3/shots/by-id/bad id/coach", EDIT),
         ("PATCH", "shooters/anna/stages/3/shots/by-id//coach", EDIT),
-        # The stage events PUT (spec 2026-10-08) is desktop-owned, so it is
-        # not a review route: a mirror must refuse it.
-        ("PUT", "shooters/anna/stages/3/events", EDIT),
+        # The stage events PUT needs BREAKDOWN (spec 2026-10-18), which a
+        # mirror has only once its desktop merges regions; a near miss is EDIT.
+        ("PUT", "shooters/anna/stages/3/events", BREAKDOWN),
+        ("PUT", "shooters/anna/stages/3/events/x", EDIT),
+        ("POST", "shooters/anna/stages/3/events", EDIT),
         # The stage note is one method on one exact path.
         ("PUT", "shooters/anna/stages/3/stage-note", EDIT),
         ("PATCH", "shooters/anna/stages/3/stage-note/", EDIT),

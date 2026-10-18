@@ -298,7 +298,7 @@ describe("a failed region save says so in the inspector", () => {
 
 describe("Breakdown and the edit capability", () => {
   it("a local match is editable: the handles show", async () => {
-    vi.mocked(api.getProject).mockResolvedValue({ ...(PROJECT as object), origin: "local", capabilities: ["edit", "review"] } as never);
+    vi.mocked(api.getProject).mockResolvedValue({ ...(PROJECT as object), origin: "local", capabilities: ["edit", "review", "breakdown"] } as never);
     vi.mocked(api.getStageCoach).mockResolvedValue(
       stageWith([{ id: "evt-1", kind: "reload", start: 8.05, end: 9.47, source: "auto" }]),
     );
@@ -306,6 +306,19 @@ describe("Breakdown and the edit capability", () => {
     expect(await screen.findByTestId("handle-evt-1-start")).toBeInTheDocument();
     expect(screen.getByTestId("handle-evt-1-end")).toBeInTheDocument();
     expect(screen.queryByRole("list", { name: "Regions" })).toBeNull();
+  });
+
+  it("a mirror whose desktop merges regions is editable (spec 2026-10-18)", async () => {
+    vi.mocked(api.getProject).mockResolvedValue({
+      ...(PROJECT as object),
+      origin: "desktop",
+      capabilities: ["review", "breakdown", "share_manage", "comment_write"],
+    } as never);
+    vi.mocked(api.getStageCoach).mockResolvedValue(
+      stageWith([{ id: "evt-1", kind: "reload", start: 8.05, end: 9.47, source: "auto" }]),
+    );
+    renderBreakdown();
+    expect(await screen.findByTestId("handle-evt-1-start")).toBeInTheDocument();
   });
 
   it("a desktop-origin mirror shows the lanes read-only with the list and never writes", async () => {

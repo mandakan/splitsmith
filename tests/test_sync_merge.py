@@ -1349,11 +1349,12 @@ def test_compare_camera_changed_on_both_sides_goes_to_the_newer():
     assert [c.unit for c in r.conflicts] == ["compare_camera"]
 
 
-def test_stage_events_are_desktop_owned_local_wins_and_the_tripwire_names_them():
-    """Spec 2026-10-08: ``events`` is not a merge unit. The mirror refuses the
-    events PUT (403) on the strength of this: a diverging remote list never
-    reaches the desktop, and the tripwire note says the fields differed.
-    Adding ``events`` as a merge unit must revisit that ruling."""
+def test_stage_events_merge_per_region_and_no_longer_trip_the_wire():
+    """Spec 2026-10-18 revisits the 2026-10-08 ruling that ``events`` is
+    desktop-owned: regions merge per id (``test_sync_merge_regions.py``).
+    Here one id was minted on both sides for different regions, so both
+    are kept and remote's is renamed; a legacy ``events_seeded: True``
+    stands, and nothing reads as a non-whitelisted change."""
     shots = [{"id": "cand-1", "candidate_number": 1, "time": 6.5, "shot_number": 1, "ms_after_beep": 1500}]
     base = {"shots": copy.deepcopy(shots), "audit_events": [], "events": [], "events_seeded": False}
     local = {
@@ -1369,7 +1370,7 @@ def test_stage_events_are_desktop_owned_local_wins_and_the_tripwire_names_them()
         "events_seeded": True,
     }
     r = merge_audit_doc(base, local, remote, doc_key="audit/anna/3", local_ts=T_OLD, remote_ts=T_NEW)
-    assert r.doc["events"] == local["events"]
+    assert r.doc["events"] == [local["events"][0], {**remote["events"][0], "id": "evt-2"}]
     assert r.doc["events_seeded"] is True
-    assert r.changed_vs_local is False
-    assert any("events, events_seeded" in note for note in r.notes), r.notes
+    assert r.changed_vs_local is True
+    assert not any("non-whitelisted" in note for note in r.notes), r.notes

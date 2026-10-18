@@ -477,7 +477,9 @@ export function deriveStageView(ws: StageWorkspace, slug: string, stage: number)
   const stream = primary ? bigStream(primary, ws.scrub, slug, stage) : null;
   const playingScrub = stream?.playingScrub ?? false;
   const streamUrl = stream?.url ?? null;
-  const eventsReadOnly = capabilityDenied(project.capabilities, "edit");
+  // Regions sync both ways once the desktop merges them (spec 2026-10-18):
+  // the server grants `breakdown` exactly when a region edit is safe here.
+  const eventsReadOnly = capabilityDenied(project.capabilities, "breakdown");
   const { events, selectedId } = ws.regions;
   const selectedEvent = eventsReadOnly ? null : (events.find((e) => e.id === selectedId) ?? null);
   const stageSeconds = project.stages.find((s) => s.stage_number === stage)?.time_seconds ?? 0;

@@ -1,6 +1,12 @@
 {
   "entries": [
     {
+      "id": "breakdown-syncs-both-ways",
+      "date": "2026-10-18",
+      "title": "Edit Breakdown regions on splitsmith.app",
+      "body": "Regions you keep, move or add on splitsmith.app reach your desktop on its next sync, and the desktop's reach the web. Update the desktop app and sync once to turn it on."
+    },
+    {
       "id": "regions-after-beep-move",
       "date": "2026-10-17",
       "title": "Regions stay put when a beep moves",

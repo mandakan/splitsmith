@@ -41,25 +41,34 @@ EDIT = "edit"
 REVIEW = "review"
 SHARE_MANAGE = "share_manage"
 COMMENT_WRITE = "comment_write"
+#: Breakdown's region edits (the events PUT). A desktop mirror has it only
+#: once its desktop merges regions (spec 2026-10-18-breakdown-hosted-sync-design,
+#: ``MatchRow.desktop_merges_events``): before that, the desktop's next push
+#: would overwrite a region edited here.
+BREAKDOWN = "breakdown"
 
 
-def capabilities_for_origin(origin: str | None) -> frozenset[str]:
+def capabilities_for_origin(origin: str | None, *, merges_events: bool = False) -> frozenset[str]:
     """Capability set of an authenticated (non-share) request, derived
     from where the match's canonical data lives. Today origin fully
-    determines writability; when the #631 transfer endgame lands, this
-    function keys off sync state instead and no caller changes."""
+    determines writability, plus ``merges_events`` for a desktop mirror's
+    regions; when the #631 transfer endgame lands, this function keys off
+    sync state instead and no caller changes."""
     if origin == "desktop":
         # A mirror desktop still owns: review actions sync back, editing
         # stays on desktop. Share management is the point of exposing
         # the mirror hosted-side. Comment moderation (the owner's own
         # DELETE on a comment someone else posted) is the same kind of
         # hosted-side-only action, so it stays here too.
-        return frozenset({REVIEW, SHARE_MANAGE, COMMENT_WRITE})
+        caps = {REVIEW, SHARE_MANAGE, COMMENT_WRITE}
+        if merges_events:
+            caps.add(BREAKDOWN)
+        return frozenset(caps)
     if origin == "hosted":
-        return frozenset({EDIT, REVIEW, SHARE_MANAGE, COMMENT_WRITE})
+        return frozenset({EDIT, REVIEW, BREAKDOWN, SHARE_MANAGE, COMMENT_WRITE})
     # "local" and None (legacy bare-path local traffic): one operator,
     # full control, no share surface to manage.
-    return frozenset({EDIT, REVIEW})
+    return frozenset({EDIT, REVIEW, BREAKDOWN})
 
 
 # Share-token scopes -> capability sets. 'read' grants nothing; 'comment'
@@ -121,10 +130,8 @@ _REVIEW_ROUTES: tuple[tuple[str, re.Pattern[str]], ...] = (
     # to mint a non-convergent id on a mirror at that save boundary; this
     # entry is what makes the path reachable at all.
     ("PUT", re.compile(r"\Ashooters/[^/]+/stages/\d+/audit\Z")),
-    # Deliberately absent: the stage events PUT (spec 2026-10-08).
-    # ``events`` is desktop-owned - ``sync.merge.merge_audit_doc`` keeps the
-    # local copy - so a lane edit on a mirror would be overwritten by the
-    # desktop's next sync. It falls through to EDIT and a mirror 403s.
+    # The stage events PUT is not here: it needs BREAKDOWN, below, which a
+    # mirror has only once its desktop merges regions.
     # The desktop command queue (#1100): a phone asks the desktop to run
     # something and may cancel it. A request is not an edit of the mirror;
     # its effect arrives through sync like every other review action.
@@ -196,4 +203,11 @@ def required_capability(method: str, rest: str) -> str | None:
     for allowed_method, pattern in _REVIEW_ROUTES:
         if method == allowed_method and pattern.match(rest) is not None:
             return REVIEW
+    if method == "PUT" and _EVENTS_PUT.match(rest) is not None:
+        return BREAKDOWN
     return EDIT
+
+
+# Breakdown's region list (spec 2026-10-18): ``sync.merge`` merges ``events``
+# per region, so a mirror whose desktop runs that merge takes the edit.
+_EVENTS_PUT = re.compile(r"\Ashooters/[^/]+/stages/\d+/events\Z")

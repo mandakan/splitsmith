@@ -3,7 +3,9 @@
 Desktop is authoritative for everything except the narrow whitelist
 mobile is allowed to write (spec 2026-08-10-bidirectional-sync-design):
 per-video beep field-groups in project docs, per-shot coach fields, the
-stage note and the append-only ``audit_events`` log in audit docs. Each merge starts
+stage note, Breakdown's regions (``events``, per region by id, spec
+2026-10-18-breakdown-hosted-sync-design) and the append-only
+``audit_events`` log in audit docs. Each merge starts
 from a deep copy of the local doc and resolves whitelisted units
 three-way against the base snapshot: changed on one side wins outright;
 changed on both is a true conflict resolved last-writer-wins by doc
@@ -60,6 +62,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 
 from ..coach import COACH_FIELDS, FIELD_STAGE_NOTE
+from ..events import next_event_id
 from ..shot_id import ensure_shot_ids
 
 #: Every key on a video dict starting with this prefix moves as one
@@ -500,6 +503,8 @@ def merge_audit_doc(
         if merged.get(FIELD_STAGE_NOTE, ...) != sn_value:
             merged[FIELD_STAGE_NOTE] = sn_value
 
+    _merge_regions(result, base, local, remote, merged, doc_key, local_ts=local_ts, remote_ts=remote_ts)
+
     # Same shape as the project merge's tripwire: remote's copy differs from
     # base on a field this merge does not carry, so local's value stands.
     #
@@ -527,6 +532,8 @@ def merge_audit_doc(
         clone.pop("audit_events", None)
         clone.pop("needs_attention", None)
         clone.pop(FIELD_STAGE_NOTE, None)
+        clone.pop(FIELD_EVENTS, None)
+        clone.pop(FIELD_EVENTS_SEEDED, None)
         clone.pop("shots", None)
         return clone
 
@@ -576,6 +583,146 @@ def merge_audit_doc(
 
     result.changed_vs_local = merged != local
     return result
+
+
+#: Breakdown's regions and the seeder's version on a stage audit doc.
+FIELD_EVENTS = "events"
+FIELD_EVENTS_SEEDED = "events_seeded"
+
+
+def _region_index(doc: dict | None) -> dict[str, dict] | None:
+    """A doc's regions by id; ``None`` when the doc never carried the key (a
+    writer that does not know regions counts as unchanged). A region without
+    a string id cannot be matched across sides and is left out here."""
+    if not isinstance(doc, dict) or FIELD_EVENTS not in doc:
+        return None
+    raw = doc.get(FIELD_EVENTS)
+    out: dict[str, dict] = {}
+    for e in raw if isinstance(raw, list) else []:
+        if isinstance(e, dict) and isinstance(e.get("id"), str):
+            out[e["id"]] = e
+    return out
+
+
+def _lane_span(e: dict) -> tuple[str, float, float] | None:
+    kind, start, end = e.get("kind"), e.get("start"), e.get("end")
+    if not isinstance(kind, str):
+        return None
+    if not all(isinstance(v, int | float) and not isinstance(v, bool) for v in (start, end)):
+        return None
+    return kind, float(start), float(end)  # type: ignore[arg-type]
+
+
+def _merge_regions(
+    result: MergeResult,
+    base: dict | None,
+    local: dict,
+    remote: dict,
+    merged: dict,
+    doc_key: str,
+    *,
+    local_ts: datetime,
+    remote_ts: datetime,
+) -> None:
+    """Merge ``events`` per region by id, three-way against the base (spec
+    2026-10-18-breakdown-hosted-sync-design).
+
+    Changed on one side wins; changed on both is a conflict the newer doc
+    wins. A region the base has and one side lacks was deleted there, unless
+    the other side edited it: the edit wins, surfaced. The same id added on
+    both sides with different content is two regions (``next_event_id`` is
+    max + 1 on each side), so remote's is renamed. The result must pass the
+    lane rule (one region per span in a lane, one draw), so of two regions
+    from different sides that now collide the older doc's is dropped,
+    surfaced. ``events_seeded`` takes the larger side. A remote that never
+    carried regions leaves local's as they are. Mutates ``merged`` and
+    ``result``."""
+    seeded = [
+        d[FIELD_EVENTS_SEEDED]
+        for d in (local, remote)
+        if isinstance(d.get(FIELD_EVENTS_SEEDED), int) and not isinstance(d.get(FIELD_EVENTS_SEEDED), bool)
+    ]
+    if seeded and merged.get(FIELD_EVENTS_SEEDED) != max(seeded):
+        merged[FIELD_EVENTS_SEEDED] = max(seeded)
+
+    remote_ix = _region_index(remote)
+    if remote_ix is None:
+        return
+    base_ix = _region_index(base) or {}
+    local_ix = _region_index(local)
+    if local_ix is None:
+        local_ix = dict(base_ix)
+
+    def conflict(rid: str, winner: str) -> None:
+        result.conflicts.append(MergeConflict(doc_key=doc_key, unit=f"event:{rid}", winner=winner))
+
+    # Every kept region with the side it came from (the lane check's tie-break).
+    out: dict[str, tuple[dict, str]] = {}
+    order = list(local_ix) + [r for r in remote_ix if r not in local_ix]
+    for rid in order:
+        b, lo, re_ = base_ix.get(rid), local_ix.get(rid), remote_ix.get(rid)
+        if b is None:
+            if lo is not None and re_ is not None and lo != re_:
+                out[rid] = (lo, "local")
+                renamed = next_event_id({"id": i} for i in [*out, *local_ix, *remote_ix, *base_ix])
+                out[renamed] = ({**re_, "id": renamed}, "remote")
+                result.notes.append(
+                    f"{doc_key}: region {rid} was added on both sides; remote's is now {renamed}"
+                )
+            elif lo is not None:
+                out[rid] = (lo, "local")
+            elif re_ is not None:
+                out[rid] = (re_, "remote")
+        elif lo is None:
+            if re_ is not None and re_ != b:  # deleted here, edited there
+                out[rid] = (re_, "remote")
+                conflict(rid, "remote")
+        elif re_ is None:
+            if lo != b:
+                out[rid] = (lo, "local")
+                conflict(rid, "local")
+        else:
+            winner, clash = _resolve_unit(b, lo, re_, local_ts=local_ts, remote_ts=remote_ts)
+            if clash:
+                conflict(rid, winner)
+            out[rid] = (re_, "remote") if winner == "remote" else (lo, "local")
+
+    # The lane rule: of two regions from different sides that collide (an
+    # overlap in a lane, or a second draw), the older doc's goes. A pair
+    # from one side never collides: every writer validates.
+    newer = "remote" if remote_ts > local_ts else "local"
+    lanes: dict[str, list[tuple[str, float, float]]] = {}
+    for rid, (e, _side) in out.items():
+        span = _lane_span(e)
+        if span is not None:
+            lanes.setdefault(span[0], []).append((rid, span[1], span[2]))
+    for kind, lane in lanes.items():
+        lane.sort(key=lambda x: (x[1], x[2]))
+        for i, (rid, start, end) in enumerate(lane):
+            for oid, ostart, oend in lane[i + 1 :]:
+                if rid not in out or oid not in out:
+                    continue
+                if kind != "draw" and not (ostart < end and start < oend):
+                    continue
+                if out[rid][1] == out[oid][1]:
+                    continue
+                loser = rid if out[rid][1] != newer else oid
+                kept = oid if loser == rid else rid
+                out.pop(loser)
+                result.conflicts.append(
+                    MergeConflict(doc_key=doc_key, unit=f"event:{loser} (overlaps {kept})", winner=newer)
+                )
+
+    # A local region with no usable id rides along untouched.
+    raw_local = local.get(FIELD_EVENTS)
+    unkeyed = [
+        e
+        for e in (raw_local if isinstance(raw_local, list) else [])
+        if not (isinstance(e, dict) and isinstance(e.get("id"), str))
+    ]
+    value = [e for e, _side in out.values()] + unkeyed
+    if merged.get(FIELD_EVENTS) != value:
+        merged[FIELD_EVENTS] = copy.deepcopy(value)
 
 
 def _merge_shot_section(

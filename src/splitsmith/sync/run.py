@@ -23,7 +23,8 @@ from pathlib import Path
 
 from pydantic import Field
 
-from ..coach import FIELD_STAGE_NOTE
+from ..coach import FIELD_STAGE_NOTE, auto_classify_config, classify_intervals_in_dicts
+from ..events import confirmed, events_from_doc
 from ..match_model import load_match_or_legacy
 from ..match_project import PROJECT_FILE, MatchProject, atomic_write_json
 from ..observability import PhaseTimer
@@ -468,6 +469,7 @@ def _apply_pull(
                     )
                     _collect(result, conflicts, notes, reprocess)
                     if result.changed_vs_local:
+                        _reclassify_on_region_change(local_doc, result.doc, key, notes)
                         audit_path.parent.mkdir(parents=True, exist_ok=True)
                         atomic_write_json(audit_path, result.doc)
                         merged_count += 1
@@ -481,6 +483,27 @@ def _apply_pull(
         "notes": notes,
         "reprocess": reprocess,
     }
+
+
+def _reclassify_on_region_change(local_doc: dict, merged: dict, key: str, notes: list[str]) -> None:
+    """Classify the merged doc's shots against its confirmed regions, in
+    place, when those differ from the local doc's (spec
+    2026-10-18-breakdown-hosted-sync-design): a reload confirmed on the
+    phone classifies its gap here too, by the rule every audit writer uses
+    (``coach.classify_intervals_in_dicts``, manual classes untouched). A
+    regions list this install cannot read is left as merged, with a note."""
+    try:
+        before = confirmed(events_from_doc(local_doc))
+        after = confirmed(events_from_doc(merged))
+    except (ValueError, TypeError) as exc:
+        notes.append(f"{key}: merged regions could not be read, shots not reclassified ({exc})")
+        return
+    shots = merged.get("shots")
+    if before == after or not isinstance(shots, list):
+        return
+    classify_intervals_in_dicts(
+        [s for s in shots if isinstance(s, dict)], auto_classify_config(), events=after
+    )
 
 
 def _collect(result: MergeResult, conflicts: list[dict], notes: list[str], reprocess: set[str]) -> None:

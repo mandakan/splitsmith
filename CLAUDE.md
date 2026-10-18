@@ -1416,15 +1416,21 @@ strips ``events[].note`` there, as it strips ``coaching_note``.
 the saved doc's revision. A ``NaN`` / ``Infinity`` in the body is a 422
 before the lock (``_reject_non_finite``, #843). The stored
 ``StageEvent`` ignores unknown keys, so a doc a newer version wrote loads
-on an older one; the request's ``StageEventIn`` forbids them. It is **not** in ``_REVIEW_ROUTES``: ``events``
-is desktop-owned, ``sync.merge.merge_audit_doc`` keeps local's copy, so
-a hosted write on a mirror would be silently overwritten by the next
-sync. A desktop-origin mirror answers 403 ``read_only_mirror`` and the
-SPA renders Breakdown's editor read-only on
-``capabilityDenied(project.capabilities, "edit")``; a hosted-native
-match keeps the PUT. The read-only rendering serves a hosted mirror (a
-desktop browser) and ``isMobile``, but the Breakdown route sits behind
-``DesktopGate`` in ``App.tsx``, so a phone never reaches it. Every PUT appends an
+on an older one; the request's ``StageEventIn`` forbids them. Regions sync
+both ways (spec ``2026-10-18-breakdown-hosted-sync-design``):
+``sync.merge._merge_regions`` merges ``events`` per region by id against the
+base (a delete is the base having it; an edit beats a delete; the same id
+added on both sides is two regions, remote's renamed; of two regions from
+different sides that collide in a lane the older doc's goes, surfaced;
+``events_seeded`` takes the larger), and ``sync.run`` classifies the merged
+doc's shots again when its confirmed regions moved. The PUT needs the
+``breakdown`` capability: local and hosted-native always, a desktop mirror
+only once ``matches.desktop_merges_events`` is set, which ``POST
+/api/sync/matches`` does when the desktop sends ``X-Splitsmith-Sync-Features:
+events`` (``sync.pull.SYNC_FEATURES``). Before that the mirror answers 403
+``read_only_mirror``, so an older desktop's push can never overwrite a
+phone's edit. The SPA renders Breakdown read-only on
+``capabilityDenied(project.capabilities, "breakdown")``, phone and desktop. Every PUT appends an
 ``audit_events`` entry, which is why the SPA saves on commit only
 (release or keyboard nudge) through a 350 ms debounce in
 ``lib/useStageEvents.ts``: PUTs run one at a time with the revision the

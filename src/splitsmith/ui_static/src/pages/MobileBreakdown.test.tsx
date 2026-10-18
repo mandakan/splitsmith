@@ -395,7 +395,7 @@ describe("MobileBreakdown", () => {
     } as never);
     vi.mocked(api.getStageCoach).mockResolvedValue(stageWith([R1]));
     await reviewing();
-    expect(await screen.findByText(/Edit regions on the desktop/)).toBeTruthy();
+    expect(await screen.findByText(/update splitsmith on the desktop/)).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Keep" })).toBeNull();
     expect(screen.queryByRole("button", { name: /Adjust/ })).toBeNull();
   });

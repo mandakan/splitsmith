@@ -128,6 +128,22 @@ def test_delete_tenant_isolation_same_match_id() -> None:
     assert bob_row is not None and bob_row.name == "Bob Match"
 
 
+def test_mark_merges_events_sets_once_and_stays_in_its_tenant() -> None:
+    """Spec 2026-10-18: the flag goes on once, and only on the caller's row."""
+    sf, (alice, bob) = _engine_with_users("alice@thias.se", "bob@thias.se")
+    a_store = PostgresMatchStore(sf, user_id=alice)
+    b_store = PostgresMatchStore(sf, user_id=bob)
+    asyncio.run(a_store.upsert("shared-id", "Alice Match", "matches/shared-id", origin="desktop"))
+    asyncio.run(b_store.upsert("shared-id", "Bob Match", "matches/shared-id", origin="desktop"))
+    assert asyncio.run(a_store.get("shared-id")).desktop_merges_events is False
+
+    assert asyncio.run(a_store.mark_merges_events("shared-id")) is True
+    assert asyncio.run(a_store.mark_merges_events("shared-id")) is False
+    assert asyncio.run(a_store.get("shared-id")).desktop_merges_events is True
+    assert asyncio.run(b_store.get("shared-id")).desktop_merges_events is False
+    assert asyncio.run(b_store.mark_merges_events("never-existed")) is False
+
+
 # -- share read-only enforcement (#779) ---------------------------------
 
 

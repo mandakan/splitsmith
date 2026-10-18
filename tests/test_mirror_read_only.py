@@ -1289,7 +1289,7 @@ def test_guard_follows_capability_set_not_origin(
     monkeypatch.setattr(
         server_module,
         "capabilities_for_origin",
-        lambda origin: frozenset({"edit", "review", "share_manage"}),
+        lambda origin, **_kw: frozenset({"edit", "review", "share_manage"}),
     )
     resp = client.post(alias_url("mirror-fc", "match/shooters"), json={"name": "Anna"})
     # The middleware no longer blocks it; whatever the handler says, it
@@ -1373,9 +1373,10 @@ def test_mirror_events_put_is_refused_and_leaves_the_doc_alone(
     hosted_env: str,
     hosted_app: tuple[TestClient, _CapturingSender],
 ) -> None:
-    """``sync.merge.merge_audit_doc`` keeps the desktop's ``events``, so a
-    lane edit saved on a mirror would be overwritten by the next sync. The
-    gate refuses it instead of accepting an edit that cannot last."""
+    """A mirror whose desktop never said it merges regions (an older
+    desktop, no ``X-Splitsmith-Sync-Features: events``) would overwrite a
+    lane edit on its next push. The gate refuses it instead of accepting an
+    edit that cannot last (spec 2026-10-18)."""
     client, sender = hosted_app
     login(client, sender, "owner@example.com")
     match_id = "01JMIRREVENTSPUT00000001"
@@ -1397,6 +1398,43 @@ def test_mirror_events_put_is_refused_and_leaves_the_doc_alone(
     for key in ("events", "events_seeded", "audit_events"):
         assert after.get(key) == before.json().get(key), key
     assert after["events"] == _EVENTS
+
+
+def test_mirror_events_put_is_accepted_once_its_desktop_merges_regions(
+    hosted_env: str,
+    hosted_app: tuple[TestClient, _CapturingSender],
+) -> None:
+    """Spec 2026-10-18: a desktop that merges regions says so on its sync's
+    match POST; from then on the mirror grants ``breakdown`` and the region
+    edit saves (the desktop pulls and merges it)."""
+    from splitsmith.sync.pull import FEATURE_EVENTS, SYNC_FEATURES_HEADER
+
+    client, sender = hosted_app
+    login(client, sender, "owner@example.com")
+    match_id = "01JMIRREVENTSPUT00000002"
+    seed_mirror_stage_with_audit(client, match_id, "mirror-events", _audit_doc_with_events())
+    caps = client.get(alias_url(match_id, "shooters/alice/project")).json()["capabilities"]
+    assert "breakdown" not in caps
+
+    synced = client.post(
+        "/api/sync/matches",
+        json={"match_id": match_id, "name": "mirror-events"},
+        headers={SYNC_FEATURES_HEADER: FEATURE_EVENTS},
+    )
+    assert synced.status_code == 200, synced.text
+    assert "breakdown" in client.get(alias_url(match_id, "shooters/alice/project")).json()["capabilities"]
+
+    before = client.get(alias_url(match_id, "shooters/alice/stages/1/audit")).json()
+    events = [{"id": "evt-1", "kind": "movement", "start": 0.5, "end": 1.5, "source": "manual"}]
+    resp = client.put(
+        alias_url(match_id, "shooters/alice/stages/1/events"),
+        json={"events": events, "_version": before["_version"]},
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["events"] == events
+    # A later sync without the header (a downgraded desktop) does not take it back.
+    client.post("/api/sync/matches", json={"match_id": match_id, "name": "mirror-events"})
+    assert "breakdown" in client.get(alias_url(match_id, "shooters/alice/project")).json()["capabilities"]
 
 
 def test_native_match_events_put_is_allowed(
