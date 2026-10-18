@@ -38,6 +38,7 @@ import { beginEdge, edgeFrame, restoreRegion, snappedTo, stepEdge, type EdgeGest
 import { keepAllEvents, keepEvent, withKind } from "@/lib/events";
 import { focusWindow, playWindow, type FocusWindow } from "@/lib/focusWindow";
 import { useMatchHref } from "@/lib/matchHref";
+import { addRegion } from "@/lib/addRegion";
 import { nextOpenId, prevOpenId, proposals, queuePosition } from "@/lib/proposalQueue";
 import { useSnapToShots } from "@/lib/timelinePrefs";
 import { deriveStageView, useStageWorkspace } from "@/lib/useStageWorkspace";
@@ -58,6 +59,9 @@ interface EdgeEdit {
   g: EdgeGesture;
   /** The edge as it will be saved, and what snapped it, while it moves. */
   pill: { t: number; snapped: string | null } | null;
+  /** A region Add just made: Done saves it as it stands, Cancel takes it
+   *  away and opens ``returnTo`` (the region it was added over, or none). */
+  added?: { returnTo: string | null };
 }
 
 function MobileBreakdownStage({ slug, stage }: { slug: string; stage: number }) {
@@ -75,6 +79,7 @@ function MobileBreakdownStage({ slug, stage }: { slug: string; stage: number }) 
   const [openId, setOpenId] = useState<string | null>(null);
   const [edit, setEdit] = useState<EdgeEdit | null>(null);
   const [kindOpen, setKindOpen] = useState(false);
+  const [addOpen, setAddOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [snapOn, setSnapOn] = useSnapToShots();
   const stopAt = useRef<number | null>(null);
@@ -214,6 +219,11 @@ function MobileBreakdownStage({ slug, stage }: { slug: string; stage: number }) 
   };
   const done = () => {
     if (!edit) return;
+    if (edit.added) {
+      regions.change(regions.events, true);
+      setEdit(null);
+      return;
+    }
     const startEvents = regions.events.map((e) => (e.id === edit.g.id ? edit.g.before : e));
     if (sameEvents(startEvents, regions.events)) {
       regions.cancel();
@@ -225,8 +235,30 @@ function MobileBreakdownStage({ slug, stage }: { slug: string; stage: number }) 
     setEdit(null);
   };
   const cancel = () => {
-    restore();
+    if (edit?.added) {
+      regions.change(
+        regions.events.filter((e) => e.id !== edit.g.id),
+        false,
+      );
+      regions.cancel();
+      setOpenId(edit.added.returnTo);
+    } else restore();
     setEdit(null);
+  };
+  // Add: the new region over the open one, else in the gap at the playhead,
+  // opened in edge mode on its start; nothing is saved before Done.
+  const addPlace = { over: open, at: view.tFromBeep, shotTimes, span: view.span };
+  const add = (kind: StageEventKind) => {
+    setAddOpen(false);
+    const r = addRegion(events, kind, addPlace);
+    if (!r || readOnly) return;
+    const me = r.events.find((e) => e.id === r.id);
+    if (!me) return;
+    pause();
+    regions.change(r.events, false);
+    setOpenId(r.id);
+    setEdit({ g: { target: "start", id: r.id, before: me }, pill: null, added: { returnTo: open?.id ?? null } });
+    ws.seekFromBeep(me.start);
   };
   const step = (dir: -1 | 1) => {
     if (!edit || edit.g.target === "body") return;
@@ -409,6 +441,17 @@ function MobileBreakdownStage({ slug, stage }: { slug: string; stage: number }) 
               {pos ? `Proposal ${pos.index + 1} of ${pos.total}` : "Confirmed region"}
             </span>
             <span className="flex-1" />
+            {readOnly ? null : (
+              <Button
+                type="button"
+                variant="ghost"
+                className="min-h-11"
+                aria-label="Add a region over this one"
+                onClick={() => setAddOpen(true)}
+              >
+                Add
+              </Button>
+            )}
             <Button type="button" variant="ghost" className="min-h-11" onClick={() => setOpenId(null)}>
               All regions
             </Button>
@@ -447,6 +490,11 @@ function MobileBreakdownStage({ slug, stage }: { slug: string; stage: number }) 
               <p className="text-md text-muted">No proposals on this stage</p>
             )}
             <span className="flex-1" />
+            {readOnly ? null : (
+              <Button type="button" className="min-h-11" onClick={() => setAddOpen(true)}>
+                Add region
+              </Button>
+            )}
             <Button type="button" className="min-h-11" onClick={() => (ws.isPlaying ? pause() : play(0, null))}>
               {ws.isPlaying ? "Pause" : "Play stage"}
             </Button>
@@ -609,6 +657,35 @@ function MobileBreakdownStage({ slug, stage }: { slug: string; stage: number }) 
                 );
               })
             : null}
+        </div>
+      </Sheet>
+
+      <Sheet open={addOpen} onClose={() => setAddOpen(false)} label="Add region">
+        <div className="flex flex-col gap-2 p-4">
+          <p className="text-sm text-muted">
+            {open
+              ? `Over this ${LANE_LABEL[open.kind].toLowerCase()}, then tune its edges.`
+              : `In the gap at ${view.tFromBeep.toFixed(2)} s, then tune its edges.`}
+          </p>
+          {LANES.map((kind) => {
+            const blocked = addRegion(events, kind, addPlace) == null;
+            return (
+              <Button
+                key={kind}
+                type="button"
+                className="min-h-11 justify-start"
+                disabled={blocked}
+                onClick={() => add(kind)}
+              >
+                {LANE_LABEL[kind]}
+                {blocked ? (
+                  <span className="ml-auto text-sm text-muted">
+                    {kind === "draw" && events.some((e) => e.kind === "draw") ? "One per stage" : "No room here"}
+                  </span>
+                ) : null}
+              </Button>
+            );
+          })}
         </div>
       </Sheet>
     </div>

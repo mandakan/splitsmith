@@ -1701,7 +1701,10 @@ only). ``/breakdown/:slug`` is the stage list (``breakdown/mobile/StageIndex``,
 ``lib/breakdownIndex``, the shooter chips over it, confirmed region counts
 only: proposals are seeded when a stage opens), and a stage opens on its
 region list with nothing open; "Review N proposals" starts the queue and any
-row opens that region. It reviews the seeder's proposals one at a time: the queue
+row opens that region. Add (``lib/addRegion``) puts a new manual region over
+the open one (a movement during the draw) or in the shot gap at the playhead,
+cut to the free room in its lane, and opens it in edge mode: Done saves it,
+Cancel removes it unsaved. It reviews the seeder's proposals one at a time: the queue
 (``lib/proposalQueue``, proposals by start), a focus strip of the open
 region plus 2 s each side (``lib/focusWindow``,
 ``components/breakdown/mobile/FocusStrip``, 44 px handles that open edge

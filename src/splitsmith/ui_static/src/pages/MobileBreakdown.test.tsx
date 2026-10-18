@@ -430,4 +430,61 @@ describe("MobileBreakdown", () => {
     expect(screen.getByRole("link", { name: /^BO/i }).getAttribute("href")).toBe("/match/m1/breakdown/bo");
     expect(api.getStageCoach).not.toHaveBeenCalled();
   });
+
+  it("Add over an open draw makes a movement on the draw's span, saved once on Done", async () => {
+    const D: StageEvent = { id: "evt-1", kind: "draw", start: 0.3, end: 1, source: "auto" };
+    vi.mocked(api.getStageCoach).mockResolvedValue(stageWith([D], "v1v1v1v1v1v1v1v1"));
+    vi.mocked(api.putStageEvents).mockImplementation(async (_s, _n, events) => stageWith(events, "v2v2v2v2v2v2v2v2"));
+    await reviewing();
+    fireEvent.click(screen.getByRole("button", { name: "Add a region over this one" }));
+    expect(screen.getByRole("button", { name: /Draw/ }).hasAttribute("disabled")).toBe(true);
+    fireEvent.click(screen.getByRole("button", { name: "Movement" }));
+    expect(await screen.findByText("Movement, start")).toBeTruthy();
+    await settle();
+    expect(api.putStageEvents).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Done" }));
+    await waitFor(() =>
+      expect(api.putStageEvents).toHaveBeenCalledWith(
+        "anna",
+        1,
+        [D, { id: "evt-2", kind: "movement", start: 0.3, end: 1, source: "manual" }],
+        "v1v1v1v1v1v1v1v1",
+      ),
+    );
+    expect(api.putStageEvents).toHaveBeenCalledTimes(1);
+    await settle();
+  });
+
+  it("Cancel on an added region takes it away, saves nothing and reopens the region it was added over", async () => {
+    const D: StageEvent = { id: "evt-1", kind: "draw", start: 0.3, end: 1, source: "auto" };
+    vi.mocked(api.getStageCoach).mockResolvedValue(stageWith([D]));
+    await reviewing();
+    fireEvent.click(screen.getByRole("button", { name: "Add a region over this one" }));
+    fireEvent.click(screen.getByRole("button", { name: "Reload" }));
+    expect(await screen.findByText("Reload, start")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    await settle();
+    expect(api.putStageEvents).not.toHaveBeenCalled();
+    expect(screen.getByTestId("open-region").textContent).toContain("Draw");
+  });
+
+  it("Add region from the list fills the gap at the playhead", async () => {
+    vi.mocked(api.getStageCoach).mockResolvedValue(stageWith([], "v1v1v1v1v1v1v1v1"));
+    vi.mocked(api.putStageEvents).mockImplementation(async (_s, _n, events) => stageWith(events, "v2v2v2v2v2v2v2v2"));
+    renderPage();
+    fireEvent.click(await screen.findByRole("button", { name: "Add region" }));
+    fireEvent.click(screen.getByRole("button", { name: "Movement" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Done" }));
+    // The playhead is at the beep: the gap runs to the first shot, 1 s.
+    await waitFor(() =>
+      expect(api.putStageEvents).toHaveBeenCalledWith(
+        "anna",
+        1,
+        [{ id: "evt-1", kind: "movement", start: 0, end: 1, source: "manual" }],
+        "v1v1v1v1v1v1v1v1",
+      ),
+    );
+    await settle();
+  });
 });
+
