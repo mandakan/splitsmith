@@ -1131,7 +1131,7 @@ export interface OverlayStyleBody {
 
 export interface ExportPresetBody extends OverlayStyleBody {
   schema_version?: number;
-  mode: "single" | "trims" | "compare";
+  mode: "single" | "trims" | "compare" | "reel";
   output_format: "fcpxml" | "fcp7xml" | "mp4";
   overlay_codec: OverlayCodec;
   canvas: "uhd" | "hd";

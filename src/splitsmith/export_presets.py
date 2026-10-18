@@ -42,7 +42,7 @@ PRESETS_FILENAME = "export_presets.json"
 BUILTIN_PREFIX = "builtin:"
 MAX_NAME_LENGTH = 60
 
-ExportMode = Literal["single", "trims", "compare"]
+ExportMode = Literal["single", "trims", "compare", "reel"]
 OutputFormat = Literal["fcpxml", "fcp7xml", "mp4"]
 OverlayCodec = Literal["auto", "hevc-alpha", "prores-4444"]
 Canvas = Literal["uhd", "hd"]

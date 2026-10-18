@@ -198,3 +198,9 @@ def test_the_body_carries_the_summary_styles() -> None:
     for bad in ({"summary_variant": "../x"}, {"match_summary_variant": "Bad Name"}):
         with pytest.raises(pydantic.ValidationError):
             ExportPresetBody.model_validate(bad)
+
+
+def test_a_preset_saved_in_the_highlight_reel_mode_loads() -> None:
+    """The reel is Export's fourth mode (spec 2026-10-18-highlight-reel-design):
+    the page saves it like any mode, and it must come back."""
+    assert ExportPresetBody.model_validate({"mode": "reel"}).mode == "reel"

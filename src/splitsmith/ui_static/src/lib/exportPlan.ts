@@ -7,7 +7,7 @@
  */
 import type { StageExportStatus } from "@/lib/api";
 
-export type ExportMode = "single" | "trims" | "compare";
+export type ExportMode = "single" | "trims" | "compare" | "reel";
 
 export type FixTarget = "audit" | "footage" | "relink" | "scores";
 
