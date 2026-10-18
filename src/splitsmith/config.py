@@ -635,6 +635,22 @@ class WebTrimConfig(BaseModel):
     video_codec: str = "libx264"
 
 
+class HighlightConfig(BaseModel):
+    """Tunables of the highlight reel's moment finders (spec
+    2026-10-18-highlight-reel-design). Floors are sanity, not taste: a
+    split under ``min_split_s`` is an echo detected twice, not a split."""
+
+    min_split_s: float = 0.10
+    min_draw_s: float = 0.40
+    min_reload_s: float = 0.50
+    min_transition_s: float = 0.30
+    streak_split_max_s: float = 0.30
+    min_streak_shots: int = 4
+    lead_s: float = 0.4
+    tail_s: float = 0.6
+    max_candidates: int = 20
+
+
 class CoachAutoClassifyConfig(BaseModel):
     """Gap-time thresholds for the Coach interval auto-classifier (#160).
 
