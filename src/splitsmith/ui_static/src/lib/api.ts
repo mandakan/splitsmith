@@ -2608,6 +2608,48 @@ export interface TriageCell {
   beep_tone_offset_ms?: number | null;
 }
 
+/** Where one stage stands for the highlight reel
+ *  (``GET /api/shooters/{slug}/highlights``, ``highlights.stage_readiness``). */
+export type HighlightReadinessState =
+  | "ready"
+  | "not_audited"
+  | "breakdown_not_opened"
+  | "proposals_left"
+  | "trim_missing"
+  | "no_video"
+  | "skipped";
+
+export interface HighlightStageReadiness {
+  stage_number: number;
+  state: HighlightReadinessState;
+  proposals: number;
+}
+
+/** One moment on the reel's menu, in play order. */
+export interface HighlightMenuItem {
+  kind: string;
+  label: string;
+  group: "default" | "stat" | "lolz";
+  default: boolean;
+}
+
+export interface HighlightReadiness {
+  unlocked: boolean;
+  ready: number;
+  total: number;
+  stages: HighlightStageReadiness[];
+  menu: HighlightMenuItem[];
+  cuts: string[];
+}
+
+/** ``POST /api/shooters/{slug}/highlights``: the reel's render request. */
+export interface HighlightReelBody {
+  moments: string[];
+  short: boolean;
+  upright: boolean;
+  force: boolean;
+}
+
 /** Response from GET /api/match/triage and POST accept/attention mutations.
  *  Returns the current triage list and the count of flagged cells. */
 export interface TriageResponse {
@@ -4439,6 +4481,18 @@ export const api = {
    *  cells and the count of flagged stages. */
   getTriage: () =>
     request<TriageResponse>("/api/match/triage"),
+
+  /** The highlight reel's readiness and its moment menu for one shooter. */
+  getHighlights: (slug: string) =>
+    request<HighlightReadiness>(`/api/shooters/${encodeURIComponent(slug)}/highlights`),
+
+  /** Queue the highlight reel's render; the Job to poll. The body is spread,
+   *  never listed (``api.exportBodies.test.ts``). */
+  submitHighlightReel: (slug: string, body: HighlightReelBody) =>
+    request<Job>(`/api/shooters/${encodeURIComponent(slug)}/highlights`, {
+      method: "POST",
+      json: { ...body },
+    }),
 
   /** Cheap poll for the flagged-count badge alone, without the full
    *  triage cell list ``getTriage`` returns. Use this for the sidebar /
