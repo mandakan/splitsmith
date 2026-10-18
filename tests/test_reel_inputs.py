@@ -110,16 +110,52 @@ def test_force_renders_the_ready_stages_upright_or_landscape(tmp_path, monkeypat
             probe=lambda p: META,
         )
         assert outcome.result is not None
+        # A forced reel still says which stages it left out.
+        assert [(r.stage_number, r.state) for r in outcome.blockers] == [(2, "proposals_left")]
     (items_up, seq_up), (_, seq_wide) = calls
     assert seq_up.height > seq_up.width and seq_wide.width > seq_wide.height
     assert items_up[-1].kind == "end" and items_up[-1].lines
 
 
-def test_a_stage_whose_trim_is_missing_has_no_footage(tmp_path, monkeypatch):
+def test_a_done_stage_whose_trim_is_missing_blocks(tmp_path, monkeypatch):
     project, root = _project(tmp_path)
     a = project.stage(1).primary().video_id
     (project.trimmed_path(root) / f"stage1_cam_{a}_trimmed.mp4").unlink()
     monkeypatch.setattr(MatchProject, "stage_statuses", lambda self, root, **kw: {1: "audited", 2: "audited"})
     inputs = load_reel_inputs(project, root, label="Anna", probe=lambda p: META)
-    assert inputs.readiness[0].state == "no_footage"
+    assert inputs.readiness[0].state == "trim_missing"
     assert inputs.footage == {}
+
+
+def test_an_untouched_stage_blocks_the_reel(tmp_path, monkeypatch):
+    from splitsmith import reel_inputs
+
+    project, root = _project(tmp_path)
+    project.stage(2).primary().beep_time = None
+    (project.audit_path(root) / "stage2.json").unlink()
+    monkeypatch.setattr(MatchProject, "stage_statuses", lambda self, root, **kw: {1: "audited", 2: "ready"})
+    calls: list = []
+    monkeypatch.setattr(reel_inputs, "render_reel", _render_spy(calls))
+    outcome = reel_inputs.make_reel(
+        project, root, label="Anna", output=tmp_path / "r.mp4", probe=lambda p: META
+    )
+    assert outcome.result is None and calls == []
+    assert [(r.stage_number, r.state) for r in outcome.blockers] == [(2, "not_audited")]
+
+
+def test_a_trim_cut_for_another_beep_is_not_used(tmp_path, monkeypatch):
+    project, root = _project(tmp_path)
+    a = project.stage(1).primary().video_id
+    sidecar = project.trimmed_path(root) / f"stage1_cam_{a}_trimmed.params.json"
+    sidecar.write_text(json.dumps({"beep_time": 11.5, "pre_buffer_seconds": 5.0}))
+    monkeypatch.setattr(MatchProject, "stage_statuses", lambda self, root, **kw: {1: "audited", 2: "audited"})
+    inputs = load_reel_inputs(project, root, label="Anna", probe=lambda p: META)
+    assert inputs.readiness[0].state == "trim_missing"
+
+
+def test_an_unreviewed_secondary_beep_gives_no_replay(tmp_path, monkeypatch):
+    project, root = _project(tmp_path)
+    project.stage(1).videos[1].beep_reviewed = False
+    monkeypatch.setattr(MatchProject, "stage_statuses", lambda self, root, **kw: {1: "audited", 2: "audited"})
+    inputs = load_reel_inputs(project, root, label="Anna", probe=lambda p: META)
+    assert inputs.footage[1].secondary is None

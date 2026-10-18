@@ -21,7 +21,14 @@ from .coach import statistic_splits
 from .config import HighlightConfig, VideoMetadata
 from .export_naming import stage_display_name
 from .fcpxml_gen import probe_video
-from .highlights import StageReadiness, find_moments, pick_reel, reel_unlocked, stage_readiness
+from .highlights import (
+    OUT_OF_PLAY,
+    StageReadiness,
+    find_moments,
+    pick_reel,
+    reel_unlocked,
+    stage_readiness,
+)
 from .match_model import is_standard_start
 from .match_project import MatchProject, StageVideo
 from .reel_plan import FootageClip, StageFootage, plan_reel
@@ -29,7 +36,7 @@ from .reel_render import ReelRenderResult, reel_format, render_reel
 from .segment_cache import SegmentCache
 from .stage_summary_data import TileStageData, load_stage_events, load_stage_reloads, load_stage_shots
 from .trim import beep_in_trim, web_trim_path
-from .ui.audio import trim_pre_buffer_seconds_for
+from .ui.audio import resolve_trim_for_read, trim_params_path, trim_pre_buffer_seconds_for
 
 logger = logging.getLogger(__name__)
 
@@ -47,12 +54,30 @@ class ReelInputs:
     primaries: tuple[VideoMetadata, ...]
 
 
+#: How far a trim's recorded beep may sit from the video's before the trim
+#: counts as cut for another beep (the sidecar rounds to 4 decimals).
+STALE_BEEP_S = 0.001
+
+
 def _clip_for(project: MatchProject, root: Path, stage_number: int, video: StageVideo) -> Path | None:
-    trim = project.trimmed_path(root) / f"stage{stage_number}_cam_{video.video_id}_trimmed.mp4"
-    if trim.is_file():
+    """The trim the players read (``resolve_trim_for_read``: new-keyed, else
+    a legacy-keyed one), else its web rendition."""
+    trim = resolve_trim_for_read(root, stage_number, video, project=project)
+    if trim is not None:
         return trim
-    web = web_trim_path(trim)
+    keyed = project.trimmed_path(root) / f"stage{stage_number}_cam_{video.video_id}_trimmed.mp4"
+    web = web_trim_path(keyed)
     return web if web.is_file() else None
+
+
+def _cut_for_another_beep(trim: Path, beep_time: float) -> bool:
+    """The trim's params sidecar records the beep it was cut around; a beep
+    moved since (a re-trim pending or failed) would shift every window."""
+    try:
+        recorded = float(json.loads(trim_params_path(trim).read_text(encoding="utf-8"))["beep_time"])
+    except (OSError, ValueError, KeyError, TypeError):
+        return False
+    return abs(recorded - beep_time) > STALE_BEEP_S
 
 
 def _footage(
@@ -69,6 +94,9 @@ def _footage(
         if path.name.endswith("_trimmed.mp4")
         else path.with_name(path.name[: -len("_web.mp4")] + "_trimmed.mp4")
     )
+    if _cut_for_another_beep(trim, video.beep_time):
+        logger.warning("highlight reel: %s was cut for another beep; it needs a re-trim", path)
+        return None
     pre_buffer = trim_pre_buffer_seconds_for(trim, default=project.trim_pre_buffer_seconds)
     try:
         meta = probe(path)
@@ -100,14 +128,22 @@ def load_reel_inputs(
         primary = stage.primary()
         found = _footage(project, root, n, primary, probe) if primary is not None else None
         audit_path = audit_dir / f"stage{n}.json"
-        row = stage_readiness(n, statuses[n], _audit_doc(audit_path), has_footage=found is not None)
+        row = stage_readiness(
+            n,
+            statuses[n],
+            _audit_doc(audit_path),
+            has_video=primary is not None,
+            has_footage=found is not None,
+        )
         readiness.append(row)
         if row.state != "ready" or found is None:
             continue
         clip, meta = found
         secondary: FootageClip | None = None
         for video in stage.videos:
-            if video.role == "secondary":
+            # Only a beep someone confirmed: an auto-detected one can sit
+            # off the primary's, and the replay would centre on the wrong shot.
+            if video.role == "secondary" and video.beep_reviewed:
                 other = _footage(project, root, n, video, probe)
                 if other is not None:
                     secondary = other[0]
@@ -150,7 +186,7 @@ def end_lines(stages: Sequence[TileStageData]) -> tuple[str, ...]:
 
 @dataclass(frozen=True)
 class ReelOutcome:
-    #: Stages keeping the reel locked (empty when unlocked or forced).
+    #: Stages keeping the reel locked; on a forced reel, the stages it left out.
     blockers: tuple[StageReadiness, ...]
     result: ReelRenderResult | None
 
@@ -171,7 +207,7 @@ def make_reel(
     yet audited or broken down) renders nothing and names the blockers,
     unless ``force``, which renders from the ready stages alone."""
     inputs = load_reel_inputs(project, root, label=label, probe=probe)
-    blockers = tuple(r for r in inputs.readiness if r.state not in ("ready", "skipped", "no_footage"))
+    blockers = tuple(r for r in inputs.readiness if r.state != "ready" and r.state not in OUT_OF_PLAY)
     if not inputs.stages or (not reel_unlocked(inputs.readiness) and not force):
         return ReelOutcome(blockers, None)
     picks = pick_reel(find_moments(inputs.stages, HighlightConfig()), inputs.stages)
@@ -187,4 +223,4 @@ def make_reel(
             ffmpeg_binary=ffmpeg_binary,
             segment_cache=segment_cache,
         )
-    return ReelOutcome(() if force else blockers, result)
+    return ReelOutcome(blockers, result)

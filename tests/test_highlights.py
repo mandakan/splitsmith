@@ -48,14 +48,26 @@ def test_not_audited_blocks_before_breakdown_is_looked_at():
     assert row.state == "not_audited"
 
 
-def test_skipped_and_footageless_stages_do_not_block():
+def test_skipped_stages_and_stages_without_video_do_not_block():
     rows = [
         stage_readiness(1, StageStatus.audited, _doc(), has_footage=True),
         stage_readiness(2, StageStatus.skipped, None, has_footage=False),
-        stage_readiness(3, StageStatus.audited, _doc(), has_footage=False),
+        stage_readiness(3, StageStatus.todo, None, has_video=False, has_footage=False),
     ]
-    assert [r.state for r in rows] == ["ready", "skipped", "no_footage"]
+    assert [r.state for r in rows] == ["ready", "skipped", "no_video"]
     assert reel_unlocked(rows)
+
+
+def test_an_untouched_stage_with_video_blocks_even_without_a_trim():
+    row = stage_readiness(2, StageStatus.ready, None, has_footage=False)
+    assert row.state == "not_audited"
+    assert not reel_unlocked([stage_readiness(1, StageStatus.audited, _doc(), has_footage=True), row])
+
+
+def test_a_done_stage_whose_trim_is_missing_or_stale_blocks():
+    row = stage_readiness(3, StageStatus.audited, _doc(), has_footage=False)
+    assert row.state == "trim_missing"
+    assert not reel_unlocked([stage_readiness(1, StageStatus.audited, _doc(), has_footage=True), row])
 
 
 def test_nothing_ready_is_not_unlocked():
@@ -181,9 +193,9 @@ def test_beats_follow_the_order_and_prefer_unused_stages():
     ]
 
 
-def test_a_stage_is_reused_only_when_no_other_candidate_exists():
+def test_a_stage_gets_at_most_one_beat():
     found = _found(fastest_draw=[_m("fastest_draw", 1)], fastest_split=[_m("fastest_split", 1)])
-    assert [m.stage_number for m in pick_reel(found, []).beats] == [1, 1]
+    assert [m.stage_number for m in pick_reel(found, []).beats] == [1]
 
 
 def test_cold_open_is_the_fastest_split_else_the_first_beat():

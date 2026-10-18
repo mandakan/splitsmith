@@ -18,7 +18,7 @@ from .match_project import StageStatus
 from .stage_summary_data import TileStageData
 
 ReadinessState = Literal[
-    "ready", "not_audited", "breakdown_not_opened", "proposals_left", "no_footage", "skipped"
+    "ready", "not_audited", "breakdown_not_opened", "proposals_left", "trim_missing", "no_video", "skipped"
 ]
 
 
@@ -37,14 +37,22 @@ def _auto_proposals(doc: dict[str, Any]) -> int:
 
 
 def stage_readiness(
-    stage_number: int, status: StageStatus, audit_doc: dict[str, Any] | None, *, has_footage: bool
+    stage_number: int,
+    status: StageStatus,
+    audit_doc: dict[str, Any] | None,
+    *,
+    has_footage: bool,
+    has_video: bool = True,
 ) -> StageReadiness:
     """Where one stage stands for the reel. The order is the order a user
-    fixes things in: audit, then breakdown."""
+    fixes things in: audit, then breakdown. Only a stage with no video at
+    all is out of play; one not trimmed yet is not audited yet, and a done
+    stage whose trim is gone or was cut for another beep blocks as
+    ``trim_missing`` rather than being left out without a word."""
     if status == StageStatus.skipped:
         return StageReadiness(stage_number, "skipped")
-    if not has_footage:
-        return StageReadiness(stage_number, "no_footage")
+    if not has_video:
+        return StageReadiness(stage_number, "no_video")
     if status != StageStatus.audited or audit_doc is None:
         return StageReadiness(stage_number, "not_audited")
     if not audit_doc.get("events_seeded"):
@@ -52,15 +60,21 @@ def stage_readiness(
     proposals = _auto_proposals(audit_doc)
     if proposals:
         return StageReadiness(stage_number, "proposals_left", proposals=proposals)
+    if not has_footage:
+        return StageReadiness(stage_number, "trim_missing")
     return StageReadiness(stage_number, "ready")
 
 
+#: States that leave a stage out of the reel without blocking it.
+OUT_OF_PLAY: tuple[ReadinessState, ...] = ("skipped", "no_video")
+
+
 def reel_unlocked(rows: Sequence[StageReadiness]) -> bool:
-    """Every stage ready or out of play (skipped, no footage), and at
-    least one ready."""
+    """Every stage ready or out of play (skipped, no video), and at least
+    one ready."""
     if not any(r.state == "ready" for r in rows):
         return False
-    return all(r.state in ("ready", "skipped", "no_footage") for r in rows)
+    return all(r.state == "ready" or r.state in OUT_OF_PLAY for r in rows)
 
 
 MomentKind = Literal[
@@ -208,7 +222,8 @@ def pick_reel(
     config: HighlightConfig | None = None,
 ) -> ReelPicks:
     """One beat per kind in ``BEAT_ORDER``, each on a stage no earlier beat
-    used when any candidate allows it, so the reel moves around the match.
+    used (at most one beat per stage; a kind whose every candidate sits on
+    a used stage is left out), so the reel moves around the match.
     The cold open is the fastest split; the montage the fastest splits of
     the match, played in match order."""
     cfg = config or HighlightConfig()
@@ -218,7 +233,9 @@ def pick_reel(
         candidates = found.get(kind, [])
         if not candidates or len(beats) >= max_beats:
             continue
-        chosen = next((m for m in candidates if m.stage_number not in used), candidates[0])
+        chosen = next((m for m in candidates if m.stage_number not in used), None)
+        if chosen is None:
+            continue
         beats.append(chosen)
         used.add(chosen.stage_number)
     splits = found.get("fastest_split", [])

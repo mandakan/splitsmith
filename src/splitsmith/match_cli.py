@@ -1013,6 +1013,7 @@ def _run_youtube_upload(mp4: Path, *, client: Any, channel_title: str, options: 
 _BLOCKER_TEXT = {
     "not_audited": "shots not audited yet",
     "breakdown_not_opened": "not opened in Breakdown yet",
+    "trim_missing": "trim missing or cut for an older beep: trim the stage again",
 }
 
 
@@ -1066,11 +1067,8 @@ def highlights(
         force=force,
         segment_cache=match_exports.render_segment_cache(output_config),
     )
-    if outcome.result is None:
-        if not outcome.blockers:
-            console.print("[red]Error:[/] no stage is ready: audit and break down a stage first.")
-            raise typer.Exit(code=1)
-        console.print("[yellow]The highlight reel unlocks once every stage is audited and broken down:[/]")
+
+    def _print_rows() -> None:
         for row in outcome.blockers:
             reason = (
                 f"{row.proposals} Breakdown proposal{'s' if row.proposals != 1 else ''} left"
@@ -1078,8 +1076,19 @@ def highlights(
                 else _BLOCKER_TEXT.get(row.state, row.state)
             )
             console.print(f"  Stage {row.stage_number}: {reason}")
+
+    if outcome.result is None:
+        if force or not outcome.blockers:
+            console.print("[red]Error:[/] no stage is ready: audit and break down a stage first.")
+            _print_rows()
+            raise typer.Exit(code=1)
+        console.print("[yellow]The highlight reel unlocks once every stage is audited and broken down:[/]")
+        _print_rows()
         console.print("[dim]--force renders from the ready stages now.[/]")
         raise typer.Exit(code=1)
+    if outcome.blockers:
+        console.print("[yellow]Left out of this reel, and out of its figures:[/]")
+        _print_rows()
     result = outcome.result
     for note in result.degradations:
         console.print(f"[yellow]note:[/] {escape(note)}")

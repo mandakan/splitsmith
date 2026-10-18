@@ -151,6 +151,31 @@ def test_render_reel_encodes_every_item_then_stitches(tmp_path, monkeypatch):
     assert result.degradations == ()
 
 
+def test_a_failed_frame_grab_holds_the_callout_on_black(tmp_path, monkeypatch):
+    calls: list[list[str]] = []
+
+    def runner(cmd, **kw):
+        calls.append(list(cmd))
+        out = Path(cmd[-1])
+        if out.suffix != ".png":  # the grab past the clip's end writes nothing
+            out.parent.mkdir(parents=True, exist_ok=True)
+            out.write_bytes(b"x")
+        return subprocess.CompletedProcess(cmd, 0, "", "")
+
+    monkeypatch.setattr("splitsmith.reel_render._has_audio_stream", lambda p: True)
+    card = ReelCard("001_callout", "callout", 1.2, "FASTEST SPLIT", backdrop=FrameRef(Path("/m/a.mp4"), 99.0))
+    result = render_reel(
+        (card,),
+        sequence=UP,
+        output_path=tmp_path / "reel.mp4",
+        work_dir=tmp_path / "w",
+        runner=runner,
+        rasterizer=_FakeRaster(),
+    )
+    assert result.duration_seconds == pytest.approx(1.2)
+    assert any("001_callout" in d for d in result.degradations)
+
+
 def _probe_seconds(path: Path) -> float:
     out = subprocess.run(
         ["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", str(path)],

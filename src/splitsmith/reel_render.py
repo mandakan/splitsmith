@@ -23,7 +23,15 @@ from .composition import SequenceFormat
 from .config import VideoMetadata
 from .look_motion import motion_overlay_filters, write_motion_clip
 from .looks import load_look
-from .mp4_render import Runner, _build_concat_command, _encode_args, _has_audio_stream, _rate_string, _run
+from .mp4_render import (
+    FFmpegError,
+    Runner,
+    _build_concat_command,
+    _encode_args,
+    _has_audio_stream,
+    _rate_string,
+    _run,
+)
 from .overlay_card import card_backdrop, compose_card, first_frame_image
 from .overlay_raster import ChromiumRasterizer, Rasterizer, RasterizerUnavailableError
 from .reel_cards import reel_card_motion
@@ -218,10 +226,20 @@ def render_reel(
         if card.backdrop is None:
             return Image.new("RGB", (sequence.width, sequence.height), "black")
         frame = work_dir / f"{card.name}_frame.png"
-        _run(
-            frame_command(card.backdrop, sequence=sequence, output_path=frame, ffmpeg_binary=ffmpeg_binary),
-            runner=runner,
-        )
+        try:
+            _run(
+                frame_command(
+                    card.backdrop, sequence=sequence, output_path=frame, ffmpeg_binary=ffmpeg_binary
+                ),
+                runner=runner,
+            )
+        except FFmpegError as exc:
+            logger.warning("highlight reel: frame grab for %s failed (%s)", card.name, exc)
+        if not frame.is_file():
+            # A seek at or past the clip's end writes nothing: the callout
+            # holds on black rather than failing the reel.
+            degradations.append(f"{card.name}: no frame at {card.backdrop.at:g} s, held on black")
+            return Image.new("RGB", (sequence.width, sequence.height), "black")
         return card_backdrop(
             frame, width=sequence.width, height=sequence.height, look=look, blur_radius=0, dim=CALLOUT_DIM
         )
