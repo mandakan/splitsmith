@@ -77,7 +77,7 @@ def main() -> None:
     groups = corpus()
     audio: dict[str, tuple[np.ndarray, int]] = {}
     rows = []
-    for key, angles in groups.items():
+    for angles in groups.values():
         for ref in angles:
             for other in angles:
                 if ref is other:
