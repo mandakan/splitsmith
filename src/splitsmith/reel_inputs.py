@@ -21,6 +21,7 @@ from .coach import statistic_splits
 from .config import HighlightConfig, MomentKind, VideoMetadata
 from .export_naming import stage_display_name
 from .fcpxml_gen import probe_video
+from .grade import ResolvedGrade
 from .highlights import (
     OUT_OF_PLAY,
     StageReadiness,
@@ -213,6 +214,7 @@ def make_reel(
     probe: Probe = probe_video,
     segment_cache: SegmentCache | None = None,
     ffmpeg_binary: str = "ffmpeg",
+    grade: ResolvedGrade | None = None,
 ) -> ReelOutcome:
     """Find, pick, plan and render the shooter's reel. Locked (a stage not
     yet audited or broken down) renders nothing and names the blockers,
@@ -249,6 +251,7 @@ def make_reel(
             work_dir=Path(tmp),
             ffmpeg_binary=ffmpeg_binary,
             segment_cache=segment_cache,
+            grade=grade,
         )
     return ReelOutcome(
         blockers, result, stages=tuple(s.stage_number for s in inputs.stages), end_lines=figures
