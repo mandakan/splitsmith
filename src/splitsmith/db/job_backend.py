@@ -41,6 +41,7 @@ from typing import Any
 from sqlalchemy import and_, not_, or_, select, update
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
+from .. import __version__
 from ..access import Feature, FeatureRequiredError
 from ..async_bridge import run_sync
 from ..observability import PhaseTimer, capture_job_exception, emit_job_event
@@ -53,6 +54,7 @@ from ..ui.jobs import (
     JobNotRetryableError,
     JobStatus,
     ShutdownInProgressError,
+    UnknownJobKindError,
 )
 from .models import ComputeJobRow
 
@@ -296,8 +298,13 @@ class PostgresJobBackend:
         task) means a failure to resolve the match surfaces as a FAILED
         job row with a legible message instead of an escaped exception
         that strands the row at PENDING.
+
+        The body is looked up inside that capture too (#1495): a worker
+        whose image predates a job kind ends the row FAILED, saying so, and
+        the next request queues a fresh job. Looked up before it, the
+        ``UnknownJobKindError`` escaped, the row stayed PENDING, and every
+        later request reused it through ``find_active`` and waited forever.
         """
-        body = self.bodies.get(kind)
         call_args = args or {}
         # The account check runs again here, not only at submit: a job
         # queued before a downgrade (or woken by the boot re-trigger) must
@@ -309,6 +316,15 @@ class PostgresJobBackend:
         def _ctx_fn(handle: JobHandle) -> None:
             if refused:
                 raise FeatureRequiredError(Feature.hosted_compute)
+            try:
+                body = self.bodies.get(kind)
+            except UnknownJobKindError as exc:
+                # A KeyError's message prints in quotes; the row's error is
+                # what the jobs list and the logs show.
+                raise RuntimeError(
+                    f"this worker (splitsmith {__version__}) cannot run job kind {kind!r}: "
+                    "it runs an image older than the server; update it"
+                ) from exc
             if before_body is not None:
                 before_body()
             body(handle, **call_args)
