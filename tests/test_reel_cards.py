@@ -16,7 +16,9 @@ def test_unknown_variant_is_none_not_a_fallback():
 
 
 def test_context_carries_the_card_as_data():
-    card = ReelCard("004_callout", "callout", 1.2, "FASTEST SPLIT", figure="0.19", unit="SEC", lines=("Stage 3",))
+    card = ReelCard(
+        "004_callout", "callout", 1.2, "FASTEST SPLIT", figure="0.19", unit="SEC", lines=("Stage 3",)
+    )
     ctx = reel_card_context(card, width=1080, height=1920, fps=30, theme=theme_for(load_look("splitsmith")))
     assert ctx.data["highlight"] == {
         "kind": "callout",

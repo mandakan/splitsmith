@@ -39,7 +39,9 @@ def reel_card_context(
         },
         size={"width": width, "height": height},
         fps=fps,
-        engine=engine_block(css=single_css(width=width, height=height, scale=card_scale(height), theme=theme)),
+        engine=engine_block(
+            css=single_css(width=width, height=height, scale=card_scale(height), theme=theme)
+        ),
         assets={"shared": shared_url()},
     )
 

@@ -106,7 +106,12 @@ def _splits(stages: Sequence[TileStageData], cfg: HighlightConfig) -> list[Momen
             t = shot.time_from_beep
             out.append(
                 Moment(
-                    "fastest_split", s.stage_number, t - shot.split - cfg.lead_s, t + cfg.tail_s, t, shot.split
+                    "fastest_split",
+                    s.stage_number,
+                    t - shot.split - cfg.lead_s,
+                    t + cfg.tail_s,
+                    t,
+                    shot.split,
                 )
             )
     return out
@@ -129,7 +134,9 @@ def _streaks(stages: Sequence[TileStageData], cfg: HighlightConfig) -> list[Mome
             if count >= cfg.min_streak_shots:
                 first, last = shots[run_start].time_from_beep, shots[i - 1].time_from_beep
                 out.append(
-                    Moment("longest_streak", s.stage_number, first - cfg.lead_s, last + cfg.lead_s, last, count)
+                    Moment(
+                        "longest_streak", s.stage_number, first - cfg.lead_s, last + cfg.lead_s, last, count
+                    )
                 )
             run_start = i
     return out
@@ -150,7 +157,12 @@ def _regions(
                 continue  # a draw on the move is the draw's, not a transition
             out.append(
                 Moment(
-                    moment_kind, s.stage_number, e.start - cfg.lead_s, e.end + cfg.lead_s, e.end, e.end - e.start
+                    moment_kind,
+                    s.stage_number,
+                    e.start - cfg.lead_s,
+                    e.end + cfg.lead_s,
+                    e.end,
+                    e.end - e.start,
                 )
             )
     return out

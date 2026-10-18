@@ -172,7 +172,9 @@ def test_clips_at_different_rates_stitch(tmp_path):
     for i, (source, speed, sfx) in enumerate([(src, 1.0, None), (fast, 0.5, "riser")]):
         out = tmp_path / f"seg{i}.mp4"
         clip = ReelClip(f"c{i}", source, 0.5, 1.0, speed=speed, freeze_seconds=0.3, sfx=sfx)
-        proc = subprocess.run(clip_command(clip, sequence=UP, output_path=out), capture_output=True, text=True)
+        proc = subprocess.run(
+            clip_command(clip, sequence=UP, output_path=out), capture_output=True, text=True
+        )
         assert proc.returncode == 0, proc.stderr[-2000:]
         assert _probe_seconds(out) == pytest.approx(clip.out_seconds, abs=0.07)
         outs.append(out)
@@ -181,8 +183,21 @@ def test_clips_at_different_rates_stitch(tmp_path):
     final = tmp_path / "reel.mp4"
     subprocess.run(
         [
-            "ffmpeg", "-y", "-loglevel", "error", "-f", "concat", "-safe", "0", "-i", str(listing),
-            "-c:v", "copy", "-c:a", "aac", str(final),
+            "ffmpeg",
+            "-y",
+            "-loglevel",
+            "error",
+            "-f",
+            "concat",
+            "-safe",
+            "0",
+            "-i",
+            str(listing),
+            "-c:v",
+            "copy",
+            "-c:a",
+            "aac",
+            str(final),
         ],
         check=True,
     )
