@@ -29,6 +29,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
+from .looks import sounds_folder_has_files
 from .reel_render import AUDIO_NORMALIZE
 from .render_timeline import TimelineEntry, read_timeline, timeline_path
 
@@ -83,8 +84,13 @@ def load_sound_map(look_root: Path) -> SoundMap:
     """The ``sounds`` block of ``look_root/look.json`` (none is an empty
     map: the Look's templates may declare every sound); every file it
     names must be in the Look's ``sounds/`` folder."""
-    doc = json.loads((look_root / "look.json").read_text(encoding="utf-8"))
-    sounds = SoundMap.model_validate(doc.get("sounds", {}))
+    try:
+        doc = json.loads((look_root / "look.json").read_text(encoding="utf-8"))
+        sounds = SoundMap.model_validate(doc.get("sounds", {}))
+    except (OSError, ValueError) as exc:  # ValidationError and JSONDecodeError are ValueErrors
+        raise DressError(f"the Look's sounds cannot be read: {str(exc).splitlines()[0]}") from exc
+    if (look_root / "sounds").is_symlink():
+        raise DressError("the Look's sounds folder is a link; it must be a folder in the Look")
     folder = (look_root / "sounds").resolve()
     for cue in sounds.cues:
         name = cue.play or cue.bed or ""
@@ -199,9 +205,11 @@ def dress_command(
     *,
     output_path: Path,
     ffmpeg_binary: str = "ffmpeg",
+    audio_bitrate: str = "192k",
 ) -> tuple[str, ...]:
     """The export's video copied, its audio kept (ducked under any bed that
-    asks) with every placed sound mixed over it and limited."""
+    asks) with every placed sound mixed over it and limited, encoded at
+    ``audio_bitrate`` (the render's own: the YouTube preset's is 384k)."""
     args: list[str] = [ffmpeg_binary, "-hide_banner", "-y", "-i", str(export)]
     parts: list[str] = []
     base = f"[0:a]{AUDIO_NORMALIZE}"
@@ -242,7 +250,17 @@ def dress_command(
         f"{''.join(labels)}amix=inputs={len(labels)}:normalize=0:duration=first,alimiter=limit=0.95[aout]"
     )
     args += ["-filter_complex", ";".join(parts), "-map", "0:v", "-map", "[aout]", "-map_chapters", "0"]
-    args += ["-c:v", "copy", "-c:a", "aac", "-b:a", "192k", "-movflags", "+faststart", str(output_path)]
+    args += [
+        "-c:v",
+        "copy",
+        "-c:a",
+        "aac",
+        "-b:a",
+        audio_bitrate,
+        "-movflags",
+        "+faststart",
+        str(output_path),
+    ]
     return tuple(args)
 
 
@@ -279,6 +297,7 @@ def dress_export(
     output_path: Path | None = None,
     ffmpeg_binary: str = "ffmpeg",
     runner: Runner = subprocess.run,
+    audio_bitrate: str = "192k",
 ) -> DressResult:
     """Dress ``export`` in the Look's sounds (its map and what each card's
     template declared) and write it (atomically) to ``output_path``, by
@@ -287,14 +306,19 @@ def dress_export(
     if not sidecar.is_file():
         raise DressError(f"{export.name} has no timeline ({sidecar.name}); export it again to dress it")
     sounds = load_sound_map(look_root)
-    timeline = read_timeline(sidecar)
+    try:
+        timeline = read_timeline(sidecar)
+    except (OSError, ValueError, TypeError) as exc:
+        raise DressError(f"{sidecar.name} cannot be read: {exc}") from exc
     placed, notes = place_template_cues(sounds, timeline, look_root / "sounds")
     notes = (*notes, *_stages_without_hud(timeline, look_root))
     if not placed:
         raise NothingToPlayError(f"nothing to play: no cue of the Look's lands on {export.name}")
     out = output_path or dressed_path(export)
     partial = out.with_name(f".{out.stem}.partial{out.suffix}")
-    cmd = dress_command(export, placed, output_path=partial, ffmpeg_binary=ffmpeg_binary)
+    cmd = dress_command(
+        export, placed, output_path=partial, ffmpeg_binary=ffmpeg_binary, audio_bitrate=audio_bitrate
+    )
     try:
         runner(list(cmd), check=True, capture_output=True, text=True)
         partial.replace(out)
@@ -302,6 +326,9 @@ def dress_export(
         partial.unlink(missing_ok=True)
         tail = (exc.stderr or "").strip().splitlines()[-3:]
         raise DressError(f"ffmpeg failed: {' '.join(tail)}") from exc
+    except OSError as exc:  # no ffmpeg, or the rename
+        partial.unlink(missing_ok=True)
+        raise DressError(f"the mix could not be written: {exc}") from exc
     return DressResult(path=out, notes=notes)
 
 
@@ -311,24 +338,33 @@ def dress_in_place(
     *,
     ffmpeg_binary: str = "ffmpeg",
     runner: Runner = subprocess.run,
+    audio_bitrate: str = "192k",
 ) -> DressResult | None:
     """Dress ``export`` in the Look's sounds and put the mix where the export
     was: what the app's match export does after the render. ``None`` when the
     Look has no sounds folder or nothing of it lands on this export, and the
     file is left as rendered. A failed mix raises :class:`DressError` and
     leaves the render untouched."""
-    folder = look_root / "sounds"
-    if not folder.is_dir() or not any(p.is_file() and not p.is_symlink() for p in folder.iterdir()):
+    if not sounds_folder_has_files(look_root):
         return None
     mixed = export.with_name(f".{export.stem}.dressing{export.suffix}")
     try:
         result = dress_export(
-            export, look_root, output_path=mixed, ffmpeg_binary=ffmpeg_binary, runner=runner
+            export,
+            look_root,
+            output_path=mixed,
+            ffmpeg_binary=ffmpeg_binary,
+            runner=runner,
+            audio_bitrate=audio_bitrate,
         )
     except NothingToPlayError:
         return None
     except BaseException:
         mixed.unlink(missing_ok=True)
         raise
-    mixed.replace(export)
+    try:
+        mixed.replace(export)
+    except OSError as exc:
+        mixed.unlink(missing_ok=True)
+        raise DressError(f"the mix could not replace the render: {exc}") from exc
     return DressResult(path=export, notes=result.notes)

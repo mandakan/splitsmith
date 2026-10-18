@@ -123,9 +123,12 @@ def test_the_match_export_threads_the_choice(tmp_path: Path, monkeypatch: pytest
     assert [req.look_sounds for req in seen] == [True, False]
 
 
-def _cli_export(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, dress: Any, *extra: str) -> Any:
+def _cli_export(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, dress: Any, *extra: str, sounds_block: object = None
+) -> Any:
     """``match export --format mp4 --theme loud`` (a user Look with sounds)
-    with the render stubbed and ``dress`` standing in for the mix."""
+    with the render stubbed and ``dress`` standing in for the mix;
+    ``sounds_block`` replaces the Look's ``sounds`` in its ``look.json``."""
     from typer.testing import CliRunner
 
     from splitsmith.cli import app
@@ -133,7 +136,11 @@ def _cli_export(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, dress: Any, *ex
 
     from .test_match_cli_export import _capture_mp4, _seed
 
-    _look(tmp_path / "looks" / "loud", sounds=True)
+    loud = _look(tmp_path / "looks" / "loud", sounds=True)
+    if sounds_block is not None:
+        manifest = json.loads((loud / "look.json").read_text())
+        manifest["sounds"] = sounds_block
+        (loud / "look.json").write_text(json.dumps(manifest))
     token = looks.set_user_looks_provider(lambda: tmp_path / "looks")
     monkeypatch.setattr(match_exports_mod, "dress_in_place", dress)
     try:
@@ -176,3 +183,67 @@ def test_a_failed_mix_is_a_note_and_the_render_stands(
     result = _cli_export(tmp_path, monkeypatch, boom)
     assert result.exit_code == 0, result.output
     assert "Look sounds left out: ffmpeg failed: no audio stream" in result.output
+
+
+@pytest.mark.parametrize(
+    "sounds",
+    [
+        {"cue": [{"on": "stage", "play": "go.wav"}]},
+        {"cues": [{"on": "stage", "play": "go.wav", "bed": "go.wav"}]},
+        [1, 2],
+    ],
+)
+def test_a_broken_sounds_block_is_a_note_never_a_failed_export(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, sounds: object
+) -> None:
+    """Review finding: a typo in a Look's ``sounds`` block raised a pydantic
+    error that failed the whole job after the MP4 had rendered (no sidecar,
+    no history). The real mix runs here, not a stand-in."""
+    from splitsmith.audio_dress import dress_in_place as real_dress
+
+    result = _cli_export(tmp_path, monkeypatch, real_dress, sounds_block=sounds)
+    assert result.exit_code == 0, result.output
+    assert "Look sounds left out:" in result.output
+
+
+def test_the_mix_keeps_the_youtube_presets_audio_bitrate(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Review finding: the YouTube preset encodes audio at 384k; the mix
+    re-encodes it, and must not halve it."""
+    seen: list[dict[str, Any]] = []
+
+    def fake_dress(export: Path, look_root: Path, **kwargs: Any) -> None:
+        seen.append(kwargs)
+
+    _cli_export(tmp_path, monkeypatch, fake_dress, "--youtube-preset")
+    assert seen[0]["audio_bitrate"] == "384k"
+    argv = __import__("splitsmith.audio_dress", fromlist=["dress_command"]).dress_command(
+        tmp_path / "m.mp4", (), output_path=tmp_path / "o.mp4", audio_bitrate="384k"
+    )
+    assert argv[argv.index("-b:a") + 1] == "384k"
+
+
+def test_a_symlinked_or_hidden_only_sounds_folder_is_no_sound(tmp_path: Path) -> None:
+    """Review findings: a ``sounds/`` that is a symlink reached files outside
+    the Look; one holding only ``.DS_Store`` showed a switch with nothing to
+    mix. Neither counts."""
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "go.wav").write_bytes(b"x")
+    linked = _look(tmp_path / "looks" / "linked", sounds=False)
+    (linked / "sounds").symlink_to(outside, target_is_directory=True)
+    hidden = _look(tmp_path / "looks" / "hidden", sounds=False)
+    (hidden / "sounds").mkdir()
+    (hidden / "sounds" / ".DS_Store").write_bytes(b"x")
+    token = looks.set_user_looks_provider(lambda: tmp_path / "looks")
+    try:
+        assert not looks.look_has_sounds(looks.load_look("linked"))
+        assert not looks.look_has_sounds(looks.load_look("hidden"))
+    finally:
+        looks.reset_user_looks_provider(token)
+    export = tmp_path / "m.mp4"
+    export.write_bytes(b"render")
+    write_timeline(timeline_path(export), (STAGE,))
+    calls: list[list[str]] = []
+    assert dress_in_place(export, linked, runner=_writes(calls)) is None and calls == []

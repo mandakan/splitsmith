@@ -14,6 +14,7 @@ That keeps the unit tests free of project fixtures.
 
 from __future__ import annotations
 
+import logging
 import os
 import subprocess
 from collections.abc import Sequence
@@ -72,6 +73,8 @@ TitleKind = Literal["none", "slate", "lower-third"]
 _RENDERERS_WITHOUT_TITLES: frozenset[OutputFormat] = frozenset({"fcp7xml"})
 _RENDERERS_WITHOUT_SEGMENTS: frozenset[OutputFormat] = frozenset({"fcp7xml"})
 _RENDERERS_WITHOUT_MATCH_CARDS: frozenset[OutputFormat] = frozenset({"fcpxml", "fcp7xml"})
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -448,16 +451,26 @@ def render_segment_cache(config: OutputConfig) -> SegmentCache | None:
     )
 
 
-def _mix_look_sounds(output_path: Path, look_name: str) -> list[str]:
+def _mix_look_sounds(output_path: Path, look_name: str, *, youtube_preset: bool) -> list[str]:
     """Mix the Look's sounds into the rendered MP4 where it lies, and what the
     run should say about it: the mix's own notes, or why it was left out. A
     Look without sounds is untouched and says nothing; a failed mix keeps
-    the render as it was and never fails the export."""
+    the render as it was and never fails the export, whatever went wrong
+    (the render is done; a sound is never worth losing it). The audio keeps
+    the render's bitrate: the YouTube preset's 384k, else 192k."""
     try:
         look_root = load_look(look_name).root
-        result = dress_in_place(output_path, look_root, ffmpeg_binary=runtime().ffmpeg_binary)
+        result = dress_in_place(
+            output_path,
+            look_root,
+            ffmpeg_binary=runtime().ffmpeg_binary,
+            audio_bitrate="384k" if youtube_preset else "192k",
+        )
     except (LookError, DressError) as exc:
         return [f"Look sounds left out: {exc}"]
+    except Exception as exc:  # noqa: BLE001 -- the render stands; say what failed
+        logger.exception("mixing the Look's sounds into %s failed", output_path.name)
+        return [f"Look sounds left out: {type(exc).__name__}: {exc}"]
     return list(result.notes) if result is not None else []
 
 
@@ -940,7 +953,9 @@ def export_match(
             rendered_seconds = rendered.duration_seconds
             anomalies.extend(rendered.degradations)
             if request.look_sounds:
-                anomalies.extend(_mix_look_sounds(output_path, request.overlay_theme))
+                anomalies.extend(
+                    _mix_look_sounds(output_path, request.overlay_theme, youtube_preset=youtube_preset_active)
+                )
     except (ValueError, FileNotFoundError, mp4_render.FFmpegError) as exc:
         raise MatchExportError(str(exc)) from exc
 

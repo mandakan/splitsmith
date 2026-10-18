@@ -658,12 +658,21 @@ def _positions(look: Look, slot: str, variant: str) -> list[str]:
     return list(declared_positions(template))
 
 
+def sounds_folder_has_files(root: Path) -> bool:
+    """Whether ``root/sounds`` is a real folder (not a link out of the Look)
+    holding at least one file that is neither a link nor hidden (a
+    ``.DS_Store`` alone is no sound)."""
+    folder = root / "sounds"
+    if folder.is_symlink() or not folder.is_dir():
+        return False
+    return any(p.is_file() and not p.is_symlink() and not p.name.startswith(".") for p in folder.iterdir())
+
+
 def look_has_sounds(look: Look) -> bool:
     """Whether the Look carries sounds: a file in its own ``sounds/`` folder,
     which both its ``look.json`` cues and its templates' ``sounds()`` play
     from (``audio_dress``). A hosted Look holds no files, so never."""
-    folder = look.root / "sounds"
-    return folder.is_dir() and any(p.is_file() and not p.is_symlink() for p in folder.iterdir())
+    return sounds_folder_has_files(look.root)
 
 
 def look_catalog() -> list[LookInfo]:
@@ -701,6 +710,7 @@ def look_catalog() -> list[LookInfo]:
 
 __all__ = [
     "look_has_sounds",
+    "sounds_folder_has_files",
     "BRAND_DIR",
     "BRAND_FILE_RE",
     "LookBrand",
