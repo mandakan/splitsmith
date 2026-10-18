@@ -377,6 +377,23 @@ def test_run_job_skips_a_cancelled_row(tmp_path) -> None:
     assert asyncio.run(backend.get(queued.id)).status == JobStatus.CANCELLED
 
 
+def test_a_worker_that_does_not_know_the_kind_fails_the_row(tmp_path) -> None:
+    """#1495: a worker on an image older than the job kind ends the row
+    FAILED, saying why, instead of stranding it at PENDING where every later
+    request reused it and waited forever."""
+    backend, _, _ = _build_backend_for_new_user(tmp_path, inline=False)
+    _register(backend, "derive_audio", lambda _h: None)
+    queued = asyncio.run(backend.submit(kind="derive_audio"))
+    # The worker that picks it up never registered the kind.
+    backend.bodies._bodies.pop("derive_audio")
+
+    asyncio.run(backend.run_job(job_id=queued.id, kind="derive_audio"))
+    row = asyncio.run(backend.get(queued.id))
+    assert row.status == JobStatus.FAILED
+    assert "cannot run job kind 'derive_audio'" in (row.error or "")
+    assert "update it" in (row.error or "")
+
+
 def test_acknowledge_and_acknowledge_all_failures(tmp_path) -> None:
     backend, _, _ = _build_backend_for_new_user(tmp_path)
 
