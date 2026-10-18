@@ -58,13 +58,14 @@ def test_classified_stage_reports_the_draw_and_the_split_mean() -> None:
     assert figs.interval_count == 14
 
 
-def test_a_confirmed_draw_region_is_the_cards_draw() -> None:
-    """Spec 2026-10-17: the share card, the project payload and the triage
-    cells all read this: a confirmed draw region's length, a proposal never."""
+def test_the_cards_draw_is_the_timer_draw_whatever_the_region() -> None:
+    """#1528: the share card, the project payload and the triage cells all
+    read this: the first shot's time from the beep, confirmed draw region or
+    not."""
     from splitsmith.config import StageEvent
 
     draw = StageEvent(id="evt-1", kind="draw", start=0.4, end=1.28, source="manual")
-    assert stage_figures(_classified(), regions=[draw]).draw == pytest.approx(0.88)
+    assert stage_figures(_classified(), regions=[draw]).draw == pytest.approx(1.28)
     proposed = draw.model_copy(update={"source": "auto"})
     assert stage_figures(_classified(), regions=[proposed]).draw == pytest.approx(1.28)
 

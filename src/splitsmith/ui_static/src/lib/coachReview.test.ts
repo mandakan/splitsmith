@@ -29,10 +29,13 @@ describe("reviewFigures", () => {
     expect(f.draw).toBe(1.5);
   });
 
-  it("reads the draw off a confirmed draw region, never a proposed one", () => {
+  it("keeps the timer draw and splits it at a confirmed draw region's start (#1528)", () => {
     const draw: StageEvent = { id: "d", kind: "draw", start: 0.6, end: 1.5, source: "auto" };
-    expect(reviewFigures(SHOTS, [draw]).draw).toBe(1.5);
-    expect(reviewFigures(SHOTS, [{ ...draw, source: "manual" }]).draw).toBeCloseTo(0.9);
+    expect(reviewFigures(SHOTS, [draw])).toMatchObject({ draw: 1.5, reaction: null, presentation: null });
+    const kept = reviewFigures(SHOTS, [{ ...draw, source: "manual" }]);
+    expect(kept.draw).toBe(1.5);
+    expect(kept.reaction).toBeCloseTo(0.6);
+    expect(kept.presentation).toBeCloseTo(0.9);
   });
 
   it("orders by time, whatever order the payload has", () => {
@@ -53,7 +56,15 @@ describe("reviewFigures", () => {
   });
 
   it("has no figures without shots", () => {
-    expect(reviewFigures([], [])).toEqual({ avgSplit: null, draw: null, movingShots: 0, reloads: 0, exposedReload: 0 });
+    expect(reviewFigures([], [])).toEqual({
+      avgSplit: null,
+      draw: null,
+      reaction: null,
+      presentation: null,
+      movingShots: 0,
+      reloads: 0,
+      exposedReload: 0,
+    });
   });
 });
 

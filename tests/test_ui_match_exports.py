@@ -1472,8 +1472,8 @@ def test_export_match_without_the_breakdown_carries_no_region_marker(tmp_path: P
 def test_without_the_breakdown_the_summaries_read_no_region(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """Switch off: the hold has no reloads or regions, and the match
-    summary's Draw is the first shot again, not the draw region."""
+    """Switch off: the hold has no reloads or regions. The match summary's
+    Draw is the first shot's time from the beep either way (#1528)."""
     captured = _capture_mp4(monkeypatch)
     stage = _one_stage_input(tmp_path)
     doc = json.loads(stage.audit_path.read_text())
@@ -1494,8 +1494,8 @@ def test_without_the_breakdown_the_summaries_read_no_region(
         comp = captured["comp"]
         return comp.stages[0].summary.data, comp.match_summary.rows[0].draw
 
-    hold, draw = run(True)
-    assert hold.reloads and hold.events and draw == 0.1
-    hold, draw = run(False)
+    hold, draw_on = run(True)
+    assert hold.reloads and hold.events
+    hold, draw_off = run(False)
     assert hold.reloads == () and hold.events == ()
-    assert draw is not None and draw != 0.1
+    assert draw_on is not None and draw_on == draw_off

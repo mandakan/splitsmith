@@ -432,10 +432,10 @@ def test_triage_cells_carry_pipeline_fields(client: _MatchClient) -> None:
     assert s2["avg_split"] is None
 
 
-def test_a_confirmed_draw_region_is_the_draw_in_the_payloads(client: _MatchClient) -> None:
-    """Spec 2026-10-17: the project payload's figures and the triage cell
-    show the draw region's length once it is confirmed, the first shot's
-    time while it is only proposed."""
+def test_the_payloads_draw_is_the_timer_draw_with_a_draw_region(client: _MatchClient) -> None:
+    """#1528: the project payload's figures and the triage cell show the
+    first shot's time from the beep, also once a draw region whose start was
+    moved is confirmed."""
     doc = {
         "stage_number": 1,
         "shots": [
@@ -451,9 +451,9 @@ def test_a_confirmed_draw_region_is_the_draw_in_the_payloads(client: _MatchClien
     resp = client.put("/api/shooters/alice/stages/1/events", json={"events": [region], "_version": version})
     assert resp.status_code == 200, resp.text
     stages = {s["stage_number"]: s for s in client.get("/api/shooters/alice/project").json()["stages"]}
-    assert stages[1]["figures"]["draw"] == pytest.approx(0.9)
+    assert stages[1]["figures"]["draw"] == pytest.approx(2.3)
     cells = {c["stage_number"]: c for c in client.get("/api/match/triage").json()["cells"]}
-    assert cells[1]["draw"] == pytest.approx(0.9)
+    assert cells[1]["draw"] == pytest.approx(2.3)
 
 
 def test_project_stages_carry_figures(client: _MatchClient) -> None:

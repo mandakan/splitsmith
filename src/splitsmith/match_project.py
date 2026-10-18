@@ -671,6 +671,11 @@ class StageEntry(BaseModel):
     # and for projects imported before this field existed; the next
     # scoreboard import will populate it.
     stage_rounds: StageRounds | None = None
+    #: How the stage starts (#1528), a copy of the match's
+    #: ``MatchStageDefinition.start`` like ``stage_rounds``: ``standard`` or
+    #: ``non_standard``. Written through the stage editor, kept across a
+    #: scoreboard re-import.
+    start: str = "standard"
     # Full per-shooter scorecard from the SSI Scoreboard, persisted so hosted
     # share viewers (no live scoreboard access) still see scores. ``None`` for
     # placeholders and pre-scorecard projects; populated by merge_stage_times.
@@ -1883,6 +1888,7 @@ class MatchProject(BaseModel):
         # Index it once so the loop below can pick up rounds without
         # re-scanning per stage.
         rounds_by_number = _stage_rounds_by_number(raw.get("stages") or [])
+        start_by_number = {s.stage_number: s.start for s in self.stages}
         for s in primary_competitor.get("stages", []):
             stage_data = StageData.model_validate(s)
             scoreboard_numbers.add(stage_data.stage_number)
@@ -1894,6 +1900,7 @@ class MatchProject(BaseModel):
                     scorecard_updated_at=stage_data.scorecard_updated_at,
                     videos=videos_by_stage.get(stage_data.stage_number, []),
                     stage_rounds=rounds_by_number.get(stage_data.stage_number),
+                    start=start_by_number.get(stage_data.stage_number, "standard"),
                 )
             )
         new_stages.sort(key=lambda s: s.stage_number)
@@ -1975,6 +1982,7 @@ class MatchProject(BaseModel):
                 if s.videos:
                     videos_by_stage[s.stage_number] = list(s.videos)
 
+        start_by_number = {s.stage_number: s.start for s in self.stages}
         new_stages: list[StageEntry] = [
             StageEntry(
                 stage_number=stage.stage_number,
@@ -1984,6 +1992,7 @@ class MatchProject(BaseModel):
                 videos=videos_by_stage.get(stage.stage_number, []),
                 placeholder=True,
                 stage_rounds=_stage_rounds_from_info(stage),
+                start=start_by_number.get(stage.stage_number, "standard"),
             )
             for stage in match_data.stages
         ]

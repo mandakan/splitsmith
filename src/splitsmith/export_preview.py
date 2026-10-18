@@ -43,6 +43,7 @@ from .look_brand import brand_mark_json
 from .look_sting import sting_context
 from .look_template import shared_digest
 from .looks import Look, overlay_template_for, sting_template_for
+from .match_model import is_standard_start
 from .match_project import MatchProject
 from .match_summary import MatchSummary, build_match_summary, build_match_summary_still
 from .overlay_card import build_card_still, build_lower_third, card_backdrop, card_motion, card_scale
@@ -404,6 +405,7 @@ def match_summary_for(
                     scorecard=stage.scorecard,
                     stage_rounds=stage.stage_rounds,
                     events=regions,
+                    standard_start=is_standard_start(stage.start),
                 ),
             )
         )

@@ -61,13 +61,30 @@ export function withKind(events: StageEvent[], id: string, kind: StageEventKind)
  * ``events.confirmed``; an auto proposal is a guess nobody looked at.
  */
 /**
- * The stage's Draw figure (spec 2026-10-17): a confirmed draw region's
- * length, else the first shot's time from the beep (null without shots).
- * The twin of ``events.draw_seconds``; a proposal never counts.
+ * The stage's Draw figure (#1528): what a shot timer reports, the first
+ * shot's time from the beep (null without shots), whatever the regions say;
+ * a moved draw region splits it (``drawParts``). The twin of
+ * ``events.draw_seconds``.
  */
-export function drawSeconds(firstShotS: number | null, events: StageEvent[]): number | null {
+export function drawSeconds(firstShotS: number | null, _events: StageEvent[]): number | null {
+  return firstShotS;
+}
+
+/**
+ * The Draw split at a confirmed draw region's start (#1528): reaction (the
+ * beep to the hands moving) and presentation (the hands moving to the first
+ * shot), summing to ``drawSeconds``. Null without shots, without a
+ * confirmed draw region, or when its start is on the beep or not before
+ * the first shot. The twin of ``events.draw_parts``.
+ */
+export function drawParts(
+  firstShotS: number | null,
+  events: StageEvent[],
+): { reaction: number; presentation: number } | null {
+  if (firstShotS == null) return null;
   const draw = events.find((e) => e.kind === "draw" && e.source === "manual");
-  return draw ? draw.end - draw.start : firstShotS;
+  if (!draw || draw.start <= 0 || draw.start >= firstShotS) return null;
+  return { reaction: draw.start, presentation: firstShotS - draw.start };
 }
 
 export function confirmedEvents(events: StageEvent[]): StageEvent[] {

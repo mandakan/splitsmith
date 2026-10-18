@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import type { CoachIntervalClass, CoachMatchDistributions, CoachShot } from "@/lib/api";
+import type { CoachIntervalClass, CoachMatchDistributions, CoachShot, StageEvent } from "@/lib/api";
 import { LANE_TICK } from "@/components/coach/laneDrag";
 import { CHIP_TICK_BG } from "@/components/ui/chipTicks";
 import { INTERVAL_TONE } from "@/lib/splits";
@@ -111,5 +111,49 @@ describe("the Reclassify tones", () => {
       const hue = CHIP_TICK_BG[BUDGET_TICK[cls]].replace(/^bg-/, "");
       expect(INTERVAL_TONE[cls].split(" ")[0]).toBe(`text-${hue}`);
     }
+  });
+});
+
+describe("timeBudget on a broken-down stage (#1528)", () => {
+  // Draw 1.5; a 2.5 s gap classed transition holding a 1.0 s reload and a
+  // movement over 1.5 s of it, half of it overlapping the reload; then a split.
+  const S = shots([1.5, 1.8, 4.3, 4.6], ["first_shot", "split", "transition", "split"]);
+  const ev = (
+    id: string,
+    kind: StageEvent["kind"],
+    start: number,
+    end: number,
+    source: StageEvent["source"] = "manual",
+  ): StageEvent => ({ id, kind, start, end, source });
+  const seconds = (b: ReturnType<typeof timeBudget>) =>
+    Object.fromEntries(b.segments.map((s) => [s.cls, Number(s.seconds.toFixed(3))]));
+
+  it("gives each gap's seconds to the regions in it first, reload before movement, the rest to the class", () => {
+    const b = timeBudget(S, DIST, { events: [ev("r", "reload", 2.0, 3.0), ev("m", "movement", 2.5, 4.0)] });
+    expect(seconds(b)).toEqual({ first_shot: 1.5, movement: 1.0, transition: 0.5, split: 0.6, reload: 1.0 });
+    expect(b.segments.reduce((n, s) => n + s.seconds, 0)).toBeCloseTo(4.6, 9);
+  });
+
+  it("counts confirmed regions only", () => {
+    const b = timeBudget(S, DIST, { events: [ev("r", "reload", 2.0, 3.0, "auto")] });
+    expect(seconds(b)).toEqual({ first_shot: 1.5, transition: 2.5, split: 0.6 });
+  });
+
+  it("keeps the Draw the timer draw and splits it at a moved draw region", () => {
+    const b = timeBudget(S, DIST, { events: [ev("d", "draw", 0.4, 1.5)] });
+    const draw = b.segments.find((s) => s.cls === "first_shot")!;
+    expect(draw.seconds).toBe(1.5);
+    expect(draw.parts?.reaction).toBeCloseTo(0.4);
+    expect(draw.parts?.presentation).toBeCloseTo(1.1);
+  });
+
+  it("does not compare a non-standard start's Draw with the match", () => {
+    const slow = shots([4.0, 4.3], ["first_shot", "split"]);
+    const standard = timeBudget(slow, DIST).segments[0];
+    expect(standard.vsMatch).not.toBeNull();
+    expect(standard.outliers).toHaveLength(1);
+    const table = timeBudget(slow, DIST, { standardStart: false }).segments[0];
+    expect(table.vsMatch).toBeNull();
+    expect(table.outliers).toEqual([]);
   });
 });

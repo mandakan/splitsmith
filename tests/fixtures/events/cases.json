@@ -194,25 +194,25 @@
       ]
     }
   ],
-  "_draws_note": "The stage's Draw figure (spec 2026-10-17): a confirmed draw region's length, else the first shot's time from the beep (null without shots).",
+  "_draws_note": "The stage's Draw figure (#1528): what a shot timer reports, the first shot's time from the beep (null without shots), whatever the regions say. A confirmed draw region whose start was moved off the beep, to before the first shot, splits it: reaction is the beep to the region's start, presentation the region's start to the first shot; both null otherwise.",
   "draws": [
     {
       "name": "no_draw_region_keeps_the_first_shot",
       "first_shot": 2.31,
       "events": [{"id": "evt-1", "kind": "movement", "start": 0.0, "end": 2.2, "source": "manual"}],
-      "expect": {"draw": 2.31}
+      "expect": {"draw": 2.31, "reaction": null, "presentation": null}
     },
     {
-      "name": "a_confirmed_draw_is_its_length",
+      "name": "a_moved_draw_region_splits_the_draw_but_not_its_figure",
       "first_shot": 2.31,
       "events": [{"id": "evt-1", "kind": "draw", "start": 1.33, "end": 2.31, "source": "manual"}],
-      "expect": {"draw": 0.98}
+      "expect": {"draw": 2.31, "reaction": 1.33, "presentation": 0.98}
     },
     {
       "name": "a_proposed_draw_is_ignored",
       "first_shot": 2.31,
-      "events": [{"id": "evt-1", "kind": "draw", "start": 0.0, "end": 2.31, "source": "auto"}],
-      "expect": {"draw": 2.31}
+      "events": [{"id": "evt-1", "kind": "draw", "start": 1.33, "end": 2.31, "source": "auto"}],
+      "expect": {"draw": 2.31, "reaction": null, "presentation": null}
     },
     {
       "name": "a_movement_beside_the_draw_changes_nothing",
@@ -221,13 +221,25 @@
         {"id": "evt-1", "kind": "movement", "start": 0.0, "end": 2.2, "source": "manual"},
         {"id": "evt-2", "kind": "draw",     "start": 1.33, "end": 2.31, "source": "manual"}
       ],
-      "expect": {"draw": 0.98}
+      "expect": {"draw": 2.31, "reaction": 1.33, "presentation": 0.98}
+    },
+    {
+      "name": "a_draw_region_at_the_beep_does_not_split",
+      "first_shot": 2.31,
+      "events": [{"id": "evt-1", "kind": "draw", "start": 0.0, "end": 2.31, "source": "manual"}],
+      "expect": {"draw": 2.31, "reaction": null, "presentation": null}
+    },
+    {
+      "name": "a_draw_region_from_the_first_shot_on_does_not_split",
+      "first_shot": 1.2,
+      "events": [{"id": "evt-1", "kind": "draw", "start": 1.2, "end": 1.5, "source": "manual"}],
+      "expect": {"draw": 1.2, "reaction": null, "presentation": null}
     },
     {
       "name": "no_shots_and_no_draw_is_null",
       "first_shot": null,
       "events": [],
-      "expect": {"draw": null}
+      "expect": {"draw": null, "reaction": null, "presentation": null}
     }
   ]
 }

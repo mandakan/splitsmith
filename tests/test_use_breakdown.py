@@ -268,7 +268,8 @@ def test_the_summary_preview_follows_the_switch(tmp_path: Path) -> None:
         _render(tmp_path / str(breakdown), spec, audit={**AUDIT, "events": _REGIONS}, raster=raster)
         htmls.append(raster.htmls[-1])
     used, unused = htmls
-    assert ">Reloads<" in used and ">0.92<" in used
+    # The Draw is the timer draw, switch or not (#1528).
+    assert ">Reloads<" in used and ">1.42<" in used
     assert ">Reloads<" not in unused and ">1.42<" in unused
 
 
@@ -296,7 +297,8 @@ def test_the_previews_match_summary_follows_the_switch(tmp_path: Path) -> None:
     unused = ep.match_summary_for(
         project, docs, title="T", label="M", work_dir=tmp_path / "b", breakdown=False
     )
-    assert used.rows[0].draw == pytest.approx(0.92)
+    # The Draw is the timer draw, switch or not (#1528).
+    assert used.rows[0].draw == pytest.approx(1.42)
     assert unused.rows[0].draw == pytest.approx(1.42)
 
 

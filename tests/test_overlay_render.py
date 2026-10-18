@@ -72,21 +72,14 @@ def test_build_frame_states_running_total_clamps_pre_beep() -> None:
     assert states[45].running_total == pytest.approx(45 / 30.0 - 1.0)
 
 
-def test_a_confirmed_draw_is_shot_ones_split_on_classic() -> None:
-    """Spec 2026-10-17: shot 1's split is the draw; with a confirmed draw
-    region Classic shows its length, as every other Draw surface does.
-    Later shots are untouched."""
-    kwargs = {
-        "shot_times_in_clip": [3.32, 3.62],
-        "beep_time_in_clip": 1.0,
-        "fps": 10.0,
-        "duration_seconds": 5.0,
-    }
-    plain = overlay_render.build_frame_states(**kwargs)
-    drawn = overlay_render.build_frame_states(**kwargs, draw_seconds=0.98)
-    assert plain[34].last_split == pytest.approx(2.32)
-    assert drawn[34].last_split == pytest.approx(0.98)
-    assert drawn[40].last_split == pytest.approx(0.3)
+def test_shot_ones_split_on_classic_is_the_timer_draw() -> None:
+    """#1528: shot 1's split is the draw a shot timer reports, its time from
+    the beep; later shots are their splits."""
+    states = overlay_render.build_frame_states(
+        shot_times_in_clip=[3.32, 3.62], beep_time_in_clip=1.0, fps=10.0, duration_seconds=5.0
+    )
+    assert states[34].last_split == pytest.approx(2.32)
+    assert states[40].last_split == pytest.approx(0.3)
 
 
 def test_build_frame_states_advances_shots_fired() -> None:

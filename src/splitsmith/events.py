@@ -159,16 +159,32 @@ def confirmed(events: Sequence[StageEvent]) -> list[StageEvent]:
 
 
 def draw_seconds(first_shot_s: float | None, regions: Sequence[StageEvent]) -> float | None:
-    """The stage's Draw figure (spec 2026-10-17): a confirmed draw region's
-    length, else the first shot's time from the beep (``None`` without
-    shots). The one rule every Draw surface reads (the summary card, the
-    match summary, the share card, the project payload, Compare);
-    ``drawSeconds`` in ``lib/events.ts`` is its twin, held to the shared
-    ``cases.json``. A proposal never counts, whatever the caller passes."""
-    draw = next((e for e in regions if e.kind == "draw" and e.source == "manual"), None)
-    if draw is not None:
-        return draw.end - draw.start
+    """The stage's Draw figure (#1528): what a shot timer reports, the first
+    shot's time from the beep (``None`` without shots), whatever the regions
+    say. Shooters compare that number; a draw region's moved start splits
+    it (:func:`draw_parts`) rather than replacing it. The one rule every
+    Draw surface reads (the summary card, the match summary, the share card,
+    the project payload, Compare, the overlay's shot 1); ``drawSeconds`` in
+    ``lib/events.ts`` is its twin, held to the shared ``cases.json``.
+    ``regions`` stays in the signature so every caller keeps passing what a
+    Draw could depend on."""
+    del regions
     return first_shot_s
+
+
+def draw_parts(first_shot_s: float | None, regions: Sequence[StageEvent]) -> tuple[float, float] | None:
+    """The Draw split at a confirmed draw region's start (#1528):
+    ``(reaction, presentation)``, the beep to the hands moving and the hands
+    moving to the first shot, which sum to :func:`draw_seconds`. ``None``
+    without shots, without a confirmed draw region, or when its start is on
+    the beep or not before the first shot. ``drawParts`` in
+    ``lib/events.ts`` is its twin."""
+    if first_shot_s is None:
+        return None
+    draw = next((e for e in regions if e.kind == "draw" and e.source == "manual"), None)
+    if draw is None or draw.start <= 0 or draw.start >= first_shot_s:
+        return None
+    return draw.start, first_shot_s - draw.start
 
 
 def region_marker_label(event: StageEvent) -> str:

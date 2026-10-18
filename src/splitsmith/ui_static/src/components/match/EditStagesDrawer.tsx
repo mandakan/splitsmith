@@ -92,6 +92,9 @@ interface EditRow {
    *  ``stage_rounds`` comparison see a change that never happened, which
    *  it then counts as a no-op rename. */
   hadStageRounds: boolean;
+  /** Holstered and loaded: the stage's Draw is compared with other
+   *  standard starts (#1528). */
+  standardStart: boolean;
 }
 
 let nextDraftId = -1;
@@ -106,6 +109,7 @@ function rowsFromStages(stages: MatchStageDefinition[]): EditRow[] {
     steelTargets: s.stage_rounds?.steel_targets ?? null,
     removed: false,
     hadStageRounds: s.stage_rounds !== null,
+    standardStart: (s.start ?? "standard") === "standard",
   }));
 }
 
@@ -230,6 +234,7 @@ export function EditStagesDrawer({
         steelTargets: null,
         removed: false,
         hadStageRounds: false,
+        standardStart: true,
       },
     ]);
   }
@@ -268,6 +273,7 @@ export function EditStagesDrawer({
                 paper_targets: r.paperTargets,
                 steel_targets: r.steelTargets,
               },
+        start: r.standardStart ? "standard" : "non_standard",
       }));
       const summary = await api.editMatchStages(payload);
       onSaved(summary);
@@ -342,11 +348,14 @@ export function EditStagesDrawer({
               <div className="overflow-hidden rounded-xl border border-rule bg-bg-glow">
                 <div
                   className="grid items-center gap-3.5 border-b border-rule bg-surface-2 px-4 py-2.5 font-mono text-[0.5625rem] font-bold uppercase tracking-[0.18em] text-subtle"
-                  style={{ gridTemplateColumns: "56px 1fr 130px 36px" }}
+                  style={{ gridTemplateColumns: "56px 1fr 130px 72px 36px" }}
                 >
                   <span>#</span>
                   <span>Name</span>
                   <span className="text-right">Expected shots</span>
+                  <span className="text-center" title="Holstered and loaded. Draws are compared across standard starts only.">
+                    Std start
+                  </span>
                   <span />
                 </div>
                 {rows.map((row) => (
@@ -424,7 +433,7 @@ function EditStageRow({
         "grid items-center gap-3.5 border-b border-rule px-4 py-2.5 last:border-b-0",
         row.removed && "opacity-60",
       )}
-      style={{ gridTemplateColumns: "56px 1fr 130px 36px" }}
+      style={{ gridTemplateColumns: "56px 1fr 130px 72px 36px" }}
     >
       {/* Muted secondary identity, never the row's ordinal -- a gapped
           list (1, 2, 4, 5) must show its real numbers, and a row the
@@ -469,6 +478,16 @@ function EditStageRow({
           row.removed && "line-through",
         )}
       />
+      <span className="flex justify-center">
+        <input
+          type="checkbox"
+          checked={row.standardStart}
+          onChange={(e) => onChange({ standardStart: e.target.checked })}
+          disabled={rowDisabled}
+          aria-label={`Standard start for ${rowIdentity}`}
+          className="size-4 accent-[var(--color-led)]"
+        />
+      </span>
       <button
         type="button"
         onClick={onToggleRemove}

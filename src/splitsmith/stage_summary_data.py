@@ -94,6 +94,10 @@ class TileStageData:
     #: template's ``data.stage``, and the draw (:attr:`draw`). A builder
     #: that leaves it empty shows the first shot as the draw.
     events: tuple[StageEvent, ...] = ()
+    #: The stage starts standard (holstered and loaded, #1528): only such
+    #: stages' Draws are compared across stages (the match summary's Best
+    #: draw). A builder that does not know says standard, as before.
+    standard_start: bool = True
 
     @property
     def draw(self) -> float | None:
