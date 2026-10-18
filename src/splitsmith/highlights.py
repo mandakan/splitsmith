@@ -224,7 +224,7 @@ def _stage_figure(stages: Sequence[TileStageData], kind: MomentKind) -> list[Mom
 
 
 def _bursts(stages: Sequence[TileStageData], cfg: HighlightConfig) -> list[Moment]:
-    """Each stage's most shots inside any ``burst_window_s``, at least three."""
+    """Each stage's most shots inside any ``burst_window_s``, at least ``min_burst_shots``."""
     out = []
     for s in stages:
         times = [shot.time_from_beep for shot in s.shots]
@@ -236,7 +236,7 @@ def _bursts(stages: Sequence[TileStageData], cfg: HighlightConfig) -> list[Momen
             count = i - j + 1
             if best is None or count > best[0]:
                 best = (count, j)
-        if best is None or best[0] < 3:
+        if best is None or best[0] < cfg.min_burst_shots:
             continue
         count, first = best
         last = times[first + count - 1]

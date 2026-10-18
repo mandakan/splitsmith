@@ -288,7 +288,10 @@ def test_longest_burst_counts_shots_inside_the_window():
     assert (best.focus, best.label) == (1.6, "IN 1 S")
     assert find_moments([stage], HighlightConfig(burst_window_s=1.0))["longest_burst"][0].figure == 4
     assert find_moments([stage], HighlightConfig(burst_window_s=0.9))["longest_burst"][0].figure == 4
-    assert find_moments([stage], HighlightConfig(burst_window_s=0.5))["longest_burst"][0].figure == 3
+    # Three in the window is under the default minimum of four: no moment.
+    assert find_moments([stage], HighlightConfig(burst_window_s=0.5))["longest_burst"] == []
+    loose = HighlightConfig(burst_window_s=0.5, min_burst_shots=3)
+    assert find_moments([stage], loose)["longest_burst"][0].figure == 3
 
 
 def test_fastest_string_is_n_shots_in_a_row_without_a_reload_or_movement():

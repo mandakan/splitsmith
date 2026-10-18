@@ -675,6 +675,9 @@ class HighlightConfig(BaseModel):
     moments: list[MomentKind] = list(DEFAULT_MOMENTS)
     max_beats: int = 8
     burst_window_s: float = 1.0
+    #: Fewer shots in the window is not worth a card (three in a second is
+    #: accurate-paced shooting, not a burst).
+    min_burst_shots: int = 4
     string_shots: int = 6
     min_pause_s: float = 1.0
     min_split_s: float = 0.10
