@@ -36,7 +36,7 @@ from .mp4_render import (
 from .overlay_card import card_backdrop, compose_card, first_frame_image
 from .overlay_raster import ChromiumRasterizer, Rasterizer, RasterizerUnavailableError
 from .reel_cards import reel_card_motion
-from .reel_plan import FrameRef, ReelCard, ReelClip, ReelItem, SfxKind
+from .reel_plan import INTRO_S, FrameRef, ReelCard, ReelClip, ReelItem, SfxKind
 from .segment_cache import SegmentCache
 
 logger = logging.getLogger(__name__)
@@ -59,12 +59,28 @@ def reel_format(primaries: Sequence[VideoMetadata], *, upright: bool) -> Sequenc
 
 
 def _fit(sequence: SequenceFormat) -> str:
-    """Centre-crop to the canvas aspect, then scale to it."""
+    """Centre-crop to the canvas aspect, then scale to it, in TV range."""
     aspect = sequence.width / sequence.height
     return (
         f"crop='min(iw,ih*{aspect:.4g})':'min(ih,iw/{aspect:.4g})',"
-        f"scale={sequence.width}:{sequence.height},setsar=1"
+        f"scale={sequence.width}:{sequence.height}:out_range=tv,setsar=1"
     )
+
+
+#: Every segment's picture ends in this, so all carry one set of colour
+#: parameters: a stream-copied stitch of full-range headcam clips (yuvj420p,
+#: BT.709 tags) and untagged cards decoded the cards as footage.
+UNIFORM_COLOUR = "format=yuv420p,setparams=range=tv:color_primaries=bt709:color_trc=bt709:colorspace=bt709"
+COLOUR_TAGS = (
+    "-color_range",
+    "tv",
+    "-colorspace",
+    "bt709",
+    "-color_primaries",
+    "bt709",
+    "-color_trc",
+    "bt709",
+)
 
 
 SILENCE = "anullsrc=channel_layout=stereo:sample_rate=48000"
@@ -74,15 +90,19 @@ _SFX_DIR = Path(str(resources.files("splitsmith") / "data" / "sfx"))
 #: sits in it: the mix starts the stem that much before its cue, so the hit
 #: lands on the cut (a riser's "hit" is its last sample, a sting's after its
 #: build). Volumes are relative to the footage's own sound.
-SFX_STEMS: dict[SfxKind, tuple[Path, float]] = {
-    "impact": (_SFX_DIR / "impact.m4a", 1.2),
-    "braam": (_SFX_DIR / "braam.m4a", 1.2),
-    "whoosh": (_SFX_DIR / "whoosh.m4a", 1.0),
-    "slowmo": (_SFX_DIR / "slowmo.m4a", 0.0),
-    "riser": (_SFX_DIR / "riser.m4a", 2.2),
-    "sting": (_SFX_DIR / "sting.m4a", 6.2),
+SFX_STEMS: dict[SfxKind, tuple[Path, float, float | None]] = {
+    # kind: (file, hit, tail): ``tail`` caps how long it rings after its hit,
+    # fading out over ``SFX_FADE_S``; ``None`` plays it whole.
+    "drone": (_SFX_DIR / "drone.m4a", 0.0, INTRO_S),
+    "impact": (_SFX_DIR / "impact.m4a", 1.2, None),
+    "braam": (_SFX_DIR / "braam.m4a", 1.2, 2.0),
+    "whoosh": (_SFX_DIR / "whoosh.m4a", 1.0, None),
+    "slowmo": (_SFX_DIR / "slowmo.m4a", 0.0, None),
+    "riser": (_SFX_DIR / "riser.m4a", 2.2, None),
+    "sting": (_SFX_DIR / "sting.m4a", 6.2, None),
 }
 SFX_VOLUME = 0.7
+SFX_FADE_S = 0.4
 
 
 def beep_source(seconds: float) -> str:
@@ -108,9 +128,8 @@ def clip_command(
     out_seconds = clip.out_seconds
     rate = _rate_string(sequence)
     freeze = f",tpad=stop_mode=clone:stop_duration={clip.freeze_seconds:g}" if clip.freeze_seconds > 0 else ""
-    video = (
-        f"[0:v]{_fit(sequence)},setpts=(PTS-STARTPTS)/{clip.speed:g},fps={rate}{freeze},format=yuv420p[final]"
-    )
+    speed = f"setpts=(PTS-STARTPTS)/{clip.speed:g}"
+    video = f"[0:v]{_fit(sequence)},{speed},fps={rate}{freeze},{UNIFORM_COLOUR}[final]"
     args: list[str] = [ffmpeg_binary, "-hide_banner", "-y"]
     args += ["-ss", f"{clip.start:g}", "-t", f"{clip.seconds:g}", "-i", str(clip.source)]
     if source_audio and clip.speed == 1.0:
@@ -123,7 +142,8 @@ def clip_command(
         args += ["-f", "lavfi", "-i", SILENCE]
         audio = f"[1:a]{AUDIO_NORMALIZE},atrim=duration={out_seconds:g}[aout]"
     args += ["-filter_complex", f"{video};{audio}", "-map", "[final]", "-map", "[aout]"]
-    args += ["-t", f"{out_seconds:g}", *_encode_args(sequence, youtube_preset=False), str(output_path)]
+    args += ["-t", f"{out_seconds:g}", *_encode_args(sequence, youtube_preset=False), *COLOUR_TAGS]
+    args += [str(output_path)]
     return tuple(args)
 
 
@@ -147,15 +167,15 @@ def card_command(
     if clip is not None:
         args += ["-i", str(clip)]
         parts, label = motion_overlay_filters(1, rate=rate, seconds=seconds, source_label="0:v")
-        video = ";".join([*parts, f"[{label}]format=yuv420p,setsar=1[final]"])
+        video = ";".join([*parts, f"[{label}]{UNIFORM_COLOUR},setsar=1[final]"])
         audio_index = 2
     else:
-        video = "[0:v]format=yuv420p,setsar=1[final]"
+        video = f"[0:v]{UNIFORM_COLOUR},setsar=1[final]"
         audio_index = 1
     args += ["-f", "lavfi", "-i", beep_source(seconds) if "beep" in sfx else SILENCE]
     audio = f"[{audio_index}:a]{AUDIO_NORMALIZE}[aout]"
     args += ["-t", f"{seconds:g}", "-filter_complex", f"{video};{audio}", "-map", "[final]", "-map", "[aout]"]
-    args += [*_encode_args(sequence, youtube_preset=False), str(output_path)]
+    args += [*_encode_args(sequence, youtube_preset=False), *COLOUR_TAGS, str(output_path)]
     return tuple(args)
 
 
@@ -185,14 +205,19 @@ def sfx_mix_command(
     parts: list[str] = []
     labels = ["[0:a]"]
     for index, (kind, at) in enumerate(cues, start=1):
-        path, hit = SFX_STEMS[kind]
+        path, hit, tail = SFX_STEMS[kind]
         args += ["-i", str(path)]
+        filters: list[str] = []
+        if tail is not None:
+            end = hit + tail
+            filters.append(f"atrim=end={end:g},afade=t=out:st={end - SFX_FADE_S:g}:d={SFX_FADE_S:g}")
         start = at - hit
         if start >= 0:
             ms = round(start * 1000)
-            chain = f"[{index}:a]adelay={ms}|{ms}"
+            filters.append(f"adelay={ms}|{ms}")
         else:
-            chain = f"[{index}:a]atrim=start={-start:g},asetpts=PTS-STARTPTS"
+            filters.append(f"atrim=start={-start:g},asetpts=PTS-STARTPTS")
+        chain = f"[{index}:a]" + ",".join(filters)
         parts.append(f"{chain},{AUDIO_NORMALIZE},volume={SFX_VOLUME:g}[s{index}]")
         labels.append(f"[s{index}]")
     parts.append(

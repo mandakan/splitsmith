@@ -31,25 +31,65 @@
   var S = window.splitsmith;
   var H = S.data.highlight;
   var animations = [];
-  var settle = Math.min(H.duration_seconds, 0.8);
-  function add(el, keyframes, delayMs, durationMs) {
+  var settle = H.kind === 'intro' ? H.duration_seconds : Math.min(H.duration_seconds, 0.8);
+  function add(el, keyframes, delayMs, durationMs, easing) {
     var a = el.animate(keyframes, {
-      duration: durationMs, delay: delayMs, easing: 'cubic-bezier(0.2, 0.9, 0.1, 1)', fill: 'both'
+      duration: durationMs, delay: delayMs, easing: easing || 'cubic-bezier(0.2, 0.9, 0.1, 1)', fill: 'both'
     });
     a.pause();
     animations.push(a);
   }
+  // The mood before the first hit: the name surfaces out of the dark with its
+  // letters drawing together, a thin rule grows, the small line arrives late,
+  // and the whole frame pushes in slowly until the cut.
+  function intro(stack) {
+    var total = H.duration_seconds * 1000;
+    var text = document.createElement('div');
+    text.className = 'text';
+    text.textContent = H.text;
+    text.style.color = S.theme.ink;
+    stack.appendChild(text);
+    add(text, [
+      { opacity: 0, letterSpacing: '0.6em', filter: 'blur(1.2vmin)' },
+      { opacity: 1, letterSpacing: '0.04em', filter: 'blur(0)' }
+    ], 300, 2600, 'cubic-bezier(0.25, 0.1, 0.2, 1)');
+    var bar = document.createElement('div');
+    bar.className = 'bar';
+    bar.style.background = S.theme.accent;
+    stack.appendChild(bar);
+    add(bar, [{ transform: 'scaleX(0)' }, { transform: 'scaleX(1)' }], 1900, 900, 'ease-in-out');
+    (H.lines || []).forEach(function (line, i) {
+      var el = document.createElement('div');
+      el.className = 'line';
+      el.style.color = S.theme.muted;
+      el.style.letterSpacing = '0.35em';
+      el.textContent = line;
+      stack.appendChild(el);
+      add(el, [{ opacity: 0 }, { opacity: 1 }], 2500 + 150 * i, 700, 'ease-out');
+    });
+    add(stack, [{ transform: 'scale(1)' }, { transform: 'scale(1.06)' }], 0, total, 'linear');
+  }
   document.addEventListener('DOMContentLoaded', function () {
     var stack = document.getElementById('stack');
     if (H.kind === 'callout') { document.body.style.background = 'rgba(0, 0, 0, 0.35)'; }
+    if (H.kind === 'intro') { intro(stack); return; }
     if (!H.text && !H.figure) { return; }
+    if (H.kind === 'title') {
+      // The braam's hit: a white flash off the cut.
+      var flash = document.createElement('div');
+      flash.style.cssText = 'position:absolute;inset:0;background:#fff;';
+      document.body.appendChild(flash);
+      add(flash, [{ opacity: 0.85 }, { opacity: 0 }], 0, 320, 'ease-out');
+    }
     if (H.text) {
       var text = document.createElement('div');
       text.className = 'text';
       text.textContent = H.text;
       text.style.color = H.kind === 'callout' ? S.theme.accent : S.theme.ink;
+      if (H.kind === 'title') { text.style.fontSize = '15vmin'; }
       stack.appendChild(text);
-      add(text, [{ transform: 'scale(1.8)', opacity: 0 }, { transform: 'scale(1)', opacity: 1 }], 0, 260);
+      var from = H.kind === 'title' ? 'scale(2.6)' : 'scale(1.8)';
+      add(text, [{ transform: from, opacity: 0 }, { transform: 'scale(1)', opacity: 1 }], 0, 240);
     }
     if (H.figure) {
       var figure = document.createElement('div');

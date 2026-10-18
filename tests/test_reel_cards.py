@@ -42,7 +42,7 @@ def test_trailer_card_renders_frames_in_chromium():
     except RasterizerUnavailableError:
         pytest.skip("no Chromium")
     try:
-        for kind in ("title", "slam", "callout", "end"):
+        for kind in ("intro", "title", "slam", "callout", "end"):
             card = ReelCard("x", kind, 1.0, "FASTEST DRAW", figure="0.94", unit="SEC", lines=("Stage 1",))
             motion = reel_card_motion(
                 load_look("splitsmith"), card, width=540, height=960, fps=30, rasterizer=raster

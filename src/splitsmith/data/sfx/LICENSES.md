@@ -1,6 +1,6 @@
 # Highlight reel sound effects
 
-The six stems the highlight reel lays over its cuts (`reel_render.SFX_STEMS`). Each one is
+The seven stems the highlight reel lays over its cuts (`reel_render.SFX_STEMS`). Each one is
 designed from CC0 1.0 sources (https://creativecommons.org/publicdomain/zero/1.0/), layered,
 pitched, saturated and reverberated with numpy by the splitsmith promo trailer's sound
 design (`promo/edit/sd_v2.py`, 2026-10-11), then encoded to AAC 160 kbit/s, 48 kHz stereo.
@@ -9,6 +9,7 @@ Freesound licences were checked per sound through the Freesound API when fetched
 
 | Stem | Hit at | Made from |
 |---|---|---|
+| `drone.m4a` | 0.00 s (a bed) | Breviceps postapocalyptic drone 452999 (-2 st) and majortonic low rumble 473725 fading in, under GammaGool tick tock 759503 (-3 st); 5 s |
 | `impact.m4a` | 1.20 s | AudioPapkin impact 755054 (-2 st), Kenney impactPunch_heavy_000 (-3 st), a synthesized 58 to 34 Hz thump |
 | `braam.m4a` | 1.20 s | InMotionAudio distorted bram 697057 (-2 st), unfa braam (-3 st), TDPK_Music distorted braam 529924 (-6 st), a synthesized 46 to 36 Hz sub, hall reverb |
 | `whoosh.m4a` | 1.00 s | videofueralle swishes 614169 (-2 st) |
@@ -30,6 +31,9 @@ Freesound licences were checked per sound through the Freesound API when fetched
 | Movie short swell (218354) | jordivburgel | CC0 1.0 | https://freesound.org/people/jordivburgel/sounds/218354/ |
 | Bass drop (503774) | reathance | CC0 1.0 | https://freesound.org/people/reathance/sounds/503774/ |
 | Explosion drop (361592) | Dasgoat | CC0 1.0 | https://freesound.org/people/Dasgoat/sounds/361592/ |
+| Postapocalyptic drone (452999) | Breviceps | CC0 1.0 | https://freesound.org/people/Breviceps/sounds/452999/ |
+| Low noise rumble (473725) | majortonic | CC0 1.0 | https://freesound.org/people/majortonic/sounds/473725/ |
+| Tick tock echoing (759503) | GammaGool | CC0 1.0 | https://freesound.org/people/GammaGool/sounds/759503/ |
 | braam (Freesound 647712, mirrored on Wikimedia Commons) | unfa | CC0 1.0 | https://commons.wikimedia.org/wiki/File:647712_unfa_braam.flac |
 | Wind, hit, time morph (slomo1) | qubodup | CC0 1.0 | https://opengameart.org/content/wind-hit-time-morph |
 | Impact Sounds 1.0 (impactPunch_heavy_000) | Kenney | CC0 1.0 | https://kenney.nl/assets/impact-sounds |

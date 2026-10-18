@@ -82,9 +82,10 @@ def test_a_card_is_silent_unless_it_is_the_timer_beep():
 
 
 def test_every_stem_ships_and_names_its_hit():
-    for kind, (path, hit) in SFX_STEMS.items():
+    assert "drone" in SFX_STEMS
+    for kind, (path, hit, tail) in SFX_STEMS.items():
         assert path.is_file(), kind
-        assert hit >= 0
+        assert hit >= 0 and (tail is None or tail > 0)
 
 
 def test_cues_sit_at_each_items_start_on_the_stitched_timeline():
@@ -102,8 +103,9 @@ def test_mix_places_each_stems_hit_on_its_cue():
     cues = (("braam", 2.6), ("riser", 2.6), ("impact", 0.5))
     argv = sfx_mix_command(Path("/w/stitched.mp4"), cues, output_path=Path("/w/reel.mp4"))
     graph = argv[argv.index("-filter_complex") + 1]
-    # braam hits 1.2 s in: starts 1.4 s into the reel.
-    assert "[1:a]adelay=1400|1400" in graph
+    # braam hits 1.2 s in: starts 1.4 s into the reel, its tail cut 2 s after
+    # the hit with a fade, so the timer's beep after the title lands in quiet.
+    assert "[1:a]atrim=end=3.2,afade=t=out:st=2.8:d=0.4,adelay=1400|1400" in graph
     # riser ends (2.2 s) on the cue: starts at 0.4 s.
     assert "[2:a]adelay=400|400" in graph
     # impact's hit at 1.2 s is before its 0.5 s cue: its first 0.7 s is cut.
@@ -220,6 +222,24 @@ def _probe_seconds(path: Path) -> float:
         check=True,
     )
     return float(out.stdout.strip())
+
+
+def test_every_segment_carries_one_set_of_colour_parameters():
+    """A pin, not a reproduction: on Little Trouble (full-range, BT.709-tagged
+    headcam clips stitched after untagged cards) the stream-copied reel showed
+    frozen footage where the intro and title cards were; with every segment
+    converted to TV range and tagged BT.709 it showed the cards. Synthetic
+    footage did not reproduce it, so this holds the argv to the fix."""
+    clip = clip_command(ReelClip("c", Path("/m/a.mp4"), 0.0, 1.0), sequence=UP, output_path=Path("/w/c.mp4"))
+    card = card_command(
+        Path("/w/b.png"), None, seconds=1.0, sfx=(), sequence=UP, output_path=Path("/w/k.mp4")
+    )
+    for argv in (clip, card):
+        graph = argv[argv.index("-filter_complex") + 1]
+        assert "setparams=range=tv:color_primaries=bt709:color_trc=bt709:colorspace=bt709" in graph
+        assert argv[argv.index("-color_range") + 1] == "tv"
+        assert argv[argv.index("-colorspace") + 1] == "bt709"
+    assert "out_range=tv" in clip[clip.index("-filter_complex") + 1]
 
 
 @pytest.mark.integration

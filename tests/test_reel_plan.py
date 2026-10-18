@@ -46,16 +46,27 @@ def test_spine_shape_for_one_beat():
     items = _plan(ReelPicks(cold_open=m, beats=(m,), montage=((1, 3.0),)))
     kinds = [(type(i).__name__, getattr(i, "kind", None)) for i in items]
     assert kinds == [
-        ("ReelCard", "slam"),  # black, the beep
+        ("ReelCard", "intro"),  # the mood: drone, the match name revealed, a riser
+        ("ReelCard", "title"),  # the braam, the shooter slammed in
+        ("ReelCard", "slam"),  # black, the timer's beep
         ("ReelClip", None),  # cold open slow motion
         ("ReelCard", "callout"),
-        ("ReelCard", "title"),
         ("ReelCard", "slam"),
         ("ReelClip", None),
         ("ReelCard", "callout"),
         ("ReelClip", None),  # montage cut
         ("ReelCard", "end"),
     ]
+
+
+def test_the_opening_builds_before_anything_happens():
+    m = _split()
+    intro, title, beep = _plan(ReelPicks(cold_open=m, beats=(), montage=()))[:3]
+    assert (intro.text, intro.sfx) == ("Bromma 2026", ("drone",))
+    assert intro.seconds >= 4.0
+    # The riser ends on the title's cut, where the braam hits.
+    assert (title.text, title.sfx) == ("Anna", ("riser", "braam"))
+    assert beep.sfx == ("beep",)
 
 
 def test_clip_times_are_clip_local():

@@ -17,8 +17,8 @@ from .highlights import Moment, MomentKind, ReelPicks
 #: ``beep`` is the timer's tone, drawn in its card's own audio; every other
 #: kind is a shipped stem (``data/sfx``) the renderer lays over the stitched
 #: reel at the item's start, its hit on the cut (``reel_render.SFX_STEMS``).
-SfxKind = Literal["beep", "impact", "braam", "whoosh", "slowmo", "riser", "sting"]
-CardKind = Literal["title", "slam", "callout", "end"]
+SfxKind = Literal["beep", "drone", "impact", "braam", "whoosh", "slowmo", "riser", "sting"]
+CardKind = Literal["intro", "title", "slam", "callout", "end"]
 
 MIN_CLIP_S = 0.3
 SLOW = 0.5
@@ -27,10 +27,11 @@ REPLAY_LEAD_S = 1.0
 REPLAY_TAIL_S = 0.3
 MONTAGE_LEAD_S = 0.35
 MONTAGE_TAIL_S = 0.05
-BEEP_CARD_S = 0.6
+BEEP_CARD_S = 0.8
 SLAM_S = 0.7
 CALLOUT_S = 1.2
-TITLE_S = 1.6
+INTRO_S = 4.6
+TITLE_S = 2.2
 END_S = 2.5
 
 MOMENT_LABELS: dict[MomentKind, str] = {
@@ -153,6 +154,12 @@ def plan_reel(
             sfx=("whoosh",),
         )
 
+    # The opening builds before anything happens: a drone under the match
+    # name revealed on black, a riser into the braam on the shooter's name,
+    # its tail fading so the timer's beep lands in quiet.
+    items.append(ReelCard(name("intro"), "intro", INTRO_S, title, lines=("HIGHLIGHTS",), sfx=("drone",)))
+    items.append(ReelCard(name("title"), "title", TITLE_S, shooter, sfx=("riser", "braam")))
+
     cold = picks.cold_open
     cold_stage = footage.get(cold.stage_number) if cold is not None else None
     if cold is not None and cold_stage is not None:
@@ -163,8 +170,6 @@ def plan_reel(
                 ReelClip(name("cold"), cold_stage.primary.path, *window, speed=SLOW, sfx=("slowmo",))
             )
             items.append(callout(cold, cold_stage))
-    # The riser ends on the title's cut, where the braam hits.
-    items.append(ReelCard(name("title"), "title", TITLE_S, title, lines=(shooter,), sfx=("riser", "braam")))
 
     for moment in picks.beats:
         stage = footage.get(moment.stage_number)
