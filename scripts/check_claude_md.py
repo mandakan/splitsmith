@@ -10,7 +10,8 @@ split working:
   the root's job);
 - every ``paths:`` glob matches at least one file (a rename silently stops a
   rule from loading);
-- every ``*.md`` rule file a rule or the root names exists.
+- every ``*.md`` rule file a rule or the root names exists;
+- all of it is ASCII (the house style for prose: ``--`` not an em dash).
 
 Stdlib only, so the CI job needs no install. Exit status 1 on any problem.
 """
@@ -78,6 +79,9 @@ def problems(repo: Path = REPO) -> list[str]:
                 found.append(f"{rel}: glob {pattern!r} matches no file")
 
     for doc in [root_doc, *rule_files]:
+        for number, line in enumerate(doc.read_text().splitlines(), start=1):
+            if not line.isascii():
+                found.append(f"{doc.relative_to(repo)}:{number}: non-ASCII character")
         for name in sorted(set(_RULE_REF.findall(doc.read_text()))):
             if name in rule_names or name in {"CLAUDE.md", "SPEC.md"}:
                 continue

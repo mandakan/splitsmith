@@ -12,13 +12,13 @@ Personal tool for an IPSC competitor to extract shot splits from head-mounted ca
 ## Code conventions
 
 - Python 3.11+, type hints everywhere
-- `uv` for dependency management — never use `pip` directly
+- `uv` for dependency management -- never use `pip` directly
 - Pydantic for data validation
 - `pathlib.Path` for paths, never strings
 - f-strings for formatting
 - Black formatting (line length 110)
 - Ruff for linting
-- Imports: stdlib, third-party, local — separated by blank lines
+- Imports: stdlib, third-party, local -- separated by blank lines
 - No relative imports beyond a single dot (`.module`, not `..module`)
 
 ## Architecture rules
@@ -34,7 +34,7 @@ Personal tool for an IPSC competitor to extract shot splits from head-mounted ca
 - `pytest` for everything
 - The suite runs in parallel by default (`addopts` carries `-n auto --dist load`).
   `-n0` restores serial execution and is the right thing when debugging a single
-  test — worker startup dominates a focused run, and tracebacks are cleaner.
+  test -- worker startup dominates a focused run, and tracebacks are cleaner.
   New tests must not depend on execution order or share mutable state outside
   `tmp_path`: a worker's process-global caches are its own, but the filesystem,
   ports, and `~/` are not.
@@ -48,15 +48,15 @@ Personal tool for an IPSC competitor to extract shot splits from head-mounted ca
 - `pytest -m docker` needs `-n0` when the run spans more than one docker-marked
   file: the compose fixtures use fixed container names, and concurrent xdist
   workers collide on them.
-- Fixtures live in `tests/fixtures/` — short audio clips with hand-labeled ground truth in adjacent JSON files
-- Detection tests assert within tolerance (e.g., ±15ms for shot times)
+- Fixtures live in `tests/fixtures/` -- short audio clips with hand-labeled ground truth in adjacent JSON files
+- Detection tests assert within tolerance (e.g., +/-15ms for shot times)
 - Mock ffmpeg in trim tests; don't actually shell out during unit tests
 - Integration tests can use real ffmpeg but mark them with `@pytest.mark.integration`
 - CI installs ffmpeg and runs the integration suite with
   `SPLITSMITH_REQUIRE_INTEGRATION=1`, which turns any skip of an
   `integration`-marked test into a failure. A test that needs media builds it
   with `tests/synthetic_media.py` rather than depending on the gitignored
-  `stage_sample.mp4` — if a new integration test skips in CI, supply the input,
+  `stage_sample.mp4` -- if a new integration test skips in CI, supply the input,
   don't re-add the skip.
 
 ## Review practice
@@ -576,11 +576,11 @@ When starting fresh on this project:
 2. Check that `uv`, `ffmpeg`, and Python 3.11+ are available.
 3. Set up the project skeleton (pyproject.toml, src layout, tests dir).
 4. Get a sample video from the user before tuning detection thresholds.
-5. Build modules in pipeline order: video_match → beep_detect → trim → shot_detect → csv_gen → fcpxml_gen → cli.
+5. Build modules in pipeline order: video_match -> beep_detect -> trim -> shot_detect -> csv_gen -> fcpxml_gen -> cli.
 6. Test each module against fixtures before moving to the next.
 
 ## Useful prior context
 
-The user has prior data sources from match scoring. Example JSON format is in `examples/` — review it before designing the stage matching logic. Field names matter: `time_seconds`, `scorecard_updated_at`, `stage_number`, `stage_name`, `competitor_id`, `division`, `club`.
+The user has prior data sources from match scoring. Example JSON format is in `examples/` -- review it before designing the stage matching logic. Field names matter: `time_seconds`, `scorecard_updated_at`, `stage_number`, `stage_name`, `competitor_id`, `division`, `club`.
 
 The tool should be agnostic to division but the user typically shoots Production Optics, where splits in the 0.15-0.40s range are typical for accurate-paced shooting; use that for sensible defaults.
