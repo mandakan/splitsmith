@@ -24,6 +24,7 @@ default Look to your own templates.
 - [Fonts](#fonts)
 - [Checking](#checking)
 - [Previewing](#previewing)
+- [Sound](#sound)
 - [On splitsmith.app](#on-splitsmithapp)
 
 ## Make one
@@ -539,6 +540,56 @@ draws to `./<name>-preview/`: one PNG each and `contact-sheet.png`. Add
 stage's own frame, with that shooter's identity.
 A card whose template fails is left out of the preview with a line naming
 it; `looks check` says why.
+
+## Sound
+
+A Look can carry sound: music under its cards and effects on their moments.
+It is mixed over a rendered video afterwards, not during the render:
+
+```
+splitsmith looks dress match.mp4 --look mylook
+```
+
+writes `match-dressed.mp4` beside it with the video copied, the export's own
+audio kept and every cue mixed over it. Each MP4 render writes
+`match-timeline.json`, which says where each card and stage sits in the
+video. The dress pass places the cues by that file, so it needs a video
+rendered by this version or later.
+
+The cues are a `sounds` block in `look.json`, naming files in the Look's own
+`sounds/` folder (WAV, M4A, MP3, anything ffmpeg reads):
+
+```json
+"sounds": {
+  "cues": [
+    {"on": "title_page", "bed": "menu.m4a", "gain": 0.5, "fade": 1.0},
+    {"on": "title_page", "play": "select.wav", "at": 0.75},
+    {"on": "summary", "bed": "intermission.m4a", "gain": 0.5, "duck": 0.3},
+    {"on": "summary", "play": "tick.wav", "every": 0.114, "for": 2.6},
+    {"on": "summary", "play": "boom.wav", "at": 2.6, "hit": 0.05},
+    {"on": "stage", "play": "horn.wav", "at": "beep"}
+  ]
+}
+```
+
+- `on` is the item it plays on: `title_page`, `slate`, `stage`, `summary`,
+  `match_summary`, `closing`, `intro` or `outro`. A cue plays on every item
+  of that kind.
+- `play` is an effect, starting `at` seconds into the item (`"beep"` is a
+  stage's beep). `hit` is how far into the file its moment is, so that moment
+  lands on `at`. With `every` and `for` it repeats at that interval, each
+  copy cut to the interval: a tally's tick.
+- `bed` is music under the item from `at` to its end (or for `for` seconds),
+  looped when the file is shorter and faded out over its last `fade`
+  seconds. `duck` lowers the video's own sound to that gain while it plays.
+- `gain` scales the cue (1 is as recorded). The mix is limited, so a loud
+  stack of cues is squashed rather than clipped.
+
+An item's clock is the one its template's `seek(t)` runs on: a card's `t = 0`
+is the cut into it, even when a transition fades it in, so a cue at the
+second a template animates something lands on that frame. The map is the same
+for every video; a template whose timing depends on its data (how many rows
+a tally counts) gets cues for the case you set them for.
 
 ## On splitsmith.app
 

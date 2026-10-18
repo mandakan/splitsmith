@@ -22,6 +22,7 @@ from splitsmith.cli import app
 from splitsmith.config import VideoMetadata
 from splitsmith.export_naming import stage_file_base
 from splitsmith.match_project import MatchProject, StageEntry, StageVideo
+from splitsmith.render_timeline import timeline_path, write_timeline
 from splitsmith.ui import match_exports as match_exports_mod
 from tests.conftest import scaffold_match, strip_ansi
 
@@ -87,6 +88,8 @@ def _capture_mp4(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
         captured["kwargs"] = kwargs
         output_path.parent.mkdir(parents=True, exist_ok=True)
         output_path.write_bytes(b"")
+        # The renderer writes its timeline beside the video, as the real one does.
+        write_timeline(timeline_path(output_path), ())
         return mp4_render.Mp4RenderResult(output_path=output_path, duration_seconds=27.5)
 
     monkeypatch.setattr(match_exports_mod.mp4_render, "render_mp4", fake_render_mp4)
@@ -444,12 +447,14 @@ def test_youtube_sidecar_and_captions_move_with_a_renamed_output(
     assert out.with_suffix(".srt").exists()
     assert out.with_name("lt-youtube.json").exists()
     assert out.with_name("lt-youtube.txt").exists()
+    assert out.with_name("lt-timeline.json").exists(), "the audio dress pass reads it beside the video"
     # The render is a stub here, so the frame grab fails and is a note,
     # not an error -- and no half-written thumbnail is left behind.
     assert any("youtube thumbnail not written" in line for line in strip_ansi(result.output).splitlines())
     assert not out.with_name("lt-thumbnail.jpg").exists()
     # Nothing left behind under the default name.
     assert not list((root / "shooters" / "me" / "exports").glob("*-youtube.*"))
+    assert not list((root / "shooters" / "me" / "exports").glob("*-timeline.json"))
 
 
 def test_thumbnail_is_grabbed_from_the_render_and_moves_with_the_output(
