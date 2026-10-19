@@ -111,7 +111,10 @@ def test_a_write_failure_does_not_raise(tmp_path: Path, monkeypatch, caplog) -> 
     def boom(*a, **kw):
         raise OSError("disk full")
 
-    monkeypatch.setattr(type(state), "save_export_runs", boom, raising=True)
+    # The port does the write now; fail it where it happens.
+    from splitsmith.ui.docstore import files as _files
+
+    monkeypatch.setattr(_files, "_write", boom, raising=True)
     with caplog.at_level(logging.WARNING), _match_context(project_root):
         server_mod._record_export_run(state, "me", _run("c" * 32, 1))  # must not raise
     assert "export run record" in caplog.text
@@ -189,7 +192,7 @@ def test_conflict_retry_reloads_and_reappends_onto_the_winner(tmp_path: Path, mo
     run directly in the store -- simulating a second export job's write
     landing first -- and then raises the real conflict exception the store
     would raise in that situation. The wrapper's later calls delegate to
-    the unpatched implementation. If ``_record_export_run`` only retried
+    the unpatched implementation. If the port only retried
     the *same* save instead of re-loading, the competing run would never
     appear in the final document; if it re-loaded but then overwrote
     rather than re-appended, the competing run would still be lost.
@@ -224,20 +227,20 @@ def test_conflict_retry_reloads_and_reappends_onto_the_winner(tmp_path: Path, mo
     old = state._project_state
     state._project_state = store
 
-    real_save = type(state).save_export_runs
+    real_save = type(store).save_export_runs
     calls = {"n": 0}
 
-    def racing_save(self, slug: str, doc: dict, *, version: int) -> int:
+    async def racing_save(self, mid: str, slug: str, doc: dict, *, expected_version: int) -> int:
         calls["n"] += 1
         if calls["n"] == 1:
             # A concurrent export job wins the race: its run lands in the
-            # store between this helper's load and its own save.
+            # store between the port's load and its own save.
             winner_doc = export_runs.append_run(None, _run("e" * 32, 9))
-            _asyncio.run(store.save_export_runs(match_id, slug, winner_doc, expected_version=0))
+            await real_save(self, mid, slug, winner_doc, expected_version=0)
             raise StateConflictError("stale version")
-        return real_save(self, slug, doc, version=version)
+        return await real_save(self, mid, slug, doc, expected_version=expected_version)
 
-    monkeypatch.setattr(type(state), "save_export_runs", racing_save, raising=True)
+    monkeypatch.setattr(type(store), "save_export_runs", racing_save, raising=True)
     try:
         with _match_context(project_root, match_id):
             server_mod._record_export_run(state, "me", _run("d" * 32, 1))

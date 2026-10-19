@@ -161,6 +161,31 @@ def test_export_runs_save_and_load_round_trip(store: DocStore) -> None:
         assert v == 0
 
 
+def test_update_audit_gives_up_after_max_attempts(store: DocStore) -> None:
+    """A writer that loses every race stops after ``max_attempts`` and
+    raises the conflict rather than spinning; the audit it never wrote is
+    not on disk under a stale shape either."""
+    if not _is_db(store):
+        pytest.skip("files serialize on the lock; there is no race to lose")
+    assert isinstance(store, DbDocStore)
+    short = DbDocStore(store._store, MID, max_attempts=3)
+    short.save_audit("anna", 1, {"n": 0}, version=0)
+    calls = 0
+
+    def always_lose(doc: dict) -> dict:
+        nonlocal calls
+        calls += 1
+        _current, version = store.load_audit("anna", 1)
+        store.save_audit("anna", 1, {**doc, "winner": calls}, version=version)
+        return {**doc, "mine": True}
+
+    with pytest.raises(StateConflictError):
+        short.update_audit("anna", 1, always_lose, dict)
+    assert calls == 3
+    doc, _ = store.load_audit("anna", 1)
+    assert doc is not None and "mine" not in doc and doc["winner"] == 3
+
+
 def test_update_audit_builds_the_document_from_default(store: DocStore) -> None:
     store.update_audit("anna", 2, lambda d: {**d, "touched": True}, lambda: {"shots": [], "fresh": True})
     doc, _ = store.load_audit("anna", 2)
