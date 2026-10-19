@@ -737,17 +737,9 @@ export interface SortImportResult {
  *  relink flow can't help with. */
 export type LinkStatus = "ok" | "broken" | "missing_link" | "not_a_symlink";
 
-export interface LinkStatusEntry {
-  video_id: string;
-  name: string;
-  link_path: string;
-  current_target: string | null;
-  status: LinkStatus;
-}
+export type LinkStatusEntry = Schema["LinkStatusEntry"];
 
-export interface LinkStatusResponse {
-  entries: LinkStatusEntry[];
-}
+export type LinkStatusResponse = Schema["LinkStatusResponse"];
 
 export interface RelinkEntry {
   video_id: string;
@@ -2689,18 +2681,7 @@ export type BeepQueueItem = Schema["BeepQueueItem"];
 
 export type BeepQueueStageGroup = Schema["BeepQueueStageGroup"];
 
-export interface BeepQueueResponse {
-  total_items: number;
-  pending_count: number;
-  confirmed_count: number;
-  stages: BeepQueueStageGroup[];
-  /** "desktop" on a hosted mirror, "hosted" on a hosted-native match,
-   *  "local" in local mode - lets the SPA pick the honest media surface
-   *  (snippet vs proxy) without a second round trip. */
-  origin: MatchOrigin;
-  /** See :type:`MatchCapability` (#756). */
-  capabilities: MatchCapability[];
-}
+export type BeepQueueResponse = Schema["BeepQueueResponse"];
 
 /** Desktop-pushed beep review snippet peaks for a mirror video (slice 3).
  *  Same waveform-picker payload shape as {@link PeaksResult} plus the
@@ -2835,9 +2816,7 @@ export interface CommentAuthor {
   handles: string[];
 }
 
-export interface CommentAuthorListResponse {
-  authors: CommentAuthor[];
-}
+export type CommentAuthorListResponse = Schema["CommentAuthorListResponse"];
 
 export const api = {
   ...stagesApi,

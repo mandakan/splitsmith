@@ -41,6 +41,7 @@ from . import export_storage, stage_edit
 from . import server as _server
 from . import shooter_move as shooter_move_module
 from .access_gate import require_feature
+from .capabilities import MatchCapability, MatchOrigin
 from .comments import CommentAuthorListResponse, CommentAuthorOut
 from .context import (
     _hosted_mode_active,
@@ -182,11 +183,11 @@ class ShooterListResponse(BaseModel):
     # "hosted" | "desktop" | "local" (#631 Task 6). Lets the SPA tell a
     # desktop-synced read-only mirror apart from a natively-hosted or
     # local match so it can gate write affordances client-side.
-    origin: str = "local"
+    origin: MatchOrigin = "local"
     # Sorted capability names (#756) - the same set the server-side guard
     # enforces, so the SPA renders write affordances from data instead of
     # re-deriving them from origin.
-    capabilities: list[str] = []
+    capabilities: list[MatchCapability] = []
 
 
 class AddShooterRequest(BaseModel):
@@ -239,11 +240,11 @@ class BeepQueueResponse(BaseModel):
     # "desktop" on a hosted mirror, "local" everywhere else - lets the SPA
     # pick the honest media surface (snippet vs proxy) without a second
     # round trip.
-    origin: str = "local"
+    origin: MatchOrigin = "local"
     # Sorted capability names (#756) - the same set the server-side guard
     # enforces, so the SPA renders write affordances from data instead of
     # re-deriving them from origin.
-    capabilities: list[str] = []
+    capabilities: list[MatchCapability] = []
 
 
 class BeepQueueConfirmRequest(BaseModel):

@@ -36,6 +36,13 @@ Capabilities:
 from __future__ import annotations
 
 import re
+from typing import Literal
+
+#: The match origins and capability names as the API spells them. Response
+#: models type their fields with these so the SPA's unions come from the
+#: server (``pnpm gen:api``) instead of being retyped by hand.
+MatchOrigin = Literal["hosted", "desktop", "local"]
+MatchCapability = Literal["edit", "review", "breakdown", "share_manage", "comment_write"]
 
 EDIT = "edit"
 REVIEW = "review"
