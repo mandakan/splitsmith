@@ -59,7 +59,7 @@ def test_a_wav_too_short_to_filter_never_fails_the_confirm(tmp_path) -> None:
     from splitsmith.match_project import MatchProject
     from splitsmith.ui import audio as audio_helpers
 
-    from .test_ui_server import _seed_match_export_project
+    from .ui._helpers import _seed_match_export_project
 
     client, root = _seed_match_export_project(tmp_path, stage_count=1)
     shooter = root / "shooters" / "me"
@@ -82,7 +82,7 @@ def test_the_audio_job_never_saves_over_an_edit_made_while_it_ran(tmp_path, monk
     from splitsmith.match_project import MatchProject
     from splitsmith.ui import audio as audio_helpers
 
-    from .test_ui_server import _seed_match_export_project, _wait_for_job
+    from .ui._helpers import _seed_match_export_project, _wait_for_job
 
     client, root = _seed_match_export_project(tmp_path, stage_count=1)
     shooter = root / "shooters" / "me"

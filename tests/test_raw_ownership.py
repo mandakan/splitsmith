@@ -25,7 +25,7 @@ from unittest.mock import MagicMock
 
 from splitsmith.match_project import MatchProject
 
-from .test_ui_server import _match_create_app, _MatchClient
+from .ui._helpers import _match_create_app, _MatchClient
 
 
 def _two_shooter_match(tmp_path: Path) -> tuple[Any, str, str, str]:

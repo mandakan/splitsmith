@@ -17,7 +17,7 @@ from splitsmith.automation import AutomationOverride
 from splitsmith.match_project import MatchProject, StageEntry, StageVideo
 from tests.conftest import bound_match_id
 from tests.conftest import scaffold_match as _scaffold_match
-from tests.test_ui_server import _match_create_app, _MatchClient
+from tests.ui._helpers import _match_create_app, _MatchClient
 
 
 @pytest.fixture

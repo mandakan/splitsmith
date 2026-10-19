@@ -21,7 +21,7 @@ from splitsmith.overlay_raster import TemplateProbe
 from splitsmith.ui import export_preview_api, looks_api
 from tests.hosted_helpers import login  # hosted_app / hosted_env are registered in conftest
 
-from .test_ui_server import _seed_match_export_project
+from .ui._helpers import _seed_match_export_project
 
 
 class _Recorder:

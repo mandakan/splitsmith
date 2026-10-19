@@ -185,7 +185,7 @@ def test_the_brand_is_the_title_pages_corner_mark(tmp_path: Path, monkeypatch: p
 
 @pytest.fixture
 def client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-    from .test_ui_server import _match_create_app, _MatchClient
+    from .ui._helpers import _match_create_app, _MatchClient
 
     monkeypatch.setenv("SPLITSMITH_HOME", str(tmp_path / "home"))
     client = _MatchClient(_match_create_app(project_root=tmp_path / "match", project_name="Brand"))

@@ -16,7 +16,7 @@ from pathlib import Path
 
 from splitsmith.ui import server as server_mod
 
-from .test_ui_server import _seed_match_export_project
+from .ui._helpers import _seed_match_export_project
 
 
 @contextmanager

@@ -34,7 +34,7 @@ def test_a_preset_remembers_the_choice_and_an_older_one_uses_the_breakdown() -> 
 def test_the_match_export_threads_the_choice(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     from splitsmith.ui import match_exports as match_exports_mod
 
-    from .test_ui_server import _seed_match_export_project, _stub_match_export_probe, _wait_for_job
+    from .ui._helpers import _seed_match_export_project, _stub_match_export_probe, _wait_for_job
 
     http, _root = _seed_match_export_project(tmp_path)
     _stub_match_export_probe(monkeypatch)
@@ -60,7 +60,7 @@ def test_an_overlay_drawn_with_the_breakdown_is_drawn_again_without_it(
     """The match export reuses an overlay only when it was drawn the way
     this export asks: switching the breakdown off draws it again, through
     a stage export told so, and the next export like it reuses that one."""
-    from .test_ui_server import (
+    from .ui._helpers import (
         _run_overlay_match_export,
         _seed_match_export_project,
         _stub_match_export_probe,
@@ -89,7 +89,7 @@ def test_the_compare_grid_threads_the_choice(tmp_path: Path, monkeypatch: pytest
         _wait_for_job,
         _write_trims,
     )
-    from .test_ui_server import _match_create_app, _MatchClient
+    from .ui._helpers import _match_create_app, _MatchClient
 
     captured: list[dict[str, Any]] = []
 
@@ -328,7 +328,7 @@ def test_the_preview_route_threads_the_choice(tmp_path: Path, monkeypatch: pytes
     from splitsmith.ui import export_preview_api
 
     from .test_look_editor_api import _factory
-    from .test_ui_server import _seed_match_export_project
+    from .ui._helpers import _seed_match_export_project
 
     monkeypatch.setattr(export_preview_api, "rasterizer_factory", _factory)
     monkeypatch.setenv(runtime_module.ENV_CACHE_DIR, str(tmp_path / "cache"))
@@ -403,7 +403,7 @@ def test_the_overlay_cli_threads_the_choice(tmp_path: Path, monkeypatch: pytest.
 def test_the_stage_export_route_threads_the_choice(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     from splitsmith.ui import exports as exports_mod
 
-    from .test_ui_server import _seed_match_export_project, _wait_for_job
+    from .ui._helpers import _seed_match_export_project, _wait_for_job
 
     client, _root = _seed_match_export_project(tmp_path, stage_count=1)
     seen: list = []

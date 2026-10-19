@@ -161,7 +161,7 @@ def _hosted_sources_in_storage(
     """
     import json
 
-    from .test_ui_server import _seed_match_export_project
+    from .ui._helpers import _seed_match_export_project
 
     client, project_root = _seed_match_export_project(tmp_path, stage_count=stage_count)
     storage = CountingStorage(tmp_path / "backing")

@@ -15,7 +15,7 @@ from splitsmith.grade import Lut
 def client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     from splitsmith import runtime as runtime_module
 
-    from .test_ui_server import _match_create_app, _MatchClient
+    from .ui._helpers import _match_create_app, _MatchClient
 
     monkeypatch.setenv("SPLITSMITH_HOME", str(tmp_path / "home"))
     # The thumbnails' cache, never the real one under ~/Library/Caches.

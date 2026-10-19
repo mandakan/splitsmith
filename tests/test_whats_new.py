@@ -20,7 +20,7 @@ from splitsmith import user_config, whats_new
 from splitsmith.db import Base, PostgresWhatsNewStore, User, create_engine, sessionmaker
 from tests.hosted_helpers import login  # hosted_app / hosted_env are registered in conftest
 
-from .test_ui_server import _match_create_app, _MatchClient
+from .ui._helpers import _match_create_app, _MatchClient
 
 ENTRIES = whats_new.load_entries()
 

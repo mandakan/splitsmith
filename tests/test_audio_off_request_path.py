@@ -20,7 +20,7 @@ from splitsmith.match_project import MatchProject, StageEntry, StageVideo
 from splitsmith.storage import FilesystemStorage
 from splitsmith.ui import audio as audio_helpers
 from tests.media_bytes import tiny_mp4
-from tests.test_ui_server import _primary_cache_paths, _seed_project_with_primary, _wait_for_job
+from tests.ui._helpers import _primary_cache_paths, _seed_project_with_primary, _wait_for_job
 
 
 def _write_wav(path: Path, seconds: float = 1.0) -> None:

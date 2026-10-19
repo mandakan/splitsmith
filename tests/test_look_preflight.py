@@ -14,7 +14,7 @@ from splitsmith import runtime as runtime_module
 from splitsmith.overlay_raster import TemplateProbe
 from splitsmith.ui import looks_api
 
-from .test_ui_server import _match_create_app, _MatchClient
+from .ui._helpers import _match_create_app, _MatchClient
 
 
 class _Prober:

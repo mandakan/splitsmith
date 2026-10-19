@@ -241,7 +241,7 @@ def test_the_server_threads_the_match_summary_into_the_export(
 ) -> None:
     from splitsmith.ui import match_exports as match_exports_mod
 
-    from .test_ui_server import _seed_match_export_project, _stub_match_export_probe, _wait_for_job
+    from .ui._helpers import _seed_match_export_project, _stub_match_export_probe, _wait_for_job
 
     http, _root = _seed_match_export_project(tmp_path)
     _stub_match_export_probe(monkeypatch)
@@ -285,7 +285,7 @@ def test_the_preview_draws_the_whole_match_summary(tmp_path, monkeypatch: pytest
     from splitsmith.ui import export_preview_api
 
     from .test_look_editor_api import _factory
-    from .test_ui_server import _seed_match_export_project
+    from .ui._helpers import _seed_match_export_project
 
     monkeypatch.setattr(export_preview_api, "rasterizer_factory", _factory)
     monkeypatch.setenv(runtime_module.ENV_CACHE_DIR, str(tmp_path / "cache"))

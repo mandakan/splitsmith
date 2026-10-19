@@ -9,7 +9,7 @@ from typing import Any
 import pytest
 
 from .test_shooter_book import _png
-from .test_ui_server import _seed_match_export_project
+from .ui._helpers import _seed_match_export_project
 
 PROFILE = "/api/me/profile"
 BOOK = "/api/me/shooter-book"

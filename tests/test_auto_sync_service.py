@@ -15,7 +15,7 @@ from splitsmith.ui.jobs import JobRegistry
 from splitsmith.user_config import GlobalPrefs
 
 from .media_bytes import tiny_mp4
-from .test_ui_server import _seed_match_export_project
+from .ui._helpers import _seed_match_export_project
 
 
 class _Matches:

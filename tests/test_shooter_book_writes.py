@@ -12,7 +12,7 @@ from splitsmith.match_project import MatchProject
 from splitsmith.shooter_book import JsonShooterBookStore
 
 from .test_identity_api import _png
-from .test_ui_server import _seed_match_export_project
+from .ui._helpers import _seed_match_export_project
 
 IDENTITY = "/api/shooters/me/identity"
 LOGO = "/api/shooters/me/identity/logo"

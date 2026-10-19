@@ -27,7 +27,7 @@ def overlap(tmp_path: Path):
     from splitsmith.match_project import MatchProject
     from splitsmith.ui import audio as audio_helpers
 
-    from .test_ui_server import _seed_match_export_project
+    from .ui._helpers import _seed_match_export_project
 
     client, root = _seed_match_export_project(tmp_path, stage_count=1)
     shooter = root / "shooters" / "me"
@@ -80,7 +80,7 @@ def test_spectrum_window_is_capped(overlap) -> None:
 
 
 def test_spectrum_without_audio_is_pending(tmp_path) -> None:
-    from .test_ui_server import _seed_match_export_project
+    from .ui._helpers import _seed_match_export_project
 
     client, root = _seed_match_export_project(tmp_path, stage_count=1)
     from splitsmith.match_project import MatchProject

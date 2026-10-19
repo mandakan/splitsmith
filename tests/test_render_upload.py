@@ -17,7 +17,7 @@ from splitsmith.ui.exports_api import MatchExportRequest, check_match_export, ht
 from splitsmith.ui.jobs import JobCancelled
 from splitsmith.ui.render_upload import RENDER_SHARE, UPLOAD_FAILED_PREFIX, run_render_upload
 
-from .test_ui_server import _seed_match_export_project
+from .ui._helpers import _seed_match_export_project
 
 
 class _Handle:
@@ -187,9 +187,9 @@ def test_a_render_upload_job_renders_uploads_and_records_the_command(
     from splitsmith import youtube_sidecar
     from splitsmith.ui import youtube_api
 
-    from .test_ui_server import _stub_match_export_probe, _wait_for_job
     from .test_youtube_api import _conn, _stub_mp4_render
     from .test_youtube_upload import FakeClient
+    from .ui._helpers import _stub_match_export_probe, _wait_for_job
 
     client, root, start = _desktop(tmp_path, monkeypatch)
     _stub_match_export_probe(monkeypatch)
@@ -221,9 +221,9 @@ def _upload_command() -> dict[str, Any]:
 def _fake_youtube(monkeypatch: pytest.MonkeyPatch) -> Any:
     from splitsmith.ui import youtube_api
 
-    from .test_ui_server import _stub_match_export_probe
     from .test_youtube_api import _conn, _stub_mp4_render
     from .test_youtube_upload import FakeClient
+    from .ui._helpers import _stub_match_export_probe
 
     _stub_match_export_probe(monkeypatch)
     _stub_mp4_render(monkeypatch)
@@ -243,7 +243,7 @@ def test_an_upload_killed_after_youtube_took_it_is_still_found_on_reclaim(
     from splitsmith import youtube_sidecar
     from splitsmith.sync.commands import prior_result
 
-    from .test_ui_server import _wait_for_job
+    from .ui._helpers import _wait_for_job
 
     client, root, start = _desktop(tmp_path, monkeypatch)
     fake = _fake_youtube(monkeypatch)
@@ -272,7 +272,7 @@ def test_a_desk_reexport_does_not_erase_the_commands_upload(
     from splitsmith import youtube_sidecar
     from splitsmith.sync.commands import prior_result
 
-    from .test_ui_server import _wait_for_job
+    from .ui._helpers import _wait_for_job
 
     client, root, start = _desktop(tmp_path, monkeypatch)
     fake = _fake_youtube(monkeypatch)
@@ -297,7 +297,7 @@ def test_a_desk_reexport_does_not_erase_the_commands_upload(
 def test_the_phones_upload_options_reach_youtube(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Each option the phone picked is wired by hand from the request into
     ``run_youtube_upload``; dropping one would upload with the default."""
-    from .test_ui_server import _wait_for_job
+    from .ui._helpers import _wait_for_job
 
     client, root, start = _desktop(tmp_path, monkeypatch)
     fake = _fake_youtube(monkeypatch)
@@ -320,7 +320,7 @@ def test_a_scheduled_upload_to_a_picked_playlist_reaches_youtube(
 ) -> None:
     from datetime import UTC, datetime
 
-    from .test_ui_server import _wait_for_job
+    from .ui._helpers import _wait_for_job
 
     client, root, start = _desktop(tmp_path, monkeypatch)
     fake = _fake_youtube(monkeypatch)

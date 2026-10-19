@@ -17,7 +17,7 @@ import pytest
 from splitsmith.ui import youtube_api
 from splitsmith.youtube import oauth
 
-from .test_ui_server import _match_create_app, _MatchClient
+from .ui._helpers import _match_create_app, _MatchClient
 
 
 def _conn(title: str = "Chan") -> oauth.YouTubeConnection:
@@ -139,7 +139,7 @@ def _seed_render(client_and_root: tuple[Any, Path], name: str = "bromma.mp4") ->
 
 @pytest.fixture
 def export_client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-    from .test_ui_server import _seed_match_export_project
+    from .ui._helpers import _seed_match_export_project
 
     monkeypatch.setenv(oauth.ENV_CLIENT_ID, "cid")
     monkeypatch.setenv(oauth.ENV_CLIENT_SECRET, "sec")
@@ -202,7 +202,7 @@ def test_upload_route_runs_the_job_and_records_the_video(
 ) -> None:
     from splitsmith import youtube_sidecar
 
-    from .test_ui_server import _wait_for_job
+    from .ui._helpers import _wait_for_job
 
     client, _root = export_client
     mp4 = _seed_render(export_client)
@@ -248,7 +248,7 @@ def test_upload_job_reports_already_uploaded_as_a_failure_with_the_url(
     from splitsmith import youtube_sidecar
     from splitsmith.youtube.upload import AlreadyUploadedError
 
-    from .test_ui_server import _wait_for_job
+    from .ui._helpers import _wait_for_job
 
     client, _root = export_client
     _seed_render(export_client)
@@ -311,7 +311,7 @@ def _stub_mp4_render(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_match_export_chains_an_upload_job(export_client, monkeypatch: pytest.MonkeyPatch) -> None:
-    from .test_ui_server import _stub_match_export_probe, _wait_for_job, _wait_for_jobs_to_drain
+    from .ui._helpers import _stub_match_export_probe, _wait_for_job, _wait_for_jobs_to_drain
 
     client, _root = export_client
     _stub_match_export_probe(monkeypatch)
@@ -339,7 +339,7 @@ def test_match_export_chains_an_upload_job(export_client, monkeypatch: pytest.Mo
 
 
 def test_match_export_without_the_flag_chains_nothing(export_client, monkeypatch: pytest.MonkeyPatch) -> None:
-    from .test_ui_server import _stub_match_export_probe, _wait_for_job, _wait_for_jobs_to_drain
+    from .ui._helpers import _stub_match_export_probe, _wait_for_job, _wait_for_jobs_to_drain
 
     client, _root = export_client
     _stub_match_export_probe(monkeypatch)
@@ -418,7 +418,7 @@ def test_upload_route_forwards_playlist_schedule_and_notify(
 ) -> None:
     from datetime import timedelta, timezone
 
-    from .test_ui_server import _wait_for_job
+    from .ui._helpers import _wait_for_job
 
     client, _root = export_client
     _seed_render(export_client)
@@ -443,7 +443,7 @@ def test_upload_route_forwards_playlist_schedule_and_notify(
 
 
 def test_match_export_chains_the_options(export_client, monkeypatch: pytest.MonkeyPatch) -> None:
-    from .test_ui_server import _stub_match_export_probe, _wait_for_job, _wait_for_jobs_to_drain
+    from .ui._helpers import _stub_match_export_probe, _wait_for_job, _wait_for_jobs_to_drain
 
     client, _root = export_client
     _stub_match_export_probe(monkeypatch)
@@ -544,7 +544,7 @@ def test_playlists_route_maps_upstream_errors(client, monkeypatch: pytest.Monkey
 
 
 def test_upload_route_and_chain_forward_playlist_id(export_client, monkeypatch: pytest.MonkeyPatch) -> None:
-    from .test_ui_server import _stub_match_export_probe, _wait_for_job, _wait_for_jobs_to_drain
+    from .ui._helpers import _stub_match_export_probe, _wait_for_job, _wait_for_jobs_to_drain
 
     client, _root = export_client
     _seed_render(export_client)
@@ -579,7 +579,7 @@ def test_upload_job_takes_a_match_level_render(export_client, monkeypatch: pytes
 
     from splitsmith import youtube_sidecar
 
-    from .test_ui_server import _wait_for_job
+    from .ui._helpers import _wait_for_job
 
     client, root = export_client
     exports = root / "exports"
@@ -618,7 +618,7 @@ def test_match_level_upload_stays_inside_the_match_exports(
 ) -> None:
     import asyncio
 
-    from .test_ui_server import _wait_for_job
+    from .ui._helpers import _wait_for_job
 
     client, root = export_client
     oauth.save_connection(_conn("Mine"))

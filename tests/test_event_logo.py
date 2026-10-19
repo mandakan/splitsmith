@@ -25,7 +25,7 @@ from splitsmith.ui import identity_media, sync_api
 from .test_identity_media import _FakeStorage
 from .test_sync_plan import _build_basic_match
 from .test_sync_push import _build_match, _FakeHosted, run_push
-from .test_ui_server import _match_create_app, _MatchClient
+from .ui._helpers import _match_create_app, _MatchClient
 
 
 def _png(colour: tuple[int, int, int] = (20, 200, 60)) -> bytes:
@@ -277,7 +277,7 @@ def test_the_grid_title_and_closing_carry_the_event_logo(tmp_path: Path) -> None
 def test_the_match_export_carries_the_event_logo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     from splitsmith.ui import match_exports as match_exports_mod
 
-    from .test_ui_server import _seed_match_export_project, _stub_match_export_probe, _wait_for_job
+    from .ui._helpers import _seed_match_export_project, _stub_match_export_probe, _wait_for_job
 
     http, root = _seed_match_export_project(tmp_path)
     _stub_match_export_probe(monkeypatch)
@@ -306,7 +306,7 @@ def test_the_title_preview_draws_the_event_logo(tmp_path: Path, monkeypatch: pyt
     from splitsmith.ui import export_preview_api
 
     from .test_look_editor_api import _factory, _Recorder
-    from .test_ui_server import _seed_match_export_project
+    from .ui._helpers import _seed_match_export_project
 
     monkeypatch.setattr(export_preview_api, "rasterizer_factory", _factory)
     monkeypatch.setenv(runtime_module.ENV_CACHE_DIR, str(tmp_path / "cache"))
