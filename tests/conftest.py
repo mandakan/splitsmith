@@ -641,4 +641,12 @@ def _drain_test_jobs(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
     yield
     for registry in created:
         registry.begin_shutdown()
-        assert registry.wait_for_drain(30.0), "a job outlived its test by 30 s"
+        if not registry.wait_for_drain(30.0):
+            # Name the job: the bare assertion flaked across unrelated tests
+            # and never said which job, or which kind, was still running.
+            live = [
+                f"{j.kind}#{j.id[:8]} {j.status.value} stage={j.stage_number} video={j.video_id}"
+                for j in list(registry._jobs.values())
+                if j.status.value in ("pending", "running")
+            ]
+            raise AssertionError(f"a job outlived its test by 30 s: {live}")
