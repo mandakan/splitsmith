@@ -80,8 +80,8 @@ def _ready_match(tmp_path, stage_count=2):
 
 
 def _fake_make_reel(calls: list, *, gate=None):
-    from splitsmith.reel_inputs import ReelOutcome
-    from splitsmith.reel_render import ReelRenderResult
+    from splitsmith.reel.inputs import ReelOutcome
+    from splitsmith.reel.render import ReelRenderResult
 
     def make(project, root, *, output, **kw):
         if gate is not None:
@@ -166,8 +166,8 @@ def test_the_job_renders_records_and_writes_a_sidecar(tmp_path, monkeypatch):
 
 
 def test_the_reel_follows_the_saved_camera_unless_one_is_chosen(tmp_path, monkeypatch):
-    from splitsmith.reel_inputs import ReelOutcome
-    from splitsmith.reel_render import ReelRenderResult
+    from splitsmith.reel.inputs import ReelOutcome
+    from splitsmith.reel.render import ReelRenderResult
 
     client, root = _ready_match(tmp_path)
     calls: list = []
@@ -248,7 +248,7 @@ def test_a_stage_the_job_finds_unusable_fails_with_the_way_out(tmp_path, monkeyp
     """The route counts a trimmed stage as ready; the job checks the file. A
     stale trim found there must say which stage and how to leave it out."""
     from splitsmith.highlights import StageReadiness
-    from splitsmith.reel_inputs import ReelOutcome
+    from splitsmith.reel.inputs import ReelOutcome
 
     from .ui._helpers import _wait_for_job
 

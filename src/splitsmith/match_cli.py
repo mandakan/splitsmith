@@ -1159,7 +1159,7 @@ def _list_moments(value: bool) -> None:
     if not value:
         return
     from .highlights import BEAT_ORDER, MOMENT_GROUPS
-    from .reel_plan import MOMENT_LABELS
+    from .reel.plan import MOMENT_LABELS
 
     table = Table(title="Highlight reel moments (in play order)")
     table.add_column("Moment")
@@ -1222,7 +1222,7 @@ def highlights(
     from .grade import GradeError, resolve_grade
     from .highlights import MOMENT_KINDS
     from .match_project import MatchProject
-    from .reel_inputs import make_reel
+    from .reel.inputs import make_reel
     from .ui import match_exports
 
     try:
