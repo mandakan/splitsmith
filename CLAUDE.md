@@ -303,7 +303,9 @@ Rules that reach `ui/server.py`, which is too broad to scope:
 - A route that walks every shooter takes `AppState.match_bundle`; a per-angle
   existence check goes through the request's `StoragePresence`; a new per-match
   picker fact joins the batch, never a per-row `await`.
-- Every local audit read-modify-write runs under `_audit_rmw()`.
+- A handler's audit read-modify-write is one `state.update_audit_at` merge;
+  `_audit_rmw()` is held directly only by the shooter move, which spans two
+  shooters' documents.
 - A request never runs ffmpeg or calls an `ensure_*` producer: it reads the
   derived file and queues its job (`_audio_pending`).
 - A new `state_docs` kind needs `PULLABLE_DOC_KINDS` (applied in both

@@ -434,13 +434,13 @@ def _apply_shot_coach_patch(
     describe: str,
 ) -> JSONResponse:
     """Shared body for the by-number and by-id coach PATCH routes."""
-    with _server._audit_rmw(state):
-        payload, version, beep_in_clip, stg, project = _server._load_audit_for_coach(
-            state, slug, stage_number
-        )
+    stg, project, beep_in_clip = _server._coach_stage(state, slug, stage_number)
+    cfg = coach_module.auto_classify_config()
+
+    def merge(stored: dict[str, Any] | None, version: int) -> dict[str, Any]:
+        payload = _server._require_audit_doc(stored, stage_number)
         if body.expected_version is not None and body.expected_version != version:
             raise HTTPException(status_code=409, detail="version_conflict")
-        cfg = coach_module.auto_classify_config()
         shots = payload.get("shots") or []
         if not isinstance(shots, list):
             raise HTTPException(status_code=500, detail="audit shots is not a list")
@@ -498,7 +498,12 @@ def _apply_shot_coach_patch(
             }
         )
         payload["audit_events"] = events
-        version = _server._coach_save(state, slug, stage_number, payload, version)
+        return payload
+
+    # The response carries the version the save produced, never the one
+    # read (#844): the client uses it as ``expected_version`` on its next
+    # positional patch.
+    payload, version = state.update_audit_at(slug, stage_number, merge)
     return JSONResponse(
         _server._build_coach_response(
             state,
@@ -1623,15 +1628,18 @@ def put_stage_audit(request: Request, slug: str, stage_number: int, payload: dic
         for event in events:
             if isinstance(event, dict) and not event.get("id"):
                 event["id"] = _new_event_id()
-    # Compare-and-save under the audit lock (spec 2026-09-27 s5): a PUT
+    # Compare-and-save as one read-modify-write (spec 2026-09-27 s5): a PUT
     # carrying ``_version`` from a copy that no longer matches the stored
     # doc (a sync pull, another tab) is refused with 409 instead of
-    # overwriting it. The pull's audit apply holds the same lock. A PUT
-    # without ``_version`` keeps last-writer-wins. Hosted skips the lock:
-    # it is process-global (every tenant would queue behind it) and the
-    # state_docs version loaded here already optimistic-locks the save.
-    with _server._audit_rmw(state):
-        stored, version = state.load_audit(slug, stage_number)
+    # overwriting it. Locally the port holds the audit lock the pull's
+    # apply holds; hosted it is optimistic on the state_docs version. A
+    # PUT without ``_version`` keeps last-writer-wins.
+    is_save = isinstance(events, list) and any(
+        isinstance(e, dict) and e.get("kind") == "save" for e in events
+    )
+    incoming_flagged = bool((payload.get("needs_attention") or {}).get("flagged"))
+
+    def merge(stored: dict[str, Any] | None, version: int) -> dict[str, Any]:
         if client_revision is not None and client_revision != audit_revision(stored):
             raise AuditRevisionConflictError(f"stage {stage_number} audit changed since it was loaded")
         # #823: a desktop full-audit save resolves an open triage flag, same
@@ -1640,15 +1648,13 @@ def put_stage_audit(request: Request, slug: str, stage_number: int, payload: dic
         # incoming payload covers the normal path - but a stale SPA session
         # that dropped the key would silently keep the stored doc flagged,
         # so check both sides.
-        is_save = isinstance(events, list) and any(
-            isinstance(e, dict) and e.get("kind") == "save" for e in events
-        )
-        incoming_flagged = bool((payload.get("needs_attention") or {}).get("flagged"))
         stored_flagged = bool(((stored or {}).get("needs_attention") or {}).get("flagged"))
         if is_save and (incoming_flagged or stored_flagged):
             _set_needs_attention(payload, flagged=False)
-        state.save_audit(slug, stage_number, payload, version=version)
-    return JSONResponse({**payload, REVISION_FIELD: audit_revision(payload)})
+        return payload
+
+    saved, _version = state.update_audit_at(slug, stage_number, merge)
+    return JSONResponse({**saved, REVISION_FIELD: audit_revision(saved)})
 
 
 @router.post("/api/shooters/{slug}/stages/{stage_number}/audit/accept")
@@ -1669,40 +1675,37 @@ def accept_stage_audit(request: Request, slug: str, stage_number: int) -> JSONRe
         project.stage(stage_number)
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
-    conflict_excs = _server._state_conflict_excs()
-    for _attempt in range(3):
-        with _server._audit_rmw(state):
-            payload, version = state.load_audit(slug, stage_number)
-            if payload is None:
-                raise HTTPException(status_code=409, detail="nothing_to_accept")
-            shots = [s for s in payload.get("shots") or [] if isinstance(s, dict)]
-            kept = _kept_audit_shots(shots)
-            if not kept:
-                raise HTTPException(status_code=409, detail="nothing_to_accept")
-            # Mirror-exempt from the read-only gate (slice 4), so this is the
-            # save boundary a phone actually reaches on a mirror - and the one
-            # that must not mint a second id for a legacy shot the desktop
-            # will stamp itself. See _may_mint_shot_ids.
-            ensure_shot_ids(shots, mint=_server._may_mint_shot_ids())
-            _server._classify_doc(payload, stage_number, coach_module.auto_classify_config())
-            if any(not s.get("interval_class") for s in kept):
-                raise HTTPException(status_code=409, detail="not_fully_classified")
-            events = payload.setdefault("audit_events", [])
-            events.append(
-                {
-                    "id": _new_event_id(),
-                    "ts": _now_iso(),
-                    "kind": "accept",
-                    "payload": {"source": "triage"},
-                }
-            )
-            _set_needs_attention(payload, flagged=False)
-            try:
-                state.save_audit(slug, stage_number, payload, version=version)
-            except conflict_excs:
-                continue
-            return JSONResponse(_server._build_triage_response(state).model_dump())
-    raise HTTPException(status_code=409, detail="version_conflict")
+
+    def merge(stored: dict[str, Any] | None, version: int) -> dict[str, Any]:
+        if stored is None:
+            raise HTTPException(status_code=409, detail="nothing_to_accept")
+        shots = [s for s in stored.get("shots") or [] if isinstance(s, dict)]
+        kept = _kept_audit_shots(shots)
+        if not kept:
+            raise HTTPException(status_code=409, detail="nothing_to_accept")
+        # Mirror-exempt from the read-only gate (slice 4), so this is the
+        # save boundary a phone actually reaches on a mirror - and the one
+        # that must not mint a second id for a legacy shot the desktop
+        # will stamp itself. See _may_mint_shot_ids.
+        ensure_shot_ids(shots, mint=_server._may_mint_shot_ids())
+        _server._classify_doc(stored, stage_number, coach_module.auto_classify_config())
+        if any(not s.get("interval_class") for s in kept):
+            raise HTTPException(status_code=409, detail="not_fully_classified")
+        stored.setdefault("audit_events", []).append(
+            {
+                "id": _new_event_id(),
+                "ts": _now_iso(),
+                "kind": "accept",
+                "payload": {"source": "triage"},
+            }
+        )
+        _set_needs_attention(stored, flagged=False)
+        return stored
+
+    # A lost hosted race re-merges onto the winner inside the port; one
+    # that outlasts its attempts is the global 409 ``version_conflict``.
+    state.update_audit_at(slug, stage_number, merge)
+    return JSONResponse(_server._build_triage_response(state).model_dump())
 
 
 @router.post("/api/shooters/{slug}/stages/{stage_number}/attention")
@@ -1722,25 +1725,21 @@ def set_stage_attention(
         project.stage(stage_number)
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
-    conflict_excs = _server._state_conflict_excs()
-    for _attempt in range(3):
-        with _server._audit_rmw(state):
-            payload, version = state.load_audit(slug, stage_number)
-            if payload is None:
-                # Seed the same beep-confirm stub shape as the beep-review
-                # endpoint (line ~9897): is_stub_audit ignores the
-                # needs_attention key, so a flagged doc-less stage still
-                # reads as "ready" (derived from real shots/events) instead
-                # of falling to "in_progress" and getting stuck flagged
-                # forever once cleared.
-                payload, version = {"shots": [], "detection": STUB_AUDIT_DETECTION}, 0
-            _set_needs_attention(payload, flagged=body.flagged, note=body.note)
-            try:
-                state.save_audit(slug, stage_number, payload, version=version)
-            except conflict_excs:
-                continue
-            return JSONResponse(_server._build_triage_response(state).model_dump())
-    raise HTTPException(status_code=409, detail="version_conflict")
+
+    def merge(stored: dict[str, Any] | None, version: int) -> dict[str, Any]:
+        if stored is None:
+            # Seed the same beep-confirm stub shape as the beep-review
+            # endpoint (``_after_beep_reviewed``): is_stub_audit ignores the
+            # needs_attention key, so a flagged doc-less stage still
+            # reads as "ready" (derived from real shots/events) instead
+            # of falling to "in_progress" and getting stuck flagged
+            # forever once cleared.
+            stored = {"shots": [], "detection": STUB_AUDIT_DETECTION}
+        _set_needs_attention(stored, flagged=body.flagged, note=body.note)
+        return stored
+
+    state.update_audit_at(slug, stage_number, merge)
+    return JSONResponse(_server._build_triage_response(state).model_dump())
 
 
 @router.get("/api/shooters/{slug}/stages/{stage_number}/anomalies")
@@ -1798,25 +1797,23 @@ def get_stage_coach(request: Request, slug: str, stage_number: int, seed: bool =
     not move every stage's revision and queue a sync push per stage.
     """
     state = request.app.state.splitsmith_state
-    project = state.shooter_project(slug)
-    try:
-        stg = project.stage(stage_number)
-    except KeyError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
-    audit_payload, _ = state.load_audit(slug, stage_number)
-    if audit_payload is None:
-        return JSONResponse(None)
-    with _server._audit_rmw(state):
-        payload, version, beep_in_clip, stg, project = _server._load_audit_for_coach(
-            state, slug, stage_number
-        )
-        cfg = coach_module.auto_classify_config()
-        # Taken before the seed and heal mutate ``payload``: a read that
-        # does not persist them must still hand back the stored doc's
-        # ``_version``, or the events PUT would 409 on every attempt.
-        stored_revision = audit_revision(payload)
-        capacity = _server._coach_capacity(state, slug, project)
-        share_read = current_share_request.get()
+    stg, project, beep_in_clip = _server._coach_stage(state, slug, stage_number)
+    cfg = coach_module.auto_classify_config()
+    capacity = _server._coach_capacity(state, slug, project)
+    share_read = current_share_request.get()
+    keep_seed = seed and not share_read and not _server._is_mirror()
+    # What the last run of ``merge`` built: the doc the response shows, the
+    # stored doc's revision before the heal and seed touched it (a read
+    # that persists nothing must hand back the stored ``_version``, or the
+    # events PUT would 409 on every attempt), and the version it was read
+    # at. Empty when the stage has no audit doc yet.
+    seen: dict[str, Any] = {}
+
+    def merge(stored: dict[str, Any] | None, version: int) -> dict[str, Any]:
+        seen.clear()
+        if stored is None:
+            raise _server._AuditUnchanged
+        seen.update(view=stored, revision=audit_revision(stored), version=version)
         # #775: heal legacy docs on read so consumers (Results, share view,
         # statistic_splits) always see a fully classified stage. Owners get
         # the heal persisted; share-token readers are read-only, so the
@@ -1827,18 +1824,17 @@ def get_stage_coach(request: Request, slug: str, stage_number: int, seed: bool =
         # It classifies against confirmed regions only, which no seed adds,
         # so the heal is the same with or without ``seed``.
         healed = coach_module.heal_unclassified(
-            payload.get("shots"),
+            stored.get("shots"),
             cfg,
-            events=events_module.confirmed(_server._coach_events(payload, stage_number)),
+            events=events_module.confirmed(_server._coach_events(stored, stage_number)),
         )
         persist = healed and not share_read
-        # The doc the response is built from. The seed runs on a copy: a
-        # failed seed leaves nothing behind, and one nobody persists (a
-        # mirror, a share read) never rides a heal saved below.
-        view = payload
+        payload = stored
         if seed:
-            keep_seed = not share_read and not _server._is_mirror()
-            target = copy.deepcopy(payload)
+            # The seed runs on a copy: a failed seed leaves nothing behind,
+            # and one nobody persists (a mirror, a share read) never rides
+            # a heal saved below.
+            target = copy.deepcopy(stored)
             # Stage events (spec 2026-10-08): reload and movement proposals, seeded once
             # per stage. An earlier seeder's untouched proposals are
             # replaced, and the shots classified again (confirmed regions
@@ -1860,28 +1856,33 @@ def get_stage_coach(request: Request, slug: str, stage_number: int, seed: bool =
                 logger.exception("stage %s/%s: seeding region proposals failed", slug, stage_number)
                 seeded = False
             if seeded:
-                view = target
+                seen["view"] = target
                 if keep_seed:
                     payload = target
                     persist = True
-        if persist:
-            try:
-                version = _server._coach_save(state, slug, stage_number, payload, version)
-                stored_revision = audit_revision(payload)
-            except _server._state_conflict_excs():
-                # A concurrent writer won the version race; serve the
-                # in-memory heal and let the next read persist it.
-                # ``_state_conflict_excs`` resolves the hosted-only
-                # conflict type lazily and guarded - a slim local install
-                # has no db extras, and an unguarded import here 500ed
-                # every heal-triggering coach GET.
-                pass
-        payload = view
+        if not persist:
+            raise _server._AuditUnchanged
+        return payload
+
+    try:
+        persisted, version = state.update_audit_at(slug, stage_number, merge)
+        stored_revision = audit_revision(persisted)
+    except _server._AuditUnchanged:
+        if not seen:
+            return JSONResponse(None)
+        version, stored_revision = seen["version"], seen["revision"]
+    except _server._state_conflict_excs():
+        # Every re-merge lost the hosted version race; serve the in-memory
+        # heal and let the next read persist it. ``_state_conflict_excs``
+        # resolves the hosted-only conflict type lazily and guarded - a slim
+        # local install has no db extras, and an unguarded import here
+        # 500ed every heal-triggering coach GET.
+        version, stored_revision = seen["version"], seen["revision"]
     return JSONResponse(
         _server._build_coach_response(
             state,
             slug,
-            payload,
+            seen["view"],
             beep_in_clip,
             stg,
             project,
@@ -1915,10 +1916,9 @@ def put_stage_events(
     except ValueError as exc:
         raise HTTPException(status_code=422, detail={"code": "lane_overlap", "message": str(exc)}) from exc
     cfg = coach_module.auto_classify_config()
-    with _server._audit_rmw(state):
-        stored, version = state.load_audit(slug, stage_number)
-        if stored is None:
-            raise HTTPException(status_code=404, detail=f"no audit JSON yet for stage {stage_number}")
+
+    def merge(doc: dict[str, Any] | None, version: int) -> dict[str, Any]:
+        stored = _server._require_audit_doc(doc, stage_number)
         if req.revision is not None and req.revision != audit_revision(stored):
             raise AuditRevisionConflictError(f"stage {stage_number} audit changed since it was loaded")
         stored[events_module.EVENTS_FIELD] = [e.model_dump(exclude_none=True) for e in req.events]
@@ -1932,11 +1932,11 @@ def put_stage_events(
                 "payload": {"count": len(req.events)},
             }
         )
-        # #1330: the saved doc is ``stored`` and its lock version is what
-        # the save returns; reloading both (and the project and stage
-        # again, through ``_load_audit_for_coach``) only cost a hosted
-        # ``state_docs`` round trip per save.
-        version = _server._coach_save(state, slug, stage_number, stored, version)
+        return stored
+
+    # #1330: the response is built from the saved doc and the version the
+    # save returned, never from a reload.
+    stored, version = state.update_audit_at(slug, stage_number, merge)
     prim = stg.primary()
     beep_in_clip = (
         _server._video_beep_in_clip(state, slug, project, stage_number, prim) if prim is not None else None
@@ -1973,19 +1973,18 @@ def patch_stage_note(
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     cfg = coach_module.auto_classify_config()
-    with _server._audit_rmw(state):
-        stored, version = state.load_audit(slug, stage_number)
-        if stored is None:
-            raise HTTPException(status_code=404, detail=f"no audit JSON yet for stage {stage_number}")
+    # A clear writes ``null``, never drops the key: sync reads an absent
+    # key as "this writer never knew the field" (an older install), and
+    # only the tombstone deletes on the other side.
+    text = req.stage_note or None
+
+    def merge(doc: dict[str, Any] | None, version: int) -> dict[str, Any]:
+        stored = _server._require_audit_doc(doc, stage_number)
         if req.revision is not None and req.revision != audit_revision(stored):
             raise AuditRevisionConflictError(f"stage {stage_number} audit changed since it was loaded")
         # The response reads the events; a corrupt list is the GET's 422,
         # raised here before the save rather than after it.
         _server._coach_events(stored, stage_number)
-        # A clear writes ``null``, never drops the key: sync reads an
-        # absent key as "this writer never knew the field" (an older
-        # install), and only the tombstone deletes on the other side.
-        text = req.stage_note or None
         stored[coach_module.FIELD_STAGE_NOTE] = text
         stored.setdefault("audit_events", []).append(
             {
@@ -1995,7 +1994,9 @@ def patch_stage_note(
                 "payload": {"stage_note": _server._note_digest(text)},
             }
         )
-        version = _server._coach_save(state, slug, stage_number, stored, version)
+        return stored
+
+    stored, version = state.update_audit_at(slug, stage_number, merge)
     prim = stg.primary()
     beep_in_clip = (
         _server._video_beep_in_clip(state, slug, project, stage_number, prim) if prim is not None else None
@@ -2022,11 +2023,11 @@ def reclassify_stage_coach(request: Request, slug: str, stage_number: int) -> JS
     preserved. Idempotent.
     """
     state = request.app.state.splitsmith_state
-    with _server._audit_rmw(state):
-        payload, version, beep_in_clip, stg, project = _server._load_audit_for_coach(
-            state, slug, stage_number
-        )
-        cfg = coach_module.auto_classify_config()
+    stg, project, beep_in_clip = _server._coach_stage(state, slug, stage_number)
+    cfg = coach_module.auto_classify_config()
+
+    def merge(stored: dict[str, Any] | None, version: int) -> dict[str, Any]:
+        payload = _server._require_audit_doc(stored, stage_number)
         shots = payload.get("shots") or []
         if not isinstance(shots, list):
             raise HTTPException(status_code=500, detail="audit shots is not a list")
@@ -2041,7 +2042,9 @@ def reclassify_stage_coach(request: Request, slug: str, stage_number: int) -> JS
             }
         )
         payload["audit_events"] = events
-        version = _server._coach_save(state, slug, stage_number, payload, version)
+        return payload
+
+    payload, version = state.update_audit_at(slug, stage_number, merge)
     return JSONResponse(
         _server._build_coach_response(
             state,

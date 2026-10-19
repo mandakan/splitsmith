@@ -695,6 +695,22 @@ class AppState:
         except OSError as exc:
             raise HTTPException(status_code=500, detail=f"audit write failed: {exc}") from exc
 
+    def update_audit_at(
+        self, slug: str, stage_number: int, merge: Callable[[dict | None, int], dict]
+    ) -> tuple[dict, int]:
+        """A handler's audit read-modify-write through the storage port (spec
+        2026-10-19, amended): ``merge`` gets the stored doc (``None`` when
+        there is none) and its version, raises its own 404 or 409 part-way,
+        or returns the doc to write; the call returns that doc and its new
+        version. Local: under :attr:`audit_lock`, the one the sync pull
+        holds. Hosted: optimistic, a lost race re-applies ``merge`` to the
+        winner. An error ``merge`` raises writes nothing and is the
+        handler's answer."""
+        try:
+            return self.docstore().update_audit_at(slug, stage_number, merge)
+        except (OSError, json.JSONDecodeError) as exc:
+            raise HTTPException(status_code=500, detail=f"audit update failed: {exc}") from exc
+
     def delete_audit(self, slug: str, stage_number: int) -> bool:
         """Delete a stage's audit doc through the storage port. Returns True
         when one was removed. Used when a stage is removed from the match

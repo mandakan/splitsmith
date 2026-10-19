@@ -26,7 +26,6 @@ from .. import automation as automation_settings
 from .. import camera_select, match_model, user_config
 from .. import coach as coach_module
 from ..access import Feature
-from ..async_bridge import run_sync
 from ..audit_revision import audit_revision
 from ..config import StageRounds
 from ..identity import EVENT_LOGO_DIR, LOGO_MAX_BYTES, event_logo_name, sniff_logo
@@ -1524,8 +1523,6 @@ async def move_shooter_endpoint(request: Request, req: MoveShooterRequest) -> JS
     source_project = state.shooter_project(req.source_slug)
     target_project = state.shooter_project(req.target_slug)
 
-    match_id = current_match_id.get()
-
     def _load_target_audit(n: int) -> dict | None:
         doc, _ = state.load_audit(req.target_slug, n)
         return doc
@@ -1540,12 +1537,7 @@ async def move_shooter_endpoint(request: Request, req: MoveShooterRequest) -> JS
         state.save_audit(req.target_slug, n, doc, version=version)
 
     def _clear_source_audit(n: int) -> None:
-        store = state.project_state
-        if store is not None and match_id is not None:
-            run_sync(store.delete_audit(match_id, req.source_slug, n))
-        else:
-            audit_file = state._audit_file(req.source_slug, n)
-            audit_file.unlink(missing_ok=True)
+        state.delete_audit(req.source_slug, n)
 
     # Both shooters' audit docs are read, merged and rewritten: hold the
     # audit lock across the whole move so a sync pull cannot land in
