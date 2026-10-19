@@ -17,6 +17,7 @@ regenerate the baseline so the fix is pinned too::
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 import pytest
@@ -32,11 +33,19 @@ CALIBRATION_DIR = FIXTURES_DIR / "beep_calibration"
 def _clip_audio(stem: str):
     """The pinned fixture's manifest entry and clip audio. A clip whose audio
     lives in R2 (``audio.lock.json``) rather than git is skipped when it was
-    not fetched: no test needs it. A clip missing from both still fails."""
+    not fetched. Under ``SPLITSMITH_REQUIRE_INTEGRATION=1`` (CI) that skip is a
+    failure instead: a pinned case CI never fetches is a case CI never runs,
+    and 205 of them went unrun that way once. A clip missing from both still
+    fails."""
     entry = next(e for e in load_manifest(CALIBRATION_DIR / "manifest.yaml").fixtures if e.stem == stem)
     clip = FIXTURES_DIR / entry.clip_wav
     lock = json.loads((FIXTURES_DIR / "audio.lock.json").read_text())
     if not clip.exists() and clip.name in lock.get("files", lock):
+        if os.environ.get("SPLITSMITH_REQUIRE_INTEGRATION") == "1":
+            pytest.fail(
+                f"{stem}: pinned by baseline.json but its clip is not in tests/fixtures/audio.ci.txt, "
+                "so CI never runs this case; add the WAV to that list"
+            )
         pytest.skip(f"{stem}: audio in R2, not fetched (scripts/fixture_audio.py fetch)")
     return entry, load_audio(clip)
 
