@@ -4,6 +4,7 @@ import asyncio
 import json
 import subprocess
 import sys
+from datetime import UTC
 from pathlib import Path
 
 from sqlalchemy import select
@@ -48,7 +49,10 @@ def test_import_keeps_timestamps_and_skips_known(tmp_path: Path) -> None:
     async def rows() -> list[tuple[str, str, int]]:
         async with sessionmaker(engine)() as s:
             return [
-                (r.email, r.source, int(r.requested_at.timestamp()))
+                # SQLite hands the column back naive; ``.timestamp()`` on a naive
+                # datetime assumes local time, which is why this read 7200 s low
+                # on a CEST machine. Pin it to UTC, which is what was stored.
+                (r.email, r.source, int(r.requested_at.replace(tzinfo=UTC).timestamp()))
                 for r in (await s.execute(select(AccessRequest))).scalars()
             ]
 
