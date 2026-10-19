@@ -5,6 +5,7 @@ paths:
   - "src/splitsmith/db/**"
   - "src/splitsmith/ui/access_gate.py"
   - "src/splitsmith/ui/context.py"
+  - "src/splitsmith/ui/docstore/**"
   - "src/splitsmith/ui/state.py"
   - "src/splitsmith/ui/admin_access_api.py"
   - "src/splitsmith/ui/presence.py"
@@ -65,6 +66,22 @@ Deploy facts (worker env, `FORWARDED_ALLOW_IPS`, the waitlist cut-over) are in
   never mails the requester; only admins are alerted.
 - Admin routes are in `ui/admin_access_api.py` with the db imports inside the
   functions, because the slim local install imports that module.
+
+## The storage port (`ui/docstore/`, spec 2026-10-19)
+
+- `DocStore` is the one interface for a match's documents; `FileDocStore` and
+  `DbDocStore` are its two worlds, and `tests/ui/test_docstore_contract.py`
+  runs every contract test against both. A behaviour one implementation has
+  and the other lacks is a bug, and the suite is where it shows.
+- `update_*` is the read-modify-write: `merge` is a pure function of the
+  current document and must be safe to run more than once, because the
+  database implementation re-applies it to the winner's document after a
+  version conflict (with a jittered backoff; eight simultaneous writers
+  exhaust a flat four attempts).
+- `FileDocStore` takes the **same** `audit_lock` object the sync pull holds
+  (#1075); a store that made its own lock would silently undo that.
+- The port holds documents only: media stays on `Storage` and
+  `StoragePresence`, jobs on the job backends, merge rules in `sync.run`.
 
 ## Database connections
 

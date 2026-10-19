@@ -1,0 +1,173 @@
+"""The desktop's document tree as a :class:`DocStore`."""
+
+from __future__ import annotations
+
+import json
+import os
+import tempfile
+from collections.abc import Callable
+from contextlib import AbstractContextManager, nullcontext
+from pathlib import Path
+
+from ...export_runs import LOG_FILENAME
+from ...match_model import MATCH_FILE, Match
+from ...match_project import PROJECT_FILE
+from .port import Doc, MatchBundleDocs, Versioned
+
+AUDIT_DIR = "audit"
+
+
+def _audit_file(shooter_root: Path, stage: int) -> Path:
+    return shooter_root / AUDIT_DIR / f"stage{stage}.json"
+
+
+def _read(path: Path) -> Versioned:
+    if not path.exists():
+        return None, 0
+    return json.loads(path.read_text(encoding="utf-8")), 0
+
+
+def _write(path: Path, doc: Doc, *, backup: bool) -> None:
+    """Temp file next to ``path`` -> optional ``.bak`` rotate -> rename.
+
+    The temp name is unique (``mkstemp``): a fixed ``<name>.tmp`` is shared by
+    every writer to the document, which is the idiom that lost export-run
+    records once (#629). The caller holds whatever lock the document needs.
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp_name = tempfile.mkstemp(dir=path.parent, prefix=f"{path.name}.", suffix=".tmp")
+    tmp = Path(tmp_name)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            fh.write(json.dumps(doc, indent=2) + "\n")
+        if backup and path.exists():
+            bak = path.with_suffix(path.suffix + ".bak")
+            bak.unlink(missing_ok=True)
+            path.replace(bak)
+        tmp.replace(path)
+    except OSError:
+        tmp.unlink(missing_ok=True)
+        raise
+
+
+class FileDocStore:
+    """One match folder. Versions are always 0: there is no optimistic lock
+    on files, the locks are.
+
+    ``audit_lock`` must be the same object the sync pull holds across its
+    audit merge (#1075), so a handler's ``update_audit`` and a pull exclude
+    each other; ``AppState`` owns it and passes it in. ``shooter_root``
+    resolves a slug to its folder; the default is the match layout, and
+    ``AppState`` passes its own resolver where the legacy single-shooter
+    fallback applies.
+    """
+
+    confines_paths = False
+
+    def __init__(
+        self,
+        match_root: Path,
+        *,
+        audit_lock: AbstractContextManager[object] | None = None,
+        export_run_lock: AbstractContextManager[object] | None = None,
+        shooter_root: Callable[[str], Path] | None = None,
+    ) -> None:
+        self._root = match_root
+        self._audit_lock = audit_lock if audit_lock is not None else nullcontext()
+        self._export_run_lock = export_run_lock if export_run_lock is not None else nullcontext()
+        self._shooter_root = shooter_root or (lambda slug: Match.shooter_root(match_root, slug))
+
+    # -- match -------------------------------------------------------------
+    def load_match(self) -> Versioned:
+        return _read(self._root / MATCH_FILE)
+
+    def save_match(self, doc: Doc, *, version: int) -> int:
+        _write(self._root / MATCH_FILE, doc, backup=False)
+        return 0
+
+    # -- projects ----------------------------------------------------------
+    def list_projects(self) -> dict[str, tuple[Doc, int]]:
+        match, _ = self.load_match()
+        out: dict[str, tuple[Doc, int]] = {}
+        for slug in (match or {}).get("shooters", []):
+            doc, version = self.load_project(slug)
+            if doc is not None:
+                out[slug] = (doc, version)
+        return out
+
+    def load_project(self, slug: str) -> Versioned:
+        return _read(self._shooter_root(slug) / PROJECT_FILE)
+
+    def save_project(self, slug: str, doc: Doc, *, version: int) -> int:
+        _write(self._shooter_root(slug) / PROJECT_FILE, doc, backup=False)
+        return 0
+
+    def delete_project(self, slug: str) -> None:
+        root = self._shooter_root(slug)
+        (root / PROJECT_FILE).unlink(missing_ok=True)
+        audit_dir = root / AUDIT_DIR
+        if audit_dir.is_dir():
+            for f in audit_dir.glob("stage*.json*"):
+                f.unlink(missing_ok=True)
+
+    # -- audits ------------------------------------------------------------
+    def load_audit(self, slug: str, stage: int) -> Versioned:
+        return _read(_audit_file(self._shooter_root(slug), stage))
+
+    def list_audits(self, slug: str) -> dict[int, tuple[Doc, int]]:
+        audit_dir = self._shooter_root(slug) / AUDIT_DIR
+        out: dict[int, tuple[Doc, int]] = {}
+        if not audit_dir.is_dir():
+            return out
+        for f in sorted(audit_dir.glob("stage*.json")):
+            stem = f.stem[len("stage") :]
+            if stem.isdigit():
+                doc, version = _read(f)
+                if doc is not None:
+                    out[int(stem)] = (doc, version)
+        return out
+
+    def save_audit(self, slug: str, stage: int, doc: Doc, *, version: int) -> int:
+        with self._audit_lock:
+            _write(_audit_file(self._shooter_root(slug), stage), doc, backup=True)
+        return 0
+
+    def delete_audit(self, slug: str, stage: int) -> bool:
+        path = _audit_file(self._shooter_root(slug), stage)
+        bak = path.with_suffix(path.suffix + ".bak")
+        with self._audit_lock:
+            removed = path.exists()
+            path.unlink(missing_ok=True)
+            bak.unlink(missing_ok=True)
+        return removed
+
+    def update_audit(
+        self, slug: str, stage: int, merge: Callable[[Doc], Doc], default: Callable[[], Doc]
+    ) -> int:
+        path = _audit_file(self._shooter_root(slug), stage)
+        with self._audit_lock:
+            current, _ = _read(path)
+            _write(path, merge(current if current is not None else default()), backup=True)
+        return 0
+
+    # -- export runs -------------------------------------------------------
+    def load_export_runs(self, slug: str) -> Versioned:
+        return _read(self._shooter_root(slug) / LOG_FILENAME)
+
+    def update_export_runs(self, slug: str, merge: Callable[[Doc | None], Doc]) -> int:
+        path = self._shooter_root(slug) / LOG_FILENAME
+        with self._export_run_lock:
+            current, _ = _read(path)
+            _write(path, merge(current), backup=False)
+        return 0
+
+    # -- bundle ------------------------------------------------------------
+    def bundle(self) -> MatchBundleDocs:
+        match, version = self.load_match()
+        projects = self.list_projects()
+        return MatchBundleDocs(
+            match=match,
+            match_version=version,
+            projects=projects,
+            audits={slug: self.list_audits(slug) for slug in projects},
+        )
