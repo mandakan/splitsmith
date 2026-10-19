@@ -6693,15 +6693,16 @@ async def _after_beep_reviewed(state: AppState, slug: str, stage_number: int, vi
         return
     if video.role == "primary":
         await _replace_secondary_beeps(state, slug, stage_number)
-    with _audit_rmw(state):
-        existing_doc, audit_version = state.load_audit(slug, stage_number)
-        if existing_doc is None:
-            state.save_audit(
-                slug,
-                stage_number,
-                {"shots": [], "detection": STUB_AUDIT_DETECTION},
-                version=audit_version,
-            )
+
+    def stub_if_missing(doc: dict[str, Any] | None, version: int) -> dict[str, Any]:
+        if doc is not None:
+            raise _AuditUnchanged
+        return {"shots": [], "detection": STUB_AUDIT_DETECTION}
+
+    try:
+        state.update_audit_at(slug, stage_number, stub_if_missing)
+    except _AuditUnchanged:
+        pass
     # The reconciler's rule with explicit=True (spec 2026-09-27 s3): a
     # trim when none is cached, else detection for a trimmed primary. A
     # phone confirm pulled into this desktop reaches the same rule
@@ -7093,35 +7094,63 @@ def _coach_capacity(state: AppState, slug: str, project: MatchProject) -> int | 
     return events_module.capacity_for(competitor_division(project, project_dir))
 
 
-def _load_audit_for_coach(
-    state: AppState,
-    slug: str,
-    stage_number: int,
-) -> tuple[dict[str, Any], int, float | None, Any, MatchProject]:
-    """Shared loader: validates the stage, reads the audit doc,
-    returns (payload, version, primary_beep_in_clip, stage, project).
-    404 when no audit doc exists yet. The version rides back so a
-    coach mutation saves under the same optimistic lock."""
+def _coach_stage(state: AppState, slug: str, stage_number: int) -> tuple[Any, MatchProject, float | None]:
+    """The stage a coach route works on: (stage, project, the primary's
+    beep inside the clip the SPA streams). 404 for an unknown stage. Reads
+    the project only, so a writer calls it before its read-modify-write."""
     project = state.shooter_project(slug)
     try:
         stg = project.stage(stage_number)
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
-    payload, version = state.load_audit(slug, stage_number)
-    if payload is None:
-        raise HTTPException(
-            status_code=404,
-            detail=f"no audit JSON yet for stage {stage_number}",
-        )
     prim = stg.primary()
     primary_beep_in_clip = (
         _video_beep_in_clip(state, slug, project, stage_number, prim) if prim is not None else None
     )
-    return payload, version, primary_beep_in_clip, stg, project
+    return stg, project, primary_beep_in_clip
+
+
+def _require_audit_doc(doc: dict[str, Any] | None, stage_number: int) -> dict[str, Any]:
+    """The audit doc a coach write needs to exist: 404 when the stage has
+    none yet. Called inside a merge, so the 404 is the read-modify-write's
+    answer and nothing is written."""
+    if doc is None:
+        raise HTTPException(status_code=404, detail=f"no audit JSON yet for stage {stage_number}")
+    return doc
+
+
+def _load_audit_for_coach(
+    state: AppState,
+    slug: str,
+    stage_number: int,
+) -> tuple[dict[str, Any], int, float | None, Any, MatchProject]:
+    """Shared loader for a coach *read*: validates the stage, reads the
+    audit doc, returns (payload, version, primary_beep_in_clip, stage,
+    project). 404 when no audit doc exists yet. A coach write does the
+    same through ``_coach_stage`` and a ``state.update_audit_at`` merge
+    that calls ``_require_audit_doc``."""
+    stg, project, primary_beep_in_clip = _coach_stage(state, slug, stage_number)
+    payload, version = state.load_audit(slug, stage_number)
+    return _require_audit_doc(payload, stage_number), version, primary_beep_in_clip, stg, project
+
+
+class _AuditUnchanged(Exception):  # noqa: N818 -- a merge's signal, not an error
+    """Raised by an ``update_audit_at`` merge that found nothing to write.
+
+    The port writes whatever the merge returns and writes nothing when it
+    raises (spec 2026-10-19 s2, pinned by the contract suite), so this is
+    how a handler whose write is conditional declines: the beep-confirm
+    stub when a real document already exists, the coach read when the heal
+    touched nothing. The handler catches it; nothing else does.
+    """
 
 
 def _audit_rmw(state: AppState) -> AbstractContextManager[object]:
-    """The guard for a local audit read-modify-write (#1075).
+    """The guard for a local audit read-modify-write that spans more than
+    one document (#1075). One site: the shooter move, which reads and
+    rewrites two shooters' audit docs as one operation. A single-document
+    read-modify-write goes through ``state.update_audit_at`` instead,
+    which holds this lock itself.
 
     A sync pull's audit merge holds ``state.audit_lock`` (spec
     2026-09-27 s5); a writer that loads, edits and saves outside it
@@ -7130,19 +7159,6 @@ def _audit_rmw(state: AppState) -> AbstractContextManager[object]:
     ``state_docs`` version already optimistic-locks every save.
     """
     return state.audit_lock if state.audit_doc_target() is None else nullcontext()
-
-
-def _coach_save(state: AppState, slug: str, stage_number: int, payload: dict[str, Any], version: int) -> int:
-    """Persist a coach-mutated audit doc under optimistic locking
-    (hosted) / atomically to disk (local). A lost race -> 409.
-
-    Returns the *new* version. Every caller then serves that version in
-    its response rather than the one it read (#844): the client uses it
-    as the ``expected_version`` on its next positional patch, so handing
-    back the pre-save version would make the guard value stale the
-    moment it arrived.
-    """
-    return state.save_audit(slug, stage_number, payload, version=version)
 
 
 def _note_digest(text: str | None) -> dict[str, Any] | None:

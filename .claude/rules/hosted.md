@@ -78,6 +78,13 @@ Deploy facts (worker env, `FORWARDED_ALLOW_IPS`, the waitlist cut-over) are in
   database implementation re-applies it to the winner's document after a
   version conflict (with a jittered backoff; eight simultaneous writers
   exhaust a flat four attempts).
+- `update_audit_at` is a handler's shape of it: `merge(doc | None, version)`
+  raises the handler's own 404 or 409 part-way (nothing is written, nothing
+  retried) or returns the doc to write, and the call returns that doc with
+  its new version, which the response is built from. A merge whose write is
+  conditional declines by raising `server._AuditUnchanged`, which the handler
+  catches. `tests/test_audit_lock_wiring.py` pins that every router site
+  reads and writes the audit file under `audit_lock` this way.
 - `FileDocStore` takes the **same** `audit_lock` object the sync pull holds
   (#1075); a store that made its own lock would silently undo that.
 - The port holds documents only: media stays on `Storage` and

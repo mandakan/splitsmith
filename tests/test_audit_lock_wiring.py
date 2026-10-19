@@ -17,6 +17,7 @@ from pathlib import Path
 
 from splitsmith import user_config
 from splitsmith.ui import server as server_mod
+from splitsmith.ui.docstore import files as files_mod
 
 from .test_audit_local_save import _match_context
 from .ui._helpers import _seed_match_export_project
@@ -49,24 +50,28 @@ class _ProbeLock:
 
 
 def _probe_saves(state, monkeypatch) -> tuple[_ProbeLock, list[bool], list[bool]]:
-    """Swap in a probe lock; record whether it is held at each audit load
-    and save."""
+    """Swap in a probe lock; record whether it is held at each audit doc
+    read and write. The spies sit on the file store's read and write
+    (``ui/docstore/files.py``), which every path to an audit file goes
+    through, and ignore the other documents those two also serve."""
     probe = _ProbeLock()
     monkeypatch.setattr(state, "audit_lock", probe)
     loads: list[bool] = []
     saves: list[bool] = []
-    real_load, real_save = state.load_audit, state.save_audit
+    real_read, real_write = files_mod._read, files_mod._write
 
-    def load(*a, **kw):
-        loads.append(probe.held())
-        return real_load(*a, **kw)
+    def read(path: Path):
+        if path.parent.name == "audit":
+            loads.append(probe.held())
+        return real_read(path)
 
-    def save(*a, **kw):
-        saves.append(probe.held())
-        return real_save(*a, **kw)
+    def write(path: Path, doc, **kw):
+        if path.parent.name == "audit":
+            saves.append(probe.held())
+        return real_write(path, doc, **kw)
 
-    monkeypatch.setattr(state, "load_audit", load)
-    monkeypatch.setattr(state, "save_audit", save)
+    monkeypatch.setattr(files_mod, "_read", read)
+    monkeypatch.setattr(files_mod, "_write", write)
     return probe, loads, saves
 
 
