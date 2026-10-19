@@ -138,7 +138,7 @@ def test_the_match_export_threads_the_spots_and_the_brand(
 ) -> None:
     from splitsmith.ui import match_exports as match_exports_mod
 
-    from .test_ui_server import _seed_match_export_project, _stub_match_export_probe, _wait_for_job
+    from .ui._helpers import _seed_match_export_project, _stub_match_export_probe, _wait_for_job
 
     http, _root = _seed_match_export_project(tmp_path)
     _stub_match_export_probe(monkeypatch)
@@ -252,7 +252,7 @@ def test_the_sting_preview_draws_your_brand_with_the_wipe_spot(
     from splitsmith.ui import export_preview_api
 
     from .test_look_editor_api import _factory, _Recorder
-    from .test_ui_server import _seed_match_export_project
+    from .ui._helpers import _seed_match_export_project
 
     logo = _logo(tmp_path)
     monkeypatch.setattr(export_preview_api, "rasterizer_factory", _factory)

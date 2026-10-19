@@ -32,7 +32,7 @@ def _pin(shooter_root: Path) -> None:
 
 def test_the_match_export_job_reads_the_book(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     from splitsmith.ui import match_exports as match_exports_mod
-    from tests.test_ui_server import _seed_match_export_project, _stub_match_export_probe, _wait_for_job
+    from tests.ui._helpers import _seed_match_export_project, _stub_match_export_probe, _wait_for_job
 
     client, root = _seed_match_export_project(tmp_path)
     _stub_match_export_probe(monkeypatch)
@@ -134,7 +134,7 @@ def test_the_preview_draws_the_book_and_a_book_edit_moves_its_key(
 ) -> None:
     from splitsmith import export_preview
     from splitsmith.ui import export_preview_api
-    from tests.test_ui_server import _seed_match_export_project
+    from tests.ui._helpers import _seed_match_export_project
 
     client, root = _seed_match_export_project(tmp_path)
     _pin(next((root / "shooters").iterdir()))

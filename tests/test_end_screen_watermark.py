@@ -215,7 +215,7 @@ def test_the_export_moves_the_watermark_off_a_top_left_hud(
 ) -> None:
     from splitsmith.ui import match_exports as match_exports_mod
 
-    from .test_ui_server import _seed_match_export_project, _stub_match_export_probe, _wait_for_job
+    from .ui._helpers import _seed_match_export_project, _stub_match_export_probe, _wait_for_job
 
     http, _root = _seed_match_export_project(tmp_path)
     _stub_match_export_probe(monkeypatch)

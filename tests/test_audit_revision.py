@@ -12,7 +12,7 @@ from splitsmith.audit_revision import audit_revision
 from splitsmith.sync.pull import RemoteDoc
 from splitsmith.sync.state import SyncState
 
-from .test_ui_server import _seed_match_export_project
+from .ui._helpers import _seed_match_export_project
 
 AUDIT = "/api/shooters/me/stages/1/audit"
 

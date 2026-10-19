@@ -17,7 +17,7 @@ def _setup(tmp_path: Path):
 
     Returns (client, video_id).
     """
-    from tests.test_ui_server import _match_create_app, _MatchClient
+    from tests.ui._helpers import _match_create_app, _MatchClient
 
     project_root = tmp_path / "match"
     app = _match_create_app(project_root=project_root, project_name="Take Test")
@@ -152,7 +152,7 @@ def test_set_beep_window_422_when_start_negative(tmp_path: Path) -> None:
 
 def _setup_with_scorecard(tmp_path: Path, scorecard_iso: str = "2026-06-01T10:20:00+00:00"):
     """Like _setup but returns a client whose stage 1 has scorecard_updated_at set."""
-    from tests.test_ui_server import _match_create_app, _MatchClient
+    from tests.ui._helpers import _match_create_app, _MatchClient
 
     project_root = tmp_path / "match"
     app = _match_create_app(project_root=project_root, project_name="Suggest Test")
@@ -299,7 +299,7 @@ def _setup_take(tmp_path: Path, n_stages: int = 2):
     """
     from splitsmith.match_model import Match
     from splitsmith.match_project import MatchProject, StageEntry
-    from tests.test_ui_server import _match_create_app, _MatchClient
+    from tests.ui._helpers import _match_create_app, _MatchClient
 
     project_root = tmp_path / "match"
     app = _match_create_app(project_root=project_root, project_name="Take Overview Test")
@@ -516,7 +516,7 @@ def _setup_hosted_peaks(tmp_path: Path, project_subdir: str = "match", filename:
 
     from splitsmith.match_model import Match
     from splitsmith.match_project import MatchProject, StageEntry
-    from tests.test_ui_server import _match_create_app, _MatchClient
+    from tests.ui._helpers import _match_create_app, _MatchClient
 
     project_root = tmp_path / project_subdir
     app = _match_create_app(project_root=project_root, project_name="Hosted Peaks Test")
@@ -684,7 +684,7 @@ def test_attach_raw_video_422_on_naive_recorded_start(tmp_path: Path) -> None:
     Covers I2: AwareDatetime validation fires before the 503 storage check
     so naive datetimes are rejected at the API boundary.
     """
-    from tests.test_ui_server import _match_create_app, _MatchClient
+    from tests.ui._helpers import _match_create_app, _MatchClient
 
     project_root = tmp_path / "match_attach"
     app = _match_create_app(project_root=project_root, project_name="Attach Test")
@@ -712,7 +712,7 @@ def test_attach_raw_video_blocks_cross_shooter_dup(tmp_path: Path) -> None:
     from types import SimpleNamespace
     from unittest.mock import MagicMock
 
-    from tests.test_ui_server import _match_create_app, _MatchClient
+    from tests.ui._helpers import _match_create_app, _MatchClient
 
     project_root = tmp_path / "match_dup"
     app = _match_create_app(project_root=project_root, project_name="Dup Test")

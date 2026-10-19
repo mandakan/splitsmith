@@ -118,7 +118,7 @@ def test_the_export_draws_the_card_and_falls_back_to_the_frame(
     from splitsmith import mp4_render, overlay_raster
     from splitsmith.ui import match_exports
 
-    from .test_ui_server import _seed_match_export_project, _stub_match_export_probe, _wait_for_job
+    from .ui._helpers import _seed_match_export_project, _stub_match_export_probe, _wait_for_job
 
     http, _root = _seed_match_export_project(tmp_path)
     _stub_match_export_probe(monkeypatch)

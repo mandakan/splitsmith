@@ -9,7 +9,7 @@ from splitsmith.config import DEFAULT_MOMENTS
 from splitsmith.highlights import MOMENT_GROUPS, MOMENT_KINDS, readiness_for_project
 from splitsmith.match_project import MatchProject, StageStatus
 
-from .test_ui_server import _seed_match_export_project
+from .ui._helpers import _seed_match_export_project
 
 SHOOTER = Path("shooters") / "me"
 
@@ -124,7 +124,7 @@ def test_submit_refuses_an_empty_menu_and_a_locked_match(tmp_path, monkeypatch):
 
 
 def _run_job(client, body: dict) -> dict:
-    from .test_ui_server import _wait_for_job
+    from .ui._helpers import _wait_for_job
 
     submitted = client.post("/api/shooters/me/highlights", json=body)
     assert submitted.status_code == 200, submitted.text
@@ -250,7 +250,7 @@ def test_a_stage_the_job_finds_unusable_fails_with_the_way_out(tmp_path, monkeyp
     from splitsmith.highlights import StageReadiness
     from splitsmith.reel_inputs import ReelOutcome
 
-    from .test_ui_server import _wait_for_job
+    from .ui._helpers import _wait_for_job
 
     client, _root = _ready_match(tmp_path)
     monkeypatch.setattr(

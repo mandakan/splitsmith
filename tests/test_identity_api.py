@@ -11,7 +11,7 @@ from PIL import Image
 from splitsmith.identity import LOGO_DIR
 from splitsmith.match_project import MatchProject
 
-from .test_ui_server import _seed_match_export_project
+from .ui._helpers import _seed_match_export_project
 
 IDENTITY = "/api/shooters/me/identity"
 LOGO = "/api/shooters/me/identity/logo"

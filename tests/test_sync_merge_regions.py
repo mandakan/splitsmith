@@ -146,7 +146,7 @@ def test_a_pull_that_brings_a_confirmed_reload_reclassifies_its_gap(tmp_path):
     from splitsmith.sync.pull import RemoteDoc
     from splitsmith.sync.state import SyncState
 
-    from .test_ui_server import _seed_match_export_project
+    from .ui._helpers import _seed_match_export_project
 
     _, project_root = _seed_match_export_project(tmp_path, stage_count=1)
     audit = project_root / "shooters" / "me" / "audit" / "stage1.json"

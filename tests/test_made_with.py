@@ -98,7 +98,7 @@ def test_the_credit_sits_at_the_bottom_and_off_is_the_card_it_always_was() -> No
 def test_the_match_export_threads_the_choice(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     from splitsmith.ui import match_exports as match_exports_mod
 
-    from .test_ui_server import _seed_match_export_project, _stub_match_export_probe, _wait_for_job
+    from .ui._helpers import _seed_match_export_project, _stub_match_export_probe, _wait_for_job
 
     http, _root = _seed_match_export_project(tmp_path)
     _stub_match_export_probe(monkeypatch)
@@ -125,7 +125,7 @@ def test_the_closing_preview_shows_the_credit_unless_off(
     from splitsmith.ui import export_preview_api
 
     from .test_look_editor_api import _factory, _Recorder
-    from .test_ui_server import _seed_match_export_project
+    from .ui._helpers import _seed_match_export_project
 
     monkeypatch.setattr(export_preview_api, "rasterizer_factory", _factory)
     monkeypatch.setenv(runtime_module.ENV_CACHE_DIR, str(tmp_path / "cache"))

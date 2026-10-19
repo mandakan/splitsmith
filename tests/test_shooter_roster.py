@@ -14,7 +14,7 @@ from splitsmith.shooter_book import BookSnapshot
 from splitsmith.ui import shooter_roster
 from splitsmith.ui.shooter_roster import RosterSeen, build_roster
 
-from .test_ui_server import _seed_match_export_project
+from .ui._helpers import _seed_match_export_project
 
 
 def _seen(

@@ -104,7 +104,7 @@ def test_the_card_context_carries_it_and_off_is_the_card_it_always_was() -> None
 
 def test_the_match_export_threads_the_brand(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     from splitsmith.ui import match_exports as match_exports_mod
-    from tests.test_ui_server import _seed_match_export_project, _stub_match_export_probe, _wait_for_job
+    from tests.ui._helpers import _seed_match_export_project, _stub_match_export_probe, _wait_for_job
 
     brand = _account_brand()
     client, _root = _seed_match_export_project(tmp_path)
@@ -169,7 +169,7 @@ def test_the_preview_key_moves_with_the_brand_only_when_drawn(
 ) -> None:
     from splitsmith.ui import export_preview_api
     from tests.test_shooter_book_wiring import _NoopRasterizer
-    from tests.test_ui_server import _seed_match_export_project
+    from tests.ui._helpers import _seed_match_export_project
 
     client, _root = _seed_match_export_project(tmp_path)
     keys: list[str] = []

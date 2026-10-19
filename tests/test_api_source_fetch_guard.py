@@ -24,7 +24,7 @@ from pathlib import Path
 from splitsmith.match_project import MatchProject
 from splitsmith.storage import FilesystemStorage
 
-from .test_ui_server import _MatchClient, _seed_match_export_project
+from .ui._helpers import _MatchClient, _seed_match_export_project
 
 
 class RecordingStorage(FilesystemStorage):

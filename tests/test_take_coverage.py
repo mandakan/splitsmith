@@ -115,7 +115,7 @@ def _build_local_app(tmp_path: Path, *, stage_count: int = 3, with_scorecard: bo
     scoreboard mode = a real datetime). Returns (client, app, fake_jobs).
     """
     from splitsmith.match_model import Match
-    from tests.test_ui_server import _match_create_app, _MatchClient
+    from tests.ui._helpers import _match_create_app, _MatchClient
 
     project_root = tmp_path / "match"
     app = _match_create_app(project_root=project_root, project_name="Coverage Test")
@@ -318,7 +318,7 @@ def test_manual_beep_on_sequential_take_enqueues_next_stage(tmp_path: Path) -> N
 
 def test_manual_beep_on_non_take_video_enqueues_nothing(tmp_path: Path) -> None:
     """Manual beep on a single-stage (non-take) video submits no detect_beep jobs."""
-    from tests.test_ui_server import _match_create_app, _MatchClient
+    from tests.ui._helpers import _match_create_app, _MatchClient
 
     project_root = tmp_path / "match"
     app = _match_create_app(project_root=project_root, project_name="No Take")

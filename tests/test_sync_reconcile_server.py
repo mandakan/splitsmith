@@ -12,7 +12,7 @@ from splitsmith.ui import server as server_mod
 from splitsmith.ui.jobs import Job, JobStatus
 
 from .test_audit_local_save import _match_context
-from .test_ui_server import _seed_match_export_project
+from .ui._helpers import _seed_match_export_project
 
 
 def _job(job_id: str, kind: str, status: JobStatus) -> Job:

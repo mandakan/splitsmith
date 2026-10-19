@@ -128,7 +128,7 @@ def test_a_copy_of_the_shipped_look_carries_its_fonts_as_ids() -> None:
 
 @pytest.fixture
 def client(tmp_path: Path):
-    from .test_ui_server import _match_create_app, _MatchClient
+    from .ui._helpers import _match_create_app, _MatchClient
 
     return _MatchClient(_match_create_app(project_root=tmp_path / "match", project_name="Fonts"))
 

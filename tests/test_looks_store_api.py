@@ -12,7 +12,7 @@ from splitsmith import looks
 from splitsmith.ui import server
 from tests.hosted_helpers import login  # hosted_app / hosted_env are registered in conftest
 
-from .test_ui_server import _match_create_app, _MatchClient
+from .ui._helpers import _match_create_app, _MatchClient
 
 
 @pytest.fixture

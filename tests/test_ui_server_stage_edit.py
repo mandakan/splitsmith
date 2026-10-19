@@ -51,7 +51,7 @@ def _local_state(tmp_path: Path):
     tight window around its own assertions).
     """
     from splitsmith.ui.server import current_match_root
-    from tests.test_ui_server import _match_create_app
+    from tests.ui._helpers import _match_create_app
 
     project_root = tmp_path / "match"
     app = _match_create_app(project_root=project_root)
@@ -117,7 +117,7 @@ def _seeded_match(tmp_path: Path, *, stages: int, shooters: list[str]):
     from splitsmith import match_model
     from splitsmith.match_project import MatchProject
     from splitsmith.ui.server import current_match_root
-    from tests.test_ui_server import _match_create_app, _MatchClient
+    from tests.ui._helpers import _match_create_app, _MatchClient
 
     root = tmp_path / "match"
     match = match_model.Match.init(root, name="Test Match")

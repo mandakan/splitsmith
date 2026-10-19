@@ -20,7 +20,7 @@ from splitsmith import runtime as runtime_module
 from splitsmith.ui import export_preview_api, server
 from tests.hosted_helpers import login  # hosted_app / hosted_env are registered in conftest
 
-from .test_ui_server import _seed_match_export_project
+from .ui._helpers import _seed_match_export_project
 
 ROUTE = "/api/shooters/me/export-preview"
 

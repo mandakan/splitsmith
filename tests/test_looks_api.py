@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from .test_ui_server import _seed_match_export_project
+from .ui._helpers import _seed_match_export_project
 
 
 @pytest.fixture

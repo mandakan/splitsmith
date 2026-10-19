@@ -30,7 +30,7 @@ from splitsmith.fcpxml_gen import VideoMetadata
 from splitsmith.match_model import Match, MatchStageDefinition, Shooter
 from splitsmith.match_project import MatchProject, StageEntry, StageVideo
 from splitsmith.ui import server as server_mod
-from tests.test_ui_server import _match_create_app, _MatchClient
+from tests.ui._helpers import _match_create_app, _MatchClient
 
 
 def _fake_probe(_path: Path) -> VideoMetadata:

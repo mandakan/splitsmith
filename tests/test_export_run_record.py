@@ -17,7 +17,7 @@ import pytest
 from splitsmith import export_runs, trim
 from splitsmith.ui import server as server_mod
 
-from .test_ui_server import _seed_match_export_project
+from .ui._helpers import _seed_match_export_project
 
 
 def _run(run_id: str, stage: int) -> export_runs.ExportRun:
@@ -66,7 +66,7 @@ def _fake_trim_video(source, output_path, **kwargs):  # type: ignore[no-untyped-
 def _export_stage_trim_only(client, stage_number: int):
     """Submit a trim-only export and wait for it. The trim writer must
     already be monkeypatched by the caller."""
-    from .test_ui_server import _wait_for_job
+    from .ui._helpers import _wait_for_job
 
     resp = client.post(
         f"/api/shooters/me/stages/{stage_number}/export",
@@ -272,7 +272,7 @@ def test_concurrent_stage_exports_all_reach_the_desktop_history(tmp_path: Path, 
     """
     import time
 
-    from .test_ui_server import _wait_for_job
+    from .ui._helpers import _wait_for_job
 
     stages = 6
     client, project_root = _seed_match_export_project(tmp_path, stage_count=stages)
@@ -411,7 +411,7 @@ def test_a_stage_export_with_a_confirmed_region_records_events_csv_as_an_artifac
     audit_path.write_text(json.dumps(doc), encoding="utf-8")
 
     monkeypatch.setattr(trim, "trim_video", _fake_trim_video)
-    from .test_ui_server import _wait_for_job
+    from .ui._helpers import _wait_for_job
 
     resp = client.post(
         "/api/shooters/me/stages/1/export",
@@ -443,7 +443,7 @@ def test_a_stage_export_with_a_confirmed_region_records_events_csv_as_an_artifac
 def test_a_failed_stage_export_records_nothing(tmp_path: Path, monkeypatch) -> None:
     """The record describes a completed run. A job that raises (here: the
     trim writer produces no clip at all) must leave no history line."""
-    from .test_ui_server import _wait_for_job
+    from .ui._helpers import _wait_for_job
 
     client, project_root = _seed_match_export_project(tmp_path, stage_count=1)
 
@@ -488,7 +488,7 @@ def test_a_stage_export_records_requested_formats_separately_from_produced_artif
     from ``test_a_stage_export_records_a_run`` alone (there both fields
     happen to agree).
     """
-    from .test_ui_server import _wait_for_job
+    from .ui._helpers import _wait_for_job
 
     client, project_root = _seed_match_export_project(tmp_path, stage_count=1)
     shooter_root = project_root / "shooters" / "me"
@@ -541,7 +541,7 @@ def test_a_match_export_records_one_run_spanning_its_stages(tmp_path: Path, monk
     n+1)`` reconstruction would produce ``[1, 2, 3, 4]`` instead and this
     test would catch it (#629 review finding 4).
     """
-    from .test_ui_server import _stub_match_export_probe, _wait_for_job
+    from .ui._helpers import _stub_match_export_probe, _wait_for_job
 
     client, project_root = _seed_match_export_project(tmp_path, stage_numbers=[1, 2, 4, 5])
     _stub_match_export_probe(monkeypatch)
@@ -596,7 +596,7 @@ def test_a_match_export_with_youtube_sidecar_records_both_sidecar_files(tmp_path
     2). Both files must show up in the recorded artifacts, under their
     real filenames, with ``kind == "sidecar"``.
     """
-    from .test_ui_server import _stub_match_export_probe, _wait_for_job
+    from .ui._helpers import _stub_match_export_probe, _wait_for_job
 
     client, project_root = _seed_match_export_project(tmp_path)
     _stub_match_export_probe(monkeypatch)
@@ -661,7 +661,7 @@ def test_a_match_export_pushes_the_youtube_sidecar_json_under_its_real_name(
     """
     from splitsmith.ui import export_storage
 
-    from .test_ui_server import _stub_match_export_probe, _wait_for_job
+    from .ui._helpers import _stub_match_export_probe, _wait_for_job
 
     pushed: list[Path] = []
     real_push = export_storage.push_export_file
@@ -728,7 +728,7 @@ def test_a_match_export_to_mp4_records_a_match_video_artifact(tmp_path: Path, mo
     """
     from splitsmith.ui import match_exports as match_exports_mod
 
-    from .test_ui_server import _stub_match_export_probe, _wait_for_job
+    from .ui._helpers import _stub_match_export_probe, _wait_for_job
 
     def fake_render_mp4(comp, *, output_path, **kwargs):  # type: ignore[no-untyped-def]
         output_path.parent.mkdir(parents=True, exist_ok=True)

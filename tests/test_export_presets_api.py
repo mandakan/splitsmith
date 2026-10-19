@@ -15,7 +15,7 @@ from fastapi.testclient import TestClient
 from splitsmith.export_presets import BUILTIN_PRESETS
 from tests.hosted_helpers import login  # hosted_app / hosted_env are registered in conftest
 
-from .test_ui_server import _match_create_app, _MatchClient
+from .ui._helpers import _match_create_app, _MatchClient
 
 BUILTIN_IDS = [p.preset_id for p in BUILTIN_PRESETS]
 ROUTE = "/api/settings/export-presets"

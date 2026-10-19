@@ -18,7 +18,7 @@ from splitsmith import runtime as runtime_module
 from splitsmith.overlay_raster import RasterizerUnavailableError
 from splitsmith.ui import export_preview_api
 
-from .test_ui_server import _seed_match_export_project
+from .ui._helpers import _seed_match_export_project
 
 ROUTE = "/api/shooters/me/export-preview"
 

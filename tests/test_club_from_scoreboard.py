@@ -11,7 +11,7 @@ from splitsmith.identity import ShooterIdentity
 from splitsmith.match_project import MatchProject
 from splitsmith.ui.server import create_app
 
-from .test_ui_server import (
+from .ui._helpers import (
     _load_v1_match_fixture,
     _match_create_app,
     _MatchClient,

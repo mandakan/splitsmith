@@ -20,7 +20,7 @@ from splitsmith.shooter_book import BookSnapshot, JsonShooterBookStore, ShooterB
 from splitsmith.ui.match_exports import title_info_lines
 
 from .test_identity_api import _png
-from .test_ui_server import _seed_match_export_project
+from .ui._helpers import _seed_match_export_project
 
 SID = 40821
 
