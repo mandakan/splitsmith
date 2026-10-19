@@ -186,7 +186,7 @@ function setUpApi() {
     match_root: "/root",
     match_name: "Bromma",
     shooters: [
-      {
+      { identity: { accent: null, club: null, logo: null },
         slug: "mathias",
         name: "Mathias",
         selected_shooter_id: null,

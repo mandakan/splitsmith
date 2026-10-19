@@ -16,6 +16,7 @@ function cell(over: Partial<TriageCell>): TriageCell {
     stage_name: "Stage",
     status: "todo",
     beep_confidence: null,
+    beep_tone_offset_ms: null,
     anomalies: [],
     needs_attention: null,
     video_count: 0,
@@ -29,9 +30,9 @@ function cell(over: Partial<TriageCell>): TriageCell {
   };
 }
 function shooter(slug: string, name: string): ShooterListEntry {
-  return { slug, name, selected_shooter_id: null, selected_competitor_id: null, stages_audited: 0, stages_total: 4, video_count: 1, cameras: [], stages_missing_trim: 0, stage_statuses: [] };
+  return { identity: { accent: null, club: null, logo: null }, slug, name, selected_shooter_id: null, selected_competitor_id: null, stages_audited: 0, stages_total: 4, video_count: 1, cameras: [], stages_missing_trim: 0, stage_statuses: [] };
 }
-const TRIAGE: TriageResponse = {
+const TRIAGE: TriageResponse = { beep_tone_flag_ms: 20,
   beep_low_confidence_threshold: 0.5,
   flagged_count: 0,
   cells: [

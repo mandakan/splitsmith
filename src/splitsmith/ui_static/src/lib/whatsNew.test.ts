@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import type { WhatsNewEntry } from "@/lib/api";
 import { CHIP_DAYS, byMonth, chipActive, unseen, videoLink } from "@/lib/whatsNew";
 
-const entry = (id: string, date: string, chip?: string): WhatsNewEntry => ({
+const entry = (id: string, date: string, chip?: string): WhatsNewEntry => ({ video: null,
   id,
   date,
   title: id,

@@ -207,12 +207,12 @@ export function assignClip(
     const camera = cameraOf(view, clipId);
     const sameCamera = new Set(camera?.clip_ids ?? []);
     for (const a of d.anchors) {
-      if (sameCamera.has(a.clip_id)) d.overrides.push({ ...a });
+      if (sameCamera.has(a.clip_id)) d.overrides.push({ ...a, skip: false });
     }
     d.anchors = d.anchors.filter((a) => !sameCamera.has(a.clip_id));
     d.anchors.push({ clip_id: clipId, shooter, stage });
   } else {
-    d.overrides.push({ clip_id: clipId, shooter, stage });
+    d.overrides.push({ clip_id: clipId, shooter, stage, skip: false });
   }
   d.checked = { ...d.checked, [clipId]: true };
   return d;

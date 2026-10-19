@@ -9,6 +9,7 @@ const shooter = (slug: string, name: string, stages: number[], audited = 0): Sho
     name,
     selected_shooter_id: null,
     selected_competitor_id: null,
+    identity: { accent: null, club: null, logo: null },
     stages_audited: audited,
     stages_total: stages.length,
     video_count: stages.length,

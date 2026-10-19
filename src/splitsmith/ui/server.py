@@ -4203,7 +4203,7 @@ class TriageCell(BaseModel):
     shooter_name: str
     stage_number: int
     stage_name: str
-    status: str  # StageStatus value, backend-authoritative
+    status: StageStatus
     beep_confidence: float | None  # min across stage videos that have one
     anomalies: list[dict]  # report.Anomaly.model_dump() records
     needs_attention: TriageAttentionOut | None = None
@@ -4596,12 +4596,16 @@ class ScanRequest(BaseModel):
     link_mode: str = "symlink"
 
 
+#: Where a ``raw/<name>`` symlink stands, as the relink and link-status routes report it.
+LinkStatus = Literal["ok", "broken", "missing_link", "not_a_symlink"]
+
+
 class RelinkEntryResponse(BaseModel):
     video_id: str
     name: str
     link_path: str
     current_target: str | None
-    current_status: str
+    current_status: LinkStatus
     candidates: list[str]
     chosen_path: str | None
     ambiguous: bool
@@ -4621,7 +4625,7 @@ class LinkStatusEntry(BaseModel):
     name: str
     link_path: str
     current_target: str | None
-    status: Literal["ok", "broken", "missing_link", "not_a_symlink"]
+    status: LinkStatus
 
 
 class BulkCameraSetItem(BaseModel):

@@ -66,7 +66,7 @@ const COMPARE_BUNDLE: CompareStageResponse = {
   stage_number: 2,
   stage_name: "Stage Two",
   shooters: [
-    {
+    { identity: { accent: null, club: null, logo: null },
       slug: "ann",
       name: "Ann",
       video_ref: null,

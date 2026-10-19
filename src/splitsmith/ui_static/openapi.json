@@ -7424,6 +7424,12 @@
       "title": "Chosen Path"
      },
      "current_status": {
+      "enum": [
+       "ok",
+       "broken",
+       "missing_link",
+       "not_a_symlink"
+      ],
       "title": "Current Status",
       "type": "string"
      },
@@ -10638,8 +10644,7 @@
       "type": "integer"
      },
      "status": {
-      "title": "Status",
-      "type": "string"
+      "$ref": "#/components/schemas/StageStatus"
      },
      "time_seconds": {
       "default": 0.0,

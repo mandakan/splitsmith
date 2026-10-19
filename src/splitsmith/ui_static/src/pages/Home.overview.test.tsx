@@ -76,7 +76,7 @@ function project(): MatchProject {
     origin: "hosted",
   };
 }
-const SHOOTER: ShooterListEntry = {
+const SHOOTER: ShooterListEntry = { identity: { accent: null, club: null, logo: null },
   slug: "s1",
   name: "Mathias Axell",
   selected_shooter_id: null,
@@ -97,6 +97,7 @@ function cell(over: Partial<TriageCell>): TriageCell {
     stage_name: "Stage",
     status: "todo",
     beep_confidence: null,
+    beep_tone_offset_ms: null,
     anomalies: [],
     needs_attention: null,
     video_count: 0,
@@ -109,7 +110,7 @@ function cell(over: Partial<TriageCell>): TriageCell {
     ...over,
   };
 }
-const TRIAGE: TriageResponse = {
+const TRIAGE: TriageResponse = { beep_tone_flag_ms: 20,
   beep_low_confidence_threshold: 0.5,
   flagged_count: 0,
   cells: [
@@ -122,6 +123,7 @@ const TRIAGE: TriageResponse = {
       beep_time: 5.32,
       beep_reviewed: true,
       beep_confidence: 0.91,
+      beep_tone_offset_ms: null,
       shot_count: 30,
       draw: 1.97,
       avg_split: 0.386,
@@ -135,6 +137,7 @@ const TRIAGE: TriageResponse = {
       beep_time: 6.01,
       beep_reviewed: true,
       beep_confidence: 0.88,
+      beep_tone_offset_ms: null,
       shot_count: 33,
       draw: 1.93,
       avg_split: 0.44,
@@ -148,6 +151,7 @@ const TRIAGE: TriageResponse = {
       beep_time: 4.9,
       beep_reviewed: false,
       beep_confidence: 0.42,
+      beep_tone_offset_ms: null,
       time_seconds: 24.0,
     }),
   ],
@@ -213,6 +217,7 @@ describe("Overview", () => {
       video_path: `raw/${videoId}.mp4`,
       beep_time: 4,
       beep_confidence: 0.9,
+      beep_tone_offset_ms: null,
       beep_reviewed: false,
       status: "unreviewed" as const,
       alt_candidates: [],

@@ -49,6 +49,7 @@ function makeStatus(overrides: Partial<SyncStatusResponse> = {}): SyncStatusResp
     last_synced_at: "2026-08-01T00:00:00Z",
     stale: false,
     pending_media: 0,
+    pending_docs: 0,
     errors: [],
     remote_changes: null,
     ...overrides,
@@ -214,6 +215,7 @@ describe("SyncCard", () => {
       makeStatus({
         stale: true,
         pending_media: 2,
+        pending_docs: 0,
         errors: ["clip.mp4 lives outside the match root"],
       }),
     );

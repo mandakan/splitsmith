@@ -19,8 +19,8 @@ vi.mock("@/lib/api", async (importOriginal) => {
 const today = new Date().toISOString().slice(0, 10);
 const PAYLOAD: WhatsNewPayload = {
   entries: [
-    { id: "look-editor", date: today, title: "Make your own Look", body: "Duplicate a Look.", chip: "look-editor" },
-    { id: "older", date: "2026-09-01", title: "An older change", body: "It shipped.", chip: null },
+    { video: null, id: "look-editor", date: today, title: "Make your own Look", body: "Duplicate a Look.", chip: "look-editor" },
+    { video: null, id: "older", date: "2026-09-01", title: "An older change", body: "It shipped.", chip: null },
   ],
   seen: ["older"],
 };

@@ -10345,8 +10345,11 @@ export interface components {
             candidates: string[];
             /** Chosen Path */
             chosen_path: string | null;
-            /** Current Status */
-            current_status: string;
+            /**
+             * Current Status
+             * @enum {string}
+             */
+            current_status: "ok" | "broken" | "missing_link" | "not_a_symlink";
             /** Current Target */
             current_target: string | null;
             /** Found */
@@ -11797,8 +11800,7 @@ export interface components {
             stage_name: string;
             /** Stage Number */
             stage_number: number;
-            /** Status */
-            status: string;
+            status: components["schemas"]["StageStatus"];
             /**
              * Time Seconds
              * @default 0

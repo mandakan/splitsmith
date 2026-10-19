@@ -47,13 +47,13 @@ describe("useActiveShare", () => {
   it("returns the first live share url, skipping revoked ones", async () => {
     listShares.mockResolvedValue({
       shares: [
-        {
+        { cameras: null, scope: "read",
           id: "revoked-1",
           url: "https://x.test/share/revoked",
           created_at: "2026-08-01T00:00:00Z",
           revoked_at: "2026-08-02T00:00:00Z",
         },
-        {
+        { cameras: null, scope: "read",
           id: "live-1",
           url: "https://x.test/share/live",
           created_at: "2026-08-03T00:00:00Z",
@@ -73,7 +73,7 @@ describe("useActiveShare", () => {
   it("normalizes a trailing slash on the share url", async () => {
     listShares.mockResolvedValue({
       shares: [
-        {
+        { cameras: null, scope: "read",
           id: "live-1",
           url: "https://x.test/share/live/",
           created_at: "2026-08-03T00:00:00Z",
@@ -125,7 +125,7 @@ describe("useActiveShare", () => {
   it("returns null when there is no live share", async () => {
     listShares.mockResolvedValue({
       shares: [
-        {
+        { cameras: null, scope: "read",
           id: "revoked-1",
           url: "https://x.test/share/revoked",
           created_at: "2026-08-01T00:00:00Z",

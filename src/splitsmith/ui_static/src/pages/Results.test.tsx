@@ -33,6 +33,7 @@ vi.mock("@/lib/api", async (importOriginal) => {
         last_synced_at: null,
         stale: true,
         pending_media: 0,
+        pending_docs: 0,
         errors: [],
         remote_changes: null,
       }),
@@ -50,7 +51,7 @@ function makeShooter(
   name: string,
   statuses: [number, StageStatus][],
 ): ShooterListEntry {
-  return {
+  return { identity: { accent: null, club: null, logo: null },
     slug,
     name,
     selected_shooter_id: null,
@@ -303,6 +304,7 @@ describe("Results - Share on splitsmith.app (local mode)", () => {
     last_synced_at: "2026-09-01T00:00:00Z",
     stale: false,
     pending_media: 0,
+    pending_docs: 0,
     errors: [],
     remote_changes: null,
   };
