@@ -39,7 +39,7 @@ import { keepAllEvents, keepEvent, withKind } from "@/lib/events";
 import { focusWindow, playWindow, type FocusWindow } from "@/lib/focusWindow";
 import { useMatchHref } from "@/lib/matchHref";
 import { addRegion } from "@/lib/addRegion";
-import { nextOpenId, prevOpenId, proposals, queuePosition } from "@/lib/proposalQueue";
+import { adjacentId, nextOpenId, proposals, queuePosition } from "@/lib/proposalQueue";
 import { useSnapToShots } from "@/lib/timelinePrefs";
 import { deriveStageView, useStageWorkspace } from "@/lib/useStageWorkspace";
 import { cn } from "@/lib/utils";
@@ -156,18 +156,21 @@ function MobileBreakdownStage({ slug, stage }: { slug: string; stage: number }) 
     stopAt.current = to;
     void videoRef.current?.play().catch(() => {});
   };
-  const moveOn = (next: StageEvent[], from: StageEvent) => setOpenId(nextOpenId(next, from.start));
+  // Read off the list before the change takes ``from`` out of the queue: by
+  // place, so a proposal sharing its start (a draw and its movement) is next.
+  const moveOn = (before: StageEvent[], from: StageEvent) => setOpenId(adjacentId(before, from.id, 1));
   const keep = () => {
     if (!open) return;
-    const next = keepEvent(events, open.id);
-    regions.change(next, true);
-    moveOn(next, open);
+    regions.change(keepEvent(events, open.id), true);
+    moveOn(events, open);
   };
   const remove = () => {
     if (!open) return;
-    const next = events.filter((e) => e.id !== open.id);
-    regions.change(next, true);
-    moveOn(next, open);
+    regions.change(
+      events.filter((e) => e.id !== open.id),
+      true,
+    );
+    moveOn(events, open);
   };
   const setKind = (kind: StageEventKind) => {
     setKindOpen(false);
@@ -177,7 +180,7 @@ function MobileBreakdownStage({ slug, stage }: { slug: string; stage: number }) 
     if (!next) return;
     regions.change(next, true);
     // A new kind confirms a proposal, which leaves the queue: move on.
-    if (open.source === "auto") moveOn(next, open);
+    if (open.source === "auto") moveOn(events, open);
   };
   const pause = () => {
     stopAt.current = null;
@@ -598,7 +601,7 @@ function MobileBreakdownStage({ slug, stage }: { slug: string; stage: number }) 
                   variant="ghost"
                   className="min-h-11 flex-1"
                   disabled={queue.length === 0}
-                  onClick={() => setOpenId(prevOpenId(events, open.start))}
+                  onClick={() => setOpenId(adjacentId(events, open.id, -1) ?? open.id)}
                 >
                   Prev
                 </Button>
@@ -619,7 +622,7 @@ function MobileBreakdownStage({ slug, stage }: { slug: string; stage: number }) 
                   variant="ghost"
                   className="min-h-11 flex-1"
                   disabled={queue.length === 0}
-                  onClick={() => setOpenId(nextOpenId(events, open.start))}
+                  onClick={() => setOpenId(adjacentId(events, open.id, 1) ?? open.id)}
                 >
                   Next
                 </Button>

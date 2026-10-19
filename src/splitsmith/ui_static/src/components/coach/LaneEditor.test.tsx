@@ -780,6 +780,101 @@ describe("LaneEditor", () => {
       expect(screen.getByTestId("event-evt-2")).toBeInTheDocument();
     });
 
+    it("K keeps the selected proposal and moves to the next one across lanes, seeking to it", () => {
+      const onChange = vi.fn();
+      const onSeek = vi.fn();
+      render(
+        <Harness
+          initial={[ev("p1", "movement", 1, 2, "auto"), ev("p2", "reload", 1, 1.5, "auto"), ev("c", "reload", 3, 4), ev("p3", "movement", 6, 7, "auto")]}
+          onChange={onChange}
+          onSeek={onSeek}
+        />,
+      );
+      const at = (id: string) => screen.getByTestId(`event-${id}`);
+      act(() => at("p1").focus());
+      fireEvent.keyDown(at("p1"), { key: "k" });
+      expect(lastCommit(onChange)!.find((x) => x.id === "p1")!.source).toBe("manual");
+      // Same start, other lane: visited, not skipped.
+      expect(at("p2")).toHaveFocus();
+      expect(at("p2")).toHaveAttribute("aria-selected", "true");
+      expect(onSeek).toHaveBeenLastCalledWith(1);
+      fireEvent.keyDown(at("p2"), { key: "K" });
+      expect(at("p3")).toHaveFocus();
+      expect(onSeek).toHaveBeenLastCalledWith(6);
+      fireEvent.keyDown(at("p3"), { key: "k" });
+      // The last one: it stays, confirmed, and the status line says the review is done.
+      expect(at("p3")).toHaveFocus();
+      expect(at("p3").dataset.source).toBe("manual");
+      expect(screen.getByRole("status")).toHaveTextContent("Every proposal reviewed");
+      expect(onChange.mock.calls.filter((c) => c[1] === true)).toHaveLength(3);
+    });
+
+    it("K does nothing on a confirmed region, an unselected one, a repeat or read-only", () => {
+      const onChange = vi.fn();
+      const { unmount } = render(
+        <Harness initial={[ev("c", "reload", 3, 4), ev("p", "movement", 6, 7, "auto")]} onChange={onChange} />,
+      );
+      const at = (id: string) => screen.getByTestId(`event-${id}`);
+      act(() => at("c").focus());
+      fireEvent.keyDown(at("c"), { key: "k" });
+      act(() => at("p").focus());
+      fireEvent.keyDown(at("p"), { key: "k", repeat: true });
+      expect(onChange).not.toHaveBeenCalled();
+      unmount();
+      render(<Harness initial={[ev("p", "movement", 6, 7, "auto")]} onChange={onChange} readOnly />);
+      act(() => screen.getByTestId("event-p").focus());
+      fireEvent.keyDown(screen.getByTestId("event-p"), { key: "k" });
+      expect(onChange).not.toHaveBeenCalled();
+    });
+
+    it("Delete on a proposal rejects it and selects the next, so the review runs on the keyboard", () => {
+      const onChange = vi.fn();
+      const onSeek = vi.fn();
+      render(
+        <Harness
+          initial={[ev("p1", "reload", 1, 2, "auto"), ev("c", "reload", 3, 4), ev("p2", "movement", 5, 6, "auto"), ev("p3", "reload", 6, 7, "auto")]}
+          onChange={onChange}
+          onSeek={onSeek}
+        />,
+      );
+      const at = (id: string) => screen.getByTestId(`event-${id}`);
+      act(() => at("p1").focus());
+      fireEvent.keyDown(at("p1"), { key: "Delete" });
+      expect(screen.queryByTestId("event-p1")).toBeNull();
+      expect(at("p2")).toHaveFocus();
+      expect(at("p2")).toHaveAttribute("aria-selected", "true");
+      expect(onSeek).toHaveBeenLastCalledWith(5);
+      fireEvent.keyDown(at("p2"), { key: "Backspace" });
+      expect(at("p3")).toHaveFocus();
+      // A held key still removes only the one it started on.
+      fireEvent.keyDown(at("p3"), { key: "Delete", repeat: true });
+      expect(at("p3")).toBeInTheDocument();
+      expect(lastCommit(onChange)!.map((x) => x.id)).toEqual(["c", "p3"]);
+    });
+
+    it("N and Shift+N jump to the next and previous proposal from anywhere but a text field", () => {
+      const onSeek = vi.fn();
+      render(
+        <>
+          <input aria-label="note" />
+          <Harness initial={[ev("p1", "reload", 1, 2, "auto"), ev("c", "reload", 3, 4), ev("p2", "movement", 5, 6, "auto")]} onSeek={onSeek} />
+        </>,
+      );
+      const at = (id: string) => screen.getByTestId(`event-${id}`);
+      fireEvent.keyDown(document.body, { key: "n" });
+      expect(at("p1")).toHaveFocus();
+      expect(at("p1")).toHaveAttribute("aria-selected", "true");
+      fireEvent.keyDown(document.activeElement!, { key: "n" });
+      expect(at("p2")).toHaveFocus();
+      expect(onSeek).toHaveBeenLastCalledWith(5);
+      fireEvent.keyDown(document.activeElement!, { key: "N", shiftKey: true });
+      expect(at("p1")).toHaveFocus();
+      const note = screen.getByLabelText("note");
+      act(() => note.focus());
+      fireEvent.keyDown(note, { key: "n" });
+      expect(note).toHaveFocus();
+    });
+
     it("a held Delete (auto-repeat) removes exactly one region in the whole stage", () => {
       const onChange = vi.fn();
       render(

@@ -30,3 +30,20 @@ export function queuePosition(events: StageEvent[], id: string | null): { index:
   const index = queue.findIndex((e) => e.id === id);
   return index < 0 ? null : { index, total: queue.length };
 }
+
+/**
+ * The proposal one place after (``dir`` 1) or before (-1) ``id`` in the
+ * queue, wrapping; null when ``id`` is the only one. By place, not by time:
+ * two proposals starting together (a draw and its movement) are both
+ * visited. From a confirmed region it steps by its start, from nothing to
+ * the first (or last). Read it off the list *before* a keep or a delete
+ * takes ``id`` out of the queue.
+ */
+export function adjacentId(events: StageEvent[], id: string | null, dir: 1 | -1): string | null {
+  const queue = proposals(events);
+  const i = queue.findIndex((e) => e.id === id);
+  if (i >= 0) return queue.length > 1 ? queue[(i + dir + queue.length) % queue.length].id : null;
+  const from = events.find((e) => e.id === id);
+  if (dir === 1) return nextOpenId(events, from ? from.start : -Infinity);
+  return prevOpenId(events, from ? from.start : Infinity);
+}

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { StageEvent } from "@/lib/api";
-import { nextOpenId, prevOpenId, proposals, queuePosition } from "@/lib/proposalQueue";
+import { adjacentId, nextOpenId, prevOpenId, proposals, queuePosition } from "@/lib/proposalQueue";
 
 const ev = (id: string, kind: StageEvent["kind"], start: number, source: "auto" | "manual" = "auto"): StageEvent => ({
   id,
@@ -31,5 +31,18 @@ describe("the proposal queue", () => {
     expect(queuePosition(LIST, "r1")).toEqual({ index: 1, total: 3 });
     expect(queuePosition(LIST, "k")).toBeNull();
     expect(queuePosition(LIST, null)).toBeNull();
+  });
+  it("steps through the queue by place, so a proposal sharing a start is never skipped", () => {
+    expect(adjacentId(LIST, "m1", 1)).toBe("r1");
+    expect(adjacentId(LIST, "r1", 1)).toBe("r2");
+    expect(adjacentId(LIST, "r2", 1)).toBe("m1");
+    expect(adjacentId(LIST, "m1", -1)).toBe("r2");
+    expect(adjacentId(LIST, "r1", -1)).toBe("m1");
+  });
+  it("from a confirmed region or nothing, steps by time; the last proposal has no neighbour", () => {
+    expect(adjacentId(LIST, "k", 1)).toBe("r2");
+    expect(adjacentId(LIST, "k", -1)).toBe("r1");
+    expect(adjacentId(LIST, null, 1)).toBe("m1");
+    expect(adjacentId([ev("m1", "movement", 3)], "m1", 1)).toBeNull();
   });
 });
