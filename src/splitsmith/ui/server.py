@@ -7352,6 +7352,2068 @@ def _current_event_logo(state: AppState) -> Path | None:
     return ensure_local_event_logo(match.branding, match_root, storage=state.storage, match_id=match.match_id)
 
 
+# ---------------------------------------------------------------------------
+# Handler helpers. These were closures inside create_app; they now take the
+# AppState explicitly so routers outside this module can call them.
+# ---------------------------------------------------------------------------
+
+
+def _set_session_cookie(state: AppState, response: Response, secret: str, expires_at: datetime) -> None:
+    max_age = max(0, int((expires_at - datetime.now(UTC)).total_seconds()))
+    from ..db import SESSION_COOKIE_NAME
+
+    response.set_cookie(
+        key=SESSION_COOKIE_NAME,
+        value=secret,
+        max_age=max_age,
+        httponly=True,
+        secure=state.cookie_secure,
+        samesite="lax",
+        path="/",
+    )
+
+
+def _intake_cors(request: Request, response: Response) -> Response:
+    origin = request.headers.get("origin")
+    if origin and origin in _intake_origins():
+        response.headers["Access-Control-Allow-Origin"] = origin
+        response.headers["Access-Control-Allow-Methods"] = "POST, OPTIONS"
+        response.headers["Access-Control-Allow-Headers"] = "content-type"
+        response.headers["Vary"] = "Origin"
+    return response
+
+
+def _local_match_path(root: Path) -> Path:
+    """Resolve ``<root>/scoreboard/match.json`` (offline source path)."""
+    return root / DEFAULT_SCOREBOARD_DIRNAME / DEFAULT_MATCH_FILENAME
+
+
+def _adopt_club_from_scoreboard(
+    project: MatchProject, client_root: Path, content_type: int, match_id: int, competitor_id: int
+) -> None:
+    """Fill a shooter's empty club line from their scoreboard competitor,
+    best effort: a link never fails because the club could not be read."""
+    if (project.identity.club or "").strip():
+        return
+    try:
+        with _resolve_scoreboard_client(client_root) as client:
+            match_data = client.get_match(content_type, match_id)
+    except (ScoreboardError, OSError):
+        logger.info("scoreboard club for competitor %s could not be read", competitor_id, exc_info=True)
+        return
+    project.adopt_scoreboard_club(_club_for(match_data, competitor_id))
+
+
+def _resolve_scoreboard_client(root: Path) -> ScoreboardClient:
+    """Pick the concrete ``ScoreboardClient`` for this shooter root.
+
+    Local JSON wins when present so the user can stay fully offline by
+    dropping a file. Otherwise we wrap the HTTP client in the project-
+    local cache so a second open of the same match is a cache hit. The
+    caller is responsible for ``close()`` -- both implementations are
+    context managers (Local is a no-op; HTTP closes the httpx Client).
+    """
+    local_path = _local_match_path(root)
+    if local_path.exists():
+        local = LocalJsonScoreboard(local_path)
+        return _ScoreboardClientCtx(local, owns_close=False)
+    # Anonymous since ssi-scoreboard#554 (#1016): construction never
+    # fails on a missing token; a 401 mid-request still routes through
+    # ``_raise_scoreboard_http``.
+    http = SsiHttpClient()
+    cache_dir = root / "scoreboard" / "cache"
+    cached = CachingScoreboardClient(http, cache_dir)
+    return _ScoreboardClientCtx(cached, owns_close=True, inner_http=http)
+
+
+def _register_response(state: AppState, root: Path, name: str, match_id: str | None) -> HealthResponse:
+    """Build a HealthResponse for a freshly-registered match.
+
+    Tier 1 step 4 of doc 10 retired the bound-state concept on
+    the server, but the picker / create-match flow still need a
+    way to learn the resolved ``match_id`` + default shooter so
+    the SPA can navigate to ``/match/<match_id>``. That's what
+    this response is for; the live ``/api/health`` route never
+    returns these fields anymore.
+    """
+    # Hosted: read the authoritative roster from Postgres (the on-disk
+    # match.json is the stale creation shell). Local: from disk.
+    if state.project_state is not None and match_id is not None:
+        doc, _ = run_sync(state.project_state.load_match(match_id))
+        shooters = sorted(doc.get("shooters", [])) if doc is not None else []
+    else:
+        shooters = sorted(match_model.Match.load(root).shooters)
+    default_slug = shooters[0] if shooters else None
+    return HealthResponse(
+        bound=True,
+        project_name=name,
+        project_root=str(root),
+        kind="match",
+        default_shooter_slug=default_slug,
+        match_id=match_id,
+    )
+
+
+def _workers_not_found() -> JSONResponse:
+    return JSONResponse(status_code=404, content={"detail": "not found"})
+
+
+def _require_storage(state: AppState) -> Storage:
+    storage = state.storage
+    if storage is None:
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "raw video upload is hosted-mode only; "
+                "local mode writes raw/<name> symlinks via the desktop UI"
+            ),
+        )
+    return storage
+
+
+def _raw_video_owners(state: AppState) -> dict[str, list[str]]:
+    """Map each claimed ``storage_path`` to the shooters holding it.
+
+    The single source of truth for hosted raw-object ownership (#562).
+    On desktop a raw video is a file under one shooter's project dir,
+    so the filesystem enforced one owner for free; the hosted port put
+    the bytes in a shared per-user ``raw/`` pool and kept attachment as
+    a manifest entry, losing that invariant. The settled model is
+    option C -- shared pool, attachment is an explicit single-owner
+    claim, and ``move-shooter`` is the only thing that reassigns it.
+
+    The list values are almost always 0 or 1 slugs. They are lists
+    rather than a single slug because matches predating the claim
+    guard can genuinely hold one object on two shooters -- the prod
+    failure #562 was filed about -- and collapsing that to one owner
+    here would let the caller read "I am *an* owner" as permission and
+    silently normalise the corruption.
+
+    Slugs follow ``match.shooters`` order, so the first entry is the
+    stable first claimant. Best-effort by design: outside a match
+    context (legacy single-shooter layouts, bare/legacy calls) there
+    are no siblings to conflict with, and the map is empty.
+    """
+    try:
+        _, match = _resolve_match_context(state)
+    except HTTPException:
+        return {}
+    owners: dict[str, list[str]] = {}
+    for sh_slug in match.shooters:
+        for rv in state.shooter_project(sh_slug).raw_videos:
+            owners.setdefault(rv.storage_path, []).append(sh_slug)
+    return owners
+
+
+def _apply_raw_video_coverage(
+    project: MatchProject,
+    root: Path,
+    storage_path: str,
+    covers: list[int],
+) -> list[StageVideo]:
+    """Diff and apply per-stage coverage for a raw video.
+
+    Creates StageVideo entries for stages in ``covers`` not yet
+    registered under ``storage_path``; removes entries for stages
+    that were previously registered but are no longer listed (and
+    invalidates their trim/audio caches). Updates
+    ``rv.covers_stages`` with ``covers`` as-is (declared order is
+    shooting order for sequential-mode takes; no implicit sort).
+    Removes a matching ``unassigned_videos`` entry when coverage is
+    first applied (the video moves from the tray to named stages).
+
+    Creates the ``RawVideo`` manifest entry if one does not exist
+    yet (local-mode scan only puts the video in
+    ``unassigned_videos``; attach or PATCH coverage creates the
+    raw entry).
+
+    Returns the newly created ``StageVideo`` instances.
+    """
+    video_path = Path(storage_path)
+    rv = project.find_raw_video(storage_path)
+    if rv is None:
+        rv = RawVideo(
+            original_filename=video_path.name,
+            storage_path=storage_path,
+        )
+        project.raw_videos.append(rv)
+
+    previously_covered: set[int] = set(rv.covers_stages)
+    new_covers_set: set[int] = set(covers)
+
+    created: list[StageVideo] = []
+
+    # Add StageVideos for stages not yet registered.
+    for stage_number in covers:
+        stage = project.stage(stage_number)
+        if any(str(v.path) == storage_path for v in stage.videos):
+            continue  # already registered - skip
+        role: VideoRole = "secondary" if stage.primary() is not None else "primary"
+        sv = StageVideo(path=video_path, role=role, stage_number=stage_number)
+        stage.videos.append(sv)
+        created.append(sv)
+
+    # Remove StageVideos for stages no longer in the new list and
+    # invalidate their trim/audio caches so a later re-assign starts clean.
+    for stage_number in sorted(previously_covered - new_covers_set):
+        try:
+            stage = project.stage(stage_number)
+        except KeyError:
+            continue
+        to_remove = [v for v in stage.videos if str(v.path) == storage_path]
+        stage.videos = [v for v in stage.videos if str(v.path) != storage_path]
+        for v in to_remove:
+            audio_helpers.invalidate_video_audit_trim(root, stage_number, v, project=project)
+
+    # Update covers_stages with the caller-declared order (no sort).
+    rv.covers_stages = list(dict.fromkeys(covers))
+
+    # Remove from unassigned tray when coverage is being applied for
+    # the first time (moves it from "unregistered" to named stages).
+    project.unassigned_videos = [v for v in project.unassigned_videos if str(v.path) != storage_path]
+
+    return created
+
+
+def _queue_take_detects(state: AppState, slug: str, project: MatchProject, created: list[StageVideo]) -> None:
+    """Enqueue detect_beep for newly created take StageVideos.
+
+    Mode selection (keyed off ``rv.covers_stages`` and per-stage
+    ``scorecard_updated_at``):
+
+    - Scoreboard-mode (every covered stage has ``scorecard_updated_at``):
+      one detect_beep per created video - the window derivation is
+      independent for each so they can all run in parallel.
+    - Sequential-mode (at least one covered stage lacks
+      ``scorecard_updated_at``): one initial detect_beep for the
+      first unprocessed covered stage in ``covers_stages`` order.
+      The detect job chains to the next stage after success (Task 5
+      / ``_run_detect_beep_for_video``).
+
+    Skips videos already in ``processed["beep"]`` or with a manual
+    beep. Uses ``run_sync`` because sync FastAPI endpoints run
+    in a threadpool with no active event loop. Does NOT call
+    ``resolve_video_path`` - in hosted mode that would mirror a
+    multi-GB object into the API container; reachability is the
+    worker's problem.
+    """
+    if not created:
+        return
+    storage_path = str(created[0].path)
+    raw = project.find_raw_video(storage_path)
+    if raw is None:
+        return
+
+    def _stage_has_scorecard(n: int) -> bool:
+        try:
+            return project.stage(n).scorecard_updated_at is not None
+        except KeyError:
+            return False
+
+    is_scoreboard = len(raw.covers_stages) >= 2 and all(_stage_has_scorecard(n) for n in raw.covers_stages)
+
+    # Skip enqueue when the database URL is not Postgres. This covers two
+    # cases: (a) SQLite-backed hosted mode in smoke/CI tests, where
+    # Procrastinate's DSN converter would raise ValueError on the first
+    # submit call; (b) local-mode (no SPLITSMITH_DATABASE_URL), which has
+    # no Procrastinate wiring at all.
+    #
+    # We gate explicitly on the URL rather than catching ValueError because
+    # the submit path writes a compute_jobs row before calling the deferrer;
+    # a bare except ValueError would swallow a real deferrer error in
+    # Postgres mode after that row is committed, leaving a PENDING job that
+    # never runs. The predicate matches _hosted_mode_active() + Postgres so
+    # that Postgres-mode errors propagate like _submit_detect_beep does.
+    if _hosted_mode_active():
+        db_url = os.environ.get(SPLITSMITH_DATABASE_URL_ENV, "")
+        if not db_url.startswith("postgresql"):
+            logger.debug("_queue_take_detects: skipping enqueue (SQLite URL)")
+            return
+
+    if is_scoreboard or len(raw.covers_stages) < 2:
+        # One detect_beep per created video.
+        for sv in created:
+            if sv.processed.get("beep") or sv.beep_source == "manual":
+                continue
+            existing = run_sync(
+                state.jobs.find_active(
+                    kind="detect_beep",
+                    stage_number=sv.stage_number,
+                    shooter_slug=slug,
+                    video_id=sv.video_id,
+                )
+            )
+            if existing is None:
+                try:
+                    run_sync(
+                        state.jobs.submit(
+                            kind="detect_beep",
+                            stage_number=sv.stage_number,
+                            shooter_slug=slug,
+                            video_id=sv.video_id,
+                            args={
+                                "slug": slug,
+                                "stage_number": sv.stage_number,
+                                "video_id": sv.video_id,
+                            },
+                        )
+                    )
+                except FeatureRequiredError as exc:
+                    # The account answer is the same for every video.
+                    _log_chain_skipped("detect_beep", slug, sv.stage_number, exc)
+                    return
+    else:
+        # Sequential-mode: submit only the first unprocessed covered stage.
+        for n in raw.covers_stages:
+            try:
+                stg = project.stage(n)
+            except KeyError:
+                continue
+            primary = stg.primary()
+            if primary is None:
+                continue
+            if primary.processed.get("beep") or primary.beep_source == "manual":
+                continue
+            if primary.beep_time is not None:
+                continue
+            existing = run_sync(
+                state.jobs.find_active(
+                    kind="detect_beep",
+                    stage_number=n,
+                    shooter_slug=slug,
+                    video_id=primary.video_id,
+                )
+            )
+            if existing is not None:
+                break  # chain already started
+            try:
+                run_sync(
+                    state.jobs.submit(
+                        kind="detect_beep",
+                        stage_number=n,
+                        shooter_slug=slug,
+                        video_id=primary.video_id,
+                        args={"slug": slug, "stage_number": n, "video_id": primary.video_id},
+                    )
+                )
+            except FeatureRequiredError as exc:
+                _log_chain_skipped("detect_beep", slug, n, exc)
+            break
+
+
+def _fetch_and_merge_stage_times(
+    root: Path, project: MatchProject, ct: int, mid: int, competitor_id: int
+) -> int:
+    """Shared helper -- get_stage_times + merge_stage_times, with the
+    right error mapping. Persists the project on success.
+
+    Also opportunistically backfills ``stage_rounds`` from the cached
+    ``MatchData`` so existing projects pick up ``min_rounds`` /
+    target counts on the existing "refresh times" SPA action without
+    requiring a full overwrite-import that would orphan video
+    assignments.
+    """
+    with _resolve_scoreboard_client(root) as client:
+        try:
+            results = client.get_stage_times(ct, mid, competitor_id)
+        except ScoreboardError as exc:
+            _raise_scoreboard_http(exc)
+        except KeyError as exc:
+            raise HTTPException(
+                status_code=404,
+                detail=str(exc),
+            ) from exc
+        # Best-effort backfill of stage_rounds. Failure is non-fatal
+        # -- stage times are the user-visible action; rounds are an
+        # additive bonus that the next real scoreboard refresh can
+        # still cover.
+        try:
+            match_data = client.get_match(ct, mid)
+            project.merge_stage_rounds(match_data)
+            project.merge_competitor_division(match_data)
+        except ScoreboardError:
+            pass
+    merged = project.merge_stage_times(results)
+    project.save(root)
+    return merged
+
+
+def _resolve_stage_video(
+    state: AppState, slug: str, stage_number: int, video_id: str
+) -> tuple[MatchProject, StageEntry, StageVideo]:
+    """Load the project + stage + video for a per-video endpoint.
+
+    Returns the trio so the caller doesn't have to re-read state. Raises
+    404 when stage / video doesn't exist; pre-flight check on the
+    source-on-disk lives at the call site so endpoints that don't need
+    a reachable file (clear, manual override) can skip it.
+    """
+    project = state.shooter_project(slug)
+    try:
+        stage = project.stage(stage_number)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    video = stage.find_video_by_id(video_id)
+    if video is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"stage {stage_number} has no video with id {video_id!r}",
+        )
+    return project, stage, video
+
+
+async def _submit_detect_beep(
+    state: AppState, slug: str, stage_number: int, video: StageVideo
+) -> JSONResponse:
+    """Validate + dedupe + queue a detect-beep job for ``video``.
+
+    Shared by the per-video endpoint and the primary-only legacy
+    endpoint so both honour the same reachability + manual-override
+    pre-flight checks.
+    """
+    existing = await state.jobs.find_active(
+        kind="detect_beep", stage_number=stage_number, shooter_slug=slug, video_id=video.video_id
+    )
+    if existing is not None:
+        return JSONResponse(existing.model_dump(mode="json"))
+    job = await state.jobs.submit(
+        kind="detect_beep",
+        stage_number=stage_number,
+        shooter_slug=slug,
+        video_id=video.video_id,
+        args={"slug": slug, "stage_number": stage_number, "video_id": video.video_id},
+    )
+    return JSONResponse(job.model_dump(mode="json"))
+
+
+async def _submit_trim(
+    state: AppState,
+    slug: str,
+    stage_number: int,
+    stage: StageEntry,
+    video: StageVideo,
+    project: MatchProject,
+) -> JSONResponse:
+    """Validate + dedupe + queue a trim job for ``video``.
+
+    Pre-flight checks (reachability, beep present, stage_time set)
+    apply equally to primary and secondary -- both need a beep_time
+    and a non-zero stage_time to define the trim window.
+    """
+    # ``source_present``, not ``resolve_video_path``: ffmpeg runs in the
+    # trim job, not here, so this preflight has no use for the bytes
+    # (#638).
+    root = state.shooter_root(slug)
+    if not project.source_present(root, video.path):
+        raise source_unreachable(stage_number, root / video.path)
+    if video.beep_time is None:
+        raise HTTPException(
+            status_code=400,
+            detail=f"stage {stage_number} video has no beep_time yet",
+        )
+    if stage.time_seconds <= 0:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"stage {stage_number} has time_seconds=0; import a "
+                "scoreboard or set the stage time before trimming"
+            ),
+        )
+    existing = await state.jobs.find_active(
+        kind="trim", stage_number=stage_number, shooter_slug=slug, video_id=video.video_id
+    )
+    if existing is not None:
+        return JSONResponse(existing.model_dump(mode="json"))
+    job = await state.jobs.submit(
+        kind="trim",
+        stage_number=stage_number,
+        shooter_slug=slug,
+        video_id=video.video_id,
+        args={"slug": slug, "stage_number": stage_number, "video_id": video.video_id},
+    )
+    return JSONResponse(job.model_dump(mode="json"))
+
+
+def _apply_beep_override(
+    state: AppState,
+    slug: str,
+    project: MatchProject,
+    stage: StageEntry,
+    video: StageVideo,
+    beep_time: float | None,
+) -> None:
+    """Apply a manual beep override to ``video``.
+
+    Generic over role: secondaries also need their cached trim
+    invalidated when the user moves their beep, since the trim window
+    is anchored to that beep. ``beep_time=None`` clears back to "no
+    beep yet"; otherwise sets ``beep_source="manual"`` and drops the
+    candidate list so the UI doesn't keep suggesting a stale auto pick.
+    Shot-detect flag clearing is primary-only -- secondaries don't
+    carry their own shot timeline.
+    """
+    if beep_time is None:
+        video.beep_time = None
+        video.beep_source = None
+        video.beep_peak_amplitude = None
+        video.beep_duration_ms = None
+        video.beep_confidence = None
+        video.beep_candidates = []
+        video.beep_ranker_version = None
+        video.beep_auto_detect_failed = False
+        video.beep_alignment_confidence = None
+        video.beep_alignment_delta_ms = None
+        video.processed["beep"] = False
+        video.processed["trim"] = False
+        video.beep_reviewed = False
+        if video.role == "primary":
+            video.processed["shot_detect"] = False
+    else:
+        video.beep_time = beep_time
+        video.beep_source = "manual"
+        video.beep_peak_amplitude = None
+        video.beep_duration_ms = None
+        # Manual entry pins confidence at 1.0 -- the user told us
+        # where the beep is, so the auto-trust gate (#219) opens.
+        video.beep_confidence = 1.0
+        video.beep_candidates = []
+        video.beep_ranker_version = None
+        video.beep_auto_detect_failed = False
+        video.beep_alignment_confidence = None
+        video.beep_alignment_delta_ms = None
+        video.processed["beep"] = True
+        video.processed["trim"] = False
+        # Manual beep entry implies the user looked at the
+        # waveform to type the value -- skip the review pill (#71).
+        video.beep_reviewed = True
+        if video.role == "primary":
+            video.processed["shot_detect"] = False
+
+    audio_helpers.invalidate_video_audit_trim(
+        state.shooter_root(slug), stage.stage_number, video, project=project
+    )
+
+
+async def _maybe_chain_trim(state: AppState, slug: str, stage: StageEntry, video: StageVideo) -> None:
+    """Auto-fire a trim job for ``video`` when conditions allow.
+
+    Used after a beep override / candidate select: if the user just
+    gave us a beep and the stage time is known, the next thing they
+    want is a fresh short-GOP trim. Dedupes through ``find_active``
+    so a still-running job adopts instead of racing.
+    """
+    if video.beep_time is None or stage.time_seconds <= 0:
+        return
+    if (
+        await state.jobs.find_active(
+            kind="trim", stage_number=stage.stage_number, shooter_slug=slug, video_id=video.video_id
+        )
+        is not None
+    ):
+        return
+    try:
+        await state.jobs.submit(
+            kind="trim",
+            stage_number=stage.stage_number,
+            shooter_slug=slug,
+            video_id=video.video_id,
+            args={
+                "slug": slug,
+                "stage_number": stage.stage_number,
+                "video_id": video.video_id,
+            },
+        )
+    except FeatureRequiredError as exc:
+        _log_chain_skipped("trim", slug, stage.stage_number, exc)
+
+
+def _log_chain_skipped(kind: str, slug: str, stage_number: int, exc: FeatureRequiredError) -> None:
+    """A job chained after a committed write was refused by the account backstop.
+
+    The write the request made stands and the route answers with its
+    normal success; the chained job is simply not queued. Only the
+    API-side chains catch this: a job body chaining on the worker
+    lets the refusal fail the job.
+    """
+    logger.info(
+        "%s for %s stage %d not queued: account lacks %s", kind, slug, stage_number, exc.feature.value
+    )
+
+
+def _select_candidate_on_video(video: StageVideo, time_value: float) -> None:
+    """Promote the candidate at ``time_value`` (within 1 ms) on ``video``.
+
+    Mirrors the v1 primary path: the time still came from the detector
+    so ``beep_source="auto"`` is preserved; only the chosen candidate
+    changes. Raises ``HTTPException`` for caller-facing errors so both
+    the per-video and legacy primary endpoints get the same response
+    shapes.
+    """
+    if not video.beep_candidates:
+        raise HTTPException(
+            status_code=400,
+            detail="video has no candidate list yet; run detect-beep first",
+        )
+    match_eps = 1e-3
+    chosen = None
+    for c in video.beep_candidates:
+        if abs(c.time - time_value) <= match_eps:
+            chosen = c
+            break
+    if chosen is None:
+        available = ", ".join(f"{c.time:.3f}" for c in video.beep_candidates)
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"no candidate within {match_eps * 1000:.0f} ms of "
+                f"{time_value:.3f}s; available: [{available}]"
+            ),
+        )
+    video.beep_time = chosen.time
+    video.beep_source = "auto"
+    video.beep_peak_amplitude = chosen.peak_amplitude
+    video.beep_duration_ms = chosen.duration_ms
+    video.beep_confidence = chosen.confidence
+    video.beep_auto_detect_failed = False
+    video.beep_alignment_confidence = None
+    video.beep_alignment_delta_ms = None
+    video.processed["beep"] = True
+    video.processed["trim"] = False
+    # Switching candidate is a fresh claim about which moment is
+    # the beep -- prior review approval doesn't carry over (#71).
+    video.beep_reviewed = False
+    if video.role == "primary":
+        video.processed["shot_detect"] = False
+
+
+def _check_beep_time(video: StageVideo, beep_time: float) -> None:
+    """A beep before its clip is allowed for a secondary camera only, and
+    only a little before (2026-10-15): one that started recording during
+    the beep. A primary's shots are measured from its beep, which must
+    be in its clip."""
+    if beep_time >= 0.0:
+        return
+    if video.role != "secondary":
+        raise HTTPException(status_code=400, detail="beep_time must be >= 0 for a primary camera")
+    if beep_time < -BEEP_BEFORE_CLIP_MAX_S:
+        raise HTTPException(
+            status_code=400,
+            detail=f"a beep more than {BEEP_BEFORE_CLIP_MAX_S:g} s before the clip is not one it cut off",
+        )
+
+
+async def _replace_secondary_beeps(state: AppState, slug: str, stage_number: int) -> None:
+    """A confirmed primary beep is the best reference there is for the
+    stage's other cameras (#1442): run beep detection again for every
+    secondary whose beep nobody confirmed or typed, so its proposal and
+    its "from primary" candidate come from the confirmed beep. A
+    confirmed or hand-set secondary beep is never touched."""
+    stage = state.shooter_project(slug).stage(stage_number)
+    for other in stage.videos:
+        if other.role == "primary" or other.beep_reviewed or other.beep_source == "manual":
+            continue
+        if (
+            await state.jobs.find_active(
+                kind="detect_beep", stage_number=stage_number, shooter_slug=slug, video_id=other.video_id
+            )
+            is not None
+        ):
+            continue
+        try:
+            await state.jobs.submit(
+                kind="detect_beep",
+                stage_number=stage_number,
+                shooter_slug=slug,
+                video_id=other.video_id,
+                args={"slug": slug, "stage_number": stage_number, "video_id": other.video_id},
+            )
+        except FeatureRequiredError as exc:
+            _log_chain_skipped("detect_beep", slug, stage_number, exc)
+
+
+async def _after_beep_reviewed(state: AppState, slug: str, stage_number: int, video: StageVideo) -> None:
+    """Everything that must follow ``beep_reviewed`` flipping to True.
+
+    Shared by the per-video review endpoint and the cross-shooter
+    queue so a beep confirmed from either place leaves the same state
+    behind: a stub audit document (status surfaces and the lab read a
+    document, never infer from absence; never overwrite a real one --
+    a re-confirm on an audited stage must not wipe shot data) and,
+    for a primary whose trim is already cached, a queued
+    ``shot_detect``. That submit is the explicit unblock point for the
+    downstream pipeline (auto-detect leaves the flag False so the
+    ensemble doesn't burn cycles on an unconfirmed beep). A video
+    whose trim is not cached gets the trim submitted instead (when
+    the stage time and beep allow it, same rule as
+    ``_maybe_chain_trim``); the trim job chains detection itself for
+    a reviewed primary. Before UX PR 5 only a manual override chained
+    the trim, so confirming the detector's time as-is on an untrimmed
+    stage left it untrimmed with no shots. Secondaries get their trim
+    and no detection (no shot timeline of their own).
+
+    Mirrors mark state only, like the beep override endpoint: a
+    ``desktop``-origin match has no raw media hosted-side to detect
+    against and the desktop owns its audit documents, so neither the
+    stub nor the job is written. Desktop re-derives on its next sync
+    pull.
+    """
+    # The beep's distance from its tone (spec 2026-10-17), when its
+    # source WAV is published here; the derive job measures it otherwise.
+    proj_now = state.shooter_project(slug)
+    target = proj_now.stage(stage_number).find_video_by_id(video.video_id)
+    if target is not None and beep_tone_check.record_tone_offset(
+        state.shooter_root(slug), proj_now, stage_number, target
+    ):
+        proj_now.save(state.shooter_root(slug))
+    if current_match_origin.get() == "desktop":
+        return
+    if video.role == "primary":
+        await _replace_secondary_beeps(state, slug, stage_number)
+    with _audit_rmw(state):
+        existing_doc, audit_version = state.load_audit(slug, stage_number)
+        if existing_doc is None:
+            state.save_audit(
+                slug,
+                stage_number,
+                {"shots": [], "detection": STUB_AUDIT_DETECTION},
+                version=audit_version,
+            )
+    # The reconciler's rule with explicit=True (spec 2026-09-27 s3): a
+    # trim when none is cached, else detection for a trimmed primary. A
+    # phone confirm pulled into this desktop reaches the same rule
+    # through plan_reconcile, so the two cannot leave different state.
+    stage = state.shooter_project(slug).stage(stage_number)
+    step = video_step(stage, video, None, explicit=True)
+    if step == "trim":
+        await _maybe_chain_trim(state, slug, stage, video)
+        return
+    if (
+        step == "shot_detect"
+        and await state.jobs.find_active(kind="shot_detect", stage_number=stage_number, shooter_slug=slug)
+        is None
+    ):
+        try:
+            await state.jobs.submit(
+                kind="shot_detect",
+                stage_number=stage_number,
+                shooter_slug=slug,
+                args={"slug": slug, "stage_number": stage_number},
+            )
+        except FeatureRequiredError as exc:
+            _log_chain_skipped("shot_detect", slug, stage_number, exc)
+
+
+def _identity_logo_dir(state: AppState, slug: str) -> Path:
+    return state.shooter_root(slug) / LOGO_DIR
+
+
+def _remove_local_logo(state: AppState, slug: str, name: str | None) -> None:
+    if name is None:
+        return
+    try:
+        (_identity_logo_dir(state, slug) / name).unlink()
+    except FileNotFoundError:
+        pass
+
+
+async def _save_to_book(state: AppState, project: MatchProject, slug: str) -> None:
+    """Write the shooter's identity to the shooter book under their SSI
+    id (spec 2026-10-08): the whole record, the logo copied into the
+    book's own files (same content name); an identity that sets nothing
+    removes the entry. No SSI id, nothing: the book never keys by name."""
+    sid = project.selected_shooter_id
+    if sid is None:
+        return
+    try:
+        await _write_book(state, project, slug, sid)
+    except Exception as exc:  # noqa: BLE001 -- the match was saved; the book is the extra
+        logger.warning("shooter book: %s's look was saved to the match but not the book (%s)", slug, exc)
+
+
+async def _write_book(state: AppState, project: MatchProject, slug: str, sid: int) -> None:
+    logo_bytes: bytes | None = None
+    if project.identity.logo is not None:
+        local = ensure_local_logo(project, state.shooter_root(slug))
+        try:
+            logo_bytes = local.read_bytes() if local is not None else None
+        except OSError as exc:
+            logger.warning("shooter book: could not read %s's logo (%s); saved without it", slug, exc)
+    await shooter_book_module.save_identity(
+        state.shooter_book,
+        shooter_id=sid,
+        identity=project.identity,
+        label=project.competitor_name or project.name,
+        logo_bytes=logo_bytes,
+    )
+
+
+def _book_seeded_identity(state: AppState, project: MatchProject, slug: str) -> ShooterIdentity:
+    """What an edit starts from: the look the videos draw, so an edit
+    never drops what the user did not touch. That is the book's entry
+    when it sets anything (the book wins, spec 2026-10-09; its logo is
+    copied into this match's ``identity/``), else the match's own record."""
+    own = project.identity
+    book = shooter_book_module.load_snapshot(state.shooter_book)
+    entry = book.get(project.selected_shooter_id)
+    if not shooter_book_module.is_set(entry):
+        return own
+    assert entry is not None
+    logo = None
+    source = book.logo_path(entry)
+    if entry.logo is not None and source is not None:
+        target = _identity_logo_dir(state, slug) / entry.logo
+        try:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            data = source.read_bytes()
+            target.write_bytes(data)
+            storage = project._storage  # type: ignore[attr-defined]
+            storage_scope = project._storage_scope  # type: ignore[attr-defined]
+            if storage is not None and storage_scope is not None:
+                storage.write_bytes(f"{storage_scope}/{LOGO_DIR}/{entry.logo}", data)
+            logo = entry.logo
+        except OSError as exc:
+            logger.warning("identity: could not copy the book's logo into %s (%s)", slug, exc)
+    return entry.model_copy(update={"logo": logo})
+
+
+def _roster_book(state: AppState) -> shooter_book_module.BookSnapshot:
+    """The shooter book the roster reads (the shooters list, Compare's
+    payload, the logo route), so the ring shows the look the video draws.
+    A share request reads none: the book is the owner's account data and
+    no share route reads it."""
+    if current_share_request.get():
+        return shooter_book_module.EMPTY_BOOK
+    return shooter_book_module.load_snapshot(state.shooter_book)
+
+
+def _identity_view(state: AppState, project: MatchProject) -> dict[str, Any]:
+    """The identity sheet's view: where the look comes from and what it is."""
+    book = shooter_book_module.load_snapshot(state.shooter_book)
+    source = identity_source(project, book)
+    effective = project.identity if source != "book" else book.get(project.selected_shooter_id)
+    return {
+        "source": source,
+        "identity": (effective or ShooterIdentity()).model_dump(mode="json"),
+        "shooter_id": project.selected_shooter_id,
+        # Whether the book holds a look for this shooter ("Use shooter
+        # book" has something to fall back to) and whether this server
+        # keeps a book at all (one with no store answers an empty one).
+        "book_entry": shooter_book_module.is_set(book.get(project.selected_shooter_id)),
+        "book_available": not isinstance(state.shooter_book, shooter_book_module.EmptyShooterBookStore),
+    }
+
+
+def _event_logo_response(match: match_model.Match) -> JSONResponse:
+    return JSONResponse({"event_logo": match.branding.event_logo})
+
+
+def _audio_pending(
+    state: AppState,
+    slug: str,
+    target: str,
+    *,
+    stage_number: int | None = None,
+    video_id: str | None = None,
+    storage_path: str | None = None,
+) -> JSONResponse:
+    """The WAV a request wants is not published yet: submit the one job
+    that makes it (deduplicated on kind, stage, shooter and video) and
+    answer 202, the shape the hosted raw-file peaks already use. The SPA
+    shows a preparing line and asks again."""
+    dedupe_id = {"audit": "audit", "take": f"take:{storage_path}"}.get(target, video_id)
+    if target == "audit" and stage_number is not None:
+        # A trim running for the stage makes the audit WAV itself; a
+        # derive job beside it could cut from the old window (review,
+        # 2026-10-14). Wait on the trim.
+        trimming = run_sync(state.jobs.find_active(kind="trim", stage_number=stage_number, shooter_slug=slug))
+        if trimming is not None:
+            return JSONResponse({"pending": True, "active_job": True, "job_id": trimming.id}, status_code=202)
+    existing = run_sync(
+        state.jobs.find_active(
+            kind="derive_audio", stage_number=stage_number, shooter_slug=slug, video_id=dedupe_id
+        )
+    )
+    job_id = existing.id if existing is not None else None
+    if existing is None:
+        try:
+            job = run_sync(
+                state.jobs.submit(
+                    kind="derive_audio",
+                    stage_number=stage_number,
+                    shooter_slug=slug,
+                    video_id=dedupe_id,
+                    args={
+                        "slug": slug,
+                        "target": target,
+                        "stage_number": stage_number,
+                        "video_id": video_id,
+                        "storage_path": storage_path,
+                    },
+                )
+            )
+        except FeatureRequiredError:
+            # An account without hosted compute (the sharing tier) runs
+            # no jobs: a mirror's WAV arrives with the desktop's next
+            # push. Pending with no job, never a 403 (review, 2026-10-14).
+            return JSONResponse({"pending": True, "active_job": False, "job_id": None}, status_code=202)
+        job_id = job.id
+    return JSONResponse({"pending": True, "active_job": True, "job_id": job_id}, status_code=202)
+
+
+def _resolve_audit_audio(
+    state: AppState, slug: str, project: MatchProject, stage_number: int
+) -> audio_helpers.AuditAudioResult | JSONResponse:
+    """Shared resolver for /audio + /peaks: the published audit WAV
+    (trimmed clip's, else the full primary's), or a 202 pending while
+    a job makes it. Never extracts here (spec 2026-10-14)."""
+    try:
+        stage = project.stage(stage_number)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    primary = stage.primary()
+    if primary is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"stage {stage_number} has no primary video",
+        )
+    published = audio_helpers.published_audit_audio(
+        state.shooter_root(slug),
+        stage_number,
+        primary.beep_time,
+        project=project,
+        mirror=_is_mirror(),
+    )
+    if published is not None:
+        return published
+    return _audio_pending(state, slug, "audit", stage_number=stage_number)
+
+
+def _resolve_video_audio(
+    state: AppState, slug: str, project: MatchProject, stage_number: int, video: StageVideo
+) -> audio_helpers.AuditAudioResult | JSONResponse:
+    """Per-video version of :func:`_resolve_audit_audio`.
+
+    Always returns the full source WAV, regardless of role. The picker
+    is where the user *questions* the current beep -- if it shows the
+    trimmed audit clip, a beep that fell outside the trim window is
+    invisible and can't be moved onto. The audit screen still reaches
+    for the trimmed clip via the per-stage `/audio` + `/peaks`
+    endpoints, which is the right consumer for that cache.
+
+    ``beep_in_clip`` is just ``video.beep_time``; the WAV is in source
+    time so no trim offset applies.
+    """
+    audio_path = audio_helpers.published_video_audio(
+        state.shooter_root(slug),
+        stage_number,
+        video,
+        project=project,
+        source=_local_source(state, project, slug, video),
+    )
+    if audio_path is None:
+        return _audio_pending(state, slug, "video", stage_number=stage_number, video_id=video.video_id)
+    return audio_helpers.AuditAudioResult(
+        audio_path=audio_path,
+        beep_in_clip=video.beep_time,
+        trimmed=False,
+    )
+
+
+def _local_source(state: AppState, project: MatchProject, slug: str, video: StageVideo) -> Path | None:
+    """``video``'s source when it is a file on this disk, for the
+    freshness check; never mirrors a remote source (that is a job's)."""
+    if state.storage is not None:
+        return None
+    try:
+        source = project.resolve_video_path(state.shooter_root(slug), video.path)
+    except Exception:  # noqa: BLE001 -- an unresolvable source just skips the check
+        return None
+    return source if source.exists() else None
+
+
+def _serve_beep_preview(
+    state: AppState,
+    slug: str,
+    project: MatchProject,
+    stage_number: int,
+    video: StageVideo,
+    t: float | None,
+) -> FileResponse:
+    """Build the ~1 s MP4 around ``t`` (or ``video.beep_time``) and serve it.
+
+    Shared by the legacy primary endpoint and the per-video endpoint
+    so both honour the same 404 / 424 / cache semantics.
+    """
+    source = project.resolve_video_path(state.shooter_root(slug), video.path)
+    ensure_source_reachable(stage_number, source)
+    center = t if t is not None else video.beep_time
+    if center is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"stage {stage_number} video has no beep_time yet",
+        )
+    if center < 0:
+        raise HTTPException(status_code=400, detail="t must be >= 0")
+    thumbs_dir = project.thumbs_path(state.shooter_root(slug))
+    try:
+        clip = thumbnail_helpers.ensure_clip(
+            source,
+            cache_dir=thumbs_dir,
+            center_time=float(center),
+            duration_s=1.0,
+            width=480,
+            ffmpeg_binary=process_runtime().ffmpeg_binary,
+        )
+    except thumbnail_helpers.ThumbnailError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    return FileResponse(clip, media_type="video/mp4", filename=clip.name)
+
+
+def _parse_band(raw: str | None) -> tuple[float, float] | None:
+    """``LO-HI`` in Hz, 100 <= LO < HI <= 12000, or None for the full range."""
+    if raw is None:
+        return None
+    try:
+        lo_s, hi_s = raw.split("-")
+        lo, hi = float(lo_s), float(hi_s)
+    except ValueError:
+        raise HTTPException(status_code=422, detail="band is LO-HI in Hz") from None
+    if not (100 <= lo < hi <= 12000):
+        raise HTTPException(status_code=422, detail="band is LO-HI in Hz, 100 <= LO < HI <= 12000")
+    return (lo, hi)
+
+
+def _beep_snippet_key(state: AppState, slug: str, video_id: str, suffix: str) -> str | None:
+    """Build the desktop-pushed snippet key, or None with no match/storage bound."""
+    match_id = current_match_id.get()
+    if state.storage is None or not match_id:
+        return None
+    return f"matches/{match_id}/shooters/{slug}/beep_review/{video_id}{suffix}"
+
+
+def _set_needs_attention(payload: dict[str, Any], *, flagged: bool, note: str | None = None) -> None:
+    """Write the triage flag as a full object so sync LWW always has a
+    timestamp to compare - clears keep the object with flagged=False."""
+    now = _now_iso()
+    payload["needs_attention"] = {
+        "flagged": flagged,
+        "flagged_at": now if flagged else None,
+        "note": (note or None) if flagged else None,
+        "updated_at": now,
+    }
+
+
+def _video_clip_anchor(
+    state: AppState,
+    slug: str,
+    project: MatchProject,
+    stage_number: int,
+    video: StageVideo,
+) -> tuple[float | None, str]:
+    """Where the beep falls inside the clip the SPA will receive
+    from ``/api/videos/stream`` for ``video``.
+
+    When a per-video trimmed MP4 exists, the beep sits at
+    ``min(beep_time, pre_buffer)`` inside it (the trim starts at
+    ``max(0, beep_time - pre_buffer)``). When there's no trim we
+    fall through to the source clip and the beep is at ``beep_time``
+    directly. No ffmpeg / no audio extraction; in hosted mode this
+    pays only a cheap ``storage.exists`` HEAD so the reported
+    position agrees with the clip ``stream_video`` will actually
+    serve (which pulls the worker-cut trim on demand).
+
+    Uses the SAME fallback-aware resolver as ``stream_video``'s
+    ``pull_trimmed_video`` (``resolve_trim_for_read``) so a
+    pre-take-spec legacy-keyed trim counts here too, and reads the
+    pre_buffer from the resolved trim's params sidecar - otherwise
+    the anchor stays source-based while the served clip is
+    trim-based and every marker lands offset by beep - pre_buffer.
+
+    Returns (anchor, kind) where kind names the clip the SPA should
+    stream: "web" (the trim's streaming rendition, hosted only),
+    "trim" or "source". The web rendition shares the trim's anchor.
+    """
+    anchor, kind, trim_path = _video_trim_anchor(state, slug, project, stage_number, video)
+    if kind == "trim" and trim_path is not None and _presigned_hosted(state, video):
+        # The streaming rendition (#1031) covers the trim's window, so
+        # the anchor carries over; only the file the SPA names changes.
+        # Hosted-only by design: local playback streams the full-res
+        # trim from disk and has no reason to downgrade.
+        if audio_helpers.web_trim_available(project, trim_path):
+            return (anchor, "web")
+    return (anchor, kind)
+
+
+def _presigned_hosted(state: AppState, video: StageVideo) -> bool:
+    """Whether ``stream_video`` would answer for ``video`` with a
+    presigned redirect (the same test it applies itself)."""
+    storage = state.storage
+    return storage is not None and storage.supports_presigned_get and not video.path.is_absolute()
+
+
+def _video_trim_anchor(
+    state: AppState,
+    slug: str,
+    project: MatchProject,
+    stage_number: int,
+    video: StageVideo,
+) -> tuple[float | None, str, Path | None]:
+    """``_video_clip_anchor`` before the web-rendition step: the
+    anchor, ``"trim"`` or ``"source"``, and the new-keyed trim path
+    the kind was measured against (``None`` for source)."""
+    # One roster lookup (a state_docs SELECT hosted) for both resolvers.
+    root = state.shooter_root(slug)
+    resolved = audio_helpers.resolve_trim_for_read(root, stage_number, video, project=project)
+    if resolved is not None:
+        if video.beep_time is None:
+            return (None, "trim", resolved)
+        pre_buffer = audio_helpers.trim_pre_buffer_seconds_for(
+            resolved, default=project.trim_pre_buffer_seconds
+        )
+        return (min(video.beep_time, pre_buffer), "trim", resolved)
+    # Hosted: the trim may exist only in the storage cache (worker-
+    # cut, not yet mirrored); stream_video pulls it on demand, so the
+    # anchor must agree. New-keyed only by design: a storage-only
+    # legacy-keyed trim is missed by BOTH the pull and this check, so
+    # bytes and anchor degrade consistently to the source path, and
+    # the next worker trim job re-cuts under the new key.
+    trimmed = audio_helpers.trimmed_video_path(root, stage_number, video, project=project)
+    if audio_helpers.trim_available(project, trimmed):
+        if video.beep_time is None:
+            return (None, "trim", trimmed)
+        return (min(video.beep_time, project.trim_pre_buffer_seconds), "trim", trimmed)
+    if _is_mirror() and audio_helpers.web_trim_available(project, trimmed):
+        # Web-only mirror (spec 2026-09-27 v1.1): the rendition + the
+        # pushed params stand in for the trim; _video_clip_anchor then
+        # promotes the kind to "web". Only the small params sidecar is
+        # fetched here, never the rendition itself.
+        audio_helpers.refresh_trim_params(project, trimmed)
+        if video.beep_time is None:
+            return (None, "trim", trimmed)
+        pre_buffer = audio_helpers.trim_pre_buffer_seconds_for(
+            trimmed, default=project.trim_pre_buffer_seconds
+        )
+        return (min(video.beep_time, pre_buffer), "trim", trimmed)
+    return (video.beep_time, "source", None)
+
+
+def _video_beep_in_clip(
+    state: AppState,
+    slug: str,
+    project: MatchProject,
+    stage_number: int,
+    video: StageVideo,
+) -> float | None:
+    return _video_clip_anchor(state, slug, project, stage_number, video)[0]
+
+
+def _coach_video_entries(state: AppState, slug: str, project: MatchProject, stg: Any) -> list[dict[str, Any]]:
+    """Per-video metadata the SPA needs to seek every synced camera.
+
+    Order mirrors VideoPanel's expectation: primary first, then
+    secondaries by ``added_at``. ``beep_in_clip`` is the position
+    inside the clip the SPA will actually be playing -- the source
+    clip when no trim exists, the trimmed clip when one does.
+    """
+    primary = stg.primary()
+    secondaries = sorted(
+        (v for v in stg.videos if v.role == "secondary"),
+        key=lambda v: v.added_at,
+    )
+    ordered_videos = ([primary] if primary is not None else []) + secondaries
+    labels = camera_labels(ordered_videos)
+    root = state.shooter_root(slug)
+    # One listing of this shooter's trimmed/ prefix per request, as in
+    # ``get_project`` (#1209).
+    _storage = state.storage
+    presence = StoragePresence(_storage) if _storage is not None and _storage.supports_presigned_get else None
+    out: list[dict[str, Any]] = []
+    for v, label in zip(ordered_videos, labels, strict=True):
+        anchor, kind = _video_clip_anchor(state, slug, project, stg.stage_number, v)
+        out.append(
+            {
+                "path": str(v.path),
+                "role": v.role,
+                "beep_in_clip": anchor,
+                "kind": kind,
+                "label": label,
+                # The mount and role are what a camera choice keys on
+                # across stages (``camera_select``): a video id names a
+                # file on one stage, not a camera.
+                "mount": v.camera_mount,
+                # The same pins ``get_project`` gives the Audit players:
+                # None for both when no trim exists (``kind == "source"``).
+                "trim_version": _trim_version_for(root, stg.stage_number, v, project),
+                "scrub_version": (
+                    _hosted_scrub_version_for(presence, root, stg.stage_number, v, project)
+                    if presence is not None and not v.path.is_absolute()
+                    else _scrub_version_for(root, stg.stage_number, v, project)
+                ),
+                # Frame steps and the pill's frame number (spec 2026-10-17):
+                # null when the trim is not on this disk; the SPA uses 30.
+                "fps": _frame_rate_for(root, stg.stage_number, v, project),
+            }
+        )
+    return out
+
+
+def _coach_events(payload: dict[str, Any], stage_number: int) -> list[StageEvent]:
+    """The doc's stage events; a corrupt list is a 422, not a 500."""
+    try:
+        return events_module.events_from_doc(payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=f"stage {stage_number}: invalid events: {exc}") from exc
+
+
+def _classify_doc(payload: dict[str, Any], stage_number: int, cfg: CoachAutoClassifyConfig) -> None:
+    """Run the auto-classifier over the doc's shots against the doc's own
+    *confirmed* stage events (spec 2026-10-08), in place.
+
+    The one classification path for every audit-doc writer: a writer
+    that classified region-blind would flip a reload region's gap back
+    to ``movement`` on the next unrelated save. Only confirmed regions
+    (``source == "manual"``) hint the classifier: an auto proposal never
+    touches a stored class, whatever save happens next. A corrupt events list is
+    the coach GET's 422, raised before the caller saves anything --
+    also on a doc with no shots to classify (#1330): the coach routes
+    build their response from the saved doc, and a corrupt list that
+    slipped past here was a 422 *after* the save went through.
+    """
+    stage_events = events_module.confirmed(_coach_events(payload, stage_number))
+    shots = payload.get("shots")
+    if not isinstance(shots, list):
+        return
+    coach_module.classify_intervals_in_dicts(
+        [s for s in shots if isinstance(s, dict)],
+        cfg,
+        events=stage_events,
+    )
+
+
+def _coach_capacity(state: AppState, slug: str, project: MatchProject) -> int | None:
+    """The magazine capacity of the shooter's division, or None.
+
+    ``competitor_division`` reads the shooter directory only for a
+    scoreboard-pinned project with no stored division; resolving it
+    otherwise would cost a roster lookup (a state_docs SELECT hosted)
+    for nothing.
+    """
+    needs_dir = (
+        not project.competitor_division
+        and project.selected_competitor_id is not None
+        and bool(project.scoreboard_match_id)
+    )
+    project_dir = state.shooter_root(slug) if needs_dir else None
+    return events_module.capacity_for(competitor_division(project, project_dir))
+
+
+def _load_audit_for_coach(
+    state: AppState,
+    slug: str,
+    stage_number: int,
+) -> tuple[dict[str, Any], int, float | None, Any, MatchProject]:
+    """Shared loader: validates the stage, reads the audit doc,
+    returns (payload, version, primary_beep_in_clip, stage, project).
+    404 when no audit doc exists yet. The version rides back so a
+    coach mutation saves under the same optimistic lock."""
+    project = state.shooter_project(slug)
+    try:
+        stg = project.stage(stage_number)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    payload, version = state.load_audit(slug, stage_number)
+    if payload is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"no audit JSON yet for stage {stage_number}",
+        )
+    prim = stg.primary()
+    primary_beep_in_clip = (
+        _video_beep_in_clip(state, slug, project, stage_number, prim) if prim is not None else None
+    )
+    return payload, version, primary_beep_in_clip, stg, project
+
+
+def _audit_rmw(state: AppState) -> AbstractContextManager[object]:
+    """The guard for a local audit read-modify-write (#1075).
+
+    A sync pull's audit merge holds ``state.audit_lock`` (spec
+    2026-09-27 s5); a writer that loads, edits and saves outside it
+    can lose the pulled change or have its own edit lost. Hosted
+    returns a no-op: the lock is process-global there, and the
+    ``state_docs`` version already optimistic-locks every save.
+    """
+    return state.audit_lock if state.audit_doc_target() is None else nullcontext()
+
+
+def _coach_save(state: AppState, slug: str, stage_number: int, payload: dict[str, Any], version: int) -> int:
+    """Persist a coach-mutated audit doc under optimistic locking
+    (hosted) / atomically to disk (local). A lost race -> 409.
+
+    Returns the *new* version. Every caller then serves that version in
+    its response rather than the one it read (#844): the client uses it
+    as the ``expected_version`` on its next positional patch, so handing
+    back the pre-save version would make the guard value stale the
+    moment it arrived.
+    """
+    return state.save_audit(slug, stage_number, payload, version=version)
+
+
+def _note_digest(text: str | None) -> dict[str, Any] | None:
+    """A note as an audit event records it: its length and a short hash,
+    never the text. Notes autosave after every pause and the journal
+    syncs, so the text itself would be copied once per pause."""
+    if text is None:
+        return None
+    return {"length": len(text), "sha256": hashlib.sha256(text.encode("utf-8")).hexdigest()[:12]}
+
+
+def _stage_note(payload: dict[str, Any]) -> str | None:
+    """The doc's stage note, or None for a missing or non-string one
+    (audit docs are hand-editable JSON)."""
+    note = payload.get(coach_module.FIELD_STAGE_NOTE)
+    return note if isinstance(note, str) and note else None
+
+
+def _build_coach_response(
+    state: AppState,
+    slug: str,
+    payload: dict[str, Any],
+    primary_beep_in_clip: float | None,
+    stg: Any,
+    project: MatchProject,
+    cfg: CoachAutoClassifyConfig,
+    version: int,
+    *,
+    capacity: int | None,
+    stored_revision: str | None = None,
+) -> dict[str, Any]:
+    # ``capacity`` is the caller's ``_coach_capacity`` (a roster lookup
+    # for an older scoreboard-pinned project), computed once per request.
+    # ``stored_revision`` is the stored doc's ``_version`` when ``payload``
+    # carries in-memory changes that were not saved (a mirror's seed, a
+    # lost save race); otherwise ``payload`` is what is stored.
+    # Coach plays the same clip the audit screen serves -- typically
+    # the project-local trimmed MP4 -- so every "absolute" time must
+    # be in the served clip's coordinate system. Anchoring on
+    # ``primary_beep_in_clip`` keeps Coach working when the source
+    # SSD is unplugged. Falls back to 0.0 when the project hasn't
+    # set a beep yet (older / partial audits).
+    clip_anchor = primary_beep_in_clip if primary_beep_in_clip is not None else 0.0
+    raw_shots = payload.get("shots") or []
+    # A shot whose time is missing or unreadable (a string, NaN: a
+    # hand-edited doc) is left out of the view rather than 500ing every
+    # read of the stage (``events.shot_ms``).
+    ordered = sorted(
+        ((ms, s) for s in raw_shots if (ms := events_module.shot_ms(s)) is not None),
+        key=lambda pair: pair[0],
+    )
+    stage_events = _coach_events(payload, stg.stage_number)
+    # Every figure here reads confirmed regions only, as every output does
+    # (``events.confirmed``): ``stale``, per-shot ``moving`` and the
+    # summary Coach draws (its capacity warning included), so a figure
+    # never moves because Breakdown was opened and proposed something.
+    # The response's ``events`` keep the proposals for Breakdown's lanes.
+    confirmed_events = events_module.confirmed(stage_events)
+    coach_shots: list[dict[str, Any]] = []
+    prev_ms: float | None = None
+    for ms, s in ordered:
+        time_from_beep = ms / 1000.0
+        gap_s: float | None
+        if prev_ms is None:
+            gap_s = None
+            split = time_from_beep  # draw
+            overlap = False
+        else:
+            gap_s = (ms - prev_ms) / 1000.0
+            split = gap_s
+            # Confirmed regions only, as ``_classify_doc``: a proposal
+            # never makes a stored class stale.
+            overlap = coach_module.gap_overlaps_reload(prev_ms / 1000.0, time_from_beep, confirmed_events)
+        prev_ms = ms
+        stale = coach_module.is_classification_stale(s, gap_s=gap_s, config=cfg, reload_overlap=overlap)
+        reload_hint = coach_module.reload_hinted(gap_s, cfg)
+        coach_shots.append(
+            {
+                "shot_number": int(s.get("shot_number", 0)),
+                # #844: the stable id, so a client can address the by-id
+                # PATCH instead of the positional one. ``null`` for a
+                # shot whose id is missing or unusable (an int from a
+                # hand-edited doc) -- the by-id route matches on a
+                # string, so anything else would only ever 404, and the
+                # client is meant to fall back to the positional route
+                # plus ``expected_version`` for exactly these.
+                "id": s["id"] if has_usable_id(s) else None,
+                "ms_after_beep": int(ms),
+                "time_from_beep": time_from_beep,
+                # In the served clip's coordinate system: where the
+                # SPA must seek the primary <video> for this shot.
+                "time_absolute": clip_anchor + time_from_beep,
+                "split": split,
+                "interval_class": s.get("interval_class"),
+                "interval_class_source": s.get("interval_class_source"),
+                "improvement_flag": (
+                    False if current_share_request.get() else bool(s.get("improvement_flag", False))
+                ),
+                "coaching_note": (None if current_share_request.get() else s.get("coaching_note")),
+                "stale": stale,
+                "reload_hint": reload_hint,
+            }
+        )
+    for shot_out in coach_shots:
+        shot_out["moving"] = events_module.shot_is_moving(shot_out["time_from_beep"], confirmed_events)
+    summary = events_module.stage_event_summary(
+        [shot_out["time_from_beep"] for shot_out in coach_shots],
+        confirmed_events,
+        capacity,
+    )
+    return {
+        "stage_number": stg.stage_number,
+        "stage_name": stg.stage_name,
+        # Where the beep falls in the served primary clip. Used by
+        # the SPA's beep row + as the anchor for offsetting synced
+        # secondaries (each ``videos[i].beep_in_clip`` mirrors this
+        # field for that camera's served clip).
+        "beep_time": clip_anchor,
+        # The audit doc's version as of this response (#844) -- what a
+        # client sends as ``expected_version`` on the positional shot
+        # PATCH. Always 0 in local mode, where nothing locks a file, so
+        # the guard is hosted-only in practice.
+        "version": version,
+        "videos": _coach_video_entries(state, slug, project, stg),
+        # The camera the stage and Compare pages start on (a mount or
+        # role, ``camera_select``): a share link's own choice for this
+        # shooter when the link has one, else the shooter's saved one.
+        "compare_camera": (current_share_cameras.get() or {}).get(slug, project.compare_camera),
+        "shots": coach_shots,
+        # A region's ``note`` is private text, like ``coaching_note``: the
+        # share surface reaches this route (``_SHARE_PATH_RE``), so strip it.
+        "events": [
+            e.model_dump(exclude_none=True, exclude={"note"} if current_share_request.get() else None)
+            for e in stage_events
+        ],
+        "event_summary": summary.model_dump(),
+        # The stage note (#1376): private text, like ``coaching_note``,
+        # so a share read gets none.
+        "stage_note": None if current_share_request.get() else _stage_note(payload),
+        # The stored audit doc's content revision, what the events PUT
+        # compares against (the audit route's ``_version``).
+        REVISION_FIELD: stored_revision if stored_revision is not None else audit_revision(payload),
+    }
+
+
+def _apply_shot_coach_patch(
+    state: AppState,
+    slug: str,
+    stage_number: int,
+    body: CoachShotPatchRequest,
+    match_shot: Callable[[dict[str, Any]], bool],
+    describe: str,
+) -> JSONResponse:
+    """Shared body for the by-number and by-id coach PATCH routes."""
+    with _audit_rmw(state):
+        payload, version, beep_in_clip, stg, project = _load_audit_for_coach(state, slug, stage_number)
+        if body.expected_version is not None and body.expected_version != version:
+            raise HTTPException(status_code=409, detail="version_conflict")
+        cfg = coach_module.auto_classify_config()
+        shots = payload.get("shots") or []
+        if not isinstance(shots, list):
+            raise HTTPException(status_code=500, detail="audit shots is not a list")
+        target = next((s for s in shots if isinstance(s, dict) and match_shot(s)), None)
+        if target is None:
+            raise HTTPException(
+                status_code=404,
+                detail=f"{describe} not found in stage {stage_number}",
+            )
+        try:
+            coach_module.write_coach_fields(
+                target,
+                interval_class=body.interval_class,
+                interval_class_source=body.interval_class_source,
+                clear_class=body.clear_class,
+                improvement_flag=body.improvement_flag,
+                coaching_note=body.coaching_note,
+                clear_note=body.clear_note,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+        # #775: a ``clear_class: true`` patch drops the shot's class, which
+        # would re-open the partial-classification state the invariant
+        # rules out. Re-running the classifier heals it back to the rule's
+        # auto verdict. It also applies the rule to every other unset/auto
+        # entry (manual ones are kept), against confirmed regions only, so
+        # a note typed on Coach can move an auto class only where the
+        # stored one disagrees with the current rule (``stale``); an auto
+        # proposal never moves one.
+        _classify_doc(payload, stage_number, cfg)
+
+        events = list(payload.get("audit_events") or [])
+        events.append(
+            {
+                "id": _new_event_id(),
+                "ts": _now_iso(),
+                "kind": "coach_patch",
+                "payload": {
+                    "shot_id": target.get("id"),
+                    "shot_number": target.get("shot_number"),
+                    "fields": {
+                        **coach_module.read_coach_fields(target),
+                        **(
+                            {
+                                coach_module.FIELD_COACHING_NOTE: _note_digest(
+                                    target[coach_module.FIELD_COACHING_NOTE]
+                                )
+                            }
+                            if isinstance(target.get(coach_module.FIELD_COACHING_NOTE), str)
+                            else {}
+                        ),
+                    },
+                },
+            }
+        )
+        payload["audit_events"] = events
+        version = _coach_save(state, slug, stage_number, payload, version)
+    return JSONResponse(
+        _build_coach_response(
+            state,
+            slug,
+            payload,
+            beep_in_clip,
+            stg,
+            project,
+            cfg,
+            version,
+            capacity=_coach_capacity(state, slug, project),
+        )
+    )
+
+
+def _resolve_fixture_path(path: str) -> Path:
+    """Validate + resolve a fixture path the SPA passed in. Localhost
+    only -- we trust the user's machine but still refuse non-existent
+    files cleanly so the SPA can show a 404 message."""
+    target = Path(path).expanduser()
+    try:
+        resolved = target.resolve(strict=True)
+    except (FileNotFoundError, OSError) as exc:
+        raise HTTPException(status_code=404, detail=f"fixture not found: {target}") from exc
+    if not resolved.is_file():
+        raise HTTPException(status_code=400, detail=f"fixture is not a file: {resolved}")
+    return resolved
+
+
+def _serve_proxy(state: AppState, base_root: Path, video: StageVideo) -> FileResponse | None:
+    """Return a FileResponse for the proxy object if it exists, else None.
+
+    Callers fall through to source resolution on None - proxy absent,
+    path not a raw/ key, or no storage configured.
+
+    Local cache is checked first - proxy objects are immutable per key (delete
+    cleanup removes them; a re-upload regenerates), and _mirror_from_storage uses
+    temp+atomic-rename so a present local file is always complete and never stale.
+    This avoids redundant R2 pulls on every HTTP Range request during video scrubbing.
+    """
+    from ..proxy import proxy_key_for
+
+    _raw_str = str(video.path)
+    _storage = state.storage
+    if not _raw_str.startswith("raw/") or _storage is None:
+        return None
+    _proxy_key = proxy_key_for(_raw_str)
+    _local_proxy = base_root / _proxy_key
+    if _local_proxy.exists():  # warm cache - no network at all
+        return FileResponse(
+            _local_proxy.resolve(),
+            media_type="video/mp4",
+            filename=_local_proxy.name,
+        )
+    if not _storage.exists(_proxy_key):
+        return None
+    # cold - mirror once, then serve
+    MatchProject._mirror_from_storage(_storage, _proxy_key, _local_proxy)
+    return FileResponse(
+        _local_proxy.resolve(),
+        media_type="video/mp4",
+        filename=_local_proxy.name,
+    )
+
+
+def _hosted_web_redirect(
+    storage: Storage,
+    project: MatchProject,
+    root: Path,
+    stage: Any,
+    video: StageVideo,
+) -> RedirectResponse | None:
+    """Presigned redirect to the trim's streaming rendition (#1031) when
+    the object exists, else ``None`` so the caller falls back to the
+    trim and then the source: an explicit ``kind=web`` never 404s,
+    because a match synced before the rendition existed still has to
+    play."""
+    local_mp4 = audio_helpers.trimmed_video_path(root, stage.stage_number, video, project=project)
+    web_local = trim_module.web_trim_path(local_mp4)
+    web_key = audio_helpers._storage_trim_key(project, web_local)
+    if web_key is not None and storage.exists(web_key):
+        return serve_media(storage, web_key, web_local, content_type="video/mp4")
+    return None
+
+
+def _hosted_scrub(
+    storage: Storage,
+    project: MatchProject,
+    root: Path,
+    stage: Any,
+    video: StageVideo,
+) -> RedirectResponse:
+    """``kind=scrub`` on hosted (#1209): the fresh rendition, else the
+    trim, else 404 -- never the source. Two ``stat`` calls, the cost of
+    the two ``exists`` the other kinds make."""
+    local_mp4 = audio_helpers.trimmed_video_path(root, stage.stage_number, video, project=project)
+    web_local = trim_module.web_trim_path(local_mp4)
+    trim_key = audio_helpers._storage_trim_key(project, local_mp4)
+    web_key = audio_helpers._storage_trim_key(project, web_local)
+    if trim_key is None or web_key is None:
+        raise HTTPException(status_code=404, detail="trimmed clip not built yet")
+    trim_obj = storage.stat(trim_key)
+    web_obj = storage.stat(web_key)
+    if audio_helpers.fresh_rendition(
+        _storage_fact(trim_obj), _storage_fact(web_obj), trim_required=not _is_mirror()
+    ):
+        return serve_media(storage, web_key, web_local, content_type="video/mp4")
+    if trim_obj is not None:
+        return serve_media(storage, trim_key, local_mp4, content_type="video/mp4")
+    raise HTTPException(status_code=404, detail="trimmed clip not built yet")
+
+
+def _resolve_match_context(state: AppState) -> tuple[Path, match_model.Match]:
+    """Return ``(match_root, match)`` for the bound project.
+
+    Raises 409 ``not_a_match`` for legacy single-shooter layouts (the
+    shooter-listing / merge / compare endpoints are match-only).
+    """
+    match_root = state.match_root
+    return match_root, state.match()
+
+
+def _classify_shooter(
+    state: AppState,
+    shooter_root: Path,
+    match: match_model.Match,
+    presence: StoragePresence | None,
+    book: shooter_book_module.BookSnapshot = shooter_book_module.EMPTY_BOOK,
+) -> ShooterListEntry:
+    """Build a list entry for a single shooter directory.
+
+    ``presence`` is the request's storage index (#1180), or ``None`` on
+    a share request: the ``stages_missing_trim`` count only gates the
+    Rebuild button, which the anonymous share shell never renders, so a
+    share request reports 0 and makes no storage calls at all.
+    """
+    # ``shooter_root.name`` is the slug; the accessor loads the project
+    # doc from Postgres (hosted) or disk (local) + binds storage.
+    legacy = state.shooter_project(shooter_root.name)
+    # ``audited`` requires the operator to have hit Save & next on
+    # the stage (see :func:`stage_audit_status`). Set-up-but-not-
+    # touched stages used to count here; they no longer do.
+    # One pass: derive both the per-stage status list and the audited
+    # count from a single ``stage_statuses`` walk rather than also
+    # calling ``audited_count`` (which repeats the same audit-dir read).
+    stage_status_map = legacy.stage_statuses(
+        shooter_root, audit_docs=state.load_audit_docs(shooter_root.name)
+    )
+    stages_audited = sum(1 for st in stage_status_map.values() if st == StageStatus.audited)
+    # A stage counts once however many of its angles are uncached --
+    # the field is a stage count, and the CTA it drives rebuilds the
+    # whole stage in one click.
+    stages_missing_trim = (
+        0
+        if presence is None
+        else sum(
+            1 for s in legacy.stages if _audit_trim_targets(legacy, shooter_root, s, presence=presence)[0]
+        )
+    )
+    # Camera grouping: ``(make, model, mount)`` -> [(role, count, stages)].
+    groups: dict[tuple[str | None, str | None, str | None], dict[str, Any]] = {}
+    total_videos = 0
+    for stage in legacy.stages:
+        for video in stage.videos:
+            if video.role == "ignored":
+                continue
+            key = (video.camera_make, video.camera_model, video.camera_mount)
+            g = groups.setdefault(
+                key,
+                {
+                    "role": video.role,
+                    "video_count": 0,
+                    "stages": set(),
+                },
+            )
+            # Primary wins over secondary if any video on this camera is
+            # primary on any stage (shooters tend to keep camera roles
+            # consistent across stages).
+            if video.role == "primary":
+                g["role"] = "primary"
+            g["video_count"] += 1
+            g["stages"].add(stage.stage_number)
+            total_videos += 1
+    # Attached-but-unassigned footage counts too. A hosted upload that
+    # was attached without stage coverage (or any video the operator
+    # dropped before assigning it to a stage) lives in
+    # ``unassigned_videos``, disjoint from ``stages[].videos`` (see
+    # ``MatchProject.move_video``). Without this the overview reported
+    # "NO FOOTAGE YET" for a shooter that already had N videos attached.
+    # These carry no camera metadata yet, so they only bump the total,
+    # not the per-camera ``groups`` breakdown.
+    for video in legacy.unassigned_videos:
+        if video.role == "ignored":
+            continue
+        total_videos += 1
+    cameras = [
+        ShooterCameraInfo(
+            group_key=f"{k[0] or ''}|{k[1] or ''}|{k[2] or ''}",
+            make=k[0],
+            model=k[1],
+            mount=k[2],
+            role=g["role"],
+            video_count=g["video_count"],
+            stage_numbers=sorted(g["stages"]),
+        )
+        for k, g in groups.items()
+    ]
+    return ShooterListEntry(
+        slug=shooter_root.name,
+        name=legacy.competitor_name or shooter_root.name,
+        selected_shooter_id=legacy.selected_shooter_id,
+        selected_competitor_id=legacy.selected_competitor_id,
+        stages_audited=stages_audited,
+        # Denominator must match the numerator's source: stages_audited
+        # is counted over the shooter's OWN project (legacy.stages), so
+        # the total has to be len(legacy.stages) too. Using
+        # len(match.stages) breaks the ratio when the match-level stage
+        # list wasn't populated (e.g. stages arrived via a per-shooter
+        # scoreboard import, not match creation) -- that produced a "0
+        # stages" card next to a 12-stage match.
+        stages_total=len(legacy.stages),
+        video_count=total_videos,
+        cameras=cameras,
+        stages_missing_trim=stages_missing_trim,
+        identity=effective_identity(legacy, book),
+        stage_statuses=[
+            StageStatusEntry(stage_number=n, status=st) for n, st in sorted(stage_status_map.items())
+        ],
+    )
+
+
+def _plan_response_from_model(plan: match_model.MergePlan) -> MergePlanResponse:
+    return MergePlanResponse(
+        output_root=str(plan.output_root),
+        name=plan.name,
+        scoreboard_match_id=plan.scoreboard_match_id,
+        scoreboard_content_type=plan.scoreboard_content_type,
+        match_date=plan.match_date.isoformat() if plan.match_date else None,
+        stages=[
+            MergePlanStage(
+                stage_number=s.stage_number,
+                stage_name=s.stage_name,
+                expected_rounds=(s.stage_rounds.expected if s.stage_rounds is not None else None),
+                placeholder=s.placeholder,
+            )
+            for s in plan.stages
+        ],
+        shooter_moves=[
+            MergePlanShooterMove(
+                source_root=str(mv.source_root),
+                slug=mv.slug,
+                destination_root=str(mv.destination_root),
+                competitor_name=mv.competitor_name,
+            )
+            for mv in plan.shooter_moves
+        ],
+    )
+
+
+def _build_triage_response(state: AppState) -> TriageResponse:
+    """Assemble the cross-shooter, cross-stage triage grid (slice 4).
+
+    Enumerates shooters exactly as :func:`list_match_shooters` does,
+    then per shooter bulk-loads audit docs once via
+    ``state.load_audit_docs`` (hosted: one query; local: ``None``,
+    falling back to per-stage ``state.load_audit`` below) and derives
+    statuses via the same ``stage_statuses`` walk used by the project
+    GET. Per non-placeholder stage, the anomaly computation mirrors
+    :func:`get_stage_anomalies` exactly: same beep-time fallback, same
+    ``audit_shots_to_engine_shots`` + ``report.detect_anomalies_structured``
+    call. Both the accept and attention endpoints return this so the
+    SPA never has to re-fetch after a write (the confirm-returns-
+    fresh-list contract from slice 3). ``beep_low_confidence_threshold``
+    is resolved from the first loadable shooter's project override
+    exactly the way ``get_hitl_queue`` resolves it (#823) - the gate
+    is global to the match, not per-shooter.
+    """
+    match_root, match = _resolve_match_context(state)
+    # The whole match in one query (#1181): every shooter's project doc
+    # and audit docs, instead of two queries per shooter.
+    bundle = state.match_bundle(match)
+    cells: list[TriageCell] = []
+    docs: list[dict | None] = []
+    threshold: float | None = None
+    for slug in match.shooters:
+        shooter_root = match_model.Match.shooter_root(match_root, slug)
+        legacy = bundle.projects.get(slug)
+        if legacy is None:
+            continue
+        if threshold is None:
+            resolved = automation_settings.resolve_automation(project_override=legacy.automation)
+            threshold = resolved.settings.beep_low_confidence_threshold
+        name = legacy.competitor_name or slug
+        audit_docs = bundle.audit_docs(slug)
+        status_map = legacy.stage_statuses(shooter_root, audit_docs=audit_docs)
+        for stg in legacy.stages:
+            if stg.placeholder:
+                continue
+            prim = stg.primary()
+            beep = prim.beep_time if prim is not None and prim.beep_time is not None else 0.0
+            doc = (audit_docs or {}).get(stg.stage_number)
+            if doc is None and audit_docs is None:
+                doc, _ = state.load_audit(slug, stg.stage_number)
+            docs.append(doc)
+            anomalies: list[dict] = []
+            engine_shots: list[Shot] = []
+            if doc is not None:
+                engine_shots = audit_shots_to_engine_shots(doc, beep_time_in_source=beep)
+                anomalies = [
+                    a.model_dump()
+                    for a in report.detect_anomalies_structured(engine_shots, beep, stg.time_seconds)
+                ]
+            figures = (
+                stage_figures(
+                    engine_shots,
+                    regions=events_module.confirmed_from_doc(doc, log_context=f"stage {stg.stage_number}"),
+                )
+                if doc is not None
+                else None
+            )
+            confs = [v.beep_confidence for v in stg.videos if v.beep_confidence is not None]
+            na_raw = doc.get("needs_attention") if isinstance(doc, dict) else None
+            needs_attention: TriageAttentionOut | None = None
+            if isinstance(na_raw, dict):
+                try:
+                    needs_attention = TriageAttentionOut(**na_raw)
+                except ValidationError:
+                    needs_attention = None
+            tones = [o for o in (tone_flag_ms(v) for v in stg.videos if v.role != "ignored") if o is not None]
+            cells.append(
+                TriageCell(
+                    slug=slug,
+                    shooter_name=name,
+                    stage_number=stg.stage_number,
+                    stage_name=stg.stage_name,
+                    status=str(status_map[stg.stage_number]),
+                    beep_confidence=min(confs) if confs else None,
+                    anomalies=anomalies,
+                    needs_attention=needs_attention,
+                    video_count=len([v for v in stg.videos if v.role != "ignored"]),
+                    beep_time=prim.beep_time if prim is not None else None,
+                    beep_reviewed=bool(prim.beep_reviewed) if prim is not None else False,
+                    shot_count=len(engine_shots),
+                    draw=figures.draw if figures is not None else None,
+                    avg_split=figures.avg_split if figures is not None else None,
+                    time_seconds=float(stg.time_seconds),
+                    beep_tone_offset_ms=max(tones, key=abs) if tones else None,
+                )
+            )
+    cells.sort(key=lambda c: (c.stage_number, c.shooter_name.lower()))
+    if threshold is None:
+        threshold = automation_settings.resolve_automation().settings.beep_low_confidence_threshold
+    return TriageResponse(
+        cells=cells,
+        flagged_count=_count_flagged(docs),
+        beep_low_confidence_threshold=threshold,
+        beep_tone_flag_ms=beep_tone_module.beep_tone_config().flag_ms,
+    )
+
+
+def _account_info(ref: user_config.HostedAccountRef | None) -> HostedAccountInfo | None:
+    if ref is None:
+        return None
+    return HostedAccountInfo(
+        id=ref.id,
+        email=ref.email,
+        display_name=ref.display_name,
+        device_name=ref.device_name,
+        linked_at=ref.linked_at,
+    )
+
+
+async def _refresh_hosted_account(state: AppState, prefs: user_config.GlobalPrefs) -> user_config.GlobalPrefs:
+    """Best-effort upstream refresh of the cached account snapshot (#877).
+
+    The snapshot is written once, at device-link time, when
+    ``display_name`` is typically still NULL. Without this the chip
+    renders the operator's email address forever -- the one thing
+    the design says it will never publish -- and the only repair is
+    to unlink and re-link.
+
+    Best-effort in the strong sense: every failure path returns the
+    cached value with no error surfaced. The chip reads a missing
+    account as "not signed in" (#738), so a network blip must not be
+    able to produce that.
+
+    The TTL is consumed before the call, not after, so a dead host
+    costs one timeout per window rather than one per chip mount.
+
+    This is a WRITER, on the one route the SPA fires by itself, and
+    the ``await`` in the middle of it is long (up to
+    ``HOSTED_ACCOUNT_REFRESH_TIMEOUT_S``). The other writers -- the
+    settings PUT, the device-flow approval and the sign-out DELETE
+    -- can all land inside that window. So the object handed in is
+    used only to decide *what to ask*; the write re-reads from disk
+    immediately before saving, with no ``await`` in between, and
+    merges the two account fields alone. Saving the object we
+    loaded before the call would persist ``hosted_token`` too, and
+    a sign-out in the window would come back from the dead: a
+    revoked bearer and a live-looking chip (#877 review).
+    """
+    ref = prefs.hosted_account
+    if ref is None or not prefs.hosted_base_url or not prefs.hosted_token:
+        return prefs
+
+    now = time.monotonic()
+    last = state.hosted_account_refreshed_at
+    if last is not None and now - last < HOSTED_ACCOUNT_REFRESH_TTL_S:
+        return prefs
+    state.hosted_account_refreshed_at = now
+
+    client: HostedSyncClient | None = None
+    try:
+        # Local import: same lazy idiom sync_api.py itself uses to
+        # stay import-safe on a local-slim install (see the comment
+        # at its router registration, above). Inside the guard, so
+        # the "best-effort in the strong sense" claim covers it too.
+        from .sync_api import SyncWhoAmIResponse
+
+        client = _build_device_client(
+            prefs.hosted_base_url,
+            token=prefs.hosted_token,
+            timeout=HOSTED_ACCOUNT_REFRESH_TIMEOUT_S,
+        )
+        raw = await run_in_threadpool(client.whoami)
+        payload = SyncWhoAmIResponse.model_validate(raw)
+    except Exception:
+        # Deliberately broad, per the docstring's "best-effort in the
+        # strong sense": this route's entire job is to report the
+        # cached snapshot, so degrading to it beats a 500 for ANY
+        # failure here, not just the ones a narrower tuple happens to
+        # name. Concretely this has to catch, at minimum:
+        #   - SyncClientError / httpx.HTTPError -- non-2xx, including
+        #     401 (a revoked token is not grounds to unlink here: an
+        #     upstream outage would then sign every install out;
+        #     revocation surfaces on the next sync instead)
+        #   - httpx.InvalidURL -- a malformed hosted_base_url; it is
+        #     NOT an httpx.HTTPError subclass, and hosted_base_url is
+        #     an unvalidated str a hand-edited config.yaml can corrupt
+        #   - pydantic.ValidationError -- a 200 whose body isn't the
+        #     shape SyncWhoAmIResponse declares (not even a dict)
+        # A previous narrower tuple here caught the first bullet but
+        # missed the last two, turning either into an unhandled 500
+        # on a route whose whole job is to report a cached value
+        # (#877 review).
+        #
+        # Logged because the visible symptom of a NameError or an
+        # AttributeError in here is identical to a hosted outage --
+        # "the chip still shows my email address", i.e. the bug this
+        # code exists to fix -- and nothing else would record it.
+        logger.debug("hosted account refresh failed", exc_info=True)
+        return prefs
+    finally:
+        if client is not None:
+            client.close()
+
+    if payload.email == ref.email and payload.display_name == ref.display_name:
+        return prefs
+
+    # Re-read, then write, with no await in between: see the
+    # docstring. ``fresh`` is also what we return, so the response
+    # reports what is actually on disk rather than the snapshot this
+    # request started from.
+    fresh = user_config.load_global_prefs()
+    cur = fresh.hosted_account
+    if cur is None or cur.id != ref.id:
+        # Unlinked, or re-linked to another account, while we were
+        # away. The answer in hand describes a link that no longer
+        # exists; discard it rather than stamp it onto the new one.
+        return fresh
+    fresh.hosted_account = cur.model_copy(
+        update={"email": payload.email, "display_name": payload.display_name}
+    )
+    user_config.save_global_prefs(fresh)
+    return fresh
+
+
+async def _desktop_presence(state: AppState) -> dict[str, Any]:
+    """Newest contact from any of the user's live desktop tokens.
+    ``around`` means seen within DESKTOP_AROUND_SECONDS."""
+    store = state.desktop_tokens
+    records = await store.list() if store is not None else []
+    seen = [r.last_used_at for r in records if r.revoked_at is None and r.last_used_at is not None]
+    live = any(r.revoked_at is None for r in records)
+    last = max(seen) if seen else None
+    if last is not None and last.tzinfo is None:
+        last = last.replace(tzinfo=UTC)
+    around = last is not None and (datetime.now(UTC) - last).total_seconds() <= DESKTOP_AROUND_SECONDS
+    return {
+        "linked": live,
+        "last_seen_at": last.isoformat() if last is not None else None,
+        "around": around,
+    }
+
+
+def _command_store(state: AppState) -> Any:
+    if not _hosted_mode_active():
+        raise HTTPException(status_code=404, detail="not found")
+    store = state.desktop_commands
+    if store is None:
+        raise HTTPException(status_code=500, detail="desktop command store unavailable")
+    return store
+
+
+def _command_match_id() -> str:
+    match_id = current_match_id.get()
+    if match_id is None:
+        raise HTTPException(status_code=404, detail="not found")
+    return match_id
+
+
+def _venue_from_slug(slug: str) -> str | None:
+    # Slugs look like ``stage-shots-<venue>-2026-stage<n>-s<hash>...``.
+    # The venue is the chunk between ``stage-shots-`` and the year.
+    parts = slug.split("-")
+    if len(parts) >= 4 and parts[0] == "stage" and parts[1] == "shots":
+        venue_bits: list[str] = []
+        for tok in parts[2:]:
+            if tok.isdigit() and len(tok) == 4:
+                break
+            venue_bits.append(tok)
+        return "-".join(venue_bits) if venue_bits else None
+    return None
+
+
+def _stage_from_slug(slug: str) -> int | None:
+    for tok in slug.split("-"):
+        if tok.startswith("stage") and tok[5:].isdigit():
+            return int(tok[5:])
+    return None
+
+
+def _shooter_from_slug(slug: str) -> str | None:
+    # Shooter is encoded as ``s<8-hex-chars>`` (the slug hash).
+    for tok in slug.split("-"):
+        if len(tok) == 9 and tok.startswith("s") and all(c in "0123456789abcdef" for c in tok[1:]):
+            return tok
+    return None
+
+
 def create_app(
     *,
     project_root: Path | None = None,
@@ -7605,20 +9667,6 @@ def create_app(
     # the CSRF baseline -- the cookie isn't sent on cross-site POSTs;
     # double-submit CSRF tokens are a tracked follow-up.
 
-    def _set_session_cookie(response: Response, secret: str, expires_at: datetime) -> None:
-        max_age = max(0, int((expires_at - datetime.now(UTC)).total_seconds()))
-        from ..db import SESSION_COOKIE_NAME
-
-        response.set_cookie(
-            key=SESSION_COOKIE_NAME,
-            value=secret,
-            max_age=max_age,
-            httponly=True,
-            secure=state.cookie_secure,
-            samesite="lax",
-            path="/",
-        )
-
     @app.post("/api/v1/auth/begin")
     async def _auth_begin(payload: AuthBeginRequest, request: Request) -> JSONResponse:
         """Start a magic-link sign-in: e-mail a link to ``payload.email``.
@@ -7644,15 +9692,6 @@ def create_app(
         finally:
             _intake_client.reset(client_token)
         return JSONResponse({"ok": True})
-
-    def _intake_cors(request: Request, response: Response) -> Response:
-        origin = request.headers.get("origin")
-        if origin and origin in _intake_origins():
-            response.headers["Access-Control-Allow-Origin"] = origin
-            response.headers["Access-Control-Allow-Methods"] = "POST, OPTIONS"
-            response.headers["Access-Control-Allow-Headers"] = "content-type"
-            response.headers["Vary"] = "Origin"
-        return response
 
     @app.options("/api/v1/access-requests")
     async def _access_request_preflight(request: Request) -> Response:
@@ -7719,7 +9758,7 @@ def create_app(
             logger.exception("magic-link callback failed")
             return RedirectResponse(url="/login?error=invalid_link", status_code=303)
         response = RedirectResponse(url="/", status_code=303)
-        _set_session_cookie(response, issued.secret, issued.expires_at)
+        _set_session_cookie(state, response, issued.secret, issued.expires_at)
         return response
 
     @app.post("/api/v1/auth/logout")
@@ -8698,73 +10737,6 @@ def create_app(
     # API
     # ----------------------------------------------------------------------
 
-    def _local_match_path(root: Path) -> Path:
-        """Resolve ``<root>/scoreboard/match.json`` (offline source path)."""
-        return root / DEFAULT_SCOREBOARD_DIRNAME / DEFAULT_MATCH_FILENAME
-
-    def _adopt_club_from_scoreboard(
-        project: MatchProject, client_root: Path, content_type: int, match_id: int, competitor_id: int
-    ) -> None:
-        """Fill a shooter's empty club line from their scoreboard competitor,
-        best effort: a link never fails because the club could not be read."""
-        if (project.identity.club or "").strip():
-            return
-        try:
-            with _resolve_scoreboard_client(client_root) as client:
-                match_data = client.get_match(content_type, match_id)
-        except (ScoreboardError, OSError):
-            logger.info("scoreboard club for competitor %s could not be read", competitor_id, exc_info=True)
-            return
-        project.adopt_scoreboard_club(_club_for(match_data, competitor_id))
-
-    def _resolve_scoreboard_client(root: Path) -> ScoreboardClient:
-        """Pick the concrete ``ScoreboardClient`` for this shooter root.
-
-        Local JSON wins when present so the user can stay fully offline by
-        dropping a file. Otherwise we wrap the HTTP client in the project-
-        local cache so a second open of the same match is a cache hit. The
-        caller is responsible for ``close()`` -- both implementations are
-        context managers (Local is a no-op; HTTP closes the httpx Client).
-        """
-        local_path = _local_match_path(root)
-        if local_path.exists():
-            local = LocalJsonScoreboard(local_path)
-            return _ScoreboardClientCtx(local, owns_close=False)
-        # Anonymous since ssi-scoreboard#554 (#1016): construction never
-        # fails on a missing token; a 401 mid-request still routes through
-        # ``_raise_scoreboard_http``.
-        http = SsiHttpClient()
-        cache_dir = root / "scoreboard" / "cache"
-        cached = CachingScoreboardClient(http, cache_dir)
-        return _ScoreboardClientCtx(cached, owns_close=True, inner_http=http)
-
-    def _register_response(root: Path, name: str, match_id: str | None) -> HealthResponse:
-        """Build a HealthResponse for a freshly-registered match.
-
-        Tier 1 step 4 of doc 10 retired the bound-state concept on
-        the server, but the picker / create-match flow still need a
-        way to learn the resolved ``match_id`` + default shooter so
-        the SPA can navigate to ``/match/<match_id>``. That's what
-        this response is for; the live ``/api/health`` route never
-        returns these fields anymore.
-        """
-        # Hosted: read the authoritative roster from Postgres (the on-disk
-        # match.json is the stale creation shell). Local: from disk.
-        if state.project_state is not None and match_id is not None:
-            doc, _ = run_sync(state.project_state.load_match(match_id))
-            shooters = sorted(doc.get("shooters", [])) if doc is not None else []
-        else:
-            shooters = sorted(match_model.Match.load(root).shooters)
-        default_slug = shooters[0] if shooters else None
-        return HealthResponse(
-            bound=True,
-            project_name=name,
-            project_root=str(root),
-            kind="match",
-            default_shooter_slug=default_slug,
-            match_id=match_id,
-        )
-
     @app.get("/api/health", response_model=HealthResponse)
     async def health() -> HealthResponse:
         """Process-level health. Tier 1 step 4 of doc 10 retired
@@ -8789,9 +10761,6 @@ def create_app(
     # expired / replayed token, bad Authorization header) returns the same
     # opaque 404, the uniform-404 precedent from the share surface.
     # ------------------------------------------------------------------
-
-    def _workers_not_found() -> JSONResponse:
-        return JSONResponse(status_code=404, content={"detail": "not found"})
 
     @app.post("/api/workers/register", response_model=WorkerRegisterResponse)
     async def workers_register(body: WorkerRegisterRequest) -> Any:
@@ -9227,18 +11196,6 @@ def create_app(
     # integrity signal. Hosted-only (503 when storage is unwired).
     # ------------------------------------------------------------------
 
-    def _require_storage() -> Storage:
-        storage = state.storage
-        if storage is None:
-            raise HTTPException(
-                status_code=503,
-                detail=(
-                    "raw video upload is hosted-mode only; "
-                    "local mode writes raw/<name> symlinks via the desktop UI"
-                ),
-            )
-        return storage
-
     @app.post(
         "/api/me/raw/upload/multipart/create", dependencies=[Depends(require_feature(Feature.raw_upload))]
     )
@@ -9252,7 +11209,7 @@ def create_app(
         ``/part-url`` for a presigned URL per part, PUTs each straight to
         R2, then calls ``/complete`` with the parts' ETags.
         """
-        storage = _require_storage()
+        storage = _require_storage(state)
         name = _sanitize_raw_filename(req.filename)
         key = f"raw/{name}"
         try:
@@ -9276,7 +11233,7 @@ def create_app(
         user: User = Depends(get_current_user),
     ) -> JSONResponse:
         """Return a presigned URL the client PUTs one part to."""
-        storage = _require_storage()
+        storage = _require_storage(state)
         if req.part_number < 1:
             raise HTTPException(status_code=422, detail="part_number must be >= 1")
         key = f"raw/{_sanitize_raw_filename(req.filename)}"
@@ -9295,7 +11252,7 @@ def create_app(
     ) -> JSONResponse:
         """Finalize the upload. Returns the same shape the single-shot
         endpoint echoes (minus ``sha256``, which serve never computed)."""
-        storage = _require_storage()
+        storage = _require_storage(state)
         if not req.parts:
             raise HTTPException(status_code=422, detail="parts must not be empty")
         name = _sanitize_raw_filename(req.filename)
@@ -9320,46 +11277,13 @@ def create_app(
         user: User = Depends(get_current_user),
     ) -> JSONResponse:
         """Discard an in-progress upload (client cancelled / failed)."""
-        storage = _require_storage()
+        storage = _require_storage(state)
         key = f"raw/{_sanitize_raw_filename(req.filename)}"
         try:
             storage.abort_multipart_upload(key, req.upload_id)
         except Exception as exc:  # noqa: BLE001
             raise HTTPException(status_code=500, detail=f"could not abort upload: {exc}") from exc
         return JSONResponse({"ok": True})
-
-    def _raw_video_owners() -> dict[str, list[str]]:
-        """Map each claimed ``storage_path`` to the shooters holding it.
-
-        The single source of truth for hosted raw-object ownership (#562).
-        On desktop a raw video is a file under one shooter's project dir,
-        so the filesystem enforced one owner for free; the hosted port put
-        the bytes in a shared per-user ``raw/`` pool and kept attachment as
-        a manifest entry, losing that invariant. The settled model is
-        option C -- shared pool, attachment is an explicit single-owner
-        claim, and ``move-shooter`` is the only thing that reassigns it.
-
-        The list values are almost always 0 or 1 slugs. They are lists
-        rather than a single slug because matches predating the claim
-        guard can genuinely hold one object on two shooters -- the prod
-        failure #562 was filed about -- and collapsing that to one owner
-        here would let the caller read "I am *an* owner" as permission and
-        silently normalise the corruption.
-
-        Slugs follow ``match.shooters`` order, so the first entry is the
-        stable first claimant. Best-effort by design: outside a match
-        context (legacy single-shooter layouts, bare/legacy calls) there
-        are no siblings to conflict with, and the map is empty.
-        """
-        try:
-            _, match = _resolve_match_context()
-        except HTTPException:
-            return {}
-        owners: dict[str, list[str]] = {}
-        for sh_slug in match.shooters:
-            for rv in state.shooter_project(sh_slug).raw_videos:
-                owners.setdefault(rv.storage_path, []).append(sh_slug)
-        return owners
 
     @app.get("/api/me/raw/list")
     def list_raw_uploads(user: User = Depends(get_current_user)) -> JSONResponse:
@@ -9402,7 +11326,7 @@ def create_app(
         # ingest "available uploads" list can hide/grey what a shooter in
         # this match already owns (#562). First claimant wins, so the label
         # is stable; the attach guard reads the same map.
-        owners = _raw_video_owners()
+        owners = _raw_video_owners(state)
         attached_by = {path: slugs[0] for path, slugs in owners.items() if slugs}
 
         entries: list[dict[str, Any]] = []
@@ -9465,202 +11389,6 @@ def create_app(
         except Exception:
             logger.exception("failed to delete proxy for %s", name)
         return JSONResponse({"ok": True, "path": key})
-
-    def _apply_raw_video_coverage(
-        project: MatchProject,
-        root: Path,
-        storage_path: str,
-        covers: list[int],
-    ) -> list[StageVideo]:
-        """Diff and apply per-stage coverage for a raw video.
-
-        Creates StageVideo entries for stages in ``covers`` not yet
-        registered under ``storage_path``; removes entries for stages
-        that were previously registered but are no longer listed (and
-        invalidates their trim/audio caches). Updates
-        ``rv.covers_stages`` with ``covers`` as-is (declared order is
-        shooting order for sequential-mode takes; no implicit sort).
-        Removes a matching ``unassigned_videos`` entry when coverage is
-        first applied (the video moves from the tray to named stages).
-
-        Creates the ``RawVideo`` manifest entry if one does not exist
-        yet (local-mode scan only puts the video in
-        ``unassigned_videos``; attach or PATCH coverage creates the
-        raw entry).
-
-        Returns the newly created ``StageVideo`` instances.
-        """
-        video_path = Path(storage_path)
-        rv = project.find_raw_video(storage_path)
-        if rv is None:
-            rv = RawVideo(
-                original_filename=video_path.name,
-                storage_path=storage_path,
-            )
-            project.raw_videos.append(rv)
-
-        previously_covered: set[int] = set(rv.covers_stages)
-        new_covers_set: set[int] = set(covers)
-
-        created: list[StageVideo] = []
-
-        # Add StageVideos for stages not yet registered.
-        for stage_number in covers:
-            stage = project.stage(stage_number)
-            if any(str(v.path) == storage_path for v in stage.videos):
-                continue  # already registered - skip
-            role: VideoRole = "secondary" if stage.primary() is not None else "primary"
-            sv = StageVideo(path=video_path, role=role, stage_number=stage_number)
-            stage.videos.append(sv)
-            created.append(sv)
-
-        # Remove StageVideos for stages no longer in the new list and
-        # invalidate their trim/audio caches so a later re-assign starts clean.
-        for stage_number in sorted(previously_covered - new_covers_set):
-            try:
-                stage = project.stage(stage_number)
-            except KeyError:
-                continue
-            to_remove = [v for v in stage.videos if str(v.path) == storage_path]
-            stage.videos = [v for v in stage.videos if str(v.path) != storage_path]
-            for v in to_remove:
-                audio_helpers.invalidate_video_audit_trim(root, stage_number, v, project=project)
-
-        # Update covers_stages with the caller-declared order (no sort).
-        rv.covers_stages = list(dict.fromkeys(covers))
-
-        # Remove from unassigned tray when coverage is being applied for
-        # the first time (moves it from "unregistered" to named stages).
-        project.unassigned_videos = [v for v in project.unassigned_videos if str(v.path) != storage_path]
-
-        return created
-
-    def _queue_take_detects(slug: str, project: MatchProject, created: list[StageVideo]) -> None:
-        """Enqueue detect_beep for newly created take StageVideos.
-
-        Mode selection (keyed off ``rv.covers_stages`` and per-stage
-        ``scorecard_updated_at``):
-
-        - Scoreboard-mode (every covered stage has ``scorecard_updated_at``):
-          one detect_beep per created video - the window derivation is
-          independent for each so they can all run in parallel.
-        - Sequential-mode (at least one covered stage lacks
-          ``scorecard_updated_at``): one initial detect_beep for the
-          first unprocessed covered stage in ``covers_stages`` order.
-          The detect job chains to the next stage after success (Task 5
-          / ``_run_detect_beep_for_video``).
-
-        Skips videos already in ``processed["beep"]`` or with a manual
-        beep. Uses ``run_sync`` because sync FastAPI endpoints run
-        in a threadpool with no active event loop. Does NOT call
-        ``resolve_video_path`` - in hosted mode that would mirror a
-        multi-GB object into the API container; reachability is the
-        worker's problem.
-        """
-        if not created:
-            return
-        storage_path = str(created[0].path)
-        raw = project.find_raw_video(storage_path)
-        if raw is None:
-            return
-
-        def _stage_has_scorecard(n: int) -> bool:
-            try:
-                return project.stage(n).scorecard_updated_at is not None
-            except KeyError:
-                return False
-
-        is_scoreboard = len(raw.covers_stages) >= 2 and all(
-            _stage_has_scorecard(n) for n in raw.covers_stages
-        )
-
-        # Skip enqueue when the database URL is not Postgres. This covers two
-        # cases: (a) SQLite-backed hosted mode in smoke/CI tests, where
-        # Procrastinate's DSN converter would raise ValueError on the first
-        # submit call; (b) local-mode (no SPLITSMITH_DATABASE_URL), which has
-        # no Procrastinate wiring at all.
-        #
-        # We gate explicitly on the URL rather than catching ValueError because
-        # the submit path writes a compute_jobs row before calling the deferrer;
-        # a bare except ValueError would swallow a real deferrer error in
-        # Postgres mode after that row is committed, leaving a PENDING job that
-        # never runs. The predicate matches _hosted_mode_active() + Postgres so
-        # that Postgres-mode errors propagate like _submit_detect_beep does.
-        if _hosted_mode_active():
-            db_url = os.environ.get(SPLITSMITH_DATABASE_URL_ENV, "")
-            if not db_url.startswith("postgresql"):
-                logger.debug("_queue_take_detects: skipping enqueue (SQLite URL)")
-                return
-
-        if is_scoreboard or len(raw.covers_stages) < 2:
-            # One detect_beep per created video.
-            for sv in created:
-                if sv.processed.get("beep") or sv.beep_source == "manual":
-                    continue
-                existing = run_sync(
-                    state.jobs.find_active(
-                        kind="detect_beep",
-                        stage_number=sv.stage_number,
-                        shooter_slug=slug,
-                        video_id=sv.video_id,
-                    )
-                )
-                if existing is None:
-                    try:
-                        run_sync(
-                            state.jobs.submit(
-                                kind="detect_beep",
-                                stage_number=sv.stage_number,
-                                shooter_slug=slug,
-                                video_id=sv.video_id,
-                                args={
-                                    "slug": slug,
-                                    "stage_number": sv.stage_number,
-                                    "video_id": sv.video_id,
-                                },
-                            )
-                        )
-                    except FeatureRequiredError as exc:
-                        # The account answer is the same for every video.
-                        _log_chain_skipped("detect_beep", slug, sv.stage_number, exc)
-                        return
-        else:
-            # Sequential-mode: submit only the first unprocessed covered stage.
-            for n in raw.covers_stages:
-                try:
-                    stg = project.stage(n)
-                except KeyError:
-                    continue
-                primary = stg.primary()
-                if primary is None:
-                    continue
-                if primary.processed.get("beep") or primary.beep_source == "manual":
-                    continue
-                if primary.beep_time is not None:
-                    continue
-                existing = run_sync(
-                    state.jobs.find_active(
-                        kind="detect_beep",
-                        stage_number=n,
-                        shooter_slug=slug,
-                        video_id=primary.video_id,
-                    )
-                )
-                if existing is not None:
-                    break  # chain already started
-                try:
-                    run_sync(
-                        state.jobs.submit(
-                            kind="detect_beep",
-                            stage_number=n,
-                            shooter_slug=slug,
-                            video_id=primary.video_id,
-                            args={"slug": slug, "stage_number": n, "video_id": primary.video_id},
-                        )
-                    )
-                except FeatureRequiredError as exc:
-                    _log_chain_skipped("detect_beep", slug, n, exc)
-                break
 
     @app.post("/api/shooters/{slug}/raw-videos/attach")
     def attach_raw_video(
@@ -9726,7 +11454,9 @@ def create_app(
         # Any *other* owner is a conflict, not just the first: a match from
         # before this guard can hold one object on two shooters, and letting
         # a caller through because it is one of them would entrench that.
-        claimed_by_other = next((s for s in _raw_video_owners().get(storage_path, []) if s != slug), None)
+        claimed_by_other = next(
+            (s for s in _raw_video_owners(state).get(storage_path, []) if s != slug), None
+        )
         if claimed_by_other is not None:
             raise HTTPException(
                 status_code=409,
@@ -9798,7 +11528,7 @@ def create_app(
         project.save(root)
 
         if created:
-            _queue_take_detects(slug, project, created)
+            _queue_take_detects(state, slug, project, created)
 
         return JSONResponse(canonical.model_dump(mode="json"))
 
@@ -9854,7 +11584,7 @@ def create_app(
         project.save(root)
 
         if created:
-            _queue_take_detects(slug, project, created)
+            _queue_take_detects(state, slug, project, created)
 
         canonical = project.find_raw_video(storage_path)
         if canonical is None:
@@ -10047,7 +11777,7 @@ def create_app(
         # Local mode: compute from the take WAV a job published.
         wav = audio_helpers.published_take_audio(root, storage_path, project=project)
         if wav is None:
-            return _audio_pending(slug, "take", storage_path=storage_path)
+            return _audio_pending(state, slug, "take", storage_path=storage_path)
         result = waveform_helpers.ensure_peaks(wav, bins)
         return JSONResponse(result.model_dump(mode="json"))
 
@@ -10658,42 +12388,6 @@ def create_app(
         merged = _fetch_and_merge_stage_times(root, project, ct, mid, project.selected_competitor_id)
         return JSONResponse({**project.model_dump(mode="json"), "stage_times_merged": merged})
 
-    def _fetch_and_merge_stage_times(
-        root: Path, project: MatchProject, ct: int, mid: int, competitor_id: int
-    ) -> int:
-        """Shared helper -- get_stage_times + merge_stage_times, with the
-        right error mapping. Persists the project on success.
-
-        Also opportunistically backfills ``stage_rounds`` from the cached
-        ``MatchData`` so existing projects pick up ``min_rounds`` /
-        target counts on the existing "refresh times" SPA action without
-        requiring a full overwrite-import that would orphan video
-        assignments.
-        """
-        with _resolve_scoreboard_client(root) as client:
-            try:
-                results = client.get_stage_times(ct, mid, competitor_id)
-            except ScoreboardError as exc:
-                _raise_scoreboard_http(exc)
-            except KeyError as exc:
-                raise HTTPException(
-                    status_code=404,
-                    detail=str(exc),
-                ) from exc
-            # Best-effort backfill of stage_rounds. Failure is non-fatal
-            # -- stage times are the user-visible action; rounds are an
-            # additive bonus that the next real scoreboard refresh can
-            # still cover.
-            try:
-                match_data = client.get_match(ct, mid)
-                project.merge_stage_rounds(match_data)
-                project.merge_competitor_division(match_data)
-            except ScoreboardError:
-                pass
-        merged = project.merge_stage_times(results)
-        project.save(root)
-        return merged
-
     @app.get("/api/match/stages", response_model=MatchStagesResponse)
     def get_match_stages() -> MatchStagesResponse:
         """The bound match's canonical stage list (#521).
@@ -11158,50 +12852,6 @@ def create_app(
         project.save(root)
         return JSONResponse(project.model_dump(mode="json"))
 
-    def _resolve_stage_video(
-        slug: str, stage_number: int, video_id: str
-    ) -> tuple[MatchProject, StageEntry, StageVideo]:
-        """Load the project + stage + video for a per-video endpoint.
-
-        Returns the trio so the caller doesn't have to re-read state. Raises
-        404 when stage / video doesn't exist; pre-flight check on the
-        source-on-disk lives at the call site so endpoints that don't need
-        a reachable file (clear, manual override) can skip it.
-        """
-        project = state.shooter_project(slug)
-        try:
-            stage = project.stage(stage_number)
-        except KeyError as exc:
-            raise HTTPException(status_code=404, detail=str(exc)) from exc
-        video = stage.find_video_by_id(video_id)
-        if video is None:
-            raise HTTPException(
-                status_code=404,
-                detail=f"stage {stage_number} has no video with id {video_id!r}",
-            )
-        return project, stage, video
-
-    async def _submit_detect_beep(slug: str, stage_number: int, video: StageVideo) -> JSONResponse:
-        """Validate + dedupe + queue a detect-beep job for ``video``.
-
-        Shared by the per-video endpoint and the primary-only legacy
-        endpoint so both honour the same reachability + manual-override
-        pre-flight checks.
-        """
-        existing = await state.jobs.find_active(
-            kind="detect_beep", stage_number=stage_number, shooter_slug=slug, video_id=video.video_id
-        )
-        if existing is not None:
-            return JSONResponse(existing.model_dump(mode="json"))
-        job = await state.jobs.submit(
-            kind="detect_beep",
-            stage_number=stage_number,
-            shooter_slug=slug,
-            video_id=video.video_id,
-            args={"slug": slug, "stage_number": stage_number, "video_id": video.video_id},
-        )
-        return JSONResponse(job.model_dump(mode="json"))
-
     async def _auto_queue_beep_if_needed(
         slug: str, project: MatchProject, stage_number: int, video: StageVideo
     ) -> bool:
@@ -11253,7 +12903,7 @@ def create_app(
             )
             return False
         try:
-            await _submit_detect_beep(slug, stage_number, video)
+            await _submit_detect_beep(state, slug, stage_number, video)
         except FeatureRequiredError as exc:
             _log_chain_skipped("detect_beep", slug, stage_number, exc)
             return False
@@ -11290,7 +12940,7 @@ def create_app(
                 status_code=409,
                 detail="detection already running for this video - wait for it to finish, then set the window",  # noqa: E501
             )
-        project, stage, video = _resolve_stage_video(slug, stage_number, video_id)
+        project, stage, video = _resolve_stage_video(state, slug, stage_number, video_id)
         root = state.shooter_root(slug)
         video.beep_window = (body.start_s, body.end_s)
         video.beep_window_source = "manual"
@@ -11307,7 +12957,7 @@ def create_app(
         video.processed["trim"] = False
         audio_helpers.invalidate_video_audit_trim(root, stage_number, video, project=project)
         project.save(root)
-        return await _submit_detect_beep(slug, stage_number, video)
+        return await _submit_detect_beep(state, slug, stage_number, video)
 
     @app.post("/api/shooters/{slug}/stages/{stage_number}/videos/{video_id}/detect-beep")
     async def detect_beep_for_video(
@@ -11322,7 +12972,7 @@ def create_app(
         primary results; secondaries align to the primary timeline by
         their own beep so they don't need their own shot timeline.
         """
-        project, _stage, video = _resolve_stage_video(slug, stage_number, video_id)
+        project, _stage, video = _resolve_stage_video(state, slug, stage_number, video_id)
         # ``source_present``, not ``resolve_video_path``: the bytes belong to
         # the queued job, so resolving here downloaded the raw source into
         # the API container just to decide whether to queue (#638).
@@ -11337,7 +12987,7 @@ def create_app(
                     "replace it with auto-detected output"
                 ),
             )
-        return await _submit_detect_beep(slug, stage_number, video)
+        return await _submit_detect_beep(state, slug, stage_number, video)
 
     @app.post("/api/shooters/{slug}/stages/{stage_number}/detect-beep")
     async def detect_beep(slug: str, stage_number: int, force: bool = False) -> JSONResponse:
@@ -11372,7 +13022,7 @@ def create_app(
                     "replace it with auto-detected output"
                 ),
             )
-        return await _submit_detect_beep(slug, stage_number, primary)
+        return await _submit_detect_beep(state, slug, stage_number, primary)
 
     @app.post("/api/shooters/{slug}/stages/{stage_number}/trim")
     async def trim_stage(slug: str, stage_number: int) -> JSONResponse:
@@ -11394,59 +13044,13 @@ def create_app(
                 status_code=400,
                 detail=f"stage {stage_number} has no primary video",
             )
-        return await _submit_trim(slug, stage_number, stage, primary, project)
-
-    async def _submit_trim(
-        slug: str,
-        stage_number: int,
-        stage: StageEntry,
-        video: StageVideo,
-        project: MatchProject,
-    ) -> JSONResponse:
-        """Validate + dedupe + queue a trim job for ``video``.
-
-        Pre-flight checks (reachability, beep present, stage_time set)
-        apply equally to primary and secondary -- both need a beep_time
-        and a non-zero stage_time to define the trim window.
-        """
-        # ``source_present``, not ``resolve_video_path``: ffmpeg runs in the
-        # trim job, not here, so this preflight has no use for the bytes
-        # (#638).
-        root = state.shooter_root(slug)
-        if not project.source_present(root, video.path):
-            raise source_unreachable(stage_number, root / video.path)
-        if video.beep_time is None:
-            raise HTTPException(
-                status_code=400,
-                detail=f"stage {stage_number} video has no beep_time yet",
-            )
-        if stage.time_seconds <= 0:
-            raise HTTPException(
-                status_code=400,
-                detail=(
-                    f"stage {stage_number} has time_seconds=0; import a "
-                    "scoreboard or set the stage time before trimming"
-                ),
-            )
-        existing = await state.jobs.find_active(
-            kind="trim", stage_number=stage_number, shooter_slug=slug, video_id=video.video_id
-        )
-        if existing is not None:
-            return JSONResponse(existing.model_dump(mode="json"))
-        job = await state.jobs.submit(
-            kind="trim",
-            stage_number=stage_number,
-            shooter_slug=slug,
-            video_id=video.video_id,
-            args={"slug": slug, "stage_number": stage_number, "video_id": video.video_id},
-        )
-        return JSONResponse(job.model_dump(mode="json"))
+        return await _submit_trim(state, slug, stage_number, stage, primary, project)
 
     @app.post("/api/shooters/{slug}/stages/{stage_number}/videos/{video_id}/trim")
     async def trim_for_video(slug: str, stage_number: int, video_id: str) -> JSONResponse:
         """Submit an audit-mode trim job for ``video_id`` on ``stage_number``."""
-        project, stage, video = _resolve_stage_video(slug, stage_number, video_id)
-        return await _submit_trim(slug, stage_number, stage, video, project)
+        project, stage, video = _resolve_stage_video(state, slug, stage_number, video_id)
+        return await _submit_trim(state, slug, stage_number, stage, video, project)
 
     @app.post("/api/shooters/{slug}/stages/shot-detect")
     async def shot_detect_all_endpoint(slug: str, reset: bool = False) -> JSONResponse:
@@ -11809,153 +13413,6 @@ def create_app(
             raise HTTPException(status_code=400, detail="cannot delete the railway worker")
         return Response(status_code=204)
 
-    def _apply_beep_override(
-        slug: str,
-        project: MatchProject,
-        stage: StageEntry,
-        video: StageVideo,
-        beep_time: float | None,
-    ) -> None:
-        """Apply a manual beep override to ``video``.
-
-        Generic over role: secondaries also need their cached trim
-        invalidated when the user moves their beep, since the trim window
-        is anchored to that beep. ``beep_time=None`` clears back to "no
-        beep yet"; otherwise sets ``beep_source="manual"`` and drops the
-        candidate list so the UI doesn't keep suggesting a stale auto pick.
-        Shot-detect flag clearing is primary-only -- secondaries don't
-        carry their own shot timeline.
-        """
-        if beep_time is None:
-            video.beep_time = None
-            video.beep_source = None
-            video.beep_peak_amplitude = None
-            video.beep_duration_ms = None
-            video.beep_confidence = None
-            video.beep_candidates = []
-            video.beep_ranker_version = None
-            video.beep_auto_detect_failed = False
-            video.beep_alignment_confidence = None
-            video.beep_alignment_delta_ms = None
-            video.processed["beep"] = False
-            video.processed["trim"] = False
-            video.beep_reviewed = False
-            if video.role == "primary":
-                video.processed["shot_detect"] = False
-        else:
-            video.beep_time = beep_time
-            video.beep_source = "manual"
-            video.beep_peak_amplitude = None
-            video.beep_duration_ms = None
-            # Manual entry pins confidence at 1.0 -- the user told us
-            # where the beep is, so the auto-trust gate (#219) opens.
-            video.beep_confidence = 1.0
-            video.beep_candidates = []
-            video.beep_ranker_version = None
-            video.beep_auto_detect_failed = False
-            video.beep_alignment_confidence = None
-            video.beep_alignment_delta_ms = None
-            video.processed["beep"] = True
-            video.processed["trim"] = False
-            # Manual beep entry implies the user looked at the
-            # waveform to type the value -- skip the review pill (#71).
-            video.beep_reviewed = True
-            if video.role == "primary":
-                video.processed["shot_detect"] = False
-
-        audio_helpers.invalidate_video_audit_trim(
-            state.shooter_root(slug), stage.stage_number, video, project=project
-        )
-
-    async def _maybe_chain_trim(slug: str, stage: StageEntry, video: StageVideo) -> None:
-        """Auto-fire a trim job for ``video`` when conditions allow.
-
-        Used after a beep override / candidate select: if the user just
-        gave us a beep and the stage time is known, the next thing they
-        want is a fresh short-GOP trim. Dedupes through ``find_active``
-        so a still-running job adopts instead of racing.
-        """
-        if video.beep_time is None or stage.time_seconds <= 0:
-            return
-        if (
-            await state.jobs.find_active(
-                kind="trim", stage_number=stage.stage_number, shooter_slug=slug, video_id=video.video_id
-            )
-            is not None
-        ):
-            return
-        try:
-            await state.jobs.submit(
-                kind="trim",
-                stage_number=stage.stage_number,
-                shooter_slug=slug,
-                video_id=video.video_id,
-                args={
-                    "slug": slug,
-                    "stage_number": stage.stage_number,
-                    "video_id": video.video_id,
-                },
-            )
-        except FeatureRequiredError as exc:
-            _log_chain_skipped("trim", slug, stage.stage_number, exc)
-
-    def _log_chain_skipped(kind: str, slug: str, stage_number: int, exc: FeatureRequiredError) -> None:
-        """A job chained after a committed write was refused by the account backstop.
-
-        The write the request made stands and the route answers with its
-        normal success; the chained job is simply not queued. Only the
-        API-side chains catch this: a job body chaining on the worker
-        lets the refusal fail the job.
-        """
-        logger.info(
-            "%s for %s stage %d not queued: account lacks %s", kind, slug, stage_number, exc.feature.value
-        )
-
-    def _select_candidate_on_video(video: StageVideo, time_value: float) -> None:
-        """Promote the candidate at ``time_value`` (within 1 ms) on ``video``.
-
-        Mirrors the v1 primary path: the time still came from the detector
-        so ``beep_source="auto"`` is preserved; only the chosen candidate
-        changes. Raises ``HTTPException`` for caller-facing errors so both
-        the per-video and legacy primary endpoints get the same response
-        shapes.
-        """
-        if not video.beep_candidates:
-            raise HTTPException(
-                status_code=400,
-                detail="video has no candidate list yet; run detect-beep first",
-            )
-        match_eps = 1e-3
-        chosen = None
-        for c in video.beep_candidates:
-            if abs(c.time - time_value) <= match_eps:
-                chosen = c
-                break
-        if chosen is None:
-            available = ", ".join(f"{c.time:.3f}" for c in video.beep_candidates)
-            raise HTTPException(
-                status_code=400,
-                detail=(
-                    f"no candidate within {match_eps * 1000:.0f} ms of "
-                    f"{time_value:.3f}s; available: [{available}]"
-                ),
-            )
-        video.beep_time = chosen.time
-        video.beep_source = "auto"
-        video.beep_peak_amplitude = chosen.peak_amplitude
-        video.beep_duration_ms = chosen.duration_ms
-        video.beep_confidence = chosen.confidence
-        video.beep_auto_detect_failed = False
-        video.beep_alignment_confidence = None
-        video.beep_alignment_delta_ms = None
-        video.processed["beep"] = True
-        video.processed["trim"] = False
-        # Switching candidate is a fresh claim about which moment is
-        # the beep -- prior review approval doesn't carry over (#71).
-        video.beep_reviewed = False
-        if video.role == "primary":
-            video.processed["shot_detect"] = False
-
     @app.post("/api/shooters/{slug}/stages/{stage_number}/videos/{video_id}/beep")
     async def override_beep_for_video(
         slug: str, stage_number: int, video_id: str, req: BeepOverrideRequest
@@ -11972,37 +13429,22 @@ def create_app(
         chain by submitting detect_beep for the next uncovered stage - the
         same advance the auto-detect job performs on success (Task 5).
         """
-        project, stage, video = _resolve_stage_video(slug, stage_number, video_id)
+        project, stage, video = _resolve_stage_video(state, slug, stage_number, video_id)
         if req.beep_time is not None:
             _check_beep_time(video, req.beep_time)
-        _apply_beep_override(slug, project, stage, video, req.beep_time)
+        _apply_beep_override(state, slug, project, stage, video, req.beep_time)
         beep_tone_check.record_tone_offset(state.shooter_root(slug), project, stage.stage_number, video)
         project.save(state.shooter_root(slug))
         # Mirrors mark state only: no raw media exists hosted-side, so
         # there is nothing to trim or detect against. Desktop re-derives
         # on its next sync pull (bidirectional sync design).
         if req.beep_time is not None and current_match_origin.get() != "desktop":
-            await _maybe_chain_trim(slug, stage, video)
+            await _maybe_chain_trim(state, slug, stage, video)
             try:
                 await _advance_sequential_chain(state, slug, project, video, stage_number)
             except FeatureRequiredError as exc:
                 _log_chain_skipped("detect_beep", slug, stage_number, exc)
         return JSONResponse(project.model_dump(mode="json"))
-
-    def _check_beep_time(video: StageVideo, beep_time: float) -> None:
-        """A beep before its clip is allowed for a secondary camera only, and
-        only a little before (2026-10-15): one that started recording during
-        the beep. A primary's shots are measured from its beep, which must
-        be in its clip."""
-        if beep_time >= 0.0:
-            return
-        if video.role != "secondary":
-            raise HTTPException(status_code=400, detail="beep_time must be >= 0 for a primary camera")
-        if beep_time < -BEEP_BEFORE_CLIP_MAX_S:
-            raise HTTPException(
-                status_code=400,
-                detail=f"a beep more than {BEEP_BEFORE_CLIP_MAX_S:g} s before the clip is not one it cut off",
-            )
 
     @app.post("/api/shooters/{slug}/stages/{stage_number}/beep")
     async def override_beep(slug: str, stage_number: int, req: BeepOverrideRequest) -> JSONResponse:
@@ -12020,10 +13462,10 @@ def create_app(
             )
         if req.beep_time is not None and req.beep_time < 0.0:
             raise HTTPException(status_code=400, detail="beep_time must be >= 0")
-        _apply_beep_override(slug, project, stage, primary, req.beep_time)
+        _apply_beep_override(state, slug, project, stage, primary, req.beep_time)
         project.save(state.shooter_root(slug))
         if req.beep_time is not None:
-            await _maybe_chain_trim(slug, stage, primary)
+            await _maybe_chain_trim(state, slug, stage, primary)
             try:
                 await _advance_sequential_chain(state, slug, project, primary, stage_number)
             except FeatureRequiredError as exc:
@@ -12081,7 +13523,7 @@ def create_app(
         criteria. The SPA surfaces that as "no beep found nearby; widen
         the window or move the marker".
         """
-        project, _stage, video = _resolve_stage_video(slug, stage_number, video_id)
+        project, _stage, video = _resolve_stage_video(state, slug, stage_number, video_id)
         source = project.resolve_video_path(state.shooter_root(slug), video.path)
         ensure_source_reachable(stage_number, source)
         if req.hint_time < 0.0:
@@ -12094,10 +13536,10 @@ def create_app(
             stage_number,
             video,
             project=project,
-            source=_local_source(project, slug, video),
+            source=_local_source(state, project, slug, video),
         )
         if audio_path is None:
-            return _audio_pending(slug, "video", stage_number=stage_number, video_id=video.video_id)
+            return _audio_pending(state, slug, "video", stage_number=stage_number, video_id=video.video_id)
         audio, sr = beep_detect.load_audio(audio_path)
         duration_s = audio.size / sr if sr > 0 else 0.0
         if duration_s <= 0:
@@ -12168,113 +13610,14 @@ def create_app(
         slug: str, stage_number: int, video_id: str, req: BeepSelectRequest
     ) -> JSONResponse:
         """Promote one of ``video``'s ranked candidates as authoritative."""
-        project, stage, video = _resolve_stage_video(slug, stage_number, video_id)
+        project, stage, video = _resolve_stage_video(state, slug, stage_number, video_id)
         _select_candidate_on_video(video, req.time)
         audio_helpers.invalidate_video_audit_trim(
             state.shooter_root(slug), stage_number, video, project=project
         )
         project.save(state.shooter_root(slug))
-        await _maybe_chain_trim(slug, stage, video)
+        await _maybe_chain_trim(state, slug, stage, video)
         return JSONResponse(project.model_dump(mode="json"))
-
-    async def _replace_secondary_beeps(slug: str, stage_number: int) -> None:
-        """A confirmed primary beep is the best reference there is for the
-        stage's other cameras (#1442): run beep detection again for every
-        secondary whose beep nobody confirmed or typed, so its proposal and
-        its "from primary" candidate come from the confirmed beep. A
-        confirmed or hand-set secondary beep is never touched."""
-        stage = state.shooter_project(slug).stage(stage_number)
-        for other in stage.videos:
-            if other.role == "primary" or other.beep_reviewed or other.beep_source == "manual":
-                continue
-            if (
-                await state.jobs.find_active(
-                    kind="detect_beep", stage_number=stage_number, shooter_slug=slug, video_id=other.video_id
-                )
-                is not None
-            ):
-                continue
-            try:
-                await state.jobs.submit(
-                    kind="detect_beep",
-                    stage_number=stage_number,
-                    shooter_slug=slug,
-                    video_id=other.video_id,
-                    args={"slug": slug, "stage_number": stage_number, "video_id": other.video_id},
-                )
-            except FeatureRequiredError as exc:
-                _log_chain_skipped("detect_beep", slug, stage_number, exc)
-
-    async def _after_beep_reviewed(slug: str, stage_number: int, video: StageVideo) -> None:
-        """Everything that must follow ``beep_reviewed`` flipping to True.
-
-        Shared by the per-video review endpoint and the cross-shooter
-        queue so a beep confirmed from either place leaves the same state
-        behind: a stub audit document (status surfaces and the lab read a
-        document, never infer from absence; never overwrite a real one --
-        a re-confirm on an audited stage must not wipe shot data) and,
-        for a primary whose trim is already cached, a queued
-        ``shot_detect``. That submit is the explicit unblock point for the
-        downstream pipeline (auto-detect leaves the flag False so the
-        ensemble doesn't burn cycles on an unconfirmed beep). A video
-        whose trim is not cached gets the trim submitted instead (when
-        the stage time and beep allow it, same rule as
-        ``_maybe_chain_trim``); the trim job chains detection itself for
-        a reviewed primary. Before UX PR 5 only a manual override chained
-        the trim, so confirming the detector's time as-is on an untrimmed
-        stage left it untrimmed with no shots. Secondaries get their trim
-        and no detection (no shot timeline of their own).
-
-        Mirrors mark state only, like the beep override endpoint: a
-        ``desktop``-origin match has no raw media hosted-side to detect
-        against and the desktop owns its audit documents, so neither the
-        stub nor the job is written. Desktop re-derives on its next sync
-        pull.
-        """
-        # The beep's distance from its tone (spec 2026-10-17), when its
-        # source WAV is published here; the derive job measures it otherwise.
-        proj_now = state.shooter_project(slug)
-        target = proj_now.stage(stage_number).find_video_by_id(video.video_id)
-        if target is not None and beep_tone_check.record_tone_offset(
-            state.shooter_root(slug), proj_now, stage_number, target
-        ):
-            proj_now.save(state.shooter_root(slug))
-        if current_match_origin.get() == "desktop":
-            return
-        if video.role == "primary":
-            await _replace_secondary_beeps(slug, stage_number)
-        with _audit_rmw():
-            existing_doc, audit_version = state.load_audit(slug, stage_number)
-            if existing_doc is None:
-                state.save_audit(
-                    slug,
-                    stage_number,
-                    {"shots": [], "detection": STUB_AUDIT_DETECTION},
-                    version=audit_version,
-                )
-        # The reconciler's rule with explicit=True (spec 2026-09-27 s3): a
-        # trim when none is cached, else detection for a trimmed primary. A
-        # phone confirm pulled into this desktop reaches the same rule
-        # through plan_reconcile, so the two cannot leave different state.
-        stage = state.shooter_project(slug).stage(stage_number)
-        step = video_step(stage, video, None, explicit=True)
-        if step == "trim":
-            await _maybe_chain_trim(slug, stage, video)
-            return
-        if (
-            step == "shot_detect"
-            and await state.jobs.find_active(kind="shot_detect", stage_number=stage_number, shooter_slug=slug)
-            is None
-        ):
-            try:
-                await state.jobs.submit(
-                    kind="shot_detect",
-                    stage_number=stage_number,
-                    shooter_slug=slug,
-                    args={"slug": slug, "stage_number": stage_number},
-                )
-            except FeatureRequiredError as exc:
-                _log_chain_skipped("shot_detect", slug, stage_number, exc)
 
     @app.post("/api/shooters/{slug}/stages/{stage_number}/videos/{video_id}/beep/review")
     async def set_beep_reviewed(
@@ -12290,7 +13633,7 @@ def create_app(
         ensemble doesn't burn cycles on an unconfirmed beep, and we
         finally fire it here once the user has listened and approved).
         """
-        project, stage, video = _resolve_stage_video(slug, stage_number, video_id)
+        project, stage, video = _resolve_stage_video(state, slug, stage_number, video_id)
         if req.reviewed and video.beep_time is None:
             raise HTTPException(
                 status_code=400,
@@ -12302,7 +13645,7 @@ def create_app(
         # The exporter does not depend on the stub audit doc existing;
         # projects predating it have no stub and still export.
         if req.reviewed:
-            await _after_beep_reviewed(slug, stage_number, video)
+            await _after_beep_reviewed(state, slug, stage_number, video)
 
         return JSONResponse(project.model_dump(mode="json"))
 
@@ -12317,7 +13660,7 @@ def create_app(
         override -- the next shot-detect run will use the artifact's
         default class instead of a per-class threshold.
         """
-        project, _stage, video = _resolve_stage_video(slug, stage_number, video_id)
+        project, _stage, video = _resolve_stage_video(state, slug, stage_number, video_id)
         from ..fixture_schema import CameraMount
 
         if req.mount is not None:
@@ -12358,7 +13701,7 @@ def create_app(
                 status_code=400,
                 detail="camera-model: 'make' and 'model' must be supplied together or both null",
             )
-        project, _stage, video = _resolve_stage_video(slug, stage_number, video_id)
+        project, _stage, video = _resolve_stage_video(state, slug, stage_number, video_id)
         video.camera_make = req.make
         video.camera_model = req.model
         project.save(state.shooter_root(slug))
@@ -12383,104 +13726,11 @@ def create_app(
         project.save(state.shooter_root(slug))
         return JSONResponse(project.model_dump(mode="json"))
 
-    def _identity_logo_dir(slug: str) -> Path:
-        return state.shooter_root(slug) / LOGO_DIR
-
-    def _remove_local_logo(slug: str, name: str | None) -> None:
-        if name is None:
-            return
-        try:
-            (_identity_logo_dir(slug) / name).unlink()
-        except FileNotFoundError:
-            pass
-
-    async def _save_to_book(project: MatchProject, slug: str) -> None:
-        """Write the shooter's identity to the shooter book under their SSI
-        id (spec 2026-10-08): the whole record, the logo copied into the
-        book's own files (same content name); an identity that sets nothing
-        removes the entry. No SSI id, nothing: the book never keys by name."""
-        sid = project.selected_shooter_id
-        if sid is None:
-            return
-        try:
-            await _write_book(project, slug, sid)
-        except Exception as exc:  # noqa: BLE001 -- the match was saved; the book is the extra
-            logger.warning("shooter book: %s's look was saved to the match but not the book (%s)", slug, exc)
-
-    async def _write_book(project: MatchProject, slug: str, sid: int) -> None:
-        logo_bytes: bytes | None = None
-        if project.identity.logo is not None:
-            local = ensure_local_logo(project, state.shooter_root(slug))
-            try:
-                logo_bytes = local.read_bytes() if local is not None else None
-            except OSError as exc:
-                logger.warning("shooter book: could not read %s's logo (%s); saved without it", slug, exc)
-        await shooter_book_module.save_identity(
-            state.shooter_book,
-            shooter_id=sid,
-            identity=project.identity,
-            label=project.competitor_name or project.name,
-            logo_bytes=logo_bytes,
-        )
-
-    def _book_seeded_identity(project: MatchProject, slug: str) -> ShooterIdentity:
-        """What an edit starts from: the look the videos draw, so an edit
-        never drops what the user did not touch. That is the book's entry
-        when it sets anything (the book wins, spec 2026-10-09; its logo is
-        copied into this match's ``identity/``), else the match's own record."""
-        own = project.identity
-        book = shooter_book_module.load_snapshot(state.shooter_book)
-        entry = book.get(project.selected_shooter_id)
-        if not shooter_book_module.is_set(entry):
-            return own
-        assert entry is not None
-        logo = None
-        source = book.logo_path(entry)
-        if entry.logo is not None and source is not None:
-            target = _identity_logo_dir(slug) / entry.logo
-            try:
-                target.parent.mkdir(parents=True, exist_ok=True)
-                data = source.read_bytes()
-                target.write_bytes(data)
-                storage = project._storage  # type: ignore[attr-defined]
-                storage_scope = project._storage_scope  # type: ignore[attr-defined]
-                if storage is not None and storage_scope is not None:
-                    storage.write_bytes(f"{storage_scope}/{LOGO_DIR}/{entry.logo}", data)
-                logo = entry.logo
-            except OSError as exc:
-                logger.warning("identity: could not copy the book's logo into %s (%s)", slug, exc)
-        return entry.model_copy(update={"logo": logo})
-
-    def _roster_book() -> shooter_book_module.BookSnapshot:
-        """The shooter book the roster reads (the shooters list, Compare's
-        payload, the logo route), so the ring shows the look the video draws.
-        A share request reads none: the book is the owner's account data and
-        no share route reads it."""
-        if current_share_request.get():
-            return shooter_book_module.EMPTY_BOOK
-        return shooter_book_module.load_snapshot(state.shooter_book)
-
-    def _identity_view(project: MatchProject) -> dict[str, Any]:
-        """The identity sheet's view: where the look comes from and what it is."""
-        book = shooter_book_module.load_snapshot(state.shooter_book)
-        source = identity_source(project, book)
-        effective = project.identity if source != "book" else book.get(project.selected_shooter_id)
-        return {
-            "source": source,
-            "identity": (effective or ShooterIdentity()).model_dump(mode="json"),
-            "shooter_id": project.selected_shooter_id,
-            # Whether the book holds a look for this shooter ("Use shooter
-            # book" has something to fall back to) and whether this server
-            # keeps a book at all (one with no store answers an empty one).
-            "book_entry": shooter_book_module.is_set(book.get(project.selected_shooter_id)),
-            "book_available": not isinstance(state.shooter_book, shooter_book_module.EmptyShooterBookStore),
-        }
-
     @app.get("/api/shooters/{slug}/identity")
     def get_shooter_identity(slug: str) -> JSONResponse:
         """Where this shooter's look comes from (``match``, ``book`` or
         ``none``) and the identity a render draws for them."""
-        return JSONResponse(_identity_view(state.shooter_project(slug)))
+        return JSONResponse(_identity_view(state, state.shooter_project(slug)))
 
     @app.post("/api/shooters/{slug}/identity/use-book")
     def use_shooter_book(slug: str) -> JSONResponse:
@@ -12494,8 +13744,8 @@ def create_app(
         previous = project.identity.logo
         project.identity = ShooterIdentity()
         project.save(state.shooter_root(slug))
-        _remove_local_logo(slug, previous)
-        return JSONResponse(_identity_view(project))
+        _remove_local_logo(state, slug, previous)
+        return JSONResponse(_identity_view(state, project))
 
     @app.patch("/api/shooters/{slug}/identity")
     def set_shooter_identity(slug: str, req: ShooterIdentityRequest) -> JSONResponse:
@@ -12503,7 +13753,7 @@ def create_app(
         identity model itself, so a bad colour or an over-long club line
         is a 422 that names the field and writes nothing."""
         project = state.shooter_project(slug)
-        current = _book_seeded_identity(project, slug)
+        current = _book_seeded_identity(state, project, slug)
         fields = req.model_dump(exclude_unset=True)
         try:
             project.identity = ShooterIdentity(
@@ -12515,7 +13765,7 @@ def create_app(
             raise HTTPException(status_code=422, detail=exc.errors()[0]["msg"]) from exc
         project.save(state.shooter_root(slug))
         if req.scope == "book":
-            run_sync(_save_to_book(project, slug))
+            run_sync(_save_to_book(state, project, slug))
         return JSONResponse(project.model_dump(mode="json"))
 
     @app.post("/api/shooters/{slug}/identity/logo")
@@ -12553,7 +13803,7 @@ def create_app(
             raise HTTPException(status_code=422, detail=f"logo is over {LOGO_MAX_SIDE} px on a side")
         name = logo_name(data, ext)
         previous = project.identity.logo
-        logo_dir = _identity_logo_dir(slug)
+        logo_dir = _identity_logo_dir(state, slug)
         logo_dir.mkdir(parents=True, exist_ok=True)
         (logo_dir / name).write_bytes(data)
         storage = project._storage  # type: ignore[attr-defined]
@@ -12563,9 +13813,9 @@ def create_app(
         project.identity = project.identity.model_copy(update={"logo": name})
         project.save(state.shooter_root(slug))
         if previous != name:
-            _remove_local_logo(slug, previous)
+            _remove_local_logo(state, slug, previous)
         if scope == "book":
-            await _save_to_book(project, slug)
+            await _save_to_book(state, project, slug)
         return JSONResponse(project.model_dump(mode="json"))
 
     @app.get("/api/shooters/{slug}/identity/logo")
@@ -12576,7 +13826,7 @@ def create_app(
         the request to that match's shooters. Content-named and sniffed on
         upload (PNG, JPEG, WebP, never SVG); served with ``nosniff``."""
         project = state.shooter_project(slug)
-        book = _roster_book()
+        book = _roster_book(state)
         if identity_source(project, book) == "book":
             entry = book.get(project.selected_shooter_id)
             path = book.logo_path(entry) if entry is not None else None
@@ -12603,9 +13853,9 @@ def create_app(
         previous = project.identity.logo
         project.identity = project.identity.model_copy(update={"logo": None})
         project.save(state.shooter_root(slug))
-        _remove_local_logo(slug, previous)
+        _remove_local_logo(state, slug, previous)
         if scope == "book":
-            run_sync(_save_to_book(project, slug))
+            run_sync(_save_to_book(state, project, slug))
         return JSONResponse(project.model_dump(mode="json"))
 
     # --- the event's logo (the branding work) -------------------------------
@@ -12615,15 +13865,12 @@ def create_app(
     # ``matches/<id>/identity/`` (the push writes the same key from the
     # desktop). An edit, so a desktop mirror refuses it like any other.
 
-    def _event_logo_response(match: match_model.Match) -> JSONResponse:
-        return JSONResponse({"event_logo": match.branding.event_logo})
-
     @app.post("/api/match/branding/event-logo")
     async def upload_event_logo(file: UploadFile = File(...)) -> JSONResponse:
         """Store the event's logo: a PNG, JPEG or WebP, sniffed and capped
         like a shooter's (``identity.sniff_logo``), never trusted by name;
         the previous file is removed."""
-        match_root, match = _resolve_match_context()
+        match_root, match = _resolve_match_context(state)
         data = await file.read(LOGO_MAX_BYTES + 1)
         try:
             ext = sniff_logo(data)
@@ -12647,7 +13894,7 @@ def create_app(
     def get_event_logo() -> FileResponse:
         """The event's logo, for the Branding row. Content-named and sniffed
         on upload; served with ``nosniff``."""
-        match_root, match = _resolve_match_context()
+        match_root, match = _resolve_match_context(state)
         path = ensure_local_event_logo(
             match.branding, match_root, storage=state.storage, match_id=match.match_id
         )
@@ -12666,7 +13913,7 @@ def create_app(
     def remove_event_logo() -> JSONResponse:
         """Clear the event's logo and remove the local file; a hosted copy is
         swept by the next push's gc."""
-        match_root, match = _resolve_match_context()
+        match_root, match = _resolve_match_context(state)
         previous = match.branding.event_logo
         match.branding = match.branding.model_copy(update={"event_logo": None})
         match.save(match_root)
@@ -12810,175 +14057,16 @@ def create_app(
             state.shooter_root(slug), stage_number, primary, project=project
         )
         project.save(state.shooter_root(slug))
-        await _maybe_chain_trim(slug, stage, primary)
+        await _maybe_chain_trim(state, slug, stage, primary)
         return JSONResponse(project.model_dump(mode="json"))
-
-    def _audio_pending(
-        slug: str,
-        target: str,
-        *,
-        stage_number: int | None = None,
-        video_id: str | None = None,
-        storage_path: str | None = None,
-    ) -> JSONResponse:
-        """The WAV a request wants is not published yet: submit the one job
-        that makes it (deduplicated on kind, stage, shooter and video) and
-        answer 202, the shape the hosted raw-file peaks already use. The SPA
-        shows a preparing line and asks again."""
-        dedupe_id = {"audit": "audit", "take": f"take:{storage_path}"}.get(target, video_id)
-        if target == "audit" and stage_number is not None:
-            # A trim running for the stage makes the audit WAV itself; a
-            # derive job beside it could cut from the old window (review,
-            # 2026-10-14). Wait on the trim.
-            trimming = run_sync(
-                state.jobs.find_active(kind="trim", stage_number=stage_number, shooter_slug=slug)
-            )
-            if trimming is not None:
-                return JSONResponse(
-                    {"pending": True, "active_job": True, "job_id": trimming.id}, status_code=202
-                )
-        existing = run_sync(
-            state.jobs.find_active(
-                kind="derive_audio", stage_number=stage_number, shooter_slug=slug, video_id=dedupe_id
-            )
-        )
-        job_id = existing.id if existing is not None else None
-        if existing is None:
-            try:
-                job = run_sync(
-                    state.jobs.submit(
-                        kind="derive_audio",
-                        stage_number=stage_number,
-                        shooter_slug=slug,
-                        video_id=dedupe_id,
-                        args={
-                            "slug": slug,
-                            "target": target,
-                            "stage_number": stage_number,
-                            "video_id": video_id,
-                            "storage_path": storage_path,
-                        },
-                    )
-                )
-            except FeatureRequiredError:
-                # An account without hosted compute (the sharing tier) runs
-                # no jobs: a mirror's WAV arrives with the desktop's next
-                # push. Pending with no job, never a 403 (review, 2026-10-14).
-                return JSONResponse({"pending": True, "active_job": False, "job_id": None}, status_code=202)
-            job_id = job.id
-        return JSONResponse({"pending": True, "active_job": True, "job_id": job_id}, status_code=202)
-
-    def _resolve_audit_audio(
-        slug: str, project: MatchProject, stage_number: int
-    ) -> audio_helpers.AuditAudioResult | JSONResponse:
-        """Shared resolver for /audio + /peaks: the published audit WAV
-        (trimmed clip's, else the full primary's), or a 202 pending while
-        a job makes it. Never extracts here (spec 2026-10-14)."""
-        try:
-            stage = project.stage(stage_number)
-        except KeyError as exc:
-            raise HTTPException(status_code=404, detail=str(exc)) from exc
-        primary = stage.primary()
-        if primary is None:
-            raise HTTPException(
-                status_code=404,
-                detail=f"stage {stage_number} has no primary video",
-            )
-        published = audio_helpers.published_audit_audio(
-            state.shooter_root(slug),
-            stage_number,
-            primary.beep_time,
-            project=project,
-            mirror=_is_mirror(),
-        )
-        if published is not None:
-            return published
-        return _audio_pending(slug, "audit", stage_number=stage_number)
-
-    def _resolve_video_audio(
-        slug: str, project: MatchProject, stage_number: int, video: StageVideo
-    ) -> audio_helpers.AuditAudioResult | JSONResponse:
-        """Per-video version of :func:`_resolve_audit_audio`.
-
-        Always returns the full source WAV, regardless of role. The picker
-        is where the user *questions* the current beep -- if it shows the
-        trimmed audit clip, a beep that fell outside the trim window is
-        invisible and can't be moved onto. The audit screen still reaches
-        for the trimmed clip via the per-stage `/audio` + `/peaks`
-        endpoints, which is the right consumer for that cache.
-
-        ``beep_in_clip`` is just ``video.beep_time``; the WAV is in source
-        time so no trim offset applies.
-        """
-        audio_path = audio_helpers.published_video_audio(
-            state.shooter_root(slug),
-            stage_number,
-            video,
-            project=project,
-            source=_local_source(project, slug, video),
-        )
-        if audio_path is None:
-            return _audio_pending(slug, "video", stage_number=stage_number, video_id=video.video_id)
-        return audio_helpers.AuditAudioResult(
-            audio_path=audio_path,
-            beep_in_clip=video.beep_time,
-            trimmed=False,
-        )
-
-    def _local_source(project: MatchProject, slug: str, video: StageVideo) -> Path | None:
-        """``video``'s source when it is a file on this disk, for the
-        freshness check; never mirrors a remote source (that is a job's)."""
-        if state.storage is not None:
-            return None
-        try:
-            source = project.resolve_video_path(state.shooter_root(slug), video.path)
-        except Exception:  # noqa: BLE001 -- an unresolvable source just skips the check
-            return None
-        return source if source.exists() else None
-
-    def _serve_beep_preview(
-        slug: str,
-        project: MatchProject,
-        stage_number: int,
-        video: StageVideo,
-        t: float | None,
-    ) -> FileResponse:
-        """Build the ~1 s MP4 around ``t`` (or ``video.beep_time``) and serve it.
-
-        Shared by the legacy primary endpoint and the per-video endpoint
-        so both honour the same 404 / 424 / cache semantics.
-        """
-        source = project.resolve_video_path(state.shooter_root(slug), video.path)
-        ensure_source_reachable(stage_number, source)
-        center = t if t is not None else video.beep_time
-        if center is None:
-            raise HTTPException(
-                status_code=404,
-                detail=f"stage {stage_number} video has no beep_time yet",
-            )
-        if center < 0:
-            raise HTTPException(status_code=400, detail="t must be >= 0")
-        thumbs_dir = project.thumbs_path(state.shooter_root(slug))
-        try:
-            clip = thumbnail_helpers.ensure_clip(
-                source,
-                cache_dir=thumbs_dir,
-                center_time=float(center),
-                duration_s=1.0,
-                width=480,
-                ffmpeg_binary=process_runtime().ffmpeg_binary,
-            )
-        except thumbnail_helpers.ThumbnailError as exc:
-            raise HTTPException(status_code=500, detail=str(exc)) from exc
-        return FileResponse(clip, media_type="video/mp4", filename=clip.name)
 
     @app.get("/api/shooters/{slug}/stages/{stage_number}/videos/{video_id}/beep-preview")
     def video_beep_preview(
         slug: str, stage_number: int, video_id: str, t: float | None = None
     ) -> FileResponse:
         """Serve a ~1 s MP4 around ``video``'s beep (or override ``t``)."""
-        project, _stage, video = _resolve_stage_video(slug, stage_number, video_id)
-        return _serve_beep_preview(slug, project, stage_number, video, t)
+        project, _stage, video = _resolve_stage_video(state, slug, stage_number, video_id)
+        return _serve_beep_preview(state, slug, project, stage_number, video, t)
 
     @app.get("/api/shooters/{slug}/stages/{stage_number}/beep-preview")
     def stage_beep_preview(slug: str, stage_number: int, t: float | None = None) -> FileResponse:
@@ -13001,7 +14089,7 @@ def create_app(
                 status_code=404,
                 detail=f"stage {stage_number} has no primary video",
             )
-        return _serve_beep_preview(slug, project, stage_number, primary, t)
+        return _serve_beep_preview(state, slug, project, stage_number, primary, t)
 
     @app.get("/api/shooters/{slug}/stages/{stage_number}/audio", response_model=None)
     def stage_audio(slug: str, stage_number: int) -> FileResponse | JSONResponse:
@@ -13014,7 +14102,7 @@ def create_app(
         "trim required" hint.
         """
         project = state.shooter_project(slug)
-        result = _resolve_audit_audio(slug, project, stage_number)
+        result = _resolve_audit_audio(state, slug, project, stage_number)
         if isinstance(result, JSONResponse):
             return result
         return FileResponse(
@@ -13040,7 +14128,7 @@ def create_app(
         correctly and warn when the user is auditing an untrimmed source.
         """
         project = state.shooter_project(slug)
-        audit = _resolve_audit_audio(slug, project, stage_number)
+        audit = _resolve_audit_audio(state, slug, project, stage_number)
         if isinstance(audit, JSONResponse):
             return audit
         peaks = waveform_helpers.ensure_peaks(audit.audio_path, bins)
@@ -13060,8 +14148,8 @@ def create_app(
         the user can find the buzzer / first-shot regardless of where
         the current beep estimate is.
         """
-        project, _stage, video = _resolve_stage_video(slug, stage_number, video_id)
-        result = _resolve_video_audio(slug, project, stage_number, video)
+        project, _stage, video = _resolve_stage_video(state, slug, stage_number, video_id)
+        result = _resolve_video_audio(state, slug, project, stage_number, video)
         if isinstance(result, JSONResponse):
             return result
         return FileResponse(
@@ -13069,19 +14157,6 @@ def create_app(
             media_type="audio/wav",
             filename=result.audio_path.name,
         )
-
-    def _parse_band(raw: str | None) -> tuple[float, float] | None:
-        """``LO-HI`` in Hz, 100 <= LO < HI <= 12000, or None for the full range."""
-        if raw is None:
-            return None
-        try:
-            lo_s, hi_s = raw.split("-")
-            lo, hi = float(lo_s), float(hi_s)
-        except ValueError:
-            raise HTTPException(status_code=422, detail="band is LO-HI in Hz") from None
-        if not (100 <= lo < hi <= 12000):
-            raise HTTPException(status_code=422, detail="band is LO-HI in Hz, 100 <= LO < HI <= 12000")
-        return (lo, hi)
 
     @app.get("/api/shooters/{slug}/stages/{stage_number}/videos/{video_id}/peaks")
     def video_peaks(
@@ -13103,13 +14178,13 @@ def create_app(
         picker can take the same path for primary + secondary -- the
         only thing that varies between roles is the URL.
         """
-        project, _stage, video = _resolve_stage_video(slug, stage_number, video_id)
+        project, _stage, video = _resolve_stage_video(state, slug, stage_number, video_id)
         if (start is None) != (end is None) or (start is not None and end is not None and end <= start):
             raise HTTPException(status_code=422, detail="start and end go together, start before end")
         band_range = _parse_band(band)
         if band_range is not None and start is None:
             raise HTTPException(status_code=422, detail="a band needs a window (start and end)")
-        audit = _resolve_video_audio(slug, project, stage_number, video)
+        audit = _resolve_video_audio(state, slug, project, stage_number, video)
         if isinstance(audit, JSONResponse):
             return audit
         peaks = (
@@ -13142,8 +14217,8 @@ def create_app(
 
         if end <= start:
             raise HTTPException(status_code=422, detail="start before end")
-        project, _stage, video = _resolve_stage_video(slug, stage_number, video_id)
-        audit = _resolve_video_audio(slug, project, stage_number, video)
+        project, _stage, video = _resolve_stage_video(state, slug, stage_number, video_id)
+        audit = _resolve_video_audio(state, slug, project, stage_number, video)
         if isinstance(audit, JSONResponse):
             return audit
         audio, sr = beep_detect.load_audio(audit.audio_path)
@@ -13152,21 +14227,14 @@ def create_app(
         payload["tone_band"] = list(beep_tone.tone_band(audio, sr, around))
         return JSONResponse(payload)
 
-    def _beep_snippet_key(slug: str, video_id: str, suffix: str) -> str | None:
-        """Build the desktop-pushed snippet key, or None with no match/storage bound."""
-        match_id = current_match_id.get()
-        if state.storage is None or not match_id:
-            return None
-        return f"matches/{match_id}/shooters/{slug}/beep_review/{video_id}{suffix}"
-
     @app.get(
         "/api/shooters/{slug}/stages/{stage_number}/videos/{video_id}/beep-snippet/audio",
         response_model=None,
     )
     def beep_snippet_audio(slug: str, stage_number: int, video_id: str) -> FileResponse | RedirectResponse:
         """Serve the pushed beep review audio snippet for a mirror video."""
-        _resolve_stage_video(slug, stage_number, video_id)  # 404 on unknown video
-        key = _beep_snippet_key(slug, video_id, ".m4a")
+        _resolve_stage_video(state, slug, stage_number, video_id)  # 404 on unknown video
+        key = _beep_snippet_key(state, slug, video_id, ".m4a")
         if key is None or not state.storage.exists(key):
             raise HTTPException(status_code=404, detail="beep_snippet_not_available")
         local = state.shooter_root(slug) / "beep_review" / f"{video_id}.m4a"
@@ -13175,8 +14243,8 @@ def create_app(
     @app.get("/api/shooters/{slug}/stages/{stage_number}/videos/{video_id}/beep-snippet/peaks")
     def beep_snippet_peaks(slug: str, stage_number: int, video_id: str) -> JSONResponse:
         """Return the pushed peaks JSON for a mirror video's beep snippet."""
-        _resolve_stage_video(slug, stage_number, video_id)  # 404 on unknown video
-        key = _beep_snippet_key(slug, video_id, ".peaks.json")
+        _resolve_stage_video(state, slug, stage_number, video_id)  # 404 on unknown video
+        key = _beep_snippet_key(state, slug, video_id, ".peaks.json")
         if key is None or not state.storage.exists(key):
             raise HTTPException(status_code=404, detail="beep_snippet_not_available")
         # Read through to storage every request - desktop rewrites this object
@@ -13266,7 +14334,7 @@ def create_app(
         # without ``_version`` keeps last-writer-wins. Hosted skips the lock:
         # it is process-global (every tenant would queue behind it) and the
         # state_docs version loaded here already optimistic-locks the save.
-        with _audit_rmw():
+        with _audit_rmw(state):
             stored, version = state.load_audit(slug, stage_number)
             if client_revision is not None and client_revision != audit_revision(stored):
                 raise AuditRevisionConflictError(f"stage {stage_number} audit changed since it was loaded")
@@ -13285,17 +14353,6 @@ def create_app(
                 _set_needs_attention(payload, flagged=False)
             state.save_audit(slug, stage_number, payload, version=version)
         return JSONResponse({**payload, REVISION_FIELD: audit_revision(payload)})
-
-    def _set_needs_attention(payload: dict[str, Any], *, flagged: bool, note: str | None = None) -> None:
-        """Write the triage flag as a full object so sync LWW always has a
-        timestamp to compare - clears keep the object with flagged=False."""
-        now = _now_iso()
-        payload["needs_attention"] = {
-            "flagged": flagged,
-            "flagged_at": now if flagged else None,
-            "note": (note or None) if flagged else None,
-            "updated_at": now,
-        }
 
     @app.post("/api/shooters/{slug}/stages/{stage_number}/audit/accept")
     def accept_stage_audit(slug: str, stage_number: int) -> JSONResponse:
@@ -13316,7 +14373,7 @@ def create_app(
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         conflict_excs = _state_conflict_excs()
         for _attempt in range(3):
-            with _audit_rmw():
+            with _audit_rmw(state):
                 payload, version = state.load_audit(slug, stage_number)
                 if payload is None:
                     raise HTTPException(status_code=409, detail="nothing_to_accept")
@@ -13346,7 +14403,7 @@ def create_app(
                     state.save_audit(slug, stage_number, payload, version=version)
                 except conflict_excs:
                     continue
-                return JSONResponse(_build_triage_response().model_dump())
+                return JSONResponse(_build_triage_response(state).model_dump())
         raise HTTPException(status_code=409, detail="version_conflict")
 
     @app.post("/api/shooters/{slug}/stages/{stage_number}/attention")
@@ -13365,7 +14422,7 @@ def create_app(
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         conflict_excs = _state_conflict_excs()
         for _attempt in range(3):
-            with _audit_rmw():
+            with _audit_rmw(state):
                 payload, version = state.load_audit(slug, stage_number)
                 if payload is None:
                     # Seed the same beep-confirm stub shape as the beep-review
@@ -13380,7 +14437,7 @@ def create_app(
                     state.save_audit(slug, stage_number, payload, version=version)
                 except conflict_excs:
                     continue
-                return JSONResponse(_build_triage_response().model_dump())
+                return JSONResponse(_build_triage_response(state).model_dump())
         raise HTTPException(status_code=409, detail="version_conflict")
 
     @app.get("/api/shooters/{slug}/stages/{stage_number}/anomalies")
@@ -13423,390 +14480,6 @@ def create_app(
     # coach fields.
     # ----------------------------------------------------------------------
 
-    def _video_clip_anchor(
-        slug: str,
-        project: MatchProject,
-        stage_number: int,
-        video: StageVideo,
-    ) -> tuple[float | None, str]:
-        """Where the beep falls inside the clip the SPA will receive
-        from ``/api/videos/stream`` for ``video``.
-
-        When a per-video trimmed MP4 exists, the beep sits at
-        ``min(beep_time, pre_buffer)`` inside it (the trim starts at
-        ``max(0, beep_time - pre_buffer)``). When there's no trim we
-        fall through to the source clip and the beep is at ``beep_time``
-        directly. No ffmpeg / no audio extraction; in hosted mode this
-        pays only a cheap ``storage.exists`` HEAD so the reported
-        position agrees with the clip ``stream_video`` will actually
-        serve (which pulls the worker-cut trim on demand).
-
-        Uses the SAME fallback-aware resolver as ``stream_video``'s
-        ``pull_trimmed_video`` (``resolve_trim_for_read``) so a
-        pre-take-spec legacy-keyed trim counts here too, and reads the
-        pre_buffer from the resolved trim's params sidecar - otherwise
-        the anchor stays source-based while the served clip is
-        trim-based and every marker lands offset by beep - pre_buffer.
-
-        Returns (anchor, kind) where kind names the clip the SPA should
-        stream: "web" (the trim's streaming rendition, hosted only),
-        "trim" or "source". The web rendition shares the trim's anchor.
-        """
-        anchor, kind, trim_path = _video_trim_anchor(slug, project, stage_number, video)
-        if kind == "trim" and trim_path is not None and _presigned_hosted(video):
-            # The streaming rendition (#1031) covers the trim's window, so
-            # the anchor carries over; only the file the SPA names changes.
-            # Hosted-only by design: local playback streams the full-res
-            # trim from disk and has no reason to downgrade.
-            if audio_helpers.web_trim_available(project, trim_path):
-                return (anchor, "web")
-        return (anchor, kind)
-
-    def _presigned_hosted(video: StageVideo) -> bool:
-        """Whether ``stream_video`` would answer for ``video`` with a
-        presigned redirect (the same test it applies itself)."""
-        storage = state.storage
-        return storage is not None and storage.supports_presigned_get and not video.path.is_absolute()
-
-    def _video_trim_anchor(
-        slug: str,
-        project: MatchProject,
-        stage_number: int,
-        video: StageVideo,
-    ) -> tuple[float | None, str, Path | None]:
-        """``_video_clip_anchor`` before the web-rendition step: the
-        anchor, ``"trim"`` or ``"source"``, and the new-keyed trim path
-        the kind was measured against (``None`` for source)."""
-        # One roster lookup (a state_docs SELECT hosted) for both resolvers.
-        root = state.shooter_root(slug)
-        resolved = audio_helpers.resolve_trim_for_read(root, stage_number, video, project=project)
-        if resolved is not None:
-            if video.beep_time is None:
-                return (None, "trim", resolved)
-            pre_buffer = audio_helpers.trim_pre_buffer_seconds_for(
-                resolved, default=project.trim_pre_buffer_seconds
-            )
-            return (min(video.beep_time, pre_buffer), "trim", resolved)
-        # Hosted: the trim may exist only in the storage cache (worker-
-        # cut, not yet mirrored); stream_video pulls it on demand, so the
-        # anchor must agree. New-keyed only by design: a storage-only
-        # legacy-keyed trim is missed by BOTH the pull and this check, so
-        # bytes and anchor degrade consistently to the source path, and
-        # the next worker trim job re-cuts under the new key.
-        trimmed = audio_helpers.trimmed_video_path(root, stage_number, video, project=project)
-        if audio_helpers.trim_available(project, trimmed):
-            if video.beep_time is None:
-                return (None, "trim", trimmed)
-            return (min(video.beep_time, project.trim_pre_buffer_seconds), "trim", trimmed)
-        if _is_mirror() and audio_helpers.web_trim_available(project, trimmed):
-            # Web-only mirror (spec 2026-09-27 v1.1): the rendition + the
-            # pushed params stand in for the trim; _video_clip_anchor then
-            # promotes the kind to "web". Only the small params sidecar is
-            # fetched here, never the rendition itself.
-            audio_helpers.refresh_trim_params(project, trimmed)
-            if video.beep_time is None:
-                return (None, "trim", trimmed)
-            pre_buffer = audio_helpers.trim_pre_buffer_seconds_for(
-                trimmed, default=project.trim_pre_buffer_seconds
-            )
-            return (min(video.beep_time, pre_buffer), "trim", trimmed)
-        return (video.beep_time, "source", None)
-
-    def _video_beep_in_clip(
-        slug: str,
-        project: MatchProject,
-        stage_number: int,
-        video: StageVideo,
-    ) -> float | None:
-        return _video_clip_anchor(slug, project, stage_number, video)[0]
-
-    def _coach_video_entries(slug: str, project: MatchProject, stg: Any) -> list[dict[str, Any]]:
-        """Per-video metadata the SPA needs to seek every synced camera.
-
-        Order mirrors VideoPanel's expectation: primary first, then
-        secondaries by ``added_at``. ``beep_in_clip`` is the position
-        inside the clip the SPA will actually be playing -- the source
-        clip when no trim exists, the trimmed clip when one does.
-        """
-        primary = stg.primary()
-        secondaries = sorted(
-            (v for v in stg.videos if v.role == "secondary"),
-            key=lambda v: v.added_at,
-        )
-        ordered_videos = ([primary] if primary is not None else []) + secondaries
-        labels = camera_labels(ordered_videos)
-        root = state.shooter_root(slug)
-        # One listing of this shooter's trimmed/ prefix per request, as in
-        # ``get_project`` (#1209).
-        _storage = state.storage
-        presence = (
-            StoragePresence(_storage) if _storage is not None and _storage.supports_presigned_get else None
-        )
-        out: list[dict[str, Any]] = []
-        for v, label in zip(ordered_videos, labels, strict=True):
-            anchor, kind = _video_clip_anchor(slug, project, stg.stage_number, v)
-            out.append(
-                {
-                    "path": str(v.path),
-                    "role": v.role,
-                    "beep_in_clip": anchor,
-                    "kind": kind,
-                    "label": label,
-                    # The mount and role are what a camera choice keys on
-                    # across stages (``camera_select``): a video id names a
-                    # file on one stage, not a camera.
-                    "mount": v.camera_mount,
-                    # The same pins ``get_project`` gives the Audit players:
-                    # None for both when no trim exists (``kind == "source"``).
-                    "trim_version": _trim_version_for(root, stg.stage_number, v, project),
-                    "scrub_version": (
-                        _hosted_scrub_version_for(presence, root, stg.stage_number, v, project)
-                        if presence is not None and not v.path.is_absolute()
-                        else _scrub_version_for(root, stg.stage_number, v, project)
-                    ),
-                    # Frame steps and the pill's frame number (spec 2026-10-17):
-                    # null when the trim is not on this disk; the SPA uses 30.
-                    "fps": _frame_rate_for(root, stg.stage_number, v, project),
-                }
-            )
-        return out
-
-    def _coach_events(payload: dict[str, Any], stage_number: int) -> list[StageEvent]:
-        """The doc's stage events; a corrupt list is a 422, not a 500."""
-        try:
-            return events_module.events_from_doc(payload)
-        except ValueError as exc:
-            raise HTTPException(
-                status_code=422, detail=f"stage {stage_number}: invalid events: {exc}"
-            ) from exc
-
-    def _classify_doc(payload: dict[str, Any], stage_number: int, cfg: CoachAutoClassifyConfig) -> None:
-        """Run the auto-classifier over the doc's shots against the doc's own
-        *confirmed* stage events (spec 2026-10-08), in place.
-
-        The one classification path for every audit-doc writer: a writer
-        that classified region-blind would flip a reload region's gap back
-        to ``movement`` on the next unrelated save. Only confirmed regions
-        (``source == "manual"``) hint the classifier: an auto proposal never
-        touches a stored class, whatever save happens next. A corrupt events list is
-        the coach GET's 422, raised before the caller saves anything --
-        also on a doc with no shots to classify (#1330): the coach routes
-        build their response from the saved doc, and a corrupt list that
-        slipped past here was a 422 *after* the save went through.
-        """
-        stage_events = events_module.confirmed(_coach_events(payload, stage_number))
-        shots = payload.get("shots")
-        if not isinstance(shots, list):
-            return
-        coach_module.classify_intervals_in_dicts(
-            [s for s in shots if isinstance(s, dict)],
-            cfg,
-            events=stage_events,
-        )
-
-    def _coach_capacity(slug: str, project: MatchProject) -> int | None:
-        """The magazine capacity of the shooter's division, or None.
-
-        ``competitor_division`` reads the shooter directory only for a
-        scoreboard-pinned project with no stored division; resolving it
-        otherwise would cost a roster lookup (a state_docs SELECT hosted)
-        for nothing.
-        """
-        needs_dir = (
-            not project.competitor_division
-            and project.selected_competitor_id is not None
-            and bool(project.scoreboard_match_id)
-        )
-        project_dir = state.shooter_root(slug) if needs_dir else None
-        return events_module.capacity_for(competitor_division(project, project_dir))
-
-    def _load_audit_for_coach(
-        slug: str,
-        stage_number: int,
-    ) -> tuple[dict[str, Any], int, float | None, Any, MatchProject]:
-        """Shared loader: validates the stage, reads the audit doc,
-        returns (payload, version, primary_beep_in_clip, stage, project).
-        404 when no audit doc exists yet. The version rides back so a
-        coach mutation saves under the same optimistic lock."""
-        project = state.shooter_project(slug)
-        try:
-            stg = project.stage(stage_number)
-        except KeyError as exc:
-            raise HTTPException(status_code=404, detail=str(exc)) from exc
-        payload, version = state.load_audit(slug, stage_number)
-        if payload is None:
-            raise HTTPException(
-                status_code=404,
-                detail=f"no audit JSON yet for stage {stage_number}",
-            )
-        prim = stg.primary()
-        primary_beep_in_clip = (
-            _video_beep_in_clip(slug, project, stage_number, prim) if prim is not None else None
-        )
-        return payload, version, primary_beep_in_clip, stg, project
-
-    def _audit_rmw() -> AbstractContextManager[object]:
-        """The guard for a local audit read-modify-write (#1075).
-
-        A sync pull's audit merge holds ``state.audit_lock`` (spec
-        2026-09-27 s5); a writer that loads, edits and saves outside it
-        can lose the pulled change or have its own edit lost. Hosted
-        returns a no-op: the lock is process-global there, and the
-        ``state_docs`` version already optimistic-locks every save.
-        """
-        return state.audit_lock if state.audit_doc_target() is None else nullcontext()
-
-    def _coach_save(slug: str, stage_number: int, payload: dict[str, Any], version: int) -> int:
-        """Persist a coach-mutated audit doc under optimistic locking
-        (hosted) / atomically to disk (local). A lost race -> 409.
-
-        Returns the *new* version. Every caller then serves that version in
-        its response rather than the one it read (#844): the client uses it
-        as the ``expected_version`` on its next positional patch, so handing
-        back the pre-save version would make the guard value stale the
-        moment it arrived.
-        """
-        return state.save_audit(slug, stage_number, payload, version=version)
-
-    def _note_digest(text: str | None) -> dict[str, Any] | None:
-        """A note as an audit event records it: its length and a short hash,
-        never the text. Notes autosave after every pause and the journal
-        syncs, so the text itself would be copied once per pause."""
-        if text is None:
-            return None
-        return {"length": len(text), "sha256": hashlib.sha256(text.encode("utf-8")).hexdigest()[:12]}
-
-    def _stage_note(payload: dict[str, Any]) -> str | None:
-        """The doc's stage note, or None for a missing or non-string one
-        (audit docs are hand-editable JSON)."""
-        note = payload.get(coach_module.FIELD_STAGE_NOTE)
-        return note if isinstance(note, str) and note else None
-
-    def _build_coach_response(
-        slug: str,
-        payload: dict[str, Any],
-        primary_beep_in_clip: float | None,
-        stg: Any,
-        project: MatchProject,
-        cfg: CoachAutoClassifyConfig,
-        version: int,
-        *,
-        capacity: int | None,
-        stored_revision: str | None = None,
-    ) -> dict[str, Any]:
-        # ``capacity`` is the caller's ``_coach_capacity`` (a roster lookup
-        # for an older scoreboard-pinned project), computed once per request.
-        # ``stored_revision`` is the stored doc's ``_version`` when ``payload``
-        # carries in-memory changes that were not saved (a mirror's seed, a
-        # lost save race); otherwise ``payload`` is what is stored.
-        # Coach plays the same clip the audit screen serves -- typically
-        # the project-local trimmed MP4 -- so every "absolute" time must
-        # be in the served clip's coordinate system. Anchoring on
-        # ``primary_beep_in_clip`` keeps Coach working when the source
-        # SSD is unplugged. Falls back to 0.0 when the project hasn't
-        # set a beep yet (older / partial audits).
-        clip_anchor = primary_beep_in_clip if primary_beep_in_clip is not None else 0.0
-        raw_shots = payload.get("shots") or []
-        # A shot whose time is missing or unreadable (a string, NaN: a
-        # hand-edited doc) is left out of the view rather than 500ing every
-        # read of the stage (``events.shot_ms``).
-        ordered = sorted(
-            ((ms, s) for s in raw_shots if (ms := events_module.shot_ms(s)) is not None),
-            key=lambda pair: pair[0],
-        )
-        stage_events = _coach_events(payload, stg.stage_number)
-        # Every figure here reads confirmed regions only, as every output does
-        # (``events.confirmed``): ``stale``, per-shot ``moving`` and the
-        # summary Coach draws (its capacity warning included), so a figure
-        # never moves because Breakdown was opened and proposed something.
-        # The response's ``events`` keep the proposals for Breakdown's lanes.
-        confirmed_events = events_module.confirmed(stage_events)
-        coach_shots: list[dict[str, Any]] = []
-        prev_ms: float | None = None
-        for ms, s in ordered:
-            time_from_beep = ms / 1000.0
-            gap_s: float | None
-            if prev_ms is None:
-                gap_s = None
-                split = time_from_beep  # draw
-                overlap = False
-            else:
-                gap_s = (ms - prev_ms) / 1000.0
-                split = gap_s
-                # Confirmed regions only, as ``_classify_doc``: a proposal
-                # never makes a stored class stale.
-                overlap = coach_module.gap_overlaps_reload(prev_ms / 1000.0, time_from_beep, confirmed_events)
-            prev_ms = ms
-            stale = coach_module.is_classification_stale(s, gap_s=gap_s, config=cfg, reload_overlap=overlap)
-            reload_hint = coach_module.reload_hinted(gap_s, cfg)
-            coach_shots.append(
-                {
-                    "shot_number": int(s.get("shot_number", 0)),
-                    # #844: the stable id, so a client can address the by-id
-                    # PATCH instead of the positional one. ``null`` for a
-                    # shot whose id is missing or unusable (an int from a
-                    # hand-edited doc) -- the by-id route matches on a
-                    # string, so anything else would only ever 404, and the
-                    # client is meant to fall back to the positional route
-                    # plus ``expected_version`` for exactly these.
-                    "id": s["id"] if has_usable_id(s) else None,
-                    "ms_after_beep": int(ms),
-                    "time_from_beep": time_from_beep,
-                    # In the served clip's coordinate system: where the
-                    # SPA must seek the primary <video> for this shot.
-                    "time_absolute": clip_anchor + time_from_beep,
-                    "split": split,
-                    "interval_class": s.get("interval_class"),
-                    "interval_class_source": s.get("interval_class_source"),
-                    "improvement_flag": (
-                        False if current_share_request.get() else bool(s.get("improvement_flag", False))
-                    ),
-                    "coaching_note": (None if current_share_request.get() else s.get("coaching_note")),
-                    "stale": stale,
-                    "reload_hint": reload_hint,
-                }
-            )
-        for shot_out in coach_shots:
-            shot_out["moving"] = events_module.shot_is_moving(shot_out["time_from_beep"], confirmed_events)
-        summary = events_module.stage_event_summary(
-            [shot_out["time_from_beep"] for shot_out in coach_shots],
-            confirmed_events,
-            capacity,
-        )
-        return {
-            "stage_number": stg.stage_number,
-            "stage_name": stg.stage_name,
-            # Where the beep falls in the served primary clip. Used by
-            # the SPA's beep row + as the anchor for offsetting synced
-            # secondaries (each ``videos[i].beep_in_clip`` mirrors this
-            # field for that camera's served clip).
-            "beep_time": clip_anchor,
-            # The audit doc's version as of this response (#844) -- what a
-            # client sends as ``expected_version`` on the positional shot
-            # PATCH. Always 0 in local mode, where nothing locks a file, so
-            # the guard is hosted-only in practice.
-            "version": version,
-            "videos": _coach_video_entries(slug, project, stg),
-            # The camera the stage and Compare pages start on (a mount or
-            # role, ``camera_select``): a share link's own choice for this
-            # shooter when the link has one, else the shooter's saved one.
-            "compare_camera": (current_share_cameras.get() or {}).get(slug, project.compare_camera),
-            "shots": coach_shots,
-            # A region's ``note`` is private text, like ``coaching_note``: the
-            # share surface reaches this route (``_SHARE_PATH_RE``), so strip it.
-            "events": [
-                e.model_dump(exclude_none=True, exclude={"note"} if current_share_request.get() else None)
-                for e in stage_events
-            ],
-            "event_summary": summary.model_dump(),
-            # The stage note (#1376): private text, like ``coaching_note``,
-            # so a share read gets none.
-            "stage_note": None if current_share_request.get() else _stage_note(payload),
-            # The stored audit doc's content revision, what the events PUT
-            # compares against (the audit route's ``_version``).
-            REVISION_FIELD: stored_revision if stored_revision is not None else audit_revision(payload),
-        }
-
     @app.get("/api/shooters/{slug}/stages/{stage_number}/coach")
     def get_stage_coach(slug: str, stage_number: int, seed: bool = False) -> JSONResponse:
         """Return the per-shot coach view for a stage.
@@ -13836,14 +14509,14 @@ def create_app(
         audit_payload, _ = state.load_audit(slug, stage_number)
         if audit_payload is None:
             return JSONResponse(None)
-        with _audit_rmw():
-            payload, version, beep_in_clip, stg, project = _load_audit_for_coach(slug, stage_number)
+        with _audit_rmw(state):
+            payload, version, beep_in_clip, stg, project = _load_audit_for_coach(state, slug, stage_number)
             cfg = coach_module.auto_classify_config()
             # Taken before the seed and heal mutate ``payload``: a read that
             # does not persist them must still hand back the stored doc's
             # ``_version``, or the events PUT would 409 on every attempt.
             stored_revision = audit_revision(payload)
-            capacity = _coach_capacity(slug, project)
+            capacity = _coach_capacity(state, slug, project)
             share_read = current_share_request.get()
             # #775: heal legacy docs on read so consumers (Results, share view,
             # statistic_splits) always see a fully classified stage. Owners get
@@ -13894,7 +14567,7 @@ def create_app(
                         persist = True
             if persist:
                 try:
-                    version = _coach_save(slug, stage_number, payload, version)
+                    version = _coach_save(state, slug, stage_number, payload, version)
                     stored_revision = audit_revision(payload)
                 except _state_conflict_excs():
                     # A concurrent writer won the version race; serve the
@@ -13907,6 +14580,7 @@ def create_app(
             payload = view
         return JSONResponse(
             _build_coach_response(
+                state,
                 slug,
                 payload,
                 beep_in_clip,
@@ -13940,7 +14614,7 @@ def create_app(
                 status_code=422, detail={"code": "lane_overlap", "message": str(exc)}
             ) from exc
         cfg = coach_module.auto_classify_config()
-        with _audit_rmw():
+        with _audit_rmw(state):
             stored, version = state.load_audit(slug, stage_number)
             if stored is None:
                 raise HTTPException(status_code=404, detail=f"no audit JSON yet for stage {stage_number}")
@@ -13961,11 +14635,14 @@ def create_app(
             # the save returns; reloading both (and the project and stage
             # again, through ``_load_audit_for_coach``) only cost a hosted
             # ``state_docs`` round trip per save.
-            version = _coach_save(slug, stage_number, stored, version)
+            version = _coach_save(state, slug, stage_number, stored, version)
         prim = stg.primary()
-        beep_in_clip = _video_beep_in_clip(slug, project, stage_number, prim) if prim is not None else None
+        beep_in_clip = (
+            _video_beep_in_clip(state, slug, project, stage_number, prim) if prim is not None else None
+        )
         return JSONResponse(
             _build_coach_response(
+                state,
                 slug,
                 stored,
                 beep_in_clip,
@@ -13973,7 +14650,7 @@ def create_app(
                 project,
                 cfg,
                 version,
-                capacity=_coach_capacity(slug, project),
+                capacity=_coach_capacity(state, slug, project),
             )
         )
 
@@ -13991,7 +14668,7 @@ def create_app(
         except KeyError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         cfg = coach_module.auto_classify_config()
-        with _audit_rmw():
+        with _audit_rmw(state):
             stored, version = state.load_audit(slug, stage_number)
             if stored is None:
                 raise HTTPException(status_code=404, detail=f"no audit JSON yet for stage {stage_number}")
@@ -14013,11 +14690,14 @@ def create_app(
                     "payload": {"stage_note": _note_digest(text)},
                 }
             )
-            version = _coach_save(slug, stage_number, stored, version)
+            version = _coach_save(state, slug, stage_number, stored, version)
         prim = stg.primary()
-        beep_in_clip = _video_beep_in_clip(slug, project, stage_number, prim) if prim is not None else None
+        beep_in_clip = (
+            _video_beep_in_clip(state, slug, project, stage_number, prim) if prim is not None else None
+        )
         return JSONResponse(
             _build_coach_response(
+                state,
                 slug,
                 stored,
                 beep_in_clip,
@@ -14025,7 +14705,7 @@ def create_app(
                 project,
                 cfg,
                 version,
-                capacity=_coach_capacity(slug, project),
+                capacity=_coach_capacity(state, slug, project),
             )
         )
 
@@ -14035,8 +14715,8 @@ def create_app(
         every shot whose source is unset or ``"auto"``. Manual entries are
         preserved. Idempotent.
         """
-        with _audit_rmw():
-            payload, version, beep_in_clip, stg, project = _load_audit_for_coach(slug, stage_number)
+        with _audit_rmw(state):
+            payload, version, beep_in_clip, stg, project = _load_audit_for_coach(state, slug, stage_number)
             cfg = coach_module.auto_classify_config()
             shots = payload.get("shots") or []
             if not isinstance(shots, list):
@@ -14052,9 +14732,10 @@ def create_app(
                 }
             )
             payload["audit_events"] = events
-            version = _coach_save(slug, stage_number, payload, version)
+            version = _coach_save(state, slug, stage_number, payload, version)
         return JSONResponse(
             _build_coach_response(
+                state,
                 slug,
                 payload,
                 beep_in_clip,
@@ -14062,91 +14743,7 @@ def create_app(
                 project,
                 cfg,
                 version,
-                capacity=_coach_capacity(slug, project),
-            )
-        )
-
-    def _apply_shot_coach_patch(
-        slug: str,
-        stage_number: int,
-        body: CoachShotPatchRequest,
-        match_shot: Callable[[dict[str, Any]], bool],
-        describe: str,
-    ) -> JSONResponse:
-        """Shared body for the by-number and by-id coach PATCH routes."""
-        with _audit_rmw():
-            payload, version, beep_in_clip, stg, project = _load_audit_for_coach(slug, stage_number)
-            if body.expected_version is not None and body.expected_version != version:
-                raise HTTPException(status_code=409, detail="version_conflict")
-            cfg = coach_module.auto_classify_config()
-            shots = payload.get("shots") or []
-            if not isinstance(shots, list):
-                raise HTTPException(status_code=500, detail="audit shots is not a list")
-            target = next((s for s in shots if isinstance(s, dict) and match_shot(s)), None)
-            if target is None:
-                raise HTTPException(
-                    status_code=404,
-                    detail=f"{describe} not found in stage {stage_number}",
-                )
-            try:
-                coach_module.write_coach_fields(
-                    target,
-                    interval_class=body.interval_class,
-                    interval_class_source=body.interval_class_source,
-                    clear_class=body.clear_class,
-                    improvement_flag=body.improvement_flag,
-                    coaching_note=body.coaching_note,
-                    clear_note=body.clear_note,
-                )
-            except ValueError as exc:
-                raise HTTPException(status_code=400, detail=str(exc)) from exc
-
-            # #775: a ``clear_class: true`` patch drops the shot's class, which
-            # would re-open the partial-classification state the invariant
-            # rules out. Re-running the classifier heals it back to the rule's
-            # auto verdict. It also applies the rule to every other unset/auto
-            # entry (manual ones are kept), against confirmed regions only, so
-            # a note typed on Coach can move an auto class only where the
-            # stored one disagrees with the current rule (``stale``); an auto
-            # proposal never moves one.
-            _classify_doc(payload, stage_number, cfg)
-
-            events = list(payload.get("audit_events") or [])
-            events.append(
-                {
-                    "id": _new_event_id(),
-                    "ts": _now_iso(),
-                    "kind": "coach_patch",
-                    "payload": {
-                        "shot_id": target.get("id"),
-                        "shot_number": target.get("shot_number"),
-                        "fields": {
-                            **coach_module.read_coach_fields(target),
-                            **(
-                                {
-                                    coach_module.FIELD_COACHING_NOTE: _note_digest(
-                                        target[coach_module.FIELD_COACHING_NOTE]
-                                    )
-                                }
-                                if isinstance(target.get(coach_module.FIELD_COACHING_NOTE), str)
-                                else {}
-                            ),
-                        },
-                    },
-                }
-            )
-            payload["audit_events"] = events
-            version = _coach_save(slug, stage_number, payload, version)
-        return JSONResponse(
-            _build_coach_response(
-                slug,
-                payload,
-                beep_in_clip,
-                stg,
-                project,
-                cfg,
-                version,
-                capacity=_coach_capacity(slug, project),
+                capacity=_coach_capacity(state, slug, project),
             )
         )
 
@@ -14165,6 +14762,7 @@ def create_app(
         ``expected_version``.
         """
         return _apply_shot_coach_patch(
+            state,
             slug,
             stage_number,
             body,
@@ -14185,6 +14783,7 @@ def create_app(
         just write the document should use.
         """
         return _apply_shot_coach_patch(
+            state,
             slug,
             stage_number,
             body,
@@ -14200,7 +14799,7 @@ def create_app(
         Empty classes still appear in the response with count=0 so the
         UI can render an empty histogram without a special case.
         """
-        payload, _version, _beep_in_clip, stg, _project = _load_audit_for_coach(slug, stage_number)
+        payload, _version, _beep_in_clip, stg, _project = _load_audit_for_coach(state, slug, stage_number)
         cfg = coach_module.auto_classify_config()
         shots = payload.get("shots") or []
         if not isinstance(shots, list):
@@ -14256,19 +14855,6 @@ def create_app(
     # context, no stages, no jobs. Localhost-only convention applies; paths
     # are passed by the user via CLI / query string.
     # ----------------------------------------------------------------------
-
-    def _resolve_fixture_path(path: str) -> Path:
-        """Validate + resolve a fixture path the SPA passed in. Localhost
-        only -- we trust the user's machine but still refuse non-existent
-        files cleanly so the SPA can show a 404 message."""
-        target = Path(path).expanduser()
-        try:
-            resolved = target.resolve(strict=True)
-        except (FileNotFoundError, OSError) as exc:
-            raise HTTPException(status_code=404, detail=f"fixture not found: {target}") from exc
-        if not resolved.is_file():
-            raise HTTPException(status_code=400, detail=f"fixture is not a file: {resolved}")
-        return resolved
 
     @app.get("/api/fixture/audit")
     def get_fixture_audit(path: str = Query(...)) -> JSONResponse:
@@ -14416,86 +15002,6 @@ def create_app(
             content_disposition_type="inline",
         )
 
-    def _serve_proxy(base_root: Path, video: StageVideo) -> FileResponse | None:
-        """Return a FileResponse for the proxy object if it exists, else None.
-
-        Callers fall through to source resolution on None - proxy absent,
-        path not a raw/ key, or no storage configured.
-
-        Local cache is checked first - proxy objects are immutable per key (delete
-        cleanup removes them; a re-upload regenerates), and _mirror_from_storage uses
-        temp+atomic-rename so a present local file is always complete and never stale.
-        This avoids redundant R2 pulls on every HTTP Range request during video scrubbing.
-        """
-        from ..proxy import proxy_key_for
-
-        _raw_str = str(video.path)
-        _storage = state.storage
-        if not _raw_str.startswith("raw/") or _storage is None:
-            return None
-        _proxy_key = proxy_key_for(_raw_str)
-        _local_proxy = base_root / _proxy_key
-        if _local_proxy.exists():  # warm cache - no network at all
-            return FileResponse(
-                _local_proxy.resolve(),
-                media_type="video/mp4",
-                filename=_local_proxy.name,
-            )
-        if not _storage.exists(_proxy_key):
-            return None
-        # cold - mirror once, then serve
-        MatchProject._mirror_from_storage(_storage, _proxy_key, _local_proxy)
-        return FileResponse(
-            _local_proxy.resolve(),
-            media_type="video/mp4",
-            filename=_local_proxy.name,
-        )
-
-    def _hosted_web_redirect(
-        storage: Storage,
-        project: MatchProject,
-        root: Path,
-        stage: Any,
-        video: StageVideo,
-    ) -> RedirectResponse | None:
-        """Presigned redirect to the trim's streaming rendition (#1031) when
-        the object exists, else ``None`` so the caller falls back to the
-        trim and then the source: an explicit ``kind=web`` never 404s,
-        because a match synced before the rendition existed still has to
-        play."""
-        local_mp4 = audio_helpers.trimmed_video_path(root, stage.stage_number, video, project=project)
-        web_local = trim_module.web_trim_path(local_mp4)
-        web_key = audio_helpers._storage_trim_key(project, web_local)
-        if web_key is not None and storage.exists(web_key):
-            return serve_media(storage, web_key, web_local, content_type="video/mp4")
-        return None
-
-    def _hosted_scrub(
-        storage: Storage,
-        project: MatchProject,
-        root: Path,
-        stage: Any,
-        video: StageVideo,
-    ) -> RedirectResponse:
-        """``kind=scrub`` on hosted (#1209): the fresh rendition, else the
-        trim, else 404 -- never the source. Two ``stat`` calls, the cost of
-        the two ``exists`` the other kinds make."""
-        local_mp4 = audio_helpers.trimmed_video_path(root, stage.stage_number, video, project=project)
-        web_local = trim_module.web_trim_path(local_mp4)
-        trim_key = audio_helpers._storage_trim_key(project, local_mp4)
-        web_key = audio_helpers._storage_trim_key(project, web_local)
-        if trim_key is None or web_key is None:
-            raise HTTPException(status_code=404, detail="trimmed clip not built yet")
-        trim_obj = storage.stat(trim_key)
-        web_obj = storage.stat(web_key)
-        if audio_helpers.fresh_rendition(
-            _storage_fact(trim_obj), _storage_fact(web_obj), trim_required=not _is_mirror()
-        ):
-            return serve_media(storage, web_key, web_local, content_type="video/mp4")
-        if trim_obj is not None:
-            return serve_media(storage, trim_key, local_mp4, content_type="video/mp4")
-        raise HTTPException(status_code=404, detail="trimmed clip not built yet")
-
     @app.get("/api/shooters/{slug}/videos/stream", response_model=None)
     def stream_video(
         slug: str,
@@ -14573,7 +15079,7 @@ def create_app(
                 return serve_media(storage, proxy_key, root / proxy_key, content_type="video/mp4")
             else:
                 # local mode: try cached proxy on disk; fall through to source on miss
-                _resp = _serve_proxy(root, video)
+                _resp = _serve_proxy(state, root, video)
                 if _resp is not None:
                     return _resp
                 # kind=proxy + local + no proxy - serve source below
@@ -15122,7 +15628,7 @@ def create_app(
                 # trim, which chains detection. Queuing a beep detection here
                 # raced the confirmed beep and could leave it unreviewed.
                 if current_match_origin.get() != "desktop":
-                    await _maybe_chain_trim(slug, project.stage(req.stage_number), new_primary)
+                    await _maybe_chain_trim(state, slug, project.stage(req.stage_number), new_primary)
             else:
                 background.add_task(_auto_queue_beep_if_needed, slug, project, req.stage_number, new_primary)
 
@@ -15343,7 +15849,7 @@ def create_app(
                 await state.recent_projects.record_open(
                     target, name, kind=entry.kind or "match", match_id=entry.match_id
                 )
-                return _register_response(target, name, entry.match_id)
+                return _register_response(state, target, name, entry.match_id)
             # Hosted never binds by path: ``path`` is only a key into the
             # caller's own picker rows. Scaffolding or loading a folder the
             # caller names would read and write the shared container's disk.
@@ -15379,7 +15885,7 @@ def create_app(
             )
         except OSError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
-        return _register_response(target.resolve(), recorded, match_id)
+        return _register_response(state, target.resolve(), recorded, match_id)
 
     @app.post("/api/match/create-manual", dependencies=[Depends(require_feature(Feature.create_match))])
     async def create_match_manual(req: CreateMatchManualRequest) -> HealthResponse:
@@ -15479,7 +15985,7 @@ def create_app(
             recorded, match_id = await _register_match_at(state, target, fallback_name=req.name)
         except OSError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
-        return _register_response(target.resolve(), recorded, match_id)
+        return _register_response(state, target.resolve(), recorded, match_id)
 
     @app.post(
         "/api/match/create-from-scoreboard", dependencies=[Depends(require_feature(Feature.create_match))]
@@ -15614,127 +16120,11 @@ def create_app(
             recorded, match_id = await _register_match_at(state, target, fallback_name=req.name)
         except OSError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
-        return _register_response(target.resolve(), recorded, match_id)
+        return _register_response(state, target.resolve(), recorded, match_id)
 
     # ----------------------------------------------------------------------
     # Shooters management (#324)
     # ----------------------------------------------------------------------
-
-    def _resolve_match_context() -> tuple[Path, match_model.Match]:
-        """Return ``(match_root, match)`` for the bound project.
-
-        Raises 409 ``not_a_match`` for legacy single-shooter layouts (the
-        shooter-listing / merge / compare endpoints are match-only).
-        """
-        match_root = state.match_root
-        return match_root, state.match()
-
-    def _classify_shooter(
-        shooter_root: Path,
-        match: match_model.Match,
-        presence: StoragePresence | None,
-        book: shooter_book_module.BookSnapshot = shooter_book_module.EMPTY_BOOK,
-    ) -> ShooterListEntry:
-        """Build a list entry for a single shooter directory.
-
-        ``presence`` is the request's storage index (#1180), or ``None`` on
-        a share request: the ``stages_missing_trim`` count only gates the
-        Rebuild button, which the anonymous share shell never renders, so a
-        share request reports 0 and makes no storage calls at all.
-        """
-        # ``shooter_root.name`` is the slug; the accessor loads the project
-        # doc from Postgres (hosted) or disk (local) + binds storage.
-        legacy = state.shooter_project(shooter_root.name)
-        # ``audited`` requires the operator to have hit Save & next on
-        # the stage (see :func:`stage_audit_status`). Set-up-but-not-
-        # touched stages used to count here; they no longer do.
-        # One pass: derive both the per-stage status list and the audited
-        # count from a single ``stage_statuses`` walk rather than also
-        # calling ``audited_count`` (which repeats the same audit-dir read).
-        stage_status_map = legacy.stage_statuses(
-            shooter_root, audit_docs=state.load_audit_docs(shooter_root.name)
-        )
-        stages_audited = sum(1 for st in stage_status_map.values() if st == StageStatus.audited)
-        # A stage counts once however many of its angles are uncached --
-        # the field is a stage count, and the CTA it drives rebuilds the
-        # whole stage in one click.
-        stages_missing_trim = (
-            0
-            if presence is None
-            else sum(
-                1 for s in legacy.stages if _audit_trim_targets(legacy, shooter_root, s, presence=presence)[0]
-            )
-        )
-        # Camera grouping: ``(make, model, mount)`` -> [(role, count, stages)].
-        groups: dict[tuple[str | None, str | None, str | None], dict[str, Any]] = {}
-        total_videos = 0
-        for stage in legacy.stages:
-            for video in stage.videos:
-                if video.role == "ignored":
-                    continue
-                key = (video.camera_make, video.camera_model, video.camera_mount)
-                g = groups.setdefault(
-                    key,
-                    {
-                        "role": video.role,
-                        "video_count": 0,
-                        "stages": set(),
-                    },
-                )
-                # Primary wins over secondary if any video on this camera is
-                # primary on any stage (shooters tend to keep camera roles
-                # consistent across stages).
-                if video.role == "primary":
-                    g["role"] = "primary"
-                g["video_count"] += 1
-                g["stages"].add(stage.stage_number)
-                total_videos += 1
-        # Attached-but-unassigned footage counts too. A hosted upload that
-        # was attached without stage coverage (or any video the operator
-        # dropped before assigning it to a stage) lives in
-        # ``unassigned_videos``, disjoint from ``stages[].videos`` (see
-        # ``MatchProject.move_video``). Without this the overview reported
-        # "NO FOOTAGE YET" for a shooter that already had N videos attached.
-        # These carry no camera metadata yet, so they only bump the total,
-        # not the per-camera ``groups`` breakdown.
-        for video in legacy.unassigned_videos:
-            if video.role == "ignored":
-                continue
-            total_videos += 1
-        cameras = [
-            ShooterCameraInfo(
-                group_key=f"{k[0] or ''}|{k[1] or ''}|{k[2] or ''}",
-                make=k[0],
-                model=k[1],
-                mount=k[2],
-                role=g["role"],
-                video_count=g["video_count"],
-                stage_numbers=sorted(g["stages"]),
-            )
-            for k, g in groups.items()
-        ]
-        return ShooterListEntry(
-            slug=shooter_root.name,
-            name=legacy.competitor_name or shooter_root.name,
-            selected_shooter_id=legacy.selected_shooter_id,
-            selected_competitor_id=legacy.selected_competitor_id,
-            stages_audited=stages_audited,
-            # Denominator must match the numerator's source: stages_audited
-            # is counted over the shooter's OWN project (legacy.stages), so
-            # the total has to be len(legacy.stages) too. Using
-            # len(match.stages) breaks the ratio when the match-level stage
-            # list wasn't populated (e.g. stages arrived via a per-shooter
-            # scoreboard import, not match creation) -- that produced a "0
-            # stages" card next to a 12-stage match.
-            stages_total=len(legacy.stages),
-            video_count=total_videos,
-            cameras=cameras,
-            stages_missing_trim=stages_missing_trim,
-            identity=effective_identity(legacy, book),
-            stage_statuses=[
-                StageStatusEntry(stage_number=n, status=st) for n, st in sorted(stage_status_map.items())
-            ],
-        )
 
     # ----------------------------------------------------------------------
     # Match merge (#332) -- consolidate N legacy single-shooter projects
@@ -15742,33 +16132,6 @@ def create_app(
     # match_model.plan_merge + execute_merge that the `splitsmith match
     # merge` CLI uses.
     # ----------------------------------------------------------------------
-
-    def _plan_response_from_model(plan: match_model.MergePlan) -> MergePlanResponse:
-        return MergePlanResponse(
-            output_root=str(plan.output_root),
-            name=plan.name,
-            scoreboard_match_id=plan.scoreboard_match_id,
-            scoreboard_content_type=plan.scoreboard_content_type,
-            match_date=plan.match_date.isoformat() if plan.match_date else None,
-            stages=[
-                MergePlanStage(
-                    stage_number=s.stage_number,
-                    stage_name=s.stage_name,
-                    expected_rounds=(s.stage_rounds.expected if s.stage_rounds is not None else None),
-                    placeholder=s.placeholder,
-                )
-                for s in plan.stages
-            ],
-            shooter_moves=[
-                MergePlanShooterMove(
-                    source_root=str(mv.source_root),
-                    slug=mv.slug,
-                    destination_root=str(mv.destination_root),
-                    competitor_name=mv.competitor_name,
-                )
-                for mv in plan.shooter_moves
-            ],
-        )
 
     @app.post("/api/match/merge/plan", response_model=MergePlanResponse)
     def merge_plan(req: MergePlanRequest) -> MergePlanResponse:
@@ -15844,23 +16207,23 @@ def create_app(
             recorded, match_id = await _register_match_at(state, output, fallback_name=match.name)
         except OSError as exc:
             raise HTTPException(status_code=500, detail=str(exc)) from exc
-        return _register_response(output.resolve(), recorded, match_id)
+        return _register_response(state, output.resolve(), recorded, match_id)
 
     @app.get("/api/match/shooters", response_model=ShooterListResponse)
     def list_match_shooters() -> ShooterListResponse:
         """List every shooter in the currently-bound match with coverage."""
-        match_root, match = _resolve_match_context()
+        match_root, match = _resolve_match_context(state)
         # One storage index for the whole request (#1180): the raw-upload
         # listing is shared by every shooter, the trim listing is per
         # shooter. A share request gets none: its viewer never sees the
         # count the index exists to compute.
         presence = None if current_share_request.get() else StoragePresence(state.storage)
-        book = _roster_book()
+        book = _roster_book(state)
         entries: list[ShooterListEntry] = []
         for slug in match.shooters:
             shooter_root = match_model.Match.shooter_root(match_root, slug)
             try:
-                entries.append(_classify_shooter(shooter_root, match, presence, book))
+                entries.append(_classify_shooter(state, shooter_root, match, presence, book))
             except Exception as exc:  # noqa: BLE001
                 logger.warning("Skipping shooter %s: %s", slug, exc)
                 continue
@@ -15872,124 +16235,20 @@ def create_app(
             capabilities=_serialized_capabilities(),
         )
 
-    def _build_triage_response() -> TriageResponse:
-        """Assemble the cross-shooter, cross-stage triage grid (slice 4).
-
-        Enumerates shooters exactly as :func:`list_match_shooters` does,
-        then per shooter bulk-loads audit docs once via
-        ``state.load_audit_docs`` (hosted: one query; local: ``None``,
-        falling back to per-stage ``state.load_audit`` below) and derives
-        statuses via the same ``stage_statuses`` walk used by the project
-        GET. Per non-placeholder stage, the anomaly computation mirrors
-        :func:`get_stage_anomalies` exactly: same beep-time fallback, same
-        ``audit_shots_to_engine_shots`` + ``report.detect_anomalies_structured``
-        call. Both the accept and attention endpoints return this so the
-        SPA never has to re-fetch after a write (the confirm-returns-
-        fresh-list contract from slice 3). ``beep_low_confidence_threshold``
-        is resolved from the first loadable shooter's project override
-        exactly the way ``get_hitl_queue`` resolves it (#823) - the gate
-        is global to the match, not per-shooter.
-        """
-        match_root, match = _resolve_match_context()
-        # The whole match in one query (#1181): every shooter's project doc
-        # and audit docs, instead of two queries per shooter.
-        bundle = state.match_bundle(match)
-        cells: list[TriageCell] = []
-        docs: list[dict | None] = []
-        threshold: float | None = None
-        for slug in match.shooters:
-            shooter_root = match_model.Match.shooter_root(match_root, slug)
-            legacy = bundle.projects.get(slug)
-            if legacy is None:
-                continue
-            if threshold is None:
-                resolved = automation_settings.resolve_automation(project_override=legacy.automation)
-                threshold = resolved.settings.beep_low_confidence_threshold
-            name = legacy.competitor_name or slug
-            audit_docs = bundle.audit_docs(slug)
-            status_map = legacy.stage_statuses(shooter_root, audit_docs=audit_docs)
-            for stg in legacy.stages:
-                if stg.placeholder:
-                    continue
-                prim = stg.primary()
-                beep = prim.beep_time if prim is not None and prim.beep_time is not None else 0.0
-                doc = (audit_docs or {}).get(stg.stage_number)
-                if doc is None and audit_docs is None:
-                    doc, _ = state.load_audit(slug, stg.stage_number)
-                docs.append(doc)
-                anomalies: list[dict] = []
-                engine_shots: list[Shot] = []
-                if doc is not None:
-                    engine_shots = audit_shots_to_engine_shots(doc, beep_time_in_source=beep)
-                    anomalies = [
-                        a.model_dump()
-                        for a in report.detect_anomalies_structured(engine_shots, beep, stg.time_seconds)
-                    ]
-                figures = (
-                    stage_figures(
-                        engine_shots,
-                        regions=events_module.confirmed_from_doc(
-                            doc, log_context=f"stage {stg.stage_number}"
-                        ),
-                    )
-                    if doc is not None
-                    else None
-                )
-                confs = [v.beep_confidence for v in stg.videos if v.beep_confidence is not None]
-                na_raw = doc.get("needs_attention") if isinstance(doc, dict) else None
-                needs_attention: TriageAttentionOut | None = None
-                if isinstance(na_raw, dict):
-                    try:
-                        needs_attention = TriageAttentionOut(**na_raw)
-                    except ValidationError:
-                        needs_attention = None
-                tones = [
-                    o for o in (tone_flag_ms(v) for v in stg.videos if v.role != "ignored") if o is not None
-                ]
-                cells.append(
-                    TriageCell(
-                        slug=slug,
-                        shooter_name=name,
-                        stage_number=stg.stage_number,
-                        stage_name=stg.stage_name,
-                        status=str(status_map[stg.stage_number]),
-                        beep_confidence=min(confs) if confs else None,
-                        anomalies=anomalies,
-                        needs_attention=needs_attention,
-                        video_count=len([v for v in stg.videos if v.role != "ignored"]),
-                        beep_time=prim.beep_time if prim is not None else None,
-                        beep_reviewed=bool(prim.beep_reviewed) if prim is not None else False,
-                        shot_count=len(engine_shots),
-                        draw=figures.draw if figures is not None else None,
-                        avg_split=figures.avg_split if figures is not None else None,
-                        time_seconds=float(stg.time_seconds),
-                        beep_tone_offset_ms=max(tones, key=abs) if tones else None,
-                    )
-                )
-        cells.sort(key=lambda c: (c.stage_number, c.shooter_name.lower()))
-        if threshold is None:
-            threshold = automation_settings.resolve_automation().settings.beep_low_confidence_threshold
-        return TriageResponse(
-            cells=cells,
-            flagged_count=_count_flagged(docs),
-            beep_low_confidence_threshold=threshold,
-            beep_tone_flag_ms=beep_tone_module.beep_tone_config().flag_ms,
-        )
-
     @app.get("/api/match/triage", response_model=TriageResponse)
     def get_match_triage() -> TriageResponse:
         """Cross-shooter, cross-stage triage grid for the mobile audit-
         triage surface (slice 4). Placeholder stages are excluded; skipped
         stages are included with status ``skipped`` (the SPA collapses
         them client-side)."""
-        return _build_triage_response()
+        return _build_triage_response(state)
 
     @app.get("/api/match/triage/summary", response_model=TriageSummaryResponse)
     def get_match_triage_summary() -> TriageSummaryResponse:
         """Just the flagged count, without the anomaly computation or
         status walk that :func:`_build_triage_response` does (#823) - a
         cheap poll target for the mobile triage surface's badge."""
-        _, match = _resolve_match_context()
+        _, match = _resolve_match_context(state)
         bundle = state.match_bundle(match)
         docs: list[dict | None] = []
         for slug in match.shooters:
@@ -16016,7 +16275,7 @@ def create_app(
         opaque random ids (``s_<hex>``) so URLs / disk paths don't leak
         competitor names.
         """
-        match_root, match = _resolve_match_context()
+        match_root, match = _resolve_match_context(state)
         if not req.name.strip():
             raise HTTPException(status_code=400, detail="name is required")
         slug = match_model.mint_shooter_slug(set(match.shooters))
@@ -16110,7 +16369,7 @@ def create_app(
         Returns name-based ``proposals`` for the operator to confirm via the
         reconcile endpoint; this route never auto-applies a shooter link.
         """
-        match_root, match = _resolve_match_context()
+        match_root, match = _resolve_match_context(state)
         with _resolve_scoreboard_client(match_root) as client:
             try:
                 match_data = client.get_match(req.content_type, req.match_id)
@@ -16172,7 +16431,7 @@ def create_app(
         link is still persisted); the operator can refresh later. Local names
         are left untouched -- reconcile binds identity, it doesn't rename.
         """
-        _resolve_match_context()
+        _resolve_match_context(state)
         for link in req.links:
             legacy = state.shooter_project(link.slug)
             shooter_root = state.shooter_root(link.slug)
@@ -16215,7 +16474,7 @@ def create_app(
         shooter's project + audit ``state_docs`` so no orphaned rows are
         left behind.
         """
-        match_root, match = _resolve_match_context()
+        match_root, match = _resolve_match_context(state)
         if slug not in match.shooters:
             raise HTTPException(status_code=404, detail="shooter not found")
         shooter_root = match_model.Match.shooter_root(match_root, slug)
@@ -16252,7 +16511,7 @@ def create_app(
           moved video lands as ``secondary`` and ``demoted_to_secondary=True``
           is set on the result.
         """
-        match_root, match = _resolve_match_context()
+        match_root, match = _resolve_match_context(state)
         if req.source_slug == req.target_slug:
             raise HTTPException(status_code=400, detail="source and target shooter must differ")
         for slug in (req.source_slug, req.target_slug):
@@ -16290,7 +16549,7 @@ def create_app(
         # Both shooters' audit docs are read, merged and rewritten: hold the
         # audit lock across the whole move so a sync pull cannot land in
         # between (#1075).
-        with _audit_rmw():
+        with _audit_rmw(state):
             outcome = shooter_move_module.move_shooter(
                 source_project=source_project,
                 source_root=source_root,
@@ -16348,7 +16607,7 @@ def create_app(
         re-queued: the underlying ``ensure_video_audit_trim`` is
         idempotent, but skipping early avoids the queue churn.
         """
-        match_root, match = _resolve_match_context()
+        match_root, match = _resolve_match_context(state)
         if slug not in match.shooters:
             raise HTTPException(status_code=404, detail="shooter not found")
         shooter_root = match_model.Match.shooter_root(match_root, slug)
@@ -16413,14 +16672,14 @@ def create_app(
         scalars. Shooters with no trim still appear so the SPA can render
         empty tiles instead of silently dropping the slot.
         """
-        match_root, match = _resolve_match_context()
+        match_root, match = _resolve_match_context(state)
         try:
             stage_def = match.stage(stage_number)
         except KeyError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
 
         records: list[CompareShooterRecord] = []
-        book = _roster_book()
+        book = _roster_book(state)
         for slug in match.shooters:
             shooter_root = match_model.Match.shooter_root(match_root, slug)
             try:
@@ -16520,7 +16779,7 @@ def create_app(
         unresolvable camera selector, and the no-trims-at-all case all
         400 rather than producing a grid of black tiles.
         """
-        match_root, match = _resolve_match_context()
+        match_root, match = _resolve_match_context(state)
         if not req.stage_numbers:
             raise HTTPException(status_code=400, detail="stage_numbers cannot be empty")
         try:
@@ -16602,7 +16861,7 @@ def create_app(
         ran in another container. ``filename`` is confined to the match's
         ``exports/`` dir, so ``..`` traversal is a 400.
         """
-        match_root, _match = _resolve_match_context()
+        match_root, _match = _resolve_match_context(state)
         exports_dir = (match_root / "exports").resolve()
         target = (exports_dir / filename).resolve()
         try:
@@ -16645,7 +16904,7 @@ def create_app(
         + serve_media); local mode serves it from disk under the shooter's
         exports/ or trimmed/ dir.
         """
-        match_root, match = _resolve_match_context()
+        match_root, match = _resolve_match_context(state)
         if slug not in match.shooters:
             raise HTTPException(status_code=404, detail="shooter not found")
         shooter_root = match_model.Match.shooter_root(match_root, slug)
@@ -16694,7 +16953,7 @@ def create_app(
                     )
                 else:
                     # local mode: try cached proxy, fall through to source on miss
-                    _resp = _serve_proxy(shooter_root, video)
+                    _resp = _serve_proxy(state, shooter_root, video)
                     if _resp is not None:
                         return _resp
                     # kind=proxy + local + no proxy - fall through to source
@@ -16790,7 +17049,7 @@ def create_app(
         Secondary items never gate anything - they exist so a wrong
         secondary auto-beep has a review surface at all.
         """
-        match_root, match = _resolve_match_context()
+        match_root, match = _resolve_match_context(state)
         # The whole match in one query (#1181); the threshold below and the
         # per-shooter loop both read from it.
         bundle = state.match_bundle(match)
@@ -16940,7 +17199,7 @@ def create_app(
         was shared, a low-confidence primary confirmed here stayed
         trimmed with no shots until someone opened Audit and pressed Run.
         """
-        match_root, match = _resolve_match_context()
+        match_root, match = _resolve_match_context(state)
         if req.slug not in match.shooters:
             raise HTTPException(status_code=404, detail="shooter not found")
         shooter_root = match_model.Match.shooter_root(match_root, req.slug)
@@ -16968,7 +17227,7 @@ def create_app(
             )
         target_video.beep_reviewed = True
         proj.save(shooter_root)
-        await _after_beep_reviewed(req.slug, req.stage_number, target_video)
+        await _after_beep_reviewed(state, req.slug, req.stage_number, target_video)
         return get_beep_queue()
 
     # ``/api/me/recent-projects/unbind`` was deleted in Tier 1
@@ -17014,127 +17273,12 @@ def create_app(
     # alias.
     # ----------------------------------------------------------------------
 
-    def _account_info(ref: user_config.HostedAccountRef | None) -> HostedAccountInfo | None:
-        if ref is None:
-            return None
-        return HostedAccountInfo(
-            id=ref.id,
-            email=ref.email,
-            display_name=ref.display_name,
-            device_name=ref.device_name,
-            linked_at=ref.linked_at,
-        )
-
-    async def _refresh_hosted_account(prefs: user_config.GlobalPrefs) -> user_config.GlobalPrefs:
-        """Best-effort upstream refresh of the cached account snapshot (#877).
-
-        The snapshot is written once, at device-link time, when
-        ``display_name`` is typically still NULL. Without this the chip
-        renders the operator's email address forever -- the one thing
-        the design says it will never publish -- and the only repair is
-        to unlink and re-link.
-
-        Best-effort in the strong sense: every failure path returns the
-        cached value with no error surfaced. The chip reads a missing
-        account as "not signed in" (#738), so a network blip must not be
-        able to produce that.
-
-        The TTL is consumed before the call, not after, so a dead host
-        costs one timeout per window rather than one per chip mount.
-
-        This is a WRITER, on the one route the SPA fires by itself, and
-        the ``await`` in the middle of it is long (up to
-        ``HOSTED_ACCOUNT_REFRESH_TIMEOUT_S``). The other writers -- the
-        settings PUT, the device-flow approval and the sign-out DELETE
-        -- can all land inside that window. So the object handed in is
-        used only to decide *what to ask*; the write re-reads from disk
-        immediately before saving, with no ``await`` in between, and
-        merges the two account fields alone. Saving the object we
-        loaded before the call would persist ``hosted_token`` too, and
-        a sign-out in the window would come back from the dead: a
-        revoked bearer and a live-looking chip (#877 review).
-        """
-        ref = prefs.hosted_account
-        if ref is None or not prefs.hosted_base_url or not prefs.hosted_token:
-            return prefs
-
-        now = time.monotonic()
-        last = state.hosted_account_refreshed_at
-        if last is not None and now - last < HOSTED_ACCOUNT_REFRESH_TTL_S:
-            return prefs
-        state.hosted_account_refreshed_at = now
-
-        client: HostedSyncClient | None = None
-        try:
-            # Local import: same lazy idiom sync_api.py itself uses to
-            # stay import-safe on a local-slim install (see the comment
-            # at its router registration, above). Inside the guard, so
-            # the "best-effort in the strong sense" claim covers it too.
-            from .sync_api import SyncWhoAmIResponse
-
-            client = _build_device_client(
-                prefs.hosted_base_url,
-                token=prefs.hosted_token,
-                timeout=HOSTED_ACCOUNT_REFRESH_TIMEOUT_S,
-            )
-            raw = await run_in_threadpool(client.whoami)
-            payload = SyncWhoAmIResponse.model_validate(raw)
-        except Exception:
-            # Deliberately broad, per the docstring's "best-effort in the
-            # strong sense": this route's entire job is to report the
-            # cached snapshot, so degrading to it beats a 500 for ANY
-            # failure here, not just the ones a narrower tuple happens to
-            # name. Concretely this has to catch, at minimum:
-            #   - SyncClientError / httpx.HTTPError -- non-2xx, including
-            #     401 (a revoked token is not grounds to unlink here: an
-            #     upstream outage would then sign every install out;
-            #     revocation surfaces on the next sync instead)
-            #   - httpx.InvalidURL -- a malformed hosted_base_url; it is
-            #     NOT an httpx.HTTPError subclass, and hosted_base_url is
-            #     an unvalidated str a hand-edited config.yaml can corrupt
-            #   - pydantic.ValidationError -- a 200 whose body isn't the
-            #     shape SyncWhoAmIResponse declares (not even a dict)
-            # A previous narrower tuple here caught the first bullet but
-            # missed the last two, turning either into an unhandled 500
-            # on a route whose whole job is to report a cached value
-            # (#877 review).
-            #
-            # Logged because the visible symptom of a NameError or an
-            # AttributeError in here is identical to a hosted outage --
-            # "the chip still shows my email address", i.e. the bug this
-            # code exists to fix -- and nothing else would record it.
-            logger.debug("hosted account refresh failed", exc_info=True)
-            return prefs
-        finally:
-            if client is not None:
-                client.close()
-
-        if payload.email == ref.email and payload.display_name == ref.display_name:
-            return prefs
-
-        # Re-read, then write, with no await in between: see the
-        # docstring. ``fresh`` is also what we return, so the response
-        # reports what is actually on disk rather than the snapshot this
-        # request started from.
-        fresh = user_config.load_global_prefs()
-        cur = fresh.hosted_account
-        if cur is None or cur.id != ref.id:
-            # Unlinked, or re-linked to another account, while we were
-            # away. The answer in hand describes a link that no longer
-            # exists; discard it rather than stamp it onto the new one.
-            return fresh
-        fresh.hosted_account = cur.model_copy(
-            update={"email": payload.email, "display_name": payload.display_name}
-        )
-        user_config.save_global_prefs(fresh)
-        return fresh
-
     @app.get("/api/settings/hosted-sync", response_model=HostedSyncSettings)
     async def get_hosted_sync_settings() -> HostedSyncSettings:
         if _hosted_mode_active():
             raise HTTPException(status_code=404, detail="not found")
         prefs = user_config.load_global_prefs()
-        prefs = await _refresh_hosted_account(prefs)
+        prefs = await _refresh_hosted_account(state, prefs)
         return HostedSyncSettings(
             base_url=prefs.hosted_base_url,
             token_set=bool(prefs.hosted_token),
@@ -17377,43 +17521,12 @@ def create_app(
     # compute. The desktop side lives in sync_api.py under /api/sync.
     # ----------------------------------------------------------------------
 
-    async def _desktop_presence() -> dict[str, Any]:
-        """Newest contact from any of the user's live desktop tokens.
-        ``around`` means seen within DESKTOP_AROUND_SECONDS."""
-        store = state.desktop_tokens
-        records = await store.list() if store is not None else []
-        seen = [r.last_used_at for r in records if r.revoked_at is None and r.last_used_at is not None]
-        live = any(r.revoked_at is None for r in records)
-        last = max(seen) if seen else None
-        if last is not None and last.tzinfo is None:
-            last = last.replace(tzinfo=UTC)
-        around = last is not None and (datetime.now(UTC) - last).total_seconds() <= DESKTOP_AROUND_SECONDS
-        return {
-            "linked": live,
-            "last_seen_at": last.isoformat() if last is not None else None,
-            "around": around,
-        }
-
-    def _command_store() -> Any:
-        if not _hosted_mode_active():
-            raise HTTPException(status_code=404, detail="not found")
-        store = state.desktop_commands
-        if store is None:
-            raise HTTPException(status_code=500, detail="desktop command store unavailable")
-        return store
-
-    def _command_match_id() -> str:
-        match_id = current_match_id.get()
-        if match_id is None:
-            raise HTTPException(status_code=404, detail="not found")
-        return match_id
-
     @app.get("/api/me/desktop-presence")
     async def get_desktop_presence(user: User = Depends(get_current_user)) -> JSONResponse:
         """Whether a linked desktop is around to pick up a request."""
         if not _hosted_mode_active():
             raise HTTPException(status_code=404, detail="not found")
-        return JSONResponse(await _desktop_presence())
+        return JSONResponse(await _desktop_presence(state))
 
     @app.post("/api/match/desktop-commands")
     async def request_desktop_command(req: DesktopCommandRequest) -> JSONResponse:
@@ -17431,7 +17544,7 @@ def create_app(
         """
         from ..db.desktop_commands import COMMAND_KINDS
 
-        store = _command_store()
+        store = _command_store(state)
         match_id = _command_match_id()
         row = await state.matches_store.get(match_id) if state.matches_store is not None else None
         if row is None:
@@ -17492,18 +17605,18 @@ def create_app(
     async def list_desktop_commands() -> JSONResponse:
         """This match's recent requests plus the desktop presence, so the
         phone's status poll is one request."""
-        store = _command_store()
+        store = _command_store(state)
         commands = await store.list_for_match(_command_match_id())
         return JSONResponse(
             {
                 "commands": [c.model_dump(mode="json") for c in commands],
-                "presence": await _desktop_presence(),
+                "presence": await _desktop_presence(state),
             }
         )
 
     @app.post("/api/match/desktop-commands/{command_id}/cancel")
     async def cancel_desktop_command(command_id: str) -> JSONResponse:
-        store = _command_store()
+        store = _command_store(state)
         command = await store.cancel(command_id, match_id=_command_match_id())
         if command is None:
             raise HTTPException(status_code=404, detail="not found")
@@ -17773,7 +17886,7 @@ def create_app(
             except KeyError as exc:
                 raise HTTPException(status_code=404, detail=str(exc)) from exc
             audit_json = state.materialize_audit(shooter_slug, stage_n)
-            audit_audio = _resolve_audit_audio(shooter_slug, project, stage_n)
+            audit_audio = _resolve_audit_audio(state, shooter_slug, project, stage_n)
             if isinstance(audit_audio, JSONResponse):
                 # Being made by a job (it reads, never cuts): try again shortly.
                 raise HTTPException(
@@ -18289,7 +18402,7 @@ def create_app(
             caller only has to supply ``mount`` + ``position``. Anchor
             fixture must already exist (run the primary promote first).
             """
-            project, stage, video = _resolve_stage_video(slug, stage_number, video_id)
+            project, stage, video = _resolve_stage_video(state, slug, stage_number, video_id)
             if video.role != "secondary":
                 raise HTTPException(
                     status_code=400,
@@ -18478,7 +18591,7 @@ def create_app(
             comes from ``body.anchor_slug`` (any fixture in
             ``tests/fixtures/``).
             """
-            project, _stage, video = _resolve_stage_video(slug, stage_number, video_id)
+            project, _stage, video = _resolve_stage_video(state, slug, stage_number, video_id)
             if video.beep_time is None:
                 raise HTTPException(
                     status_code=409,
@@ -18666,32 +18779,6 @@ def create_app(
     # ----------------------------------------------------------------------
     from .. import lab as _lab_for_dev  # local import to avoid module top
     from ..ensemble import load_calibration as _load_dev_calibration
-
-    def _venue_from_slug(slug: str) -> str | None:
-        # Slugs look like ``stage-shots-<venue>-2026-stage<n>-s<hash>...``.
-        # The venue is the chunk between ``stage-shots-`` and the year.
-        parts = slug.split("-")
-        if len(parts) >= 4 and parts[0] == "stage" and parts[1] == "shots":
-            venue_bits: list[str] = []
-            for tok in parts[2:]:
-                if tok.isdigit() and len(tok) == 4:
-                    break
-                venue_bits.append(tok)
-            return "-".join(venue_bits) if venue_bits else None
-        return None
-
-    def _stage_from_slug(slug: str) -> int | None:
-        for tok in slug.split("-"):
-            if tok.startswith("stage") and tok[5:].isdigit():
-                return int(tok[5:])
-        return None
-
-    def _shooter_from_slug(slug: str) -> str | None:
-        # Shooter is encoded as ``s<8-hex-chars>`` (the slug hash).
-        for tok in slug.split("-"):
-            if len(tok) == 9 and tok.startswith("s") and all(c in "0123456789abcdef" for c in tok[1:]):
-                return tok
-        return None
 
     @app.get("/api/dev/model", response_model=DeveloperModelInfo)
     def dev_model_info() -> DeveloperModelInfo:
