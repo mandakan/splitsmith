@@ -13,7 +13,7 @@ import pytest
 
 from splitsmith.account_profile import AccountProfile, JsonAccountProfileStore, brand_digest, load_brand
 from splitsmith.composition import BrandMark, MatchTitle
-from splitsmith.look_brand import brand_json
+from splitsmith.look.brand import brand_json
 from splitsmith.looks import LookBrand, load_look
 
 from .test_shooter_book import _png
@@ -72,7 +72,7 @@ def test_a_symlinked_or_missing_logo_is_left_out(tmp_path: Path) -> None:
 
 
 def test_the_card_context_carries_it_and_off_is_the_card_it_always_was() -> None:
-    from splitsmith.look_template import template_digest
+    from splitsmith.look.template import template_digest
     from splitsmith.looks import template_for
     from splitsmith.overlay.card import card_context
     from splitsmith.overlay.theme import theme_for

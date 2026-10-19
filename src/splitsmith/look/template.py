@@ -27,10 +27,10 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict
 
-from .identity import LOGO_MAX_BYTES, ResolvedIdentity
-from .looks import shared_dir
-from .overlay.layout import MIN_FONT_SIZE, Element, Group
-from .overlay.theme import OverlayTheme
+from ..identity import LOGO_MAX_BYTES, ResolvedIdentity
+from ..looks import shared_dir
+from ..overlay.layout import MIN_FONT_SIZE, Element, Group
+from ..overlay.theme import OverlayTheme
 
 logger = logging.getLogger(__name__)
 

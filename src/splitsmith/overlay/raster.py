@@ -67,10 +67,10 @@ from playwright.sync_api import Browser, Playwright, sync_playwright
 from playwright.sync_api import Error as PlaywrightError
 from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 
-from .. import look_sandbox
+from ..look import sandbox as look_sandbox
 
 if TYPE_CHECKING:
-    from ..look_template import TemplateContext
+    from ..look.template import TemplateContext
 
 logger = logging.getLogger(__name__)
 
@@ -181,7 +181,7 @@ class Rasterizer(Protocol):
     def png(self, html: str, *, width: int, height: int) -> bytes: ...
 
     def render_template(self, template: Path, *, context: TemplateContext, width: int, height: int) -> bytes:
-        """A Look template (``splitsmith.look_template``) to an alpha PNG:
+        """A Look template (``splitsmith.look.template``) to an alpha PNG:
         ``context`` is installed as ``window.splitsmith`` before the
         document's scripts run, the template is rendered at its poster
         (``poster()``, else the midpoint of ``duration()``, else 0)."""

@@ -524,7 +524,7 @@ def look_credits_for(name: str) -> str | None:
 def _write_thumbnail_card(comp: composition.Composition, request: MatchExportRequestData, out: Path) -> str:
     """Write the thumbnail card (the ``thumbnail`` logo spot) to ``out``:
     ``""`` when written, else why not, and the caller grabs the plain frame."""
-    from ..look_brand import brand_mark_json
+    from ..look.brand import brand_mark_json
     from ..looks import load_look
     from ..overlay.raster import ChromiumRasterizer, RasterizerUnavailableError
     from ..thumbnail_card import ThumbnailData, ThumbnailError, grab_frame, render_thumbnail_card

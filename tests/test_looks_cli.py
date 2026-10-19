@@ -173,7 +173,7 @@ def _plant_old_card(home: Path, name: str, monkeypatch: pytest.MonkeyPatch) -> N
     is no longer current, as a Look duplicated before a release holds."""
     import hashlib
 
-    from splitsmith import look_tools
+    from splitsmith.look import tools as look_tools
 
     old = b"<!doctype html><p>card.html as it shipped once</p>"
     (home / "looks" / name / "card.html").write_bytes(old)

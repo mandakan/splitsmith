@@ -34,7 +34,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
 from splitsmith import composition  # noqa: E402
 from splitsmith.composition import XFADE_FAMILIES  # noqa: E402
-from splitsmith.look_sting import sting_context  # noqa: E402
+from splitsmith.look.sting import sting_context  # noqa: E402
 from splitsmith.looks import (  # noqa: E402
     CARD_PREVIEW_SLOTS,
     OVERLAY_SLOT,

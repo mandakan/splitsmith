@@ -24,13 +24,13 @@ from fastapi import HTTPException
 from .. import account_profile as account_profile_module
 from .. import export_presets as export_presets_module
 from .. import export_runs, match_model, user_config
-from .. import look_store as look_store_module
 from .. import shooter_book as shooter_book_module
 from .. import whats_new as whats_new_module
 from ..access import AccessConfig
 from ..async_bridge import run_sync
 from ..auth import AuthBackend, LoopbackAuth
 from ..compute import ComputeBackend, LocalComputeBackend
+from ..look import store as look_store_module
 from ..match_project import MatchProject
 from ..match_registry import MatchRegistry
 from ..storage import Storage

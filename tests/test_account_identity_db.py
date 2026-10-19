@@ -23,7 +23,7 @@ from splitsmith.db import (
     sessionmaker,
 )
 from splitsmith.identity import ShooterIdentity
-from splitsmith.look_brand import BrandError
+from splitsmith.look.brand import BrandError
 from splitsmith.looks import LookBrand
 from splitsmith.shooter_book import BackfillCandidate, ShooterBookEntry, ShooterBookStore, save_identity
 from splitsmith.storage import FilesystemStorage

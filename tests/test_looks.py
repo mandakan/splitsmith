@@ -111,7 +111,7 @@ def test_a_manifest_must_carry_every_required_colour(user_dir: Path) -> None:
 
 
 def test_a_look_without_the_event_colours_loads_with_the_defaults(user_dir: Path) -> None:
-    from splitsmith.look_template import theme_tokens
+    from splitsmith.look.template import theme_tokens
     from splitsmith.overlay.theme import load_theme
 
     _write_look(user_dir, "club")
@@ -140,7 +140,7 @@ def test_a_look_can_choose_its_event_colours(user_dir: Path) -> None:
 def test_the_draw_colour_defaults_to_pink_and_a_look_may_choose_it(user_dir: Path) -> None:
     """Spec 2026-10-17: the draw band's colour is optional like the other
     event colours; its default is the app's --color-draw."""
-    from splitsmith.look_template import theme_tokens
+    from splitsmith.look.template import theme_tokens
     from splitsmith.overlay.theme import load_theme
 
     _write_look(user_dir, "club")

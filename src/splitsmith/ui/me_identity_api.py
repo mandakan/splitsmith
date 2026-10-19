@@ -19,7 +19,7 @@ from pydantic import BaseModel, Field, ValidationError
 
 from ..account_profile import AccountProfile, AccountProfileStore, EmptyAccountProfileStore
 from ..identity import CLUB_MAX_CHARS, LOGO_MAX_BYTES, ShooterIdentity
-from ..look_brand import BrandError
+from ..look.brand import BrandError
 from ..looks import BRAND_LINE_MAX, LookBrand
 from ..shooter_book import EmptyShooterBookStore, ShooterBookEntry, ShooterBookStore, is_set
 from .context import _hosted_mode_active

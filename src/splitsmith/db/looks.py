@@ -1,8 +1,8 @@
-"""Postgres-backed :class:`splitsmith.look_store.LookStore` (issue #1263).
+"""Postgres-backed :class:`splitsmith.look.store.LookStore` (issue #1263).
 
-Hosted-mode counterpart to :class:`splitsmith.look_store.FolderLookStore`:
+Hosted-mode counterpart to :class:`splitsmith.look.store.FolderLookStore`:
 one row per (user, name) in ``user_looks`` holding a
-:class:`~splitsmith.look_store.StoredLookBody`, never a template. A hosted
+:class:`~splitsmith.look.store.StoredLookBody`, never a template. A hosted
 Look may not take a shipped Look's name, and its base must be a shipped
 Look, so a shipped name always means the same thing on the server.
 
@@ -22,7 +22,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from ..async_bridge import run_sync
 from ..fonts import own_file
-from ..look_store import (
+from ..look.store import (
     LookStoreError,
     StoredLook,
     StoredLookBody,

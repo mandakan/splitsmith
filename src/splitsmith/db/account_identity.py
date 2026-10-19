@@ -30,7 +30,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from ..account_profile import AccountProfile
 from ..identity import _LOGO_RE, ShooterIdentity, logo_name, sniff_logo
-from ..look_brand import BrandError, check_brand_logo
+from ..look.brand import BrandError, check_brand_logo
 from ..looks import BRAND_FILE_RE, LookBrand
 from ..shooter_book import (
     BackfillCandidate,

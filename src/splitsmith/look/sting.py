@@ -2,7 +2,7 @@
 
 A transition of kind ``sting:<name>`` is the ``<name>`` variant of the
 Look's ``transition`` slot, rendered as an alpha clip (the frames path the
-animated cards use, :mod:`splitsmith.look_motion`) and composited over the
+animated cards use, :mod:`splitsmith.look.motion`) and composited over the
 boundary's own crossfade, a plain ``fade`` of the same length, before the
 segment's final ``format=yuv420p``. The template sees the transition
 (``data.transition``: kind, name, duration, the labels either side of the
@@ -25,9 +25,14 @@ import logging
 from collections.abc import Sequence
 from typing import Any
 
-from .composition import sting_name
-from .look_motion import motion_overlay_filters
-from .look_template import (
+from ..composition import sting_name
+from ..looks import Look, sting_template_for
+from ..overlay.card import CardMotion, card_scale
+from ..overlay.html import single_css
+from ..overlay.raster import Rasterizer, TemplateFrames
+from ..overlay.theme import OverlayTheme, theme_for
+from .motion import motion_overlay_filters
+from .template import (
     TemplateContext,
     engine_block,
     shared_url,
@@ -35,11 +40,6 @@ from .look_template import (
     template_digest,
     theme_tokens,
 )
-from .looks import Look, sting_template_for
-from .overlay.card import CardMotion, card_scale
-from .overlay.html import single_css
-from .overlay.raster import Rasterizer, TemplateFrames
-from .overlay.theme import OverlayTheme, theme_for
 
 logger = logging.getLogger(__name__)
 

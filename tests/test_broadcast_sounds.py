@@ -11,7 +11,8 @@ from typing import Any
 
 import pytest
 
-from splitsmith import audio_dress, look_tools, looks
+from splitsmith import audio_dress, looks
+from splitsmith.look import tools as look_tools
 from splitsmith.overlay.raster import ChromiumRasterizer, RasterizerUnavailableError
 
 _ROOT = looks.shipped_looks_dir() / "broadcast"

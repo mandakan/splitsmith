@@ -1,4 +1,4 @@
-"""``splitsmith.look_tools``: making, checking and previewing a Look (issue #1262).
+"""``splitsmith.look.tools``: making, checking and previewing a Look (issue #1262).
 
 The checks run against a fake prober here; ``test_look_tools_chromium.py``
 runs the real one.
@@ -13,7 +13,8 @@ from pathlib import Path
 import pytest
 from PIL import Image
 
-from splitsmith import look_tools, looks
+from splitsmith import looks
+from splitsmith.look import tools as look_tools
 from splitsmith.overlay.raster import TemplateProbe
 
 

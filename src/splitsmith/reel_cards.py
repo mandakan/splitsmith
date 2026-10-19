@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import logging
 
-from .look_template import TemplateContext, engine_block, shared_url, template_digest, theme_tokens
+from .look.template import TemplateContext, engine_block, shared_url, template_digest, theme_tokens
 from .looks import Look, highlight_template_for
 from .overlay.card import CardMotion, card_scale
 from .overlay.html import single_css

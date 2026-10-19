@@ -46,7 +46,7 @@ from ..grade import GradeError, grade_digest, resolve_grade
 from ..identity import ResolvedIdentity
 from ..logo_placeholder import placeholder_logo
 from ..logo_spots import DEFAULT_LOGO_SPOTS, LogoSpot
-from ..look_store import LookStoreError, StoredLookBody, TemplateEdit, draft_look
+from ..look.store import LookStoreError, StoredLookBody, TemplateEdit, draft_look
 from ..looks import Look, LookError, load_look, look_fingerprint
 from ..overlay.hud import OverlayStyleFields
 from ..overlay.raster import ChromiumRasterizer, Rasterizer, RasterizerUnavailableError

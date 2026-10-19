@@ -1979,7 +1979,7 @@ def _grid_thumbnail_data(
     the match name over the shooters' names; ``None`` with the spot off."""
     if "thumbnail" not in req.logo_spots:
         return None
-    from ..look_brand import brand_mark_json
+    from ..look.brand import brand_mark_json
     from ..thumbnail_card import ThumbnailData
 
     return ThumbnailData(

@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from splitsmith import look_motion
+from splitsmith.look import motion as look_motion
 from splitsmith.overlay.raster import TemplateFrames
 
 FFMPEG = shutil.which("ffmpeg")
@@ -103,7 +103,7 @@ def test_motion_overlay_filters_can_delay_the_clip_with_transparent_padding() ->
     """Issue #1244: a boundary's head edge of an animated card shows the
     backdrop alone for d/2, then the clip starts; the padding is
     transparent so the backdrop shows through. Unchanged without a delay."""
-    from splitsmith.look_motion import motion_overlay_filters
+    from splitsmith.look.motion import motion_overlay_filters
 
     plain, label = motion_overlay_filters(1, rate="30", seconds=2.0, source_label="0:v")
     assert plain[0] == (

@@ -1,4 +1,4 @@
-"""``splitsmith.look_store``: the stored Look body, the local folder store and
+"""``splitsmith.look.store``: the stored Look body, the local folder store and
 materializing stored Looks into a Looks folder (issue #1263)."""
 
 from __future__ import annotations
@@ -10,8 +10,9 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from splitsmith import look_store, looks
-from splitsmith.look_store import FolderLookStore, LookStore, LookStoreError, StoredLookBody
+from splitsmith import looks
+from splitsmith.look import store as look_store
+from splitsmith.look.store import FolderLookStore, LookStore, LookStoreError, StoredLookBody
 
 
 @pytest.fixture
@@ -80,7 +81,7 @@ def test_put_makes_a_look_the_renderers_load(user_dir: Path) -> None:
 
 
 def test_put_on_a_hand_made_look_keeps_its_templates_and_unknown_fields(user_dir: Path) -> None:
-    from splitsmith import look_tools
+    from splitsmith.look import tools as look_tools
 
     root = look_tools.new_look("mine", starter="still")
     raw = json.loads((root / "look.json").read_text(encoding="utf-8"))

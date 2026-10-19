@@ -2,7 +2,7 @@
 
 Exit codes: 0 done; 1 ``check`` found an error; 2 the request could not
 be carried out (a bad name, an existing Look, no Chromium, no such stage).
-The work is ``splitsmith.look_tools``; this file only prints.
+The work is ``splitsmith.look.tools``; this file only prints.
 """
 
 from __future__ import annotations
@@ -16,9 +16,9 @@ import typer
 from rich.console import Console
 from rich.table import Table
 
-from . import look_tools
 from .identity import ResolvedIdentity
-from .look_tools import CheckReport, LookToolError
+from .look import tools as look_tools
+from .look.tools import CheckReport, LookToolError
 from .looks import LookError, list_looks, load_look, user_looks_dir, variants_for
 from .overlay.raster import INSTALL_HINT, ChromiumRasterizer, RasterizerUnavailableError
 

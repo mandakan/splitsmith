@@ -9,7 +9,8 @@ import math
 
 import pytest
 
-from splitsmith import look_template, looks
+from splitsmith import looks
+from splitsmith.look import template as look_template
 from splitsmith.overlay.layout import MIN_FONT_SIZE, Anchor, ColorToken, Element, Emphasis, Flow, Group, Role
 from splitsmith.overlay.theme import load_theme
 
@@ -404,7 +405,7 @@ def test_shooter_json_drops_a_missing_or_oversized_logo_with_a_log_line(tmp_path
     from splitsmith.identity import ResolvedIdentity
 
     missing = ResolvedIdentity(label="A", accent="#ff2d2d", logo_path=tmp_path / "gone.png", club=None)
-    with caplog.at_level(logging.WARNING, logger="splitsmith.look_template"):
+    with caplog.at_level(logging.WARNING, logger="splitsmith.look.template"):
         assert look_template.shooter_json(missing)["logo"] is None
     assert "gone.png" in caplog.text
     big = tmp_path / "logo-0123456789ab.png"
@@ -505,7 +506,7 @@ def test_the_shipped_sting_shows_one_logo_only_when_the_shooters_share_it(tmp_pa
     from PIL import Image
 
     from splitsmith.identity import ResolvedIdentity
-    from splitsmith.look_sting import sting_context
+    from splitsmith.look.sting import sting_context
     from splitsmith.overlay.raster import ChromiumRasterizer, RasterizerUnavailableError
     from splitsmith.overlay.theme import theme_for
 
@@ -584,7 +585,7 @@ def test_the_shipped_sting_keeps_a_long_label_inside_the_band(tmp_path) -> None:
 
     from PIL import Image
 
-    from splitsmith.look_sting import sting_context
+    from splitsmith.look.sting import sting_context
     from splitsmith.overlay.raster import ChromiumRasterizer, RasterizerUnavailableError
     from splitsmith.overlay.theme import theme_for
 

@@ -45,8 +45,8 @@ from typing import Any
 from urllib.parse import unquote, urlsplit
 from urllib.request import url2pathname
 
-from .look_template import TemplateContext
-from .looks import shared_dir
+from ..looks import shared_dir
+from .template import TemplateContext
 
 ORIGIN = "https://look.invalid"
 HOST = "look.invalid"

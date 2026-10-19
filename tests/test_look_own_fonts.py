@@ -131,7 +131,7 @@ def test_the_clock_draws_the_own_mono_file(tmp_path: Path, monkeypatch: pytest.M
 def test_the_editors_draft_keeps_the_looks_own_files(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """The draft is a copy under a work dir; a font (or an image a template
     loads) left behind would preview in the fallback face."""
-    from splitsmith.look_store import body_from_manifest, draft_look
+    from splitsmith.look.store import body_from_manifest, draft_look
 
     look, display, _mono = _own(tmp_path, monkeypatch)
     (look.root / "badge.png").write_bytes(b"png")
@@ -143,7 +143,7 @@ def test_the_editors_draft_keeps_the_looks_own_files(tmp_path: Path, monkeypatch
 
 def test_a_hosted_look_cannot_name_an_own_file() -> None:
     from splitsmith.db.looks import _check_hosted
-    from splitsmith.look_store import LookStoreError, StoredLookBody
+    from splitsmith.look.store import LookStoreError, StoredLookBody
 
     body = StoredLookBody.model_validate(
         {
@@ -161,7 +161,7 @@ def test_an_own_face_draws_differently(tmp_path: Path, monkeypatch: pytest.Monke
     the default Antonio, so Chromium loaded the file, not a fallback."""
     from PIL import Image
 
-    from splitsmith import look_tools
+    from splitsmith.look import tools as look_tools
     from splitsmith.overlay.raster import ChromiumRasterizer, RasterizerUnavailableError
 
     def inked_width(look: looks.Look) -> int:
@@ -244,8 +244,8 @@ def test_an_animated_cards_digest_moves_with_the_own_font(
     """A motion clip is cached by ``template_digest``, which reads the font
     only through the engine stylesheet's ``@font-face`` URL; a new file is a
     new content name there, so a font swap never serves a stale clip."""
-    from splitsmith import look_tools
-    from splitsmith.look_template import template_digest
+    from splitsmith.look import tools as look_tools
+    from splitsmith.look.template import template_digest
 
     def digest(look: looks.Look) -> str:
         _case, ctx = look_tools.sample_contexts(look, "slate", "default", tmp_path)[0]

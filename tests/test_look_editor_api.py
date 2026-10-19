@@ -15,8 +15,9 @@ from pathlib import Path
 import pytest
 from PIL import Image
 
-from splitsmith import look_store, looks
+from splitsmith import looks
 from splitsmith import runtime as runtime_module
+from splitsmith.look import store as look_store
 from splitsmith.ui import export_preview_api, server
 from tests.hosted_helpers import login  # hosted_app / hosted_env are registered in conftest
 
@@ -193,7 +194,7 @@ def test_hosted_duplicate_makes_a_manifest_on_the_shipped_base(
 
 def test_draft_look_keeps_the_saved_looks_templates(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("SPLITSMITH_HOME", str(tmp_path / "home"))
-    from splitsmith import look_tools
+    from splitsmith.look import tools as look_tools
 
     look_tools.new_look("mine", starter="still")
     saved = looks.load_look("mine")
@@ -213,7 +214,7 @@ def test_outdated_names_an_old_unedited_copy_and_refresh_removes_it(
 ) -> None:
     import hashlib
 
-    from splitsmith import look_tools
+    from splitsmith.look import tools as look_tools
 
     look_tools.new_look("club", from_look="splitsmith", templates=True)
     root = looks.load_look("club").root

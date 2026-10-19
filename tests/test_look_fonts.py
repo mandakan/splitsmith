@@ -107,7 +107,7 @@ def test_the_single_shooter_clock_uses_the_theme_too() -> None:
 def test_a_stored_look_validates_its_fonts_strictly() -> None:
     from pydantic import ValidationError
 
-    from splitsmith.look_store import StoredLookBody
+    from splitsmith.look.store import StoredLookBody
 
     base = {"label": "Club", "colors": dict(looks.load_look("clean").manifest.colors)}
     assert StoredLookBody.model_validate({**base, "fonts": {"display": "oswald"}}).fonts == {
@@ -120,7 +120,7 @@ def test_a_stored_look_validates_its_fonts_strictly() -> None:
 
 
 def test_a_copy_of_the_shipped_look_carries_its_fonts_as_ids() -> None:
-    from splitsmith.look_store import body_from_manifest
+    from splitsmith.look.store import body_from_manifest
 
     body = body_from_manifest(looks.load_look("splitsmith").manifest)
     assert body.fonts == {"display": "antonio", "mono": "jetbrains-mono"}
@@ -151,7 +151,7 @@ def test_a_chosen_face_draws_differently(tmp_path: Path, monkeypatch: pytest.Mon
 
     from PIL import Image
 
-    from splitsmith import look_tools
+    from splitsmith.look import tools as look_tools
     from splitsmith.overlay.raster import ChromiumRasterizer, RasterizerUnavailableError
 
     def inked_width(look: looks.Look) -> int:

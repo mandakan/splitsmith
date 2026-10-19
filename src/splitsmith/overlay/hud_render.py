@@ -32,7 +32,7 @@ from ..audit_data import read_audit_data
 from ..config import StageEvent
 from ..events import confirmed_from_doc
 from ..hud_extras import HudExtras, declared_data, hud_extras_data
-from ..look_template import TemplateContext, engine_block, shared_url, template_digest, theme_tokens
+from ..look.template import TemplateContext, engine_block, shared_url, template_digest, theme_tokens
 from ..safe_area import safe_area
 from ..segment_cache import SegmentCache
 from ..stage_summary_data import load_stage_shots

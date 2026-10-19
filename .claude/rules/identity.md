@@ -3,7 +3,7 @@ paths:
   - "src/splitsmith/identity.py"
   - "src/splitsmith/shooter_book.py"
   - "src/splitsmith/account_profile.py"
-  - "src/splitsmith/look_brand.py"
+  - "src/splitsmith/look/brand.py"
   - "src/splitsmith/logo_spots.py"
   - "src/splitsmith/ui/identity_media.py"
   - "src/splitsmith/ui/shooter_roster.py"

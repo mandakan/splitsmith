@@ -212,7 +212,7 @@ def _card_page(
     text: str = "HFO Masters 2026",
     js: str = _PROBE_JS,
 ) -> Any:
-    from splitsmith.look_brand import brand_json
+    from splitsmith.look.brand import brand_json
     from splitsmith.looks import load_look, template_for
     from splitsmith.overlay.card import card_context
     from splitsmith.overlay.raster import ChromiumRasterizer, RasterizerUnavailableError

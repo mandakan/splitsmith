@@ -588,7 +588,7 @@ def test_every_shipped_style_is_still_outside_its_live_span(variant: str, landin
 
 def test_the_hud_digest_moves_when_a_confirmed_region_is_added() -> None:
     from splitsmith.config import StageEvent
-    from splitsmith.look_template import template_digest
+    from splitsmith.look.template import template_digest
     from splitsmith.overlay.hud import hud_options_data, hud_stage_data
     from splitsmith.overlay.hud_render import hud_context
     from splitsmith.overlay.theme import load_theme

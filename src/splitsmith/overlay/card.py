@@ -5,7 +5,7 @@ lower-third are all one operation: declare what the card says as
 ``overlay_layout`` groups (:func:`card_groups`), hand that declaration
 with the Look's palette and the engine stylesheet to the Look's template
 for the card's slot (:func:`card_context`, the contract in
-:mod:`splitsmith.look_template`), rasterize it in headless Chromium
+:mod:`splitsmith.look.template`), rasterize it in headless Chromium
 through an injected :class:`~splitsmith.overlay.raster.Rasterizer`, and
 composite the result over a backdrop. The shipped template draws the
 engine's own markup, so the default Look renders what ``overlay_html``
@@ -39,8 +39,8 @@ from PIL import Image
 
 from ..composition import MatchTitle, TitleCard
 from ..identity import ResolvedIdentity
-from ..look_brand import brand_json
-from ..look_template import (
+from ..look.brand import brand_json
+from ..look.template import (
     TemplateContext,
     engine_block,
     group_json,

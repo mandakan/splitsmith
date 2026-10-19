@@ -18,9 +18,9 @@ import hashlib
 import io
 from pathlib import Path
 
-from .composition import BrandMark
-from .identity import LOGO_MAX_BYTES, LOGO_MAX_SIDE
-from .looks import BRAND_DIR, BRAND_FILE_RE, Look
+from ..composition import BrandMark
+from ..identity import LOGO_MAX_BYTES, LOGO_MAX_SIDE
+from ..looks import BRAND_DIR, BRAND_FILE_RE, Look
 
 #: The card slots that draw the brand.
 BRAND_SLOTS = frozenset({"title_page", "closing"})

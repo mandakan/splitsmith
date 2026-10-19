@@ -17,11 +17,11 @@ from typing import TYPE_CHECKING
 
 from .. import account_profile as account_profile_module
 from .. import export_presets as export_presets_module
-from .. import look_store as look_store_module
 from .. import shooter_book as shooter_book_module
 from .. import user_config
 from .. import whats_new as whats_new_module
 from ..auth import User
+from ..look import store as look_store_module
 from ..storage import Storage
 
 if TYPE_CHECKING:
