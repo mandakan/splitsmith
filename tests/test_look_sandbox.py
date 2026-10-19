@@ -19,7 +19,7 @@ from PIL import Image
 
 from splitsmith import look_sandbox
 from splitsmith.look_template import TemplateContext, engine_block, shared_url
-from splitsmith.overlay_raster import (
+from splitsmith.overlay.raster import (
     ChromiumRasterizer,
     RasterizerUnavailableError,
     TemplateScriptError,

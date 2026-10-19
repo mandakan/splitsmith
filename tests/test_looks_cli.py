@@ -10,7 +10,7 @@ from typer.testing import CliRunner
 
 from splitsmith import looks_cli
 from splitsmith.cli import app
-from splitsmith.overlay_raster import TemplateProbe
+from splitsmith.overlay.raster import TemplateProbe
 from tests.test_look_tools import _Prober, _Raster
 
 runner = CliRunner()
@@ -61,7 +61,7 @@ def test_check_exits_0_when_clean_and_1_on_an_error(home: Path, monkeypatch: pyt
 
 
 def test_check_without_chromium_says_how_to_install_it(home: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    from splitsmith.overlay_raster import RasterizerUnavailableError
+    from splitsmith.overlay.raster import RasterizerUnavailableError
 
     @contextmanager
     def missing():  # type: ignore[no-untyped-def]
@@ -109,7 +109,7 @@ def test_new_prints_the_guide_as_a_link_that_exists_outside_the_repo(home: Path)
 def test_check_reports_a_missing_look_without_needing_a_browser(
     home: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from splitsmith.overlay_raster import RasterizerUnavailableError
+    from splitsmith.overlay.raster import RasterizerUnavailableError
 
     @contextmanager
     def missing():  # type: ignore[no-untyped-def]

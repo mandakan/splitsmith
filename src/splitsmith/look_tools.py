@@ -60,10 +60,10 @@ from .looks import (
 )
 from .match_project import StageScorecard
 from .match_summary import MatchSummary, MatchSummaryRow
-from .overlay_card import build_card_still, build_lower_third, card_context
-from .overlay_hud import HudOptions, declared_positions, hud_options_data, hud_stage_data, resolve_position
-from .overlay_raster import Rasterizer, TemplateFrames, TemplateProbe, TemplateScriptError
-from .overlay_theme import theme_for
+from .overlay.card import build_card_still, build_lower_third, card_context
+from .overlay.hud import HudOptions, declared_positions, hud_options_data, hud_stage_data, resolve_position
+from .overlay.raster import Rasterizer, TemplateFrames, TemplateProbe, TemplateScriptError
+from .overlay.theme import theme_for
 from .stage_summary_data import TileShot, TileStageData
 from .summary_template import match_summary_payload, stage_summary_payload, summary_context
 
@@ -721,7 +721,7 @@ def _hud_context(
     look: Look, template: Path, sample: HudSample, *, width: int = CHECK_WIDTH, height: int = CHECK_HEIGHT
 ) -> TemplateContext:
     # Deferred: overlay_hud_render builds on the renderer's encoder module.
-    from .overlay_hud_render import hud_context
+    from .overlay.hud_render import hud_context
 
     stage = hud_stage_data(sample.shots, beep_in_clip=HUD_SAMPLE_BEEP, events=sample.events)
     extras = hud_extras_data(

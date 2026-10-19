@@ -52,7 +52,7 @@ def test_the_draw_is_the_timer_draw_whatever_the_draw_region_says(with_movement:
 
 
 def test_the_upright_card_shows_the_timer_draw_too() -> None:
-    from splitsmith.overlay_summary_cell import summary_groups, upright_summary_scale
+    from splitsmith.overlay.summary_cell import summary_groups, upright_summary_scale
 
     tile = _draw_tile(with_movement=False)
     groups = summary_groups(

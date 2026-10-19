@@ -761,7 +761,7 @@ def _run_overlay_match_export(
 ) -> list[object]:
     """One match export with the overlay on; returns the per-stage export
     calls it made (empty when the overlay on disk was reused)."""
-    from splitsmith import overlay_render
+    from splitsmith.overlay import render as overlay_render
     from splitsmith.ui import exports as exports_mod
 
     calls: list[object] = []

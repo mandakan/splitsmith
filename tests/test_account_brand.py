@@ -74,8 +74,8 @@ def test_a_symlinked_or_missing_logo_is_left_out(tmp_path: Path) -> None:
 def test_the_card_context_carries_it_and_off_is_the_card_it_always_was() -> None:
     from splitsmith.look_template import template_digest
     from splitsmith.looks import template_for
-    from splitsmith.overlay_card import card_context
-    from splitsmith.overlay_theme import theme_for
+    from splitsmith.overlay.card import card_context
+    from splitsmith.overlay.theme import theme_for
 
     brand = _account_brand()
     theme = theme_for(LOOK)
@@ -204,8 +204,8 @@ def test_the_preview_key_moves_with_the_brand_only_when_drawn(
 def test_chromium_draws_the_account_brand_as_the_corner_mark_and_moves_nothing(tmp_path: Path) -> None:
     from PIL import Image, ImageChops
 
-    from splitsmith.overlay_card import build_card_still
-    from splitsmith.overlay_raster import ChromiumRasterizer, RasterizerUnavailableError
+    from splitsmith.overlay.card import build_card_still
+    from splitsmith.overlay.raster import ChromiumRasterizer, RasterizerUnavailableError
 
     logo = tmp_path / "brand-0123456789ab.png"
     Image.new("RGB", (200, 200), (0, 200, 255)).save(logo)

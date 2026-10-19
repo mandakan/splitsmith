@@ -1086,7 +1086,7 @@ def _redraw_overlay(
     per-stage export the app's match export runs for a stale overlay: the
     overlay only, its record written beside it. ``None`` when it drew, else
     why not (no record says which style; no project; the export failed)."""
-    from .overlay_hud import HudOptions
+    from .overlay.hud import HudOptions
     from .ui.exports import StageExportRequest
 
     if record is None or project is None or project_dir is None:

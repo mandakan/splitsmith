@@ -2,7 +2,7 @@
 
 import pytest
 
-from splitsmith.overlay_layout import (
+from splitsmith.overlay.layout import (
     Anchor,
     CellScale,
     Element,

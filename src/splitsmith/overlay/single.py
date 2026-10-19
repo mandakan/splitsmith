@@ -36,7 +36,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Protocol
 
-from .overlay_layout import Anchor, ColorToken, Element, Flow, Group, Role
+from .layout import Anchor, ColorToken, Element, Flow, Group, Role
 
 
 class _FrameLike(Protocol):
@@ -139,10 +139,10 @@ def run_groups(run: OverlayRun) -> tuple[Group, ...]:
 
     Two things, in the two places they have always been drawn:
 
-    - the **shot counter** at :attr:`~splitsmith.overlay_layout.Anchor.TOP_LEFT`,
+    - the **shot counter** at :attr:`~splitsmith.overlay.layout.Anchor.TOP_LEFT`,
       reading ``"7/32"``;
     - the **last split** at
-      :attr:`~splitsmith.overlay_layout.Anchor.BOTTOM_CENTER` in the
+      :attr:`~splitsmith.overlay.layout.Anchor.BOTTOM_CENTER` in the
       theme's split colour, absent only before the first shot. Shot 1's
       figure is the draw (its time from the beep), which is what
       ``build_frame_states`` puts in ``last_split`` and what today's
@@ -158,7 +158,7 @@ def run_groups(run: OverlayRun) -> tuple[Group, ...]:
     is why the two paths declare their own groups instead of sharing one
     function.
 
-    Both elements are :attr:`~splitsmith.overlay_layout.Role.LIVE_PRIMARY`,
+    Both elements are :attr:`~splitsmith.overlay.layout.Role.LIVE_PRIMARY`,
     which at 1x1 resolves to ``max(48, height // 14)`` -- byte-identical
     to what the PIL template computed for both, so the type size does not
     move.

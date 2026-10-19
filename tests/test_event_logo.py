@@ -16,8 +16,8 @@ from PIL import Image
 from splitsmith import match_model
 from splitsmith.composition import MatchTitle
 from splitsmith.identity import EVENT_LOGO_DIR, event_logo_name
-from splitsmith.overlay_card import card_context
-from splitsmith.overlay_theme import load_theme
+from splitsmith.overlay.card import card_context
+from splitsmith.overlay.theme import load_theme
 from splitsmith.sync.plan import build_push_plan
 from splitsmith.sync.state import SyncState, load_sync_state
 from splitsmith.ui import identity_media, sync_api
@@ -172,7 +172,7 @@ def test_a_shooter_never_falls_back_to_a_match_logo() -> None:
 
 def _render_title(tmp_path: Path, logo: Path | None, brand: dict | None = None) -> Image.Image:
     from splitsmith import looks
-    from splitsmith.overlay_raster import ChromiumRasterizer, RasterizerUnavailableError
+    from splitsmith.overlay.raster import ChromiumRasterizer, RasterizerUnavailableError
 
     theme = load_theme("splitsmith")
     look = looks.load_look("splitsmith")

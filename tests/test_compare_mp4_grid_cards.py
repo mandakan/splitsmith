@@ -5,7 +5,7 @@ segment of their own -- one still held for its duration, with the grid's
 own stream layout (video plus the mix and one silent track per shooter)
 so the cross-stage stitch stays a stream copy. A lower-third rides the
 stage's own filter graph and adds no time. The card still itself is
-``splitsmith.overlay_card``'s, sized to the *composed* grid (#691).
+``splitsmith.overlay.card``'s, sized to the *composed* grid (#691).
 """
 
 from __future__ import annotations
@@ -19,7 +19,7 @@ from PIL import Image
 
 from splitsmith.compare import mp4_grid
 from splitsmith.composition import MatchTitle, TitleCard
-from splitsmith.overlay_raster import RasterizerUnavailableError
+from splitsmith.overlay.raster import RasterizerUnavailableError
 from tests.conftest import fake_ffmpeg_probe
 from tests.test_compare_mp4_grid_hold import _command, _driver_shooters, _graph_of, _plan, _still_runner
 
@@ -61,7 +61,7 @@ class _FakeRasterizer:
         import json
         import math
 
-        from splitsmith.overlay_raster import TemplateFrames
+        from splitsmith.overlay.raster import TemplateFrames
 
         self.calls.append(json.dumps(context.data, ensure_ascii=False))
         self.frame_requests.append((template, context.model_dump(), width, height, fps, max_seconds))
@@ -784,7 +784,7 @@ def test_boundary_segment_lays_a_sting_clip_over_the_fade(tmp_path: Path) -> Non
 
 def test_a_card_whose_template_fails_is_named_in_the_degradations(tmp_path: Path) -> None:
     """A broken template used to drop its card with only a log line (#1265 review)."""
-    from splitsmith.overlay_raster import TemplateScriptError
+    from splitsmith.overlay.raster import TemplateScriptError
 
     class _Broken(_FakeRasterizer):
         def render_template_frames(self, template, *, context, width, height, fps, max_seconds):

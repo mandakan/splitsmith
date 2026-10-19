@@ -27,12 +27,12 @@ from typing import Any, Literal, get_args
 
 from pydantic import BaseModel, ConfigDict, field_validator
 
-from .config import StageEvent
-from .events import confirmed, draw_seconds, reload_figures, shot_is_moving
-from .hud_extras import HudExtras, declared_data, extras_identity
-from .looks import DEFAULT_VARIANT, LOOK_NAME_RE
-from .safe_area import SafeArea
-from .stage_summary_data import TileShot
+from ..config import StageEvent
+from ..events import confirmed, draw_seconds, reload_figures, shot_is_moving
+from ..hud_extras import HudExtras, declared_data, extras_identity
+from ..looks import DEFAULT_VARIANT, LOOK_NAME_RE
+from ..safe_area import SafeArea
+from ..stage_summary_data import TileShot
 
 HudPosition = Literal["top-left", "top-right", "bottom-left", "bottom-right"]
 HUD_POSITIONS: tuple[HudPosition, ...] = get_args(HudPosition)
@@ -152,8 +152,8 @@ def overlay_template_identity(look: str, variant: str) -> str | None:
         return None
     # Deferred: look_template imports the theme and layout modules, which
     # nothing else here needs.
-    from .look_template import shared_digest
-    from .looks import LookError, load_look, overlay_template_for
+    from ..look_template import shared_digest
+    from ..looks import LookError, load_look, overlay_template_for
 
     try:
         template = overlay_template_for(load_look(look), variant)
@@ -175,7 +175,7 @@ def overlay_data_identity(look: str, variant: str, extras: HudExtras | None) -> 
     such record is what it always was."""
     if variant == DEFAULT_VARIANT:
         return None
-    from .looks import LookError, load_look, overlay_template_for
+    from ..looks import LookError, load_look, overlay_template_for
 
     try:
         template = overlay_template_for(load_look(look), variant)
@@ -197,8 +197,8 @@ def overlay_theme_identity(look: str) -> str | None:
     hash) gives the same identity. ``None`` when the Look cannot be loaded,
     which no reuse check matches."""
     # Deferred, like the template's: the theme module loads the Look machinery.
-    from .look_template import theme_tokens
-    from .overlay_theme import OverlayThemeError, load_theme
+    from ..look_template import theme_tokens
+    from .theme import OverlayThemeError, load_theme
 
     try:
         theme = load_theme(look)

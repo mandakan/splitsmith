@@ -15,7 +15,7 @@ import pytest
 from PIL import Image
 
 from splitsmith import runtime as runtime_module
-from splitsmith.overlay_raster import RasterizerUnavailableError
+from splitsmith.overlay.raster import RasterizerUnavailableError
 from splitsmith.ui import export_preview_api
 
 from .ui._helpers import _seed_match_export_project
@@ -51,7 +51,7 @@ class _StubRasterizer:
         counted in ``frames_rendered`` as they are pulled."""
         import math
 
-        from splitsmith.overlay_raster import TemplateFrames
+        from splitsmith.overlay.raster import TemplateFrames
 
         pass
         self.frame_requests.append((template, context.model_dump(), width, height, fps, max_seconds))
@@ -71,7 +71,7 @@ class _StubRasterizer:
 
     def render_template_timeline(self, template, *, context, width: int, height: int, plan):  # noqa: ANN001
         """A HUD: one distinct frame per planned time (a fixed settle)."""
-        from splitsmith.overlay_raster import TemplateFrames
+        from splitsmith.overlay.raster import TemplateFrames
 
         times = list(plan(0.5))
         self.frame_requests.append((template, context.model_dump(), width, height))

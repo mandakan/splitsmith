@@ -49,20 +49,20 @@ from splitsmith.looks import (  # noqa: E402
 )
 from splitsmith.match_project import StageScorecard  # noqa: E402
 from splitsmith.match_summary import build_match_summary, build_match_summary_still  # noqa: E402
-from splitsmith.overlay_card import build_card_still, build_lower_third, card_scale  # noqa: E402
-from splitsmith.overlay_html import single_html  # noqa: E402
-from splitsmith.overlay_hud import (  # noqa: E402
+from splitsmith.overlay.card import build_card_still, build_lower_third, card_scale  # noqa: E402
+from splitsmith.overlay.html import single_html  # noqa: E402
+from splitsmith.overlay.hud import (  # noqa: E402
     HudOptions,
     declared_positions,
     hud_options_data,
     hud_stage_data,
     resolve_position,
 )
-from splitsmith.overlay_hud_render import hud_context  # noqa: E402
-from splitsmith.overlay_raster import ChromiumRasterizer, Rasterizer  # noqa: E402
-from splitsmith.overlay_single import OverlayRun, run_groups  # noqa: E402
-from splitsmith.overlay_summary_cell import build_summary_still  # noqa: E402
-from splitsmith.overlay_theme import OverlayTheme, theme_for  # noqa: E402
+from splitsmith.overlay.hud_render import hud_context  # noqa: E402
+from splitsmith.overlay.raster import ChromiumRasterizer, Rasterizer  # noqa: E402
+from splitsmith.overlay.single import OverlayRun, run_groups  # noqa: E402
+from splitsmith.overlay.summary_cell import build_summary_still  # noqa: E402
+from splitsmith.overlay.theme import OverlayTheme, theme_for  # noqa: E402
 from splitsmith.stage_summary_data import TileShot, TileStageData  # noqa: E402
 
 WIDTH = 480

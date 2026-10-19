@@ -33,11 +33,11 @@ from .look_template import (
     theme_tokens,
 )
 from .looks import DEFAULT_VARIANT, Look, SummarySlot, summary_template_for
-from .overlay_card import CardMotion, card_scale, note_card_degradation
-from .overlay_html import single_css
-from .overlay_hud import hud_safe_area_data, hud_stage_data
-from .overlay_raster import Rasterizer, TemplateFrames
-from .overlay_theme import OverlayTheme, theme_for
+from .overlay.card import CardMotion, card_scale, note_card_degradation
+from .overlay.html import single_css
+from .overlay.hud import hud_safe_area_data, hud_stage_data
+from .overlay.raster import Rasterizer, TemplateFrames
+from .overlay.theme import OverlayTheme, theme_for
 from .safe_area import safe_area
 from .stage_summary_data import TileStageData, stage_summary_figures
 

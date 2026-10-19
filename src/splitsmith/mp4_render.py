@@ -27,8 +27,8 @@ size and rate: a still (``-loop 1`` over a PNG plus ``anullsrc`` audio)
 for a card, a conforming re-encode for an intro / outro clip. A
 lower-third rides the stage's own filter graph instead (an ``overlay``
 with an alpha fade-out), so it adds no time. The cards themselves are
-composed by :mod:`splitsmith.overlay_card` through an injected
-:class:`~splitsmith.overlay_raster.Rasterizer`; no usable browser
+composed by :mod:`splitsmith.overlay.card` through an injected
+:class:`~splitsmith.overlay.raster.Rasterizer`; no usable browser
 degrades -- every card skipped, the degradation recorded on the
 result -- rather than failing the render, mirroring
 ``compare/mp4_grid``'s preflight.
@@ -88,7 +88,7 @@ from .look_motion import MotionClipError, motion_overlay_filters, write_motion_c
 from .look_sting import sting_motion, sting_overlay_filters
 from .looks import LookError, load_look, look_credits, sting_template_for
 from .match_summary import MatchSummary, build_match_summary_still
-from .overlay_card import (
+from .overlay.card import (
     LOWER_THIRD_FADE_SECONDS,
     Card,
     CardMotion,
@@ -101,9 +101,9 @@ from .overlay_card import (
     note_card_degradation,
     with_card_failures,
 )
-from .overlay_raster import ChromiumRasterizer, Rasterizer, RasterizerUnavailableError
-from .overlay_summary_cell import build_summary_still
-from .overlay_theme import ThemeName, load_theme, theme_for
+from .overlay.raster import ChromiumRasterizer, Rasterizer, RasterizerUnavailableError
+from .overlay.summary_cell import build_summary_still
+from .overlay.theme import ThemeName, load_theme, theme_for
 from .render_timeline import TimelineEntry, timeline_path, write_timeline
 from .runtime import runtime
 from .segment_cache import SegmentCache
@@ -186,7 +186,7 @@ def render_mp4(
 
     ``rasterizer`` (issue #973) composes the generated cards. Left
     ``None``, a composition that carries any card gets one
-    :class:`~splitsmith.overlay_raster.ChromiumRasterizer` for the whole
+    :class:`~splitsmith.overlay.raster.ChromiumRasterizer` for the whole
     render, preflighted before any encode so a missing browser is found
     in the first second rather than after every stage has rendered. A
     caller who passes their own owns its lifecycle. No usable browser

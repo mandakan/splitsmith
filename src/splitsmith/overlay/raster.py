@@ -67,10 +67,10 @@ from playwright.sync_api import Browser, Playwright, sync_playwright
 from playwright.sync_api import Error as PlaywrightError
 from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 
-from . import look_sandbox
+from .. import look_sandbox
 
 if TYPE_CHECKING:
-    from .look_template import TemplateContext
+    from ..look_template import TemplateContext
 
 logger = logging.getLogger(__name__)
 

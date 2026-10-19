@@ -1,7 +1,7 @@
 """Render stage-summary cells straight to PNG, without the video pipeline.
 
 The compare grid's summary is HTML and CSS rasterized by Chromium
-(:mod:`splitsmith.overlay_html`, :mod:`splitsmith.overlay_raster`), so a
+(:mod:`splitsmith.overlay.html`, :mod:`splitsmith.overlay.raster`), so a
 layout question does not need ffmpeg to answer. This writes candidate cell
 markup, screenshots it at real cell size, and composites it over a blurred,
 dimmed still -- about four seconds for twenty cells, against tens of minutes
@@ -37,7 +37,7 @@ sys.path.insert(0, str(REPO / "tests"))
 from PIL import Image, ImageFilter  # noqa: E402
 from playwright.sync_api import sync_playwright  # noqa: E402
 
-from splitsmith.overlay_theme import load_theme  # noqa: E402
+from splitsmith.overlay.theme import load_theme  # noqa: E402
 
 OUT = REPO / "build" / "mock-cells"
 FONTS = REPO / "src/splitsmith/data/fonts"

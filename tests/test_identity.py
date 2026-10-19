@@ -109,7 +109,7 @@ def test_resolve_uses_the_shooters_logo_and_never_another(tmp_path: Path) -> Non
 
 def test_a_look_without_a_series_falls_back_to_its_accent_token() -> None:
     from splitsmith.look_template import theme_tokens
-    from splitsmith.overlay_theme import load_theme
+    from splitsmith.overlay.theme import load_theme
 
     look = looks.load_look("clean")
     stripped = look.model_copy(update={"manifest": look.manifest.model_copy(update={"accent_series": []})})

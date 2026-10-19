@@ -17,7 +17,7 @@ from PIL import Image
 
 from splitsmith import looks
 from splitsmith import runtime as runtime_module
-from splitsmith.overlay_raster import TemplateProbe
+from splitsmith.overlay.raster import TemplateProbe
 from splitsmith.ui import export_preview_api, looks_api
 from tests.hosted_helpers import login  # hosted_app / hosted_env are registered in conftest
 
@@ -186,7 +186,7 @@ def test_hosted_has_no_template_editing(hosted_app) -> None:
 
 
 def test_page_error_messages_carry_the_template_line() -> None:
-    from splitsmith.overlay_raster import describe_page_error
+    from splitsmith.overlay.raster import describe_page_error
 
     class _Err:
         message = "Cannot read properties of undefined (reading 'forEach')"

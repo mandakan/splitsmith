@@ -190,7 +190,7 @@ def _overlay_on_disk(
     import shutil
 
     from splitsmith import looks
-    from splitsmith.overlay_hud import HudOptions, overlay_settings
+    from splitsmith.overlay.hud import HudOptions, overlay_settings
     from splitsmith.ui import exports as exports_mod
 
     copy = tmp_path / "shipped-looks"
@@ -263,7 +263,7 @@ def _redraws(monkeypatch: pytest.MonkeyPatch, *, fail: bool = False) -> list[Any
     """Stand in for the per-stage export a redraw runs: record its request and
     write the overlay's record as the real one would (with the extras and the
     audit as they stand), or raise."""
-    from splitsmith.overlay_hud import overlay_data_identity, overlay_settings
+    from splitsmith.overlay.hud import overlay_data_identity, overlay_settings
     from splitsmith.ui import exports as exports_mod
 
     calls: list[Any] = []

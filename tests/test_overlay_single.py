@@ -2,9 +2,9 @@
 
 import pytest
 
-from splitsmith.overlay_layout import Anchor, ColorToken, Role
-from splitsmith.overlay_render import build_frame_states
-from splitsmith.overlay_single import OverlayRun, build_overlay_runs, run_groups
+from splitsmith.overlay.layout import Anchor, ColorToken, Role
+from splitsmith.overlay.render import build_frame_states
+from splitsmith.overlay.single import OverlayRun, build_overlay_runs, run_groups
 
 
 def _states(shots: list[float], *, beep: float = 1.0, fps: float = 30.0, duration: float = 10.0):

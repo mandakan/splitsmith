@@ -8,7 +8,7 @@ from pathlib import Path
 
 from splitsmith.compare import mp4_grid
 from splitsmith.compare.free_cell import FreeCellContext, free_cell_groups
-from splitsmith.overlay_layout import ColorToken
+from splitsmith.overlay.layout import ColorToken
 from splitsmith.stage_summary_data import TileShot, TileStageData
 
 

@@ -15,9 +15,9 @@ import pytest
 from splitsmith.events import ReloadFigure
 from splitsmith.match_project import StageScorecard
 from splitsmith.match_summary import build_match_summary, build_match_summary_still, match_summary_html
-from splitsmith.overlay_layout import MIN_FONT_SIZE
-from splitsmith.overlay_summary_cell import build_summary_still
-from splitsmith.overlay_theme import load_theme
+from splitsmith.overlay.layout import MIN_FONT_SIZE
+from splitsmith.overlay.summary_cell import build_summary_still
+from splitsmith.overlay.theme import load_theme
 from splitsmith.safe_area import is_upright, safe_area
 from splitsmith.stage_summary_data import TileShot, TileStageData
 
@@ -203,7 +203,7 @@ _PROBE_JS = r"""() => {
 def _probe(html: str, *, width: int, height: int, tmp_path: Path) -> list[dict]:
     """Lay ``html`` out as ``ChromiumRasterizer.png`` does (file URL, fonts
     ready, the fit script run) and return every drawn text run."""
-    from splitsmith.overlay_raster import ChromiumRasterizer, RasterizerUnavailableError
+    from splitsmith.overlay.raster import ChromiumRasterizer, RasterizerUnavailableError
 
     page_path = tmp_path / "card.html"
     page_path.write_text(html, encoding="utf-8")

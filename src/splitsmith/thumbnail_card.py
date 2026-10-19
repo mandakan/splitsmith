@@ -25,10 +25,10 @@ from PIL import Image, ImageOps
 
 from .look_template import TemplateContext, engine_block, shared_url, shooter_json, theme_tokens
 from .looks import Look, thumbnail_template_for
-from .overlay_card import card_scale
-from .overlay_html import single_css
-from .overlay_raster import Rasterizer
-from .overlay_theme import theme_for
+from .overlay.card import card_scale
+from .overlay.html import single_css
+from .overlay.raster import Rasterizer
+from .overlay.theme import theme_for
 
 logger = logging.getLogger(__name__)
 

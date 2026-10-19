@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 from splitsmith.config import StageEvent
-from splitsmith.overlay_hud import (
+from splitsmith.overlay.hud import (
     HudFrame,
     HudOptions,
     OverlayStyleFields,

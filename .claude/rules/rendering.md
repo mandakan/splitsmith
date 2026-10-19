@@ -3,7 +3,7 @@ paths:
   - "src/splitsmith/mp4_render.py"
   - "src/splitsmith/composition.py"
   - "src/splitsmith/segment_cache.py"
-  - "src/splitsmith/overlay_*.py"
+  - "src/splitsmith/overlay/**"
   - "src/splitsmith/summary_*.py"
   - "src/splitsmith/stage_summary_data.py"
   - "src/splitsmith/match_summary.py"

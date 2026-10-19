@@ -7,11 +7,11 @@ from pathlib import Path
 
 from PIL import Image
 
-from splitsmith import overlay_card
 from splitsmith.composition import MatchTitle, TitleCard
 from splitsmith.looks import load_look
-from splitsmith.overlay_layout import Anchor, Emphasis, Role
-from splitsmith.overlay_theme import load_theme
+from splitsmith.overlay import card as overlay_card
+from splitsmith.overlay.layout import Anchor, Emphasis, Role
+from splitsmith.overlay.theme import load_theme
 
 THEME = load_theme("splitsmith")
 LOOK = load_look("splitsmith")
@@ -46,7 +46,7 @@ class _FakeRasterizer:
         counted in ``frames_rendered`` as they are pulled."""
         import math
 
-        from splitsmith.overlay_raster import TemplateFrames
+        from splitsmith.overlay.raster import TemplateFrames
 
         self.template_calls.append((template, context.model_dump(), width, height))
         self.frame_requests.append((template, context.model_dump(), width, height, fps, max_seconds))

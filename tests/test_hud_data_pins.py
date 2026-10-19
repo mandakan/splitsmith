@@ -28,7 +28,7 @@ import pytest
 from splitsmith.config import StageEvent
 from splitsmith.hud_extras import PROVIDERS, HudExtras, HudInputs
 from splitsmith.match_project import StageScorecard
-from splitsmith.overlay_hud import STAGE_DATA_VERSION, hud_stage_data
+from splitsmith.overlay.hud import STAGE_DATA_VERSION, hud_stage_data
 from splitsmith.stage_summary_data import TileShot
 
 PINS = Path(__file__).parent / "fixtures" / "hud_data_pins.json"

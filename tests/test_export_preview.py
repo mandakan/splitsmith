@@ -53,7 +53,7 @@ class _StubRasterizer:
         import json
         import math
 
-        from splitsmith.overlay_raster import TemplateFrames
+        from splitsmith.overlay.raster import TemplateFrames
 
         self.htmls.append(json.dumps(context.data, ensure_ascii=False))
         self.frame_requests.append((template, context.model_dump(), width, height, fps, max_seconds))
@@ -424,7 +424,7 @@ class _HudRasterizer(_StubRasterizer):
         self.timelines: list[dict] = []
 
     def render_template_timeline(self, template, *, context, width: int, height: int, plan):  # noqa: ANN001
-        from splitsmith.overlay_raster import TemplateFrames
+        from splitsmith.overlay.raster import TemplateFrames
 
         times = list(plan(0.5))
         self.timelines.append({"template": template, "data": context.data, "times": times})
@@ -439,7 +439,7 @@ class _HudRasterizer(_StubRasterizer):
 
 
 def test_an_overlay_style_previews_as_a_loop_of_the_stage(tmp_path: Path) -> None:
-    from splitsmith.overlay_hud import HudOptions
+    from splitsmith.overlay.hud import HudOptions
 
     raster = _HudRasterizer()
     spec = ep.PreviewSpec(
@@ -479,7 +479,7 @@ def test_an_unknown_overlay_style_previews_as_classic(tmp_path: Path) -> None:
 
 
 def test_the_overlay_style_moves_the_key_only_on_an_overlay_card() -> None:
-    from splitsmith.overlay_hud import HudOptions
+    from splitsmith.overlay.hud import HudOptions
 
     def key(spec: ep.PreviewSpec) -> str:
         return ep.preview_key(spec, slug="me", project_updated_at="t", audit="a")

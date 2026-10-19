@@ -16,13 +16,13 @@ from PIL import Image
 
 from splitsmith import look_tools
 from splitsmith.looks import load_look, overlay_template_for
-from splitsmith.overlay_html import single_css, single_html
-from splitsmith.overlay_hud import HudOptions, declared_positions, hud_options_data, hud_stage_data
-from splitsmith.overlay_hud_render import hud_context
-from splitsmith.overlay_layout import CellScale
-from splitsmith.overlay_render import build_frame_states, classic_cell_style
-from splitsmith.overlay_single import build_overlay_runs, run_groups
-from splitsmith.overlay_theme import load_theme
+from splitsmith.overlay.html import single_css, single_html
+from splitsmith.overlay.hud import HudOptions, declared_positions, hud_options_data, hud_stage_data
+from splitsmith.overlay.hud_render import hud_context
+from splitsmith.overlay.layout import CellScale
+from splitsmith.overlay.render import build_frame_states, classic_cell_style
+from splitsmith.overlay.single import build_overlay_runs, run_groups
+from splitsmith.overlay.theme import load_theme
 
 BEEP = look_tools.HUD_SAMPLE_BEEP
 STYLES = ("plate", "pips", "ticker", "timeline", "minimal")
@@ -78,7 +78,7 @@ def test_classic_pads_only_an_upright_sprite() -> None:
 
 @pytest.fixture(scope="module")
 def raster():
-    from splitsmith.overlay_raster import ChromiumRasterizer, RasterizerUnavailableError
+    from splitsmith.overlay.raster import ChromiumRasterizer, RasterizerUnavailableError
 
     try:
         with ChromiumRasterizer() as r:
@@ -184,7 +184,7 @@ def test_looks_check_warns_about_a_style_that_draws_into_the_safe_area(
 
 
 def _record(*, variant: str = "default", upright: bool = False, revision: str = "rev-1") -> dict:
-    from splitsmith.overlay_hud import overlay_settings
+    from splitsmith.overlay.hud import overlay_settings
 
     return overlay_settings(
         look="splitsmith",

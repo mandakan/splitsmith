@@ -3,7 +3,7 @@
 Pure unit tests on frame-state derivation and on the argv / rasterizer
 calls the render loop makes. The ffmpeg pipe path is exercised via a
 mocked Popen so CI doesn't need prores_ks support, and the browser via an
-injected fake :class:`~splitsmith.overlay_raster.Rasterizer`; integration
+injected fake :class:`~splitsmith.overlay.raster.Rasterizer`; integration
 tests cover the real binary and a real Chromium in development.
 """
 
@@ -21,12 +21,14 @@ from PIL import Image, ImageFont
 from playwright.sync_api import Error as PlaywrightError
 from typer.testing import CliRunner
 
-from splitsmith import overlay_raster, overlay_render, runtime
+from splitsmith import runtime
 from splitsmith.cli import app
 from splitsmith.config import VideoMetadata
-from splitsmith.overlay_clock import border_width
-from splitsmith.overlay_layout import CellScale
-from splitsmith.overlay_text import overlay_font_file, resolve_overlay_face
+from splitsmith.overlay import raster as overlay_raster
+from splitsmith.overlay import render as overlay_render
+from splitsmith.overlay.clock import border_width
+from splitsmith.overlay.layout import CellScale
+from splitsmith.overlay.text import overlay_font_file, resolve_overlay_face
 from tests.conftest import fake_ffmpeg_probe
 from tests.synthetic_media import ffmpeg_available
 

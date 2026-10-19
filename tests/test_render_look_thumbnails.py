@@ -64,7 +64,7 @@ class _StubRasterizer:
         counted in ``frames_rendered`` as they are pulled."""
         import math
 
-        from splitsmith.overlay_raster import TemplateFrames
+        from splitsmith.overlay.raster import TemplateFrames
 
         self.calls.append((width, height))
         self.frame_requests.append((template, context.model_dump(), width, height, fps, max_seconds))
@@ -84,7 +84,7 @@ class _StubRasterizer:
     def render_template_timeline(self, template, *, context, width: int, height: int, plan):
         """A HUD: ``plan`` gets a fixed settle; one blank frame per time,
         counted apart from the stings' frames as it is pulled."""
-        from splitsmith.overlay_raster import TemplateFrames
+        from splitsmith.overlay.raster import TemplateFrames
 
         self.calls.append((width, height))
         self.hud_requests.append((template, context.model_dump(), width, height))

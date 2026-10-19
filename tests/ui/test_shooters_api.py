@@ -3069,8 +3069,8 @@ def test_match_export_redraws_an_overlay_only_when_its_record_differs(
     again, and Classic ignores the style toggles."""
     import json as _json
 
-    from splitsmith import overlay_render
-    from splitsmith.overlay_hud import HudOptions, overlay_settings
+    from splitsmith.overlay import render as overlay_render
+    from splitsmith.overlay.hud import HudOptions, overlay_settings
     from splitsmith.ui import exports as exports_mod
 
     client, root = _seed_match_export_project(tmp_path, stage_count=1)
@@ -3153,7 +3153,7 @@ def test_a_failed_overlay_redraw_never_ships_the_stale_overlay(
     not stitched, and the result says why. Before, it shipped silently."""
     import json as _json
 
-    from splitsmith import overlay_render
+    from splitsmith.overlay import render as overlay_render
     from splitsmith.ui import match_exports as match_mod
 
     client, root = _seed_match_export_project(tmp_path, stage_count=1)

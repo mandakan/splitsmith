@@ -25,13 +25,13 @@ this module already did the work.
 See ``docs/superpowers/plans/2026-08-06-overlay-composition-seam-amendment.md``
 (Task 6R-3). ``_cell_groups`` still *declares* what one cell says; turning
 that declaration into pixels is now ``overlay_html.grid_html`` (pure
-HTML) plus an injected :class:`splitsmith.overlay_raster.Rasterizer`
+HTML) plus an injected :class:`splitsmith.overlay.raster.Rasterizer`
 (HTML -> PNG, via headless Chromium), composited once over the whole
 canvas rather than drawn per cell with hand-fitted PIL text. This module
 still shells out to ffmpeg only to extract each tile's freeze frame,
 through an injected :data:`splitsmith.compare.mp4_grid.Runner` so unit
 tests never shell out, and never launches a browser directly -- that is
-entirely the injected :class:`~splitsmith.overlay_raster.Rasterizer`'s
+entirely the injected :class:`~splitsmith.overlay.raster.Rasterizer`'s
 job. A host whose ffmpeg lacks libfreetype loses the running clock
 elsewhere in the graph but gets a complete summary here, untouched. A host
 with no usable Chromium loses the summary's text (see ``build_hold_still``)
@@ -61,19 +61,19 @@ from ..match_summary import (
     match_summary_strip_html,
     upright_match_summary_strip_html,
 )
-from ..overlay_html import grid_html
-from ..overlay_layout import CellScale, Group
-from ..overlay_raster import Rasterizer
+from ..overlay.html import grid_html
+from ..overlay.layout import CellScale, Group
+from ..overlay.raster import Rasterizer
 
-# Hoisted to ``splitsmith.overlay_still`` (issue #973) so the single-shooter
+# Hoisted to ``splitsmith.overlay.still`` (issue #973) so the single-shooter
 # MP4's generated cards share the treatment. Bound under the old names
 # because ``test_compare_overlay_summary`` monkeypatches ``_apply_blur``
 # on this module, and ``_prepare_cell`` resolves the global at call time.
-from ..overlay_still import DEFAULT_DIM
-from ..overlay_still import apply_blur as _apply_blur
-from ..overlay_still import dim as _dim
-from ..overlay_still import letterbox as _letterbox
-from ..overlay_summary_cell import (
+from ..overlay.still import DEFAULT_DIM
+from ..overlay.still import apply_blur as _apply_blur
+from ..overlay.still import dim as _dim
+from ..overlay.still import letterbox as _letterbox
+from ..overlay.summary_cell import (
     TileRoom,
     UprightGridType,
     count_elements,
@@ -83,7 +83,7 @@ from ..overlay_summary_cell import (
     upright_grid_type,
     without_captions,
 )
-from ..overlay_theme import OverlayTheme
+from ..overlay.theme import OverlayTheme
 from ..safe_area import SafeArea, safe_area
 from .mp4_grid import GridStagePlan, Runner
 from .overlay_data import TileStageData
@@ -115,7 +115,7 @@ logger = logging.getLogger(__name__)
 _FREEZE_TAIL_WINDOW_SECONDS = 0.5
 
 
-# Hoisted to ``splitsmith.overlay_summary_cell`` (issue #972) so the
+# Hoisted to ``splitsmith.overlay.summary_cell`` (issue #972) so the
 # single-shooter MP4 ends each stage on the same summary. Bound under the
 # old private names: ``test_compare_overlay_summary`` reaches
 # ``_cell_groups`` / ``_count_elements`` / ``_summary_scale`` through this
@@ -372,7 +372,7 @@ def _summary_cells(
     upright: UprightGridType | None = None,
 ) -> list[tuple[TilePlacement, tuple[Group, ...]]]:
     """One ``(placement, declared groups)`` pair per placement, in
-    placement order -- :func:`splitsmith.overlay_html.grid_html`'s own
+    placement order -- :func:`splitsmith.overlay.html.grid_html`'s own
     input shape.
 
     A filler tile's groups are never computed: ``grid_html`` already
@@ -477,7 +477,7 @@ def build_hold_still(
     still is just the blurred, dimmed freezes, which is also the
     degradation path a caller with no usable Chromium falls back to (see
     :mod:`splitsmith.compare.mp4_grid`'s preflight around
-    :class:`~splitsmith.overlay_raster.ChromiumRasterizer`). A rasterizer
+    :class:`~splitsmith.overlay.raster.ChromiumRasterizer`). A rasterizer
     that *is* given but fails on this call -- as opposed to failing to
     launch at all, which is the caller's preflight's job to catch once
     per render -- degrades the same way: logged and skipped, so one bad

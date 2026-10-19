@@ -14,8 +14,8 @@ import pytest
 
 from splitsmith.compare import overlay_live as live
 from splitsmith.compare import overlay_sprites as sp
-from splitsmith.overlay_layout import Anchor, CellScale, ColorToken, Role
-from splitsmith.overlay_theme import load_theme
+from splitsmith.overlay.layout import Anchor, CellScale, ColorToken, Role
+from splitsmith.overlay.theme import load_theme
 
 GEOMETRY = sp.SpriteGeometry(canvas_width=1280, canvas_height=720, rows=2, cols=2)
 THEME = load_theme("splitsmith")
@@ -179,9 +179,9 @@ def test_the_clock_and_the_sprites_resolve_the_same_bundled_face(theme_name):
     # Since #1272 a Look chooses the face; the invariant is unchanged: the
     # clock's file is the one the sprites' ``@font-face`` mono rule loads.
     from splitsmith import fonts
-    from splitsmith.overlay_html import single_css
-    from splitsmith.overlay_layout import CellScale
-    from splitsmith.overlay_text import _BUNDLED_FONTS
+    from splitsmith.overlay.html import single_css
+    from splitsmith.overlay.layout import CellScale
+    from splitsmith.overlay.text import _BUNDLED_FONTS
 
     theme = load_theme(theme_name)
     face = sp.theme_font_face(theme)

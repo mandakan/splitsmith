@@ -57,8 +57,8 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 # owner.
 sys.path.insert(0, str(REPO_ROOT))
 
-from splitsmith import overlay_render  # noqa: E402
-from splitsmith.overlay_hud import HUD_POSITIONS, HudOptions  # noqa: E402
+from splitsmith.overlay import render as overlay_render  # noqa: E402
+from splitsmith.overlay.hud import HUD_POSITIONS, HudOptions  # noqa: E402
 from tests.compare_fixture import cut_clip, write_audit  # noqa: E402
 from tests.synthetic_media import (  # noqa: E402
     SYNTHETIC_FPS_DEN,

@@ -1,10 +1,10 @@
 ---
 paths:
   - "src/splitsmith/safe_area.py"
-  - "src/splitsmith/overlay_summary_cell.py"
-  - "src/splitsmith/overlay_hud*.py"
-  - "src/splitsmith/overlay_html.py"
-  - "src/splitsmith/overlay_render.py"
+  - "src/splitsmith/overlay/summary_cell.py"
+  - "src/splitsmith/overlay/hud*.py"
+  - "src/splitsmith/overlay/html.py"
+  - "src/splitsmith/overlay/render.py"
   - "src/splitsmith/match_summary.py"
   - "src/splitsmith/summary_card.py"
   - "src/splitsmith/compare/overlay_summary.py"

@@ -672,7 +672,7 @@ def _positions(look: Look, slot: str, variant: str) -> list[str]:
     if template is None:
         return []
     # Deferred: overlay_hud imports this module for the variant grammar.
-    from .overlay_hud import declared_positions
+    from .overlay.hud import declared_positions
 
     return list(declared_positions(template))
 

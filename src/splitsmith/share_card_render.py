@@ -28,8 +28,8 @@ from importlib.resources import files
 from pathlib import Path
 from typing import NamedTuple
 
-from .overlay_raster import Rasterizer, RasterizerUnavailableError
-from .overlay_theme import OverlayTheme
+from .overlay.raster import Rasterizer, RasterizerUnavailableError
+from .overlay.theme import OverlayTheme
 from .share_card import CompareCard, MatchCard, StageCard, card_hash
 from .share_card_html import (
     CARD_HEIGHT,

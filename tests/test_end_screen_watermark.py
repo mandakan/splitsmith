@@ -72,8 +72,8 @@ def test_the_match_export_holds_the_end_screen(tmp_path: Path, monkeypatch: pyte
 def test_the_end_screen_keeps_the_right_of_the_frame_clear(tmp_path: Path) -> None:
     """Everything sits in the left two fifths: the right, where YouTube puts
     its end screen elements, is the backdrop alone."""
-    from splitsmith.overlay_card import build_card_still
-    from splitsmith.overlay_raster import ChromiumRasterizer, RasterizerUnavailableError
+    from splitsmith.overlay.card import build_card_still
+    from splitsmith.overlay.raster import ChromiumRasterizer, RasterizerUnavailableError
 
     look = looks.load_look("splitsmith")
     card = composition.MatchTitle(

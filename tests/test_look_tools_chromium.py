@@ -8,10 +8,10 @@ import pytest
 
 from splitsmith import look_tools
 from splitsmith.look_template import TemplateContext, engine_block, shared_url, theme_tokens
-from splitsmith.overlay_html import single_css
-from splitsmith.overlay_layout import CellScale
-from splitsmith.overlay_raster import ChromiumRasterizer, RasterizerUnavailableError
-from splitsmith.overlay_theme import load_theme
+from splitsmith.overlay.html import single_css
+from splitsmith.overlay.layout import CellScale
+from splitsmith.overlay.raster import ChromiumRasterizer, RasterizerUnavailableError
+from splitsmith.overlay.theme import load_theme
 
 pytestmark = pytest.mark.integration
 

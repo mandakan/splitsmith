@@ -20,10 +20,10 @@ from splitsmith.compare.overlay_data import TileShot, TileStageData
 from splitsmith.compare.overlay_sprites import SpriteGeometry, TilePlacement
 from splitsmith.compare.overlay_summary import _cell_groups
 from splitsmith.match_project import StageScorecard
-from splitsmith.overlay_clock import border_width
-from splitsmith.overlay_html import cell_html, grid_html, single_html
-from splitsmith.overlay_layout import Anchor, CellScale, ColorToken, Element, Flow, Group, Role
-from splitsmith.overlay_theme import load_theme
+from splitsmith.overlay.clock import border_width
+from splitsmith.overlay.html import cell_html, grid_html, single_html
+from splitsmith.overlay.layout import Anchor, CellScale, ColorToken, Element, Flow, Group, Role
+from splitsmith.overlay.theme import load_theme
 
 THEME = load_theme("clean")
 SCALE = CellScale(
@@ -237,7 +237,7 @@ def test_a_name_containing_a_script_tag_is_escaped():
     hostile *payload* itself never appears unescaped -- which is a
     strictly narrower, not weaker, assertion than "no script tag at
     all": it still fails if ``escape()`` were ever dropped from
-    :func:`~splitsmith.overlay_html._element_div`, and it no longer
+    :func:`~splitsmith.overlay.html._element_div`, and it no longer
     false-fails on the module's own, harmless script.
     """
     hostile = "<script>alert(1)</script>"
@@ -702,11 +702,11 @@ def test_overlay_html_stays_a_leaf_and_pulls_in_no_compare_module() -> None:
     written for: it predicted that once the cycle went, a runtime import
     would pull the whole ``compare`` subpackage into every overlay
     render *silently*. Measured on that branch: ``import
-    splitsmith.overlay_html`` loads 136 modules with the guard and 346
+    splitsmith.overlay.html`` loads 136 modules with the guard and 346
     without it.
 
     So the assertion that had a future is now the only one with teeth.
-    The trailing ``import splitsmith.overlay_render`` is kept as a cheap
+    The trailing ``import splitsmith.overlay.render`` is kept as a cheap
     smoke that the #684 import direction still resolves; it can no
     longer fail the way it was written to.
 
@@ -715,10 +715,10 @@ def test_overlay_html_stays_a_leaf_and_pulls_in_no_compare_module() -> None:
     already populated and the assertion could never fail.
     """
     probe = (
-        "import sys; import splitsmith.overlay_html; "
+        "import sys; import splitsmith.overlay.html; "
         "leaked = sorted(m for m in sys.modules if m.startswith('splitsmith.compare')); "
         "assert not leaked, leaked; "
-        "import splitsmith.overlay_render"
+        "import splitsmith.overlay.render"
     )
     result = subprocess.run(
         [sys.executable, "-c", probe], capture_output=True, text=True, cwd=Path(__file__).parent.parent
@@ -727,7 +727,7 @@ def test_overlay_html_stays_a_leaf_and_pulls_in_no_compare_module() -> None:
 
 
 def test_single_html_is_single_css_plus_the_fit_script_plus_the_cell() -> None:
-    from splitsmith.overlay_html import _cell_div, _fit_script, single_css
+    from splitsmith.overlay.html import _cell_div, _fit_script, single_css
 
     theme = load_theme("splitsmith")
     scale = CellScale.for_cell(360)
@@ -741,8 +741,8 @@ def test_single_html_is_single_css_plus_the_fit_script_plus_the_cell() -> None:
 
 
 def test_the_fit_script_is_the_shipped_file_with_the_floor_set_beside_it() -> None:
-    from splitsmith.overlay_html import _fit_script, fit_js
-    from splitsmith.overlay_layout import MIN_FONT_SIZE
+    from splitsmith.overlay.html import _fit_script, fit_js
+    from splitsmith.overlay.layout import MIN_FONT_SIZE
 
     script = _fit_script()
     assert fit_js() in script
@@ -768,7 +768,7 @@ def test_only_the_cell_with_an_accent_carries_the_variable() -> None:
 
 
 def test_the_stylesheet_reads_the_accent_through_variables_that_fall_back() -> None:
-    from splitsmith.overlay_html import _style_rules
+    from splitsmith.overlay.html import _style_rules
 
     rules = _style_rules(scale=SCALE, theme=THEME)
     cell = rules[rules.index(".cell {") : rules.index("}", rules.index(".cell {"))]
@@ -787,7 +787,7 @@ def test_the_shooters_name_really_takes_the_accent(tmp_path: Path) -> None:
 
     from PIL import Image
 
-    from splitsmith.overlay_raster import ChromiumRasterizer, RasterizerUnavailableError
+    from splitsmith.overlay.raster import ChromiumRasterizer, RasterizerUnavailableError
 
     width, height = 320, 180
     scale = CellScale.for_cell(height)

@@ -50,7 +50,7 @@ from pydantic import BaseModel
 from .. import coach as coach_module
 from ..audit_data import audit_shots_to_engine_shots
 from ..events import confirmed_from_doc
-from ..overlay_theme import load_theme
+from ..overlay.theme import load_theme
 from ..share_card import CompareCard, MatchCard, RosterEntry, StageCard, card_hash, stage_figures
 from ..share_card_render import cached_card_png, render_card_png
 from . import render_bound
@@ -60,7 +60,7 @@ from .state import STATIC_DIR
 if TYPE_CHECKING:
     from contextlib import AbstractContextManager
 
-    from ..overlay_raster import Rasterizer
+    from ..overlay.raster import Rasterizer
 
 logger = logging.getLogger(__name__)
 
@@ -286,7 +286,7 @@ def _bounded_rasterizer() -> Iterator[Rasterizer]:
     anonymous surface a busy renderer looks like every other failure.
     Looks ``_chromium_factory`` up at call time so a test can replace it.
     """
-    from ..overlay_raster import RasterizerUnavailableError
+    from ..overlay.raster import RasterizerUnavailableError
 
     try:
         with render_bound.render_slot():
@@ -357,7 +357,7 @@ def _chromium_factory() -> AbstractContextManager[Rasterizer]:
     # *launch*: ChromiumRasterizer() doesn't start Chromium until its
     # __enter__ runs, and cached_card_png only calls this factory on a
     # cache miss, so a hit never pays the ~1s launch cost.
-    from ..overlay_raster import ChromiumRasterizer
+    from ..overlay.raster import ChromiumRasterizer
 
     return ChromiumRasterizer()
 

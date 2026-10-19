@@ -11,7 +11,7 @@ import pytest
 
 from splitsmith import looks
 from splitsmith import runtime as runtime_module
-from splitsmith.overlay_raster import TemplateProbe
+from splitsmith.overlay.raster import TemplateProbe
 from splitsmith.ui import looks_api
 
 from .ui._helpers import _match_create_app, _MatchClient
@@ -37,7 +37,7 @@ class _Prober:
         self, template: Path, *, context, width: int, height: int, plan
     ):  # noqa: ANN001
         """A HUD that is still everywhere: the same frame at every time."""
-        from splitsmith.overlay_raster import TemplateFrames
+        from splitsmith.overlay.raster import TemplateFrames
 
         times = list(plan(0.0))
         return TemplateFrames(

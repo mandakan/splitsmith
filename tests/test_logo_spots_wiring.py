@@ -14,7 +14,7 @@ from splitsmith.compare.mp4_grid import GridStagePlan, GridTile
 from splitsmith.compare.overlay_sprites import SpriteGeometry, TilePlacement
 from splitsmith.compare.overlay_summary import build_hold_still, build_match_summary_grid_still
 from splitsmith.export_presets import ExportPresetBody
-from splitsmith.overlay_theme import load_theme
+from splitsmith.overlay.theme import load_theme
 
 GREEN = (0, 255, 0)
 
@@ -280,8 +280,8 @@ def test_the_shipped_sting_carries_your_brand_over_the_shooters_logo(tmp_path: P
     from splitsmith import looks
     from splitsmith.identity import ResolvedIdentity
     from splitsmith.look_sting import sting_context
-    from splitsmith.overlay_raster import ChromiumRasterizer, RasterizerUnavailableError
-    from splitsmith.overlay_theme import theme_for
+    from splitsmith.overlay.raster import ChromiumRasterizer, RasterizerUnavailableError
+    from splitsmith.overlay.theme import theme_for
 
     shooter_logo = _logo(tmp_path, "shooter.png", GREEN)
     brand_logo = _logo(tmp_path, "brand.png", (0, 0, 255))

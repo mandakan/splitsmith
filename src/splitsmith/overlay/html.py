@@ -8,7 +8,7 @@ three times over -- content escaping the cell it was declared in, up to
 one shooter's placing and stage percentage drawing inside the *next*
 shooter's cell. A real box model (a browser's CSS engine) solves that
 categorically rather than arithmetically: this module turns a cell's
-declared :class:`~splitsmith.overlay_layout.Group`/:class:`Element` tuple
+declared :class:`~splitsmith.overlay.layout.Group`/:class:`Element` tuple
 into an HTML fragment with ``overflow: hidden`` on every cell, and lets
 CSS do all cumulative-width/height bounding. No Python code in this
 module measures text or decides a size beyond reading it off
@@ -64,7 +64,7 @@ Design rules, each answering one of the old fitter's defects:
   ``-webkit-text-stroke`` and ``text-shadow``) -- the successor to the
   PIL routine this pipeline drew with before #693 and #684 -- and
   ``MUTED`` additionally drops opacity.
-- **``Element.color`` (:class:`~splitsmith.overlay_layout.ColorToken`)
+- **``Element.color`` (:class:`~splitsmith.overlay.layout.ColorToken`)
   overrides an element's ink with a named theme colour** -- ``.tok-*``
   classes, one per token, declared between the emphasis rules and
   ``.emphasis-plate`` so a plate always wins its own colour back (see the
@@ -108,12 +108,12 @@ from importlib.resources import files
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from .fonts import font as bundled_font
-from .fonts import is_font_path
-from .overlay_clock import border_width
-from .overlay_layout import MIN_FONT_SIZE, Anchor, CellScale, ColorToken, Element, Flow, Group, Role
-from .overlay_theme import OverlayTheme
-from .safe_area import SafeArea
+from ..fonts import font as bundled_font
+from ..fonts import is_font_path
+from ..safe_area import SafeArea
+from .clock import border_width
+from .layout import MIN_FONT_SIZE, Anchor, CellScale, ColorToken, Element, Flow, Group, Role
+from .theme import OverlayTheme
 
 if TYPE_CHECKING:
     # ``grid_html`` names these two in its signature and reads attributes
@@ -127,13 +127,13 @@ if TYPE_CHECKING:
     # now -- so a runtime import here no longer raises.
     #
     # It is still wrong. Measured on the branch that removed the edge:
-    # ``import splitsmith.overlay_html`` loads 136 modules with the guard
+    # ``import splitsmith.overlay.html`` loads 136 modules with the guard
     # and 346 without it, because the annotation would drag the whole
     # ``compare`` subpackage and its ``ui`` dependencies into every
     # single-shooter overlay render. Type-only keeps the annotation
     # honest (this module has ``from __future__ import annotations``, so
     # it is never evaluated) without paying for it.
-    from .compare.overlay_sprites import SpriteGeometry, TilePlacement
+    from ..compare.overlay_sprites import SpriteGeometry, TilePlacement
 
 RGB = tuple[int, int, int]
 
@@ -746,7 +746,7 @@ def _group_div(group: Group) -> str:
     """One :class:`Group` as a ``.group`` block -- or, when
     ``group.divider`` is set, the hairline rule instead of an
     elements-mapped block. A divider has no elements to render (see
-    :class:`~splitsmith.overlay_layout.Group`'s docstring) so it skips
+    :class:`~splitsmith.overlay.layout.Group`'s docstring) so it skips
     :func:`_group_classes`/:func:`_element_div` entirely rather than
     mapping an empty ``elements`` tuple through them."""
     if group.divider:
@@ -813,7 +813,7 @@ def _fit_script(*, fit_columns: bool = False, uniform: bool = False) -> str:
     1. **Shrink.** ``--fit-scale`` (see :func:`_fit`) is binary-searched
        from ``1`` down to the largest factor that fits, floored so no
        font in the band drops below
-       :data:`~splitsmith.overlay_layout.MIN_FONT_SIZE` -- the same
+       :data:`~splitsmith.overlay.layout.MIN_FONT_SIZE` -- the same
        legibility floor the live sprite's own PIL fitter already
        enforces. Losing nothing is always better than losing something,
        and this step touches the whole band uniformly, Scoring and
@@ -845,7 +845,7 @@ def _fit_script(*, fit_columns: bool = False, uniform: bool = False) -> str:
     live race and the free cell keep the old
     policy, their rows change text frame to frame.
 
-    Called by :mod:`splitsmith.overlay_raster` after
+    Called by :mod:`splitsmith.overlay.raster` after
     ``document.fonts.ready`` resolves, never before: a shrink measured
     against the browser's fallback system font's metrics would pick the
     wrong factor the instant the bundled face actually loads and
@@ -883,7 +883,7 @@ def cell_html(groups: Sequence[Group], *, scale: CellScale, theme: OverlayTheme)
     (``_style_rules``, ``_fit_script``, ``_cell_div``) directly rather
     than wrapping this function's output. The script only *defines*
     ``window.__splitsmithFit`` here; nothing in this module calls it --
-    see :mod:`splitsmith.overlay_raster` for where and why it is
+    see :mod:`splitsmith.overlay.raster` for where and why it is
     invoked.
     """
     return (
@@ -1057,7 +1057,7 @@ def grid_html(
 
     Carries the fit-policy ``<script>`` (see :func:`_fit_script`) in
     ``<head>``, once for the whole document -- it only defines
-    ``window.__splitsmithFit``; :mod:`splitsmith.overlay_raster` is what
+    ``window.__splitsmithFit``; :mod:`splitsmith.overlay.raster` is what
     actually calls it, after webfonts are loaded and before the
     screenshot.
     ``fit_columns`` turns on its column step (the stage summary's hold;

@@ -141,7 +141,7 @@ def test_the_brand_is_the_title_pages_corner_mark(tmp_path: Path, monkeypatch: p
     """A real render: the logo's red sits top-left, the centre stays clear,
     and the card's text stays where it was."""
     from splitsmith import look_tools
-    from splitsmith.overlay_raster import ChromiumRasterizer, RasterizerUnavailableError
+    from splitsmith.overlay.raster import ChromiumRasterizer, RasterizerUnavailableError
 
     look = _look(tmp_path, monkeypatch)
     name = look_brand.save_brand_logo(look.root, _png(256))

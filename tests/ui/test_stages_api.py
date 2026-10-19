@@ -4218,7 +4218,7 @@ def test_export_stage_summary_card_flag_reaches_the_exporter_and_the_run_record(
 
 
 def test_export_stage_forwards_the_overlay_style(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    from splitsmith import overlay_render
+    from splitsmith.overlay import render as overlay_render
 
     client, _root = _seed_match_export_project(tmp_path, stage_count=1)
     seen: dict[str, object] = {}
@@ -4247,7 +4247,7 @@ def test_export_stage_forwards_the_overlay_style(tmp_path: Path, monkeypatch: py
     assert resp.status_code == 200, resp.text
     assert _wait_for_job(client, resp.json()["id"])["status"] == "succeeded"
     assert seen["variant"] == "ticker"
-    from splitsmith.overlay_hud import HudOptions
+    from splitsmith.overlay.hud import HudOptions
 
     options = seen["hud_options"]
     assert isinstance(options, HudOptions)

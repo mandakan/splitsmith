@@ -10,8 +10,8 @@ import math
 import pytest
 
 from splitsmith import look_template, looks
-from splitsmith.overlay_layout import MIN_FONT_SIZE, Anchor, ColorToken, Element, Emphasis, Flow, Group, Role
-from splitsmith.overlay_theme import load_theme
+from splitsmith.overlay.layout import MIN_FONT_SIZE, Anchor, ColorToken, Element, Emphasis, Flow, Group, Role
+from splitsmith.overlay.theme import load_theme
 
 
 def test_theme_tokens_are_hex_strings_for_every_palette_field() -> None:
@@ -90,7 +90,7 @@ def test_shared_url_points_at_the_shipped_engine_scripts() -> None:
 
 def _lower_third_groups() -> tuple[Group, ...]:
     from splitsmith.composition import TitleCard
-    from splitsmith.overlay_card import card_groups
+    from splitsmith.overlay.card import card_groups
 
     return card_groups(
         TitleCard(
@@ -163,9 +163,9 @@ def test_the_shipped_card_template_builds_the_markup_python_builds(make_groups) 
     broken ``fit()`` or a dropped ``data-drop-priority`` through."""
     from playwright.sync_api import sync_playwright
 
-    from splitsmith.overlay_html import _cell_div, single_css
-    from splitsmith.overlay_layout import CellScale
-    from splitsmith.overlay_raster import CHROMIUM_CHANNEL
+    from splitsmith.overlay.html import _cell_div, single_css
+    from splitsmith.overlay.layout import CellScale
+    from splitsmith.overlay.raster import CHROMIUM_CHANNEL
 
     groups = make_groups()
     theme = load_theme("splitsmith")
@@ -207,8 +207,8 @@ def test_a_user_template_that_throws_skips_the_card_with_a_real_browser(
     """Review Focus 4 against a real page: a Look whose ``card.html`` throws
     while mounting yields no card, never a blank one on the backdrop."""
     from splitsmith.composition import MatchTitle
-    from splitsmith.overlay_card import build_card_still
-    from splitsmith.overlay_raster import ChromiumRasterizer, RasterizerUnavailableError
+    from splitsmith.overlay.card import build_card_still
+    from splitsmith.overlay.raster import ChromiumRasterizer, RasterizerUnavailableError
 
     monkeypatch.setenv("SPLITSMITH_HOME", str(tmp_path))
     manifest = json.loads((looks.shipped_looks_dir() / "clean" / "look.json").read_text(encoding="utf-8"))
@@ -304,8 +304,8 @@ def test_the_rise_variant_animates_deterministically() -> None:
     from PIL import Image
 
     from splitsmith.composition import TitleCard
-    from splitsmith.overlay_card import card_context
-    from splitsmith.overlay_raster import ChromiumRasterizer, RasterizerUnavailableError
+    from splitsmith.overlay.card import card_context
+    from splitsmith.overlay.raster import ChromiumRasterizer, RasterizerUnavailableError
 
     look = looks.load_look("splitsmith")
     card = TitleCard(text="Stage 3", duration_seconds=1.5, info=("24 rounds",), variant="rise")
@@ -348,8 +348,8 @@ def test_a_long_rise_cards_held_frame_is_its_poster() -> None:
     from PIL import Image, ImageChops
 
     from splitsmith.composition import MatchTitle
-    from splitsmith.overlay_card import card_context
-    from splitsmith.overlay_raster import ChromiumRasterizer, RasterizerUnavailableError
+    from splitsmith.overlay.card import card_context
+    from splitsmith.overlay.raster import ChromiumRasterizer, RasterizerUnavailableError
 
     look = looks.load_look("splitsmith")
     card = MatchTitle(
@@ -426,8 +426,8 @@ def test_a_lower_third_draws_a_logo_only_when_exactly_one_shooter_has_one(tmp_pa
 
     from splitsmith.composition import TitleCard
     from splitsmith.identity import ResolvedIdentity
-    from splitsmith.overlay_card import card_context
-    from splitsmith.overlay_raster import ChromiumRasterizer, RasterizerUnavailableError
+    from splitsmith.overlay.card import card_context
+    from splitsmith.overlay.raster import ChromiumRasterizer, RasterizerUnavailableError
 
     look = looks.load_look("splitsmith")
     template = looks.template_for(look, "lower_third")
@@ -462,8 +462,8 @@ def test_a_shooters_logo_reaches_the_shipped_card_and_nothing_else_changes(tmp_p
 
     from splitsmith.composition import TitleCard
     from splitsmith.identity import ResolvedIdentity
-    from splitsmith.overlay_card import card_context
-    from splitsmith.overlay_raster import ChromiumRasterizer, RasterizerUnavailableError
+    from splitsmith.overlay.card import card_context
+    from splitsmith.overlay.raster import ChromiumRasterizer, RasterizerUnavailableError
 
     look = looks.load_look("splitsmith")
     template = looks.template_for(look, "slate")
@@ -506,8 +506,8 @@ def test_the_shipped_sting_shows_one_logo_only_when_the_shooters_share_it(tmp_pa
 
     from splitsmith.identity import ResolvedIdentity
     from splitsmith.look_sting import sting_context
-    from splitsmith.overlay_raster import ChromiumRasterizer, RasterizerUnavailableError
-    from splitsmith.overlay_theme import theme_for
+    from splitsmith.overlay.raster import ChromiumRasterizer, RasterizerUnavailableError
+    from splitsmith.overlay.theme import theme_for
 
     def logo(name: str, colour: tuple[int, int, int]):  # type: ignore[no-untyped-def]
         path = tmp_path / name
@@ -560,8 +560,8 @@ def test_the_shipped_sting_names_only_fonts_the_engine_declares() -> None:
     deterministic across machines."""
     import re
 
-    from splitsmith.overlay_html import single_css
-    from splitsmith.overlay_layout import CellScale
+    from splitsmith.overlay.html import single_css
+    from splitsmith.overlay.layout import CellScale
 
     look = looks.load_look("splitsmith")
     template = looks.sting_template_for(look, "wipe")
@@ -585,8 +585,8 @@ def test_the_shipped_sting_keeps_a_long_label_inside_the_band(tmp_path) -> None:
     from PIL import Image
 
     from splitsmith.look_sting import sting_context
-    from splitsmith.overlay_raster import ChromiumRasterizer, RasterizerUnavailableError
-    from splitsmith.overlay_theme import theme_for
+    from splitsmith.overlay.raster import ChromiumRasterizer, RasterizerUnavailableError
+    from splitsmith.overlay.theme import theme_for
 
     look = looks.load_look("splitsmith")
     template = looks.sting_template_for(look, "wipe")

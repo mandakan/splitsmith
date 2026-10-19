@@ -926,7 +926,7 @@ def _overlay_export(
     beep_time_in_source: float = 10.0,
     **request: Any,
 ) -> tuple[exports_mod.StageExportResult, dict[str, Any]]:
-    from splitsmith import overlay_render
+    from splitsmith.overlay import render as overlay_render
 
     captured: dict[str, Any] = {}
 
@@ -968,7 +968,7 @@ def _overlay_export(
 def test_the_overlay_style_reaches_the_renderer_and_is_recorded(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from splitsmith.overlay_hud import HudOptions
+    from splitsmith.overlay.hud import HudOptions
 
     audit_path, exports_dir = _seed_stage_with_trim(tmp_path)
     options = HudOptions(landing=False, position="top-right")
@@ -1027,7 +1027,7 @@ def test_a_full_head_overlay_and_its_record_are_what_they_always_were(
 
 
 def test_an_overlay_drawn_before_the_short_head_fix_is_drawn_again() -> None:
-    from splitsmith.overlay_hud import HudOptions, overlay_settings, overlay_theme_identity
+    from splitsmith.overlay.hud import HudOptions, overlay_settings, overlay_theme_identity
 
     def record(short_head: float | None) -> dict[str, Any]:
         return overlay_settings(
@@ -1063,7 +1063,7 @@ def test_an_overlay_drawn_with_the_breakdown_is_never_reused_without_it() -> Non
     """The 'Use Breakdown' switch: an overlay drawn with regions must not
     serve an export that turned them off, nor the other way round. 'On' is
     the default and records no key, so every existing record still matches."""
-    from splitsmith.overlay_hud import HudOptions, overlay_settings, overlay_theme_identity
+    from splitsmith.overlay.hud import HudOptions, overlay_settings, overlay_theme_identity
 
     def record(breakdown: bool) -> dict[str, Any]:
         return overlay_settings(
@@ -1124,7 +1124,7 @@ def test_a_short_head_fcpxml_puts_its_markers_at_the_trims_own_beep(
 
 
 def test_read_overlay_settings_takes_a_missing_record_as_the_defaults(tmp_path: Path) -> None:
-    from splitsmith.overlay_hud import LEGACY_OVERLAY_SETTINGS
+    from splitsmith.overlay.hud import LEGACY_OVERLAY_SETTINGS
 
     assert exports_mod.read_overlay_settings(tmp_path / "nope.json") == LEGACY_OVERLAY_SETTINGS
     broken = tmp_path / "broken.json"
@@ -1137,7 +1137,7 @@ def test_a_template_record_without_the_template_identity_matches_nothing() -> No
     cannot say which template drew it: the reuse check misses, whether the
     request names the style or (the MCP tool) wants whatever was drawn.
     A Classic record carries no identity and still matches."""
-    from splitsmith.overlay_hud import HudOptions, overlay_settings
+    from splitsmith.overlay.hud import HudOptions, overlay_settings
 
     def settings(variant: str) -> dict:
         return overlay_settings(
@@ -1169,7 +1169,7 @@ def test_a_template_record_with_no_template_identity_never_matches() -> None:
     ``"template": null``; re-deriving that record (the MCP tool's
     ``wanted=None``) finds no template either, and null == null must not
     read as a match: nothing vouches for what that MOV shows."""
-    from splitsmith.overlay_hud import HudOptions, overlay_settings
+    from splitsmith.overlay.hud import HudOptions, overlay_settings
 
     record = overlay_settings(
         look="nosuch",
@@ -1192,7 +1192,7 @@ def test_the_record_holds_the_audit_revision_read_before_the_render(
     """An edit that lands while the overlay renders was never drawn, so the
     record names the audit as it stood when the render began: the next
     match export sees the edit as a change and draws again."""
-    from splitsmith import overlay_render
+    from splitsmith.overlay import render as overlay_render
 
     audit_path, exports_dir = _seed_stage_with_trim(tmp_path)
     before = exports_mod.overlay_audit_revision(audit_path)
@@ -1244,8 +1244,9 @@ def test_the_record_holds_the_template_read_before_the_render(
     Edits a copy of the shipped Looks, never the shipped files."""
     import shutil
 
-    from splitsmith import looks, overlay_render
-    from splitsmith.overlay_hud import HudOptions, overlay_settings
+    from splitsmith import looks
+    from splitsmith.overlay import render as overlay_render
+    from splitsmith.overlay.hud import HudOptions, overlay_settings
 
     copy = tmp_path / "shipped-looks"
     shutil.copytree(looks.shipped_looks_dir(), copy)
@@ -1308,8 +1309,9 @@ def test_the_record_holds_the_look_theme_read_before_the_render(
     the shipped Looks."""
     import shutil
 
-    from splitsmith import looks, overlay_render
-    from splitsmith.overlay_hud import HudOptions, overlay_settings
+    from splitsmith import looks
+    from splitsmith.overlay import render as overlay_render
+    from splitsmith.overlay.hud import HudOptions, overlay_settings
 
     copy = tmp_path / "shipped-looks"
     shutil.copytree(looks.shipped_looks_dir(), copy)
@@ -1369,7 +1371,7 @@ def test_a_record_without_a_theme_identity_never_matches() -> None:
     palette it drew, and one whose Look could not be read records
     ``"theme": null``: neither matches, and null == null never reads as a
     match (#1403)."""
-    from splitsmith.overlay_hud import HudOptions, overlay_settings
+    from splitsmith.overlay.hud import HudOptions, overlay_settings
 
     def settings(look: str) -> dict:
         return overlay_settings(
@@ -1401,8 +1403,8 @@ def test_the_theme_identity_keeps_only_an_own_fonts_content_name(
     from another folder (hosted materialises one per tenant and content
     hash) must give the same identity, so only the content-named file name
     is kept."""
-    from splitsmith import overlay_theme
-    from splitsmith.overlay_hud import overlay_theme_identity
+    from splitsmith.overlay import theme as overlay_theme
+    from splitsmith.overlay.hud import overlay_theme_identity
 
     real = overlay_theme.load_theme("splitsmith")
     seen: list[str] = []

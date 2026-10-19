@@ -12,7 +12,7 @@ from typing import Any
 import pytest
 
 from splitsmith import audio_dress, look_tools, looks
-from splitsmith.overlay_raster import ChromiumRasterizer, RasterizerUnavailableError
+from splitsmith.overlay.raster import ChromiumRasterizer, RasterizerUnavailableError
 
 _ROOT = looks.shipped_looks_dir() / "broadcast"
 _SOUNDS = _ROOT / "sounds"

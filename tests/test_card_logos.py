@@ -24,7 +24,7 @@ from splitsmith.identity import ResolvedIdentity
 from splitsmith.logo_spots import LOGO_MARGIN, SUMMARY_LOGO_HEIGHT, logo_box, paste_logo, watermark_image
 from splitsmith.match_project import StageScorecard
 from splitsmith.match_summary import build_match_summary, match_summary_html
-from splitsmith.overlay_theme import load_theme
+from splitsmith.overlay.theme import load_theme
 from splitsmith.stage_summary_data import TileShot, TileStageData
 
 THEME = load_theme("splitsmith")
@@ -132,7 +132,7 @@ def _summary(label: str = LONG_NAME, title: str = "Stockholm Open IPSC Handgun C
 
 @pytest.mark.parametrize(("width", "height"), [(1920, 1080), *UPRIGHT])
 def test_a_summary_without_a_logo_is_the_document_it_was(width: int, height: int) -> None:
-    from splitsmith.overlay_summary_cell import summary_still_html
+    from splitsmith.overlay.summary_cell import summary_still_html
 
     summary = _summary()
     assert match_summary_html(summary, width=width, height=height, theme=THEME, logo=None) == (
@@ -214,9 +214,9 @@ def _card_page(
 ) -> Any:
     from splitsmith.look_brand import brand_json
     from splitsmith.looks import load_look, template_for
-    from splitsmith.overlay_card import card_context
-    from splitsmith.overlay_raster import ChromiumRasterizer, RasterizerUnavailableError
-    from splitsmith.overlay_theme import theme_for
+    from splitsmith.overlay.card import card_context
+    from splitsmith.overlay.raster import ChromiumRasterizer, RasterizerUnavailableError
+    from splitsmith.overlay.theme import theme_for
 
     look = load_look("splitsmith")
     card: composition.MatchTitle | composition.TitleCard
@@ -303,8 +303,8 @@ def test_no_card_draws_a_logo_past_its_own_pixels(
 
 
 def _document_page(html: str, width: int, height: int, tmp_path: Path) -> dict[str, Any]:
-    from splitsmith.overlay_layout import MIN_FONT_SIZE
-    from splitsmith.overlay_raster import ChromiumRasterizer, RasterizerUnavailableError
+    from splitsmith.overlay.layout import MIN_FONT_SIZE
+    from splitsmith.overlay.raster import ChromiumRasterizer, RasterizerUnavailableError
 
     page_path = tmp_path / "doc.html"
     page_path.write_text(html, encoding="utf-8")
@@ -347,7 +347,7 @@ def test_the_match_summary_keeps_its_text_off_the_shooter_logo(
 def test_the_stage_summary_keeps_the_name_off_the_shooter_logo(
     width: int, height: int, logos: dict[str, Path], tmp_path: Path
 ) -> None:
-    from splitsmith.overlay_summary_cell import summary_still_html
+    from splitsmith.overlay.summary_cell import summary_still_html
 
     box = logo_box(logos["club"], box=(0, 0, width, height))
     assert box is not None
@@ -443,8 +443,8 @@ def test_an_upright_card_keeps_its_text_out_of_the_safe_area(
 @pytest.mark.parametrize(("width", "height"), [(1920, 1080), (1080, 1080), (1440, 1080)])
 def test_a_square_or_wider_card_carries_no_safe_area(width: int, height: int) -> None:
     from splitsmith.looks import load_look
-    from splitsmith.overlay_card import card_context
-    from splitsmith.overlay_theme import theme_for
+    from splitsmith.overlay.card import card_context
+    from splitsmith.overlay.theme import theme_for
 
     card = composition.MatchTitle(text="HFO Masters 2026", info=("2026-09-13",), credit=True)
     context = card_context(

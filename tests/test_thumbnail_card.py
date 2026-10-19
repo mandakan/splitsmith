@@ -115,7 +115,8 @@ def test_the_export_draws_the_card_and_falls_back_to_the_frame(
     """With the spot on the card is written through the template; with it off
     the plain frame; without a browser the export still succeeds, with the
     plain frame and a note."""
-    from splitsmith import mp4_render, overlay_raster
+    from splitsmith import mp4_render
+    from splitsmith.overlay import raster as overlay_raster
     from splitsmith.ui import match_exports
 
     from .ui._helpers import _seed_match_export_project, _stub_match_export_probe, _wait_for_job
@@ -186,7 +187,7 @@ def test_the_export_draws_the_card_and_falls_back_to_the_frame(
 
 @pytest.mark.integration
 def test_the_shipped_thumbnail_draws_the_title_and_both_corner_logos(tmp_path: Path) -> None:
-    from splitsmith.overlay_raster import ChromiumRasterizer, RasterizerUnavailableError
+    from splitsmith.overlay.raster import ChromiumRasterizer, RasterizerUnavailableError
 
     frame = _png(tmp_path / "frame.png", (1280, 720), (90, 90, 90))
     brand = _png(tmp_path / "brand.png", (64, 64), (0, 0, 255))

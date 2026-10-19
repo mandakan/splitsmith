@@ -5,7 +5,7 @@ out to here, per CLAUDE.md. As of issue #683's amendment (Task 6R-3),
 ``overlay_summary`` no longer hand-fits or draws text itself: it declares
 a cell's content as ``Group``/``Element`` tuples (``_cell_groups``) and
 turns the whole canvas's declared cells into one HTML document composed
-through an injected :class:`splitsmith.overlay_raster.Rasterizer`
+through an injected :class:`splitsmith.overlay.raster.Rasterizer`
 (``docs/superpowers/plans/2026-08-06-overlay-composition-seam-amendment.md``).
 Task 7 (also issue #683) changed what ``_cell_groups`` declares for the
 six hit/fault counts -- see :func:`overlay_summary._count_elements` --
@@ -17,7 +17,7 @@ but not this split; the checks below still split two ways:
   through rasterization to observe the same facts.
 - Tests about *how ``build_hold_still`` wires that declaration through
   the rasterizer* inject :class:`_FakeRasterizer`, a recording double
-  standing in for :class:`splitsmith.overlay_raster.Rasterizer` -- unit
+  standing in for :class:`splitsmith.overlay.raster.Rasterizer` -- unit
   tests never launch a browser, the same seam
   ``compare.mp4_grid.Runner`` gives ``subprocess.run``. It records the
   HTML it was asked to render (inspected for the right substrings) and
@@ -64,15 +64,15 @@ from splitsmith.compare.overlay_data import TileShot, TileStageData
 from splitsmith.compare.overlay_sprites import SpriteGeometry, TilePlacement
 from splitsmith.events import ReloadFigure
 from splitsmith.match_project import StageScorecard
-from splitsmith.overlay_html import grid_html
-from splitsmith.overlay_layout import Anchor, ColorToken, Emphasis, Flow, Role
-from splitsmith.overlay_raster import (
+from splitsmith.overlay.html import grid_html
+from splitsmith.overlay.layout import Anchor, ColorToken, Emphasis, Flow, Role
+from splitsmith.overlay.raster import (
     CHROMIUM_CHANNEL,
     DEVICE_SCALE_FACTOR,
     ChromiumRasterizer,
     RasterizerUnavailableError,
 )
-from splitsmith.overlay_theme import load_theme
+from splitsmith.overlay.theme import load_theme
 
 THEME = load_theme("clean")
 GEOMETRY = SpriteGeometry(canvas_width=640, canvas_height=360, rows=2, cols=2)
@@ -84,7 +84,7 @@ class _FakeRasterizer:
     alpha-composite step has genuine bytes to work with rather than a
     stub that would mask a wiring bug in the compositing itself.
 
-    Stands in for :class:`splitsmith.overlay_raster.Rasterizer` -- see
+    Stands in for :class:`splitsmith.overlay.raster.Rasterizer` -- see
     the module docstring.
     """
 
@@ -1160,7 +1160,7 @@ def test_a_long_names_figures_never_reach_a_neighboring_cells_markup():
 
 
 class _CapturingRealRasterizer:
-    """Wraps a real :class:`~splitsmith.overlay_raster.ChromiumRasterizer`
+    """Wraps a real :class:`~splitsmith.overlay.raster.ChromiumRasterizer`
     and remembers the exact PNG bytes it returned.
 
     ``build_hold_still`` immediately alpha-composites the rasterizer's
@@ -1187,7 +1187,7 @@ def _declared_content_survived_the_fit_policy(html: str, *, width: int, height: 
     what ``_cell_groups`` declared actually there, unclipped".
 
     Navigates a real Chromium to ``html`` (mirroring
-    :meth:`~splitsmith.overlay_raster.ChromiumRasterizer.png`'s own
+    :meth:`~splitsmith.overlay.raster.ChromiumRasterizer.png`'s own
     ``page.goto(file://...)`` + ``document.fonts.ready`` sequence, since
     a shrink/drop decision made before the bundled face loads and reflows
     everything under it would be measuring the wrong metrics) and calls
@@ -1215,7 +1215,7 @@ def _declared_content_survived_the_fit_policy(html: str, *, width: int, height: 
     Raises :class:`playwright.sync_api.Error` (never catches it) if no
     usable Chromium can be launched -- every caller is responsible for
     its own ``pytest.skip``, matching how this suite's other real-browser
-    tests treat :class:`~splitsmith.overlay_raster.RasterizerUnavailableError`.
+    tests treat :class:`~splitsmith.overlay.raster.RasterizerUnavailableError`.
     """
     with sync_playwright() as playwright:
         browser = playwright.chromium.launch(channel=CHROMIUM_CHANNEL, headless=True)
@@ -1428,7 +1428,7 @@ def test_a_full_stat_block_survives_the_fit_policy_in_a_real_render():
     (this branch's own flagship pixel proof) already runs at, and reached
     into the DOM after the fit-policy script runs (see
     ``overlay_html._fit_script``, invoked here the same way
-    :meth:`~splitsmith.overlay_raster.ChromiumRasterizer.png` invokes it
+    :meth:`~splitsmith.overlay.raster.ChromiumRasterizer.png` invokes it
     in production) to check something a pixel bounding box cannot: not
     just "did ink stay inside the cell" but "is the *declared* content
     actually there, unclipped".

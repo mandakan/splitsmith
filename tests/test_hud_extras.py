@@ -26,7 +26,7 @@ from splitsmith.hud_extras import (
     spread,
 )
 from splitsmith.match_project import StageScorecard
-from splitsmith.overlay_hud import HudOptions, overlay_data_identity, overlay_settings
+from splitsmith.overlay.hud import HudOptions, overlay_data_identity, overlay_settings
 from splitsmith.stage_summary_data import TileShot
 
 

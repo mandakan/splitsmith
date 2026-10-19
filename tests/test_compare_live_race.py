@@ -17,9 +17,9 @@ from splitsmith.compare.overlay_sprites import (
     race_rows_at,
 )
 from splitsmith.config import StageRounds
-from splitsmith.overlay_html import grid_html
-from splitsmith.overlay_layout import CellScale, ColorToken
-from splitsmith.overlay_theme import load_theme
+from splitsmith.overlay.html import grid_html
+from splitsmith.overlay.layout import CellScale, ColorToken
+from splitsmith.overlay.theme import load_theme
 from splitsmith.stage_summary_data import TileShot, TileStageData
 from tests.conftest import fake_ffmpeg_probe
 from tests.test_compare_mp4_grid_overlay import CANVAS, _recorder, _shooters, _StubRasterizer
@@ -156,7 +156,7 @@ _RACE_FIT_JS = """() => Array.from(document.querySelectorAll('.anchor-middle-cen
 def _race_fit(html: str, *, width: int, height: int, tmp_path: Path) -> list[dict]:
     """Lay ``html`` out as ``ChromiumRasterizer.png`` does (file URL, fonts
     ready, the fit policy run) and read what fit.js did to each band."""
-    from splitsmith.overlay_raster import ChromiumRasterizer, RasterizerUnavailableError
+    from splitsmith.overlay.raster import ChromiumRasterizer, RasterizerUnavailableError
 
     page_path = tmp_path / "race.html"
     page_path.write_text(html, encoding="utf-8")

@@ -2,9 +2,9 @@
 
 Issue #693. What one tile says *during* a run -- the shot counter and the
 last split -- as declared ``Group``/``Element`` objects, composed into
-one canvas-sized HTML document by :func:`splitsmith.overlay_html.grid_html`
+one canvas-sized HTML document by :func:`splitsmith.overlay.html.grid_html`
 and turned into a PNG by an injected
-:class:`~splitsmith.overlay_raster.Rasterizer`. This module is to the live
+:class:`~splitsmith.overlay.raster.Rasterizer`. This module is to the live
 overlay exactly what ``compare/overlay_summary.py`` is to the freeze-frame
 stage summary, and it is deliberately the *smaller* of the two: a tile
 says two things while it is running, and both of them are one string.
@@ -29,7 +29,7 @@ CSS's cumulative advance are what keep a counter inside the tile it
 belongs to; that guarantee is structural rather than arithmetic, which is
 the whole point.
 The size a counter draws at is read straight off
-:class:`~splitsmith.overlay_layout.CellScale` (driven by *cell* height,
+:class:`~splitsmith.overlay.layout.CellScale` (driven by *cell* height,
 never canvas height -- 3x3 and 4x4 are first-class grid kinds), and CSS
 does the rest.
 
@@ -49,7 +49,7 @@ shooter's cell, which is the #683 review defect this swap removes.
 **What did not move.** The running clock is still an ffmpeg ``drawtext``
 filter positioned by an expression ffmpeg evaluates at draw time, when it
 finally knows ``tw``/``th`` (see
-:func:`splitsmith.overlay_layout.anchor_ffmpeg_expr`). It is the one
+:func:`splitsmith.overlay.layout.anchor_ffmpeg_expr`). It is the one
 genuinely per-frame element in the overlay and no rasterizer choice
 touches it. ``overlay_sprites.theme_font_face`` therefore stays where it
 is: the clock and this module have to resolve the same typeface or the
@@ -77,10 +77,10 @@ from pathlib import Path
 
 from PIL import Image
 
-from ..overlay_html import grid_html
-from ..overlay_layout import Anchor, CellScale, ColorToken, Element, Flow, Group, Role
-from ..overlay_raster import Rasterizer
-from ..overlay_theme import OverlayTheme
+from ..overlay.html import grid_html
+from ..overlay.layout import Anchor, CellScale, ColorToken, Element, Flow, Group, Role
+from ..overlay.raster import Rasterizer
+from ..overlay.theme import OverlayTheme
 from .free_cell import race_groups, row_gutter
 from .overlay_sprites import (
     CornerFit,
@@ -102,12 +102,12 @@ def panel_groups(
 
     Two things, each absent when it has nothing honest to say:
 
-    - the **shot counter** at :attr:`~splitsmith.overlay_layout.Anchor.TOP_LEFT`,
+    - the **shot counter** at :attr:`~splitsmith.overlay.layout.Anchor.TOP_LEFT`,
       reading ``"7/32"`` when the expected shot count is known and a bare
       ``"7"`` when it is not -- never ``"7/?"``, which would claim a
       denominator exists;
     - the **last split** at
-      :attr:`~splitsmith.overlay_layout.Anchor.BOTTOM_CENTER` in the
+      :attr:`~splitsmith.overlay.layout.Anchor.BOTTOM_CENTER` in the
       theme's split colour.
 
     A tile that has not fired declares no counter (``"0/32"`` over
@@ -117,12 +117,12 @@ def panel_groups(
 
     A filler tile (``present`` false) declares nothing at all. It is not a
     shooter, so ``"--/32"`` over black would imply a competitor who isn't
-    there. :func:`splitsmith.overlay_html.grid_html` enforces the same
+    there. :func:`splitsmith.overlay.html.grid_html` enforces the same
     thing independently for a filler placement; the guard is here as well
     because "absence is first class" is this pipeline's rule, not a
     property a caller should have to remember to preserve.
 
-    Both elements are :attr:`~splitsmith.overlay_layout.Role.LIVE_PRIMARY`
+    Both elements are :attr:`~splitsmith.overlay.layout.Role.LIVE_PRIMARY`
     -- the counter and the running clock have been pinned to one size
     since before ``CellScale`` existed, and the split reads at that size
     too. #683's issue text claimed the counter and clock were at
@@ -185,10 +185,10 @@ def state_html(
     canvas-sized HTML document.
 
     Pure: no browser, no file I/O, no font opened. Rasterizing what this
-    returns is :mod:`splitsmith.overlay_raster`'s job, which is why a
+    returns is :mod:`splitsmith.overlay.raster`'s job, which is why a
     fake rasterizer is enough to test everything above the pixels.
 
-    The document is built by the same :func:`splitsmith.overlay_html.grid_html`
+    The document is built by the same :func:`splitsmith.overlay.html.grid_html`
     the stage summary uses, at the same cell geometry
     (``SpriteGeometry.cell_width``/``cell_height``, floor division,
     matching ``mp4_grid._cell_size``) -- so the live overlay and the

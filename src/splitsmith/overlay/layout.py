@@ -172,7 +172,7 @@ class ColorToken(Enum):
     SPLIT = "split"
     SPLIT_GOOD = "split_good"
     ACCENT = "accent"
-    #: Body-size red text (see :attr:`~splitsmith.overlay_theme.OverlayTheme.accent_text`)
+    #: Body-size red text (see :attr:`~splitsmith.overlay.theme.OverlayTheme.accent_text`)
     #: -- what an *unplated* fault count (a genuine zero: ``M0``, ``NS0``)
     #: draws instead of the raw, too-thin-at-small-sizes identity red.
     #: Introduced alongside :attr:`Emphasis.PLATE` reading ``accent_fill``

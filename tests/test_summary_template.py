@@ -14,7 +14,7 @@ from splitsmith import composition, looks, mp4_render
 from splitsmith.config import StageEvent
 from splitsmith.hud_extras import HudExtras
 from splitsmith.match_project import StageScorecard
-from splitsmith.overlay_theme import load_theme
+from splitsmith.overlay.theme import load_theme
 from splitsmith.stage_summary_data import TileShot, TileStageData
 from splitsmith.summary_template import (
     match_summary_payload,
@@ -256,7 +256,7 @@ def test_a_summary_clip_that_fails_draws_the_built_in_card_and_says_so(
 
 
 def test_a_still_template_whose_frame_fails_says_the_built_in_card_drew(tmp_path: Path, retro: Path) -> None:
-    from splitsmith.overlay_raster import TemplateFrames
+    from splitsmith.overlay.raster import TemplateFrames
 
     class _BadFrame(_FakeRasterizer):
         def render_template_frames(self, template, **kwargs):  # noqa: ANN001, ANN003

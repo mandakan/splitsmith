@@ -47,7 +47,7 @@ def test_a_skipped_card_is_absent_and_moves_what_follows(tmp_path: Path, monkeyp
     """No browser: the title page and closing card were never written, so
     they are not on the timeline and the stages start where the video has
     them."""
-    from splitsmith.overlay_raster import RasterizerUnavailableError
+    from splitsmith.overlay.raster import RasterizerUnavailableError
 
     class _NoBrowser:
         def __enter__(self):  # type: ignore[no-untyped-def]

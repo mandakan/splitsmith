@@ -7,7 +7,7 @@ from dataclasses import dataclass
 
 import pytest
 
-from splitsmith.overlay_theme import load_theme
+from splitsmith.overlay.theme import load_theme
 from splitsmith.share_card import (
     MatchCard,
     RosterEntry,

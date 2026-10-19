@@ -206,7 +206,7 @@ from ..match_project import (
 from ..match_registry import MatchRegistry
 from ..mp4_render import RenderStep
 from ..observability import StructuredJsonFormatter, init_sentry
-from ..overlay_hud import overlay_data_identity, overlay_settings
+from ..overlay.hud import overlay_data_identity, overlay_settings
 from ..runtime import runtime as process_runtime
 from ..share_card import stage_figures
 from ..shot_id import has_usable_id
@@ -1951,7 +1951,7 @@ def _grid_thumbnail_card(video: Path, at: float, out: Path, data: Any, look_name
     caller grabs the plain frame."""
     if data is None:
         return False
-    from ..overlay_raster import ChromiumRasterizer, RasterizerUnavailableError
+    from ..overlay.raster import ChromiumRasterizer, RasterizerUnavailableError
     from ..thumbnail_card import ThumbnailError, grab_frame, render_thumbnail_card
 
     frame = out.with_name(out.stem + "-frame.png")

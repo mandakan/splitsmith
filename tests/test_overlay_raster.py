@@ -3,7 +3,7 @@
 Two tiers, deliberately kept apart:
 
 - **Unit tests** never launch a browser. They drive
-  :class:`~splitsmith.overlay_raster.ChromiumRasterizer` against
+  :class:`~splitsmith.overlay.raster.ChromiumRasterizer` against
   hand-written recording doubles standing in for Playwright's
   ``Browser``/``BrowserContext``/``Page`` objects, so a test can assert
   exactly which calls were made and in what order without paying for a
@@ -35,8 +35,9 @@ import pytest
 from PIL import Image
 from playwright.sync_api import Error as PlaywrightError
 
-from splitsmith import look_sandbox, overlay_raster
-from splitsmith.overlay_raster import ChromiumRasterizer, RasterizerUnavailableError
+from splitsmith import look_sandbox
+from splitsmith.overlay import raster as overlay_raster
+from splitsmith.overlay.raster import ChromiumRasterizer, RasterizerUnavailableError
 
 # --- recording doubles for Playwright's Browser/BrowserContext/Page -------
 #
@@ -499,7 +500,7 @@ def _font_probe_html(*, with_bundled_face: bool, text: str, font_size: int, canv
     the real failure mode: a silently-failed ``@font-face`` falls
     through the same stack onto the browser's own ``monospace``.
     """
-    from splitsmith.overlay_html import font_face_url
+    from splitsmith.overlay.html import font_face_url
 
     face_css = ""
     if with_bundled_face:

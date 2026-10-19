@@ -11,9 +11,9 @@ string per document.
 
 import pytest
 
-from splitsmith import overlay_text
 from splitsmith.compare import overlay_live, overlay_sprites
-from splitsmith.overlay_theme import load_theme
+from splitsmith.overlay import text as overlay_text
+from splitsmith.overlay.theme import load_theme
 
 GEOMETRY = overlay_sprites.SpriteGeometry(canvas_width=1280, canvas_height=720, rows=2, cols=2)
 THEME = load_theme("clean")

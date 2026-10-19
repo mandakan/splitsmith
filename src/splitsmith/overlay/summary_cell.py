@@ -10,8 +10,8 @@ The declaration is issue #683 Task 8's approved design
 (``scripts/mock_summary_cell.py``): the shooter's name (with a DQ chip
 when DQ'd), then two equal-weight bands -- **Scoring** and **Splits**.
 See :func:`summary_groups`. Nothing here measures text or opens a font;
-:mod:`splitsmith.overlay_html` turns the groups into a document and an
-injected :class:`~splitsmith.overlay_raster.Rasterizer` into pixels.
+:mod:`splitsmith.overlay.html` turns the groups into a document and an
+injected :class:`~splitsmith.overlay.raster.Rasterizer` into pixels.
 
 Never draws a number that is absent. ``scorecard`` is ``None`` for
 placeholder stages and pre-scorecard projects; a manually-timed stage
@@ -30,17 +30,17 @@ from typing import NamedTuple
 
 from PIL import Image
 
-from .coach import statistic_split_shots
-from .events import ReloadFigure, exposed_reload_s
-from .logo_spots import LogoBox, logo_box, paste_logo, text_room
-from .match_project import StageScorecard
-from .overlay_html import single_html
-from .overlay_layout import MIN_FONT_SIZE, Anchor, CellScale, ColorToken, Element, Emphasis, Flow, Group, Role
-from .overlay_raster import Rasterizer
-from .overlay_still import DEFAULT_DIM, backdrop_from_frame
-from .overlay_theme import OverlayTheme
-from .safe_area import SafeArea, safe_area
-from .stage_summary_data import TileStageData
+from ..coach import statistic_split_shots
+from ..events import ReloadFigure, exposed_reload_s
+from ..logo_spots import LogoBox, logo_box, paste_logo, text_room
+from ..match_project import StageScorecard
+from ..safe_area import SafeArea, safe_area
+from ..stage_summary_data import TileStageData
+from .html import single_html
+from .layout import MIN_FONT_SIZE, Anchor, CellScale, ColorToken, Element, Emphasis, Flow, Group, Role
+from .raster import Rasterizer
+from .still import DEFAULT_DIM, backdrop_from_frame
+from .theme import OverlayTheme
 
 logger = logging.getLogger(__name__)
 
@@ -121,18 +121,18 @@ def count_elements(scorecard: StageScorecard) -> list[Element]:
     now that there is no single joined string to omit as a whole.
 
     A recorded zero still draws (``P0`` reads body-size red --
-    :attr:`~splitsmith.overlay_layout.ColorToken.ACCENT_TEXT`, not the raw
+    :attr:`~splitsmith.overlay.layout.ColorToken.ACCENT_TEXT`, not the raw
     identity red, which is too thin at this size -- a procedural is
     always worth -10, whether or not this shooter took one -- see
     :data:`_COUNT_FIELDS`), but an *actual* nonzero fault additionally
-    gets :attr:`~splitsmith.overlay_layout.Emphasis.PLATE`: colour alone
+    gets :attr:`~splitsmith.overlay.layout.Emphasis.PLATE`: colour alone
     says what a count is worth, and a plate says this particular one
     happened. Only the ``M``/``NS``/``P`` entries are eligible -- ``A``/
     ``C``/``D`` are never a fault, so they never plate regardless of
     value.
 
     Each element also carries a ``drop_priority`` (issue #683 F1's fit
-    policy -- see :attr:`~splitsmith.overlay_layout.Element.drop_priority`
+    policy -- see :attr:`~splitsmith.overlay.layout.Element.drop_priority`
     and ``overlay_html._fit_script``), assigned by tier
     (:data:`_TIER_UNLIT_FAULT` / ``_TIER_ACCURACY`` / ``_TIER_LIT_FAULT``)
     and, within a tier, by this row's own reading order -- **not**
@@ -307,22 +307,22 @@ def summary_groups(
 
     Issue #683 Task 8's approved design (``scripts/mock_summary_cell.py``),
     exactly: the shooter's name (with a DQ chip beside it when DQ'd) at
-    :attr:`~splitsmith.overlay_layout.Anchor.TOP_CENTER`, left-aligned;
+    :attr:`~splitsmith.overlay.layout.Anchor.TOP_CENTER`, left-aligned;
     below it, a vertically centred stack of two equal-weight bands at
-    :attr:`~splitsmith.overlay_layout.Anchor.MIDDLE_CENTER`, also
+    :attr:`~splitsmith.overlay.layout.Anchor.MIDDLE_CENTER`, also
     left-aligned -- **Scoring** (its own label, the six colour-coded
     hit/fault counts, then hit factor and stage time) and **Splits**
     (its own label, then Best/Avg/Worst/Draw as a four-column grid
     spanning the cell's full width). Neither band outranks the other --
     both draw their figures at the same size
-    (:attr:`~splitsmith.overlay_layout.Role.HEADLINE`) -- which is the
+    (:attr:`~splitsmith.overlay.layout.Role.HEADLINE`) -- which is the
     whole point of this design and the third attempt at it: the stage
     percentage and the cross-shooter placing this summary used to carry
     are gone entirely (issue #683 Task 8), not merely resized or moved.
     A DQ is not a placing; it stays, as the identity row's chip.
 
     Units attach to their own value (``"4.50s"``, ``"12.00"`` plus a
-    smaller ``"HF"`` suffix -- see :attr:`~splitsmith.overlay_layout.Element.unit`)
+    smaller ``"HF"`` suffix -- see :attr:`~splitsmith.overlay.layout.Element.unit`)
     rather than a separate caption row above a bare number.
 
     A tile with no audit and no scorecard yields just the identity group
@@ -355,7 +355,7 @@ def summary_groups(
     Draw as a 2x2, the reload row as a row of its own
     (:attr:`UprightGridType.reload_columns` wide), the counts wrapping to
     three columns, and hit factor and time one size down
-    (:attr:`~splitsmith.overlay_layout.Role.DETAIL`, the counts' size), over
+    (:attr:`~splitsmith.overlay.layout.Role.DETAIL`, the counts' size), over
     each other when the grid's narrowest tile has no room for both on a row
     (:attr:`UprightGridType.stack_figures`).
     """
@@ -752,7 +752,7 @@ class UprightGridType:
 
     scale: CellScale
     #: ``False`` when a caption would come out under the legibility floor
-    #: (:data:`~splitsmith.overlay_layout.MIN_FONT_SIZE`): the captions are
+    #: (:data:`~splitsmith.overlay.layout.MIN_FONT_SIZE`): the captions are
     #: dropped instead, and the band labels sit at the floor.
     captions: bool
     #: Hit factor over time rather than beside it: the narrowest tile has
@@ -1106,7 +1106,7 @@ def build_summary_still(
     ending before it (#1432), text or not.
 
     ``backdrop`` is the stage's last visible frame, blurred and dimmed
-    (:mod:`splitsmith.overlay_still`); ``None`` or unreadable paints the
+    (:mod:`splitsmith.overlay.still`); ``None`` or unreadable paints the
     theme's surface. ``rasterizer`` ``None`` -- no usable browser, decided
     once by the caller -- composes the still with no text, the same
     degradation the grid's hold takes: the frame is still the shooter's

@@ -64,7 +64,7 @@ from PIL import Image
 
 from splitsmith.compare import mp4_grid
 from splitsmith.compare.project_loader import CompareShooterBundle, CompareStageBundle
-from splitsmith.overlay_raster import RasterizerUnavailableError
+from splitsmith.overlay.raster import RasterizerUnavailableError
 from tests.conftest import fake_ffmpeg_probe
 
 ACTION = 12.5
@@ -1171,9 +1171,9 @@ def test_a_stage_whose_summary_still_fails_is_skipped_not_fatal(tmp_path: Path):
 
 
 class _AlwaysUnavailableRasterizer:
-    """Stands in for :class:`~splitsmith.overlay_raster.ChromiumRasterizer`
+    """Stands in for :class:`~splitsmith.overlay.raster.ChromiumRasterizer`
     at the ``render_grid_mp4`` call site: ``__enter__`` always raises
-    :class:`~splitsmith.overlay_raster.RasterizerUnavailableError`, so the
+    :class:`~splitsmith.overlay.raster.RasterizerUnavailableError`, so the
     degradation test below never needs a real browser -- it is monkeypatched
     over the name ``mp4_grid.render_grid_mp4`` resolves when the caller
     leaves ``rasterizer`` at its default (``None``) and a hold needs one.

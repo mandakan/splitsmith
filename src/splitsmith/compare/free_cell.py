@@ -22,7 +22,7 @@ information there, chosen once for the whole render:
 
 Pure declaration (:func:`free_cell_groups`) plus one rasterization
 (:func:`build_free_cell_still`) through the injected
-:class:`~splitsmith.overlay_raster.Rasterizer`, the card renderer's own
+:class:`~splitsmith.overlay.raster.Rasterizer`, the card renderer's own
 path. A host with no browser keeps the black cell and says so through the
 render's degradations, like every other card.
 """
@@ -38,11 +38,11 @@ from typing import TYPE_CHECKING, Literal
 from PIL import Image
 
 from ..coach import statistic_splits
-from ..overlay_clock import clock_text
-from ..overlay_html import single_html
-from ..overlay_layout import Anchor, CellScale, ColorToken, Element, Flow, Group, Role
-from ..overlay_raster import Rasterizer
-from ..overlay_theme import OverlayTheme
+from ..overlay.clock import clock_text
+from ..overlay.html import single_html
+from ..overlay.layout import Anchor, CellScale, ColorToken, Element, Flow, Group, Role
+from ..overlay.raster import Rasterizer
+from ..overlay.theme import OverlayTheme
 from ..stage_summary_data import TileStageData
 
 if TYPE_CHECKING:

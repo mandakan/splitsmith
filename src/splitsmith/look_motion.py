@@ -1,7 +1,7 @@
 """A motion template as an alpha clip ffmpeg can lay on a card.
 
 ``write_motion_clip`` pipes the raw RGBA frames of a
-:class:`~splitsmith.overlay_raster.TemplateFrames` into ffmpeg and writes
+:class:`~splitsmith.overlay.raster.TemplateFrames` into ffmpeg and writes
 a lossless MOV (the ``png`` encoder, ``rgba``) in the render's work
 directory. Both MP4 renderers then take that file as one more input and
 overlay it on the card's backdrop with ``tpad=stop_mode=clone``, so the
@@ -23,7 +23,7 @@ import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
-from .overlay_raster import TemplateFrames
+from .overlay.raster import TemplateFrames
 
 logger = logging.getLogger(__name__)
 

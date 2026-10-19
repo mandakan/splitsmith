@@ -23,7 +23,7 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel
 
-from ..overlay_raster import CHROMIUM_CHANNEL, ChromiumRasterizer, Rasterizer, RasterizerUnavailableError
+from ..overlay.raster import CHROMIUM_CHANNEL, ChromiumRasterizer, Rasterizer, RasterizerUnavailableError
 from .jobs import Job, JobHandle
 
 router = APIRouter()

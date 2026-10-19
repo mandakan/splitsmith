@@ -28,13 +28,16 @@ import tempfile
 from pathlib import Path
 from typing import Any, Literal
 
-from .audit_data import read_audit_data
-from .config import StageEvent
-from .events import confirmed_from_doc
-from .hud_extras import HudExtras, declared_data, hud_extras_data
-from .look_template import TemplateContext, engine_block, shared_url, template_digest, theme_tokens
-from .overlay_html import single_css
-from .overlay_hud import (
+from ..audit_data import read_audit_data
+from ..config import StageEvent
+from ..events import confirmed_from_doc
+from ..hud_extras import HudExtras, declared_data, hud_extras_data
+from ..look_template import TemplateContext, engine_block, shared_url, template_digest, theme_tokens
+from ..safe_area import safe_area
+from ..segment_cache import SegmentCache
+from ..stage_summary_data import load_stage_shots
+from .html import single_css
+from .hud import (
     HUD_KEY_VERSION,
     HudFrame,
     HudOptions,
@@ -46,13 +49,10 @@ from .overlay_hud import (
     hud_stage_data,
     resolve_position,
 )
-from .overlay_layout import CellScale
-from .overlay_raster import Rasterizer, TemplateScriptError
-from .overlay_text import OverlayRenderError
-from .overlay_theme import OverlayTheme
-from .safe_area import safe_area
-from .segment_cache import SegmentCache
-from .stage_summary_data import load_stage_shots
+from .layout import CellScale
+from .raster import Rasterizer, TemplateScriptError
+from .text import OverlayRenderError
+from .theme import OverlayTheme
 
 logger = logging.getLogger(__name__)
 
@@ -150,7 +150,7 @@ def render_hud_overlay(
     with "Use Breakdown" off) draws the stage as one nobody broke down."""
     # Deferred: overlay_render imports this module, and the encoder argv
     # and the partial-output rule are its own, shared by both paths.
-    from .overlay_render import _build_ffmpeg_cmd, _discard_partial_output
+    from .render import _build_ffmpeg_cmd, _discard_partial_output
 
     shots = load_stage_shots(audit_path, breakdown=breakdown)
     if not shots:

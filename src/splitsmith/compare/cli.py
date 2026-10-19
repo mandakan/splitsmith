@@ -16,7 +16,7 @@ from ..config import Config
 from ..export_naming import slugify
 from ..looks import load_look
 from ..match_model import Match, is_match_folder
-from ..overlay_theme import THEME_NAMES, ThemeName
+from ..overlay.theme import THEME_NAMES, ThemeName
 from ..shooter_book import JsonShooterBookStore, load_snapshot
 from ..ui.identity_media import ensure_local_event_logo, grid_identities
 from ..ui.match_exports import render_segment_cache

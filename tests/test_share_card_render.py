@@ -6,8 +6,8 @@ from dataclasses import dataclass
 
 import pytest
 
-from splitsmith.overlay_raster import RasterizerUnavailableError
-from splitsmith.overlay_theme import load_theme
+from splitsmith.overlay.raster import RasterizerUnavailableError
+from splitsmith.overlay.theme import load_theme
 from splitsmith.share_card import CompareCard, MatchCard, RosterEntry, StageCard, stage_figures
 from splitsmith.share_card_render import (
     FALLBACK_PNG_PATH,

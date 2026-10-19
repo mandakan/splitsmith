@@ -37,8 +37,8 @@ from ..compare.mp4_grid import DEFAULT_CANVAS_HEIGHT, DEFAULT_CANVAS_WIDTH
 from ..logo_spots import DEFAULT_LOGO_SPOTS, LogoSpot
 from ..looks import look_names
 from ..match_project import trim_blocker
-from ..overlay_hud import OverlayStyleFields
-from ..overlay_theme import ThemeName
+from ..overlay.hud import OverlayStyleFields
+from ..overlay.theme import ThemeName
 from . import export_storage, match_exports
 from .context import _hosted_mode_active
 from .http_errors import source_unreachable

@@ -35,7 +35,7 @@ from ..looks import DEFAULT_VARIANT, LookError, load_look, look_credits
 from ..match_model import is_standard_start
 from ..match_project import MatchProject, StageScorecard
 from ..match_summary import DEFAULT_MATCH_SUMMARY_SECONDS, MatchSummary, build_match_summary
-from ..overlay_theme import ThemeName
+from ..overlay.theme import ThemeName
 from ..runtime import runtime
 from ..segment_cache import SegmentCache
 from ..shooter_book import EMPTY_BOOK, BookSnapshot
@@ -526,7 +526,7 @@ def _write_thumbnail_card(comp: composition.Composition, request: MatchExportReq
     ``""`` when written, else why not, and the caller grabs the plain frame."""
     from ..look_brand import brand_mark_json
     from ..looks import load_look
-    from ..overlay_raster import ChromiumRasterizer, RasterizerUnavailableError
+    from ..overlay.raster import ChromiumRasterizer, RasterizerUnavailableError
     from ..thumbnail_card import ThumbnailData, ThumbnailError, grab_frame, render_thumbnail_card
 
     source = youtube_sidecar.action_frame_source(comp)
