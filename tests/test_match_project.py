@@ -34,6 +34,7 @@ from splitsmith.match_project import (
     StageStatus,
     StageVideo,
     atomic_write_json,
+    audit_docs_on_disk,
     stage_audit_status,
 )
 
@@ -535,14 +536,20 @@ def _bare_project(tmp_path: Path) -> tuple[Path, MatchProject]:
 def test_stage_status_todo_when_no_primary_video(tmp_path: Path) -> None:
     """Fresh stage with no video assigned is ``todo`` -- nothing to do."""
     root, project = _bare_project(tmp_path)
-    assert stage_audit_status(project.stages[0], project.audit_path(root)) == StageStatus.todo
+    assert (
+        stage_audit_status(project.stages[0], audit_docs=project.audit_docs_from_disk(root))
+        == StageStatus.todo
+    )
 
 
 def test_stage_status_partial_when_video_but_no_time(tmp_path: Path) -> None:
     """Primary video assigned but no stage time imported = ``partial``."""
     root, project = _bare_project(tmp_path)
     project.stages[0].videos.append(StageVideo(path=Path("raw/v.mp4"), role="primary"))
-    assert stage_audit_status(project.stages[0], project.audit_path(root)) == StageStatus.partial
+    assert (
+        stage_audit_status(project.stages[0], audit_docs=project.audit_docs_from_disk(root))
+        == StageStatus.partial
+    )
 
 
 def test_stage_status_ready_when_prereqs_met_but_no_detection(
@@ -554,7 +561,10 @@ def test_stage_status_ready_when_prereqs_met_but_no_detection(
     root, project = _bare_project(tmp_path)
     project.stages[0].videos.append(StageVideo(path=Path("raw/v.mp4"), role="primary"))
     project.stages[0].time_seconds = 12.5
-    assert stage_audit_status(project.stages[0], project.audit_path(root)) == StageStatus.ready
+    assert (
+        stage_audit_status(project.stages[0], audit_docs=project.audit_docs_from_disk(root))
+        == StageStatus.ready
+    )
 
 
 def test_stage_status_in_progress_when_detection_run_but_no_save(
@@ -577,7 +587,10 @@ def test_stage_status_in_progress_when_detection_run_but_no_save(
         ),
         encoding="utf-8",
     )
-    assert stage_audit_status(project.stages[0], audit_dir) == StageStatus.in_progress
+    assert (
+        stage_audit_status(project.stages[0], audit_docs=audit_docs_on_disk(audit_dir))
+        == StageStatus.in_progress
+    )
 
 
 def test_stage_status_audited_when_save_event_present(tmp_path: Path) -> None:
@@ -601,7 +614,9 @@ def test_stage_status_audited_when_save_event_present(tmp_path: Path) -> None:
         ),
         encoding="utf-8",
     )
-    assert stage_audit_status(project.stages[0], audit_dir) == StageStatus.audited
+    assert (
+        stage_audit_status(project.stages[0], audit_docs=audit_docs_on_disk(audit_dir)) == StageStatus.audited
+    )
 
 
 def test_accept_event_counts_as_audited(tmp_path: Path) -> None:
@@ -625,7 +640,9 @@ def test_accept_event_counts_as_audited(tmp_path: Path) -> None:
         ),
         encoding="utf-8",
     )
-    assert stage_audit_status(project.stages[0], audit_dir) == StageStatus.audited
+    assert (
+        stage_audit_status(project.stages[0], audit_docs=audit_docs_on_disk(audit_dir)) == StageStatus.audited
+    )
 
 
 def test_invalid_event_kind_does_not_mark_audited(tmp_path: Path) -> None:
@@ -649,7 +666,10 @@ def test_invalid_event_kind_does_not_mark_audited(tmp_path: Path) -> None:
         ),
         encoding="utf-8",
     )
-    assert stage_audit_status(project.stages[0], audit_dir) == StageStatus.in_progress
+    assert (
+        stage_audit_status(project.stages[0], audit_docs=audit_docs_on_disk(audit_dir))
+        == StageStatus.in_progress
+    )
 
 
 def test_stage_status_skipped_overrides_everything(tmp_path: Path) -> None:
@@ -669,7 +689,9 @@ def test_stage_status_skipped_overrides_everything(tmp_path: Path) -> None:
         ),
         encoding="utf-8",
     )
-    assert stage_audit_status(project.stages[0], audit_dir) == StageStatus.skipped
+    assert (
+        stage_audit_status(project.stages[0], audit_docs=audit_docs_on_disk(audit_dir)) == StageStatus.skipped
+    )
 
 
 def test_stage_status_ready_on_corrupt_audit_json(tmp_path: Path) -> None:
@@ -682,7 +704,9 @@ def test_stage_status_ready_on_corrupt_audit_json(tmp_path: Path) -> None:
     audit_dir = project.audit_path(root)
     audit_dir.mkdir(parents=True, exist_ok=True)
     (audit_dir / "stage1.json").write_text("not json {", encoding="utf-8")
-    assert stage_audit_status(project.stages[0], audit_dir) == StageStatus.ready
+    assert (
+        stage_audit_status(project.stages[0], audit_docs=audit_docs_on_disk(audit_dir)) == StageStatus.ready
+    )
 
 
 def test_audited_count_only_counts_saved_stages(tmp_path: Path) -> None:
@@ -711,7 +735,7 @@ def test_audited_count_only_counts_saved_stages(tmp_path: Path) -> None:
     )
     # Stage 3: ready, no audit file at all.
 
-    assert project.audited_count(root) == 1
+    assert project.audited_count(audit_docs=project.audit_docs_from_disk(root)) == 1
 
 
 def test_stage_audit_status_uses_audit_docs_over_disk(tmp_path: Path) -> None:
@@ -723,10 +747,11 @@ def test_stage_audit_status_uses_audit_docs_over_disk(tmp_path: Path) -> None:
     root, project = _bare_project(tmp_path)
     project.stages[0].videos.append(StageVideo(path=Path("raw/v.mp4"), role="primary"))
     project.stages[0].time_seconds = 12.5
-    audit_dir = project.audit_path(root)  # deliberately never created on disk
+    # The audit dir on disk stays empty: a save event lives only in the
+    # supplied doc (the state_docs analogue).
     # A save event lives only in the supplied doc (the state_docs analogue).
     docs = {1: {"audit_events": [{"kind": "shot_detect_run"}, {"kind": "save"}]}}
-    assert stage_audit_status(project.stages[0], audit_dir, audit_docs=docs) == StageStatus.audited
+    assert stage_audit_status(project.stages[0], audit_docs=docs) == StageStatus.audited
 
 
 def test_stage_audit_status_audit_docs_missing_entry_is_ready(tmp_path: Path) -> None:
@@ -741,7 +766,7 @@ def test_stage_audit_status_audit_docs_missing_entry_is_ready(tmp_path: Path) ->
     # A stale on-disk file that WOULD read as audited must be ignored when
     # docs mode is active -- state_docs is authoritative in hosted mode.
     (audit_dir / "stage1.json").write_text(json.dumps({"audit_events": [{"kind": "save"}]}), encoding="utf-8")
-    assert stage_audit_status(project.stages[0], audit_dir, audit_docs={}) == StageStatus.ready
+    assert stage_audit_status(project.stages[0], audit_docs={}) == StageStatus.ready
 
 
 def test_stub_audit_doc_keeps_stage_ready(tmp_path: Path) -> None:
@@ -758,7 +783,7 @@ def test_stub_audit_doc_keeps_stage_ready(tmp_path: Path) -> None:
         videos=[StageVideo(path=Path("/tmp/GX010042.MP4"), role="primary", beep_time=10.0)],
     )
 
-    assert stage_audit_status(stage, audit_dir) == StageStatus.ready
+    assert stage_audit_status(stage, audit_docs=audit_docs_on_disk(audit_dir)) == StageStatus.ready
 
 
 def test_real_audit_without_save_event_is_in_progress(tmp_path: Path) -> None:
@@ -775,7 +800,7 @@ def test_real_audit_without_save_event_is_in_progress(tmp_path: Path) -> None:
         videos=[StageVideo(path=Path("/tmp/GX010042.MP4"), role="primary", beep_time=10.0)],
     )
 
-    assert stage_audit_status(stage, audit_dir) == StageStatus.in_progress
+    assert stage_audit_status(stage, audit_docs=audit_docs_on_disk(audit_dir)) == StageStatus.in_progress
 
 
 def test_stub_audit_doc_keeps_stage_ready_hosted(tmp_path: Path) -> None:
@@ -788,7 +813,7 @@ def test_stub_audit_doc_keeps_stage_ready_hosted(tmp_path: Path) -> None:
     )
     docs = {1: {"shots": [], "detection": "none"}}
 
-    assert stage_audit_status(stage, tmp_path, audit_docs=docs) == StageStatus.ready
+    assert stage_audit_status(stage, audit_docs=docs) == StageStatus.ready
 
 
 def test_stale_stub_marker_does_not_mask_a_saved_audit(tmp_path: Path) -> None:
@@ -815,7 +840,7 @@ def test_stale_stub_marker_does_not_mask_a_saved_audit(tmp_path: Path) -> None:
         videos=[StageVideo(path=Path("/tmp/GX010042.MP4"), role="primary", beep_time=10.0)],
     )
 
-    assert stage_audit_status(stage, audit_dir) == StageStatus.audited
+    assert stage_audit_status(stage, audit_docs=audit_docs_on_disk(audit_dir)) == StageStatus.audited
 
 
 def test_stage_statuses_and_audited_count_honor_audit_docs(tmp_path: Path) -> None:
@@ -833,13 +858,13 @@ def test_stage_statuses_and_audited_count_honor_audit_docs(tmp_path: Path) -> No
         2: {"audit_events": [{"kind": "shot_detect_run"}]},  # in_progress
         # stage 3: no doc -> ready
     }
-    statuses = project.stage_statuses(root, audit_docs=docs)
+    statuses = project.stage_statuses(audit_docs=docs)
     assert statuses == {
         1: StageStatus.audited,
         2: StageStatus.in_progress,
         3: StageStatus.ready,
     }
-    assert project.audited_count(root, audit_docs=docs) == 1
+    assert project.audited_count(audit_docs=docs) == 1
 
 
 def test_import_scoreboard_populates_stages(tmp_path: Path) -> None:

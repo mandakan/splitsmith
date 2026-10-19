@@ -51,7 +51,7 @@ def _project(tmp_path: Path) -> tuple[MatchProject, Path]:
 
 def test_loads_ready_stages_with_footage_and_reports_the_rest(tmp_path, monkeypatch):
     project, root = _project(tmp_path)
-    monkeypatch.setattr(MatchProject, "stage_statuses", lambda self, root, **kw: {1: "audited", 2: "audited"})
+    monkeypatch.setattr(MatchProject, "stage_statuses", lambda self, **kw: {1: "audited", 2: "audited"})
     inputs = load_reel_inputs(project, root, label="Anna", probe=lambda p: META)
     assert [(r.stage_number, r.state, r.proposals) for r in inputs.readiness] == [
         (1, "ready", 0),
@@ -82,7 +82,7 @@ def test_a_locked_match_names_its_blockers_and_renders_nothing(tmp_path, monkeyp
     from splitsmith.reel import inputs as reel_inputs
 
     project, root = _project(tmp_path)
-    monkeypatch.setattr(MatchProject, "stage_statuses", lambda self, root, **kw: {1: "audited", 2: "audited"})
+    monkeypatch.setattr(MatchProject, "stage_statuses", lambda self, **kw: {1: "audited", 2: "audited"})
     calls: list = []
     monkeypatch.setattr(reel_inputs, "render_reel", _render_spy(calls))
     outcome = reel_inputs.make_reel(
@@ -96,7 +96,7 @@ def test_force_renders_the_ready_stages_upright_or_landscape(tmp_path, monkeypat
     from splitsmith.reel import inputs as reel_inputs
 
     project, root = _project(tmp_path)
-    monkeypatch.setattr(MatchProject, "stage_statuses", lambda self, root, **kw: {1: "audited", 2: "audited"})
+    monkeypatch.setattr(MatchProject, "stage_statuses", lambda self, **kw: {1: "audited", 2: "audited"})
     calls: list = []
     monkeypatch.setattr(reel_inputs, "render_reel", _render_spy(calls))
     for upright in (True, False):
@@ -121,7 +121,7 @@ def test_the_chosen_moments_and_the_shorts_cut_reach_the_plan(tmp_path, monkeypa
     from splitsmith.reel import inputs as reel_inputs
 
     project, root = _project(tmp_path)
-    monkeypatch.setattr(MatchProject, "stage_statuses", lambda self, root, **kw: {1: "audited", 2: "audited"})
+    monkeypatch.setattr(MatchProject, "stage_statuses", lambda self, **kw: {1: "audited", 2: "audited"})
     seen: dict = {}
 
     def plan(picks, footage, **kw):
@@ -150,7 +150,7 @@ def test_a_done_stage_whose_trim_is_missing_blocks(tmp_path, monkeypatch):
     project, root = _project(tmp_path)
     a = project.stage(1).primary().video_id
     (project.trimmed_path(root) / f"stage1_cam_{a}_trimmed.mp4").unlink()
-    monkeypatch.setattr(MatchProject, "stage_statuses", lambda self, root, **kw: {1: "audited", 2: "audited"})
+    monkeypatch.setattr(MatchProject, "stage_statuses", lambda self, **kw: {1: "audited", 2: "audited"})
     inputs = load_reel_inputs(project, root, label="Anna", probe=lambda p: META)
     assert inputs.readiness[0].state == "trim_missing"
     assert inputs.footage == {}
@@ -162,7 +162,7 @@ def test_an_untouched_stage_blocks_the_reel(tmp_path, monkeypatch):
     project, root = _project(tmp_path)
     project.stage(2).primary().beep_time = None
     (project.audit_path(root) / "stage2.json").unlink()
-    monkeypatch.setattr(MatchProject, "stage_statuses", lambda self, root, **kw: {1: "audited", 2: "ready"})
+    monkeypatch.setattr(MatchProject, "stage_statuses", lambda self, **kw: {1: "audited", 2: "ready"})
     calls: list = []
     monkeypatch.setattr(reel_inputs, "render_reel", _render_spy(calls))
     outcome = reel_inputs.make_reel(
@@ -177,7 +177,7 @@ def test_a_trim_cut_for_another_beep_is_not_used(tmp_path, monkeypatch):
     a = project.stage(1).primary().video_id
     sidecar = project.trimmed_path(root) / f"stage1_cam_{a}_trimmed.params.json"
     sidecar.write_text(json.dumps({"beep_time": 11.5, "pre_buffer_seconds": 5.0}))
-    monkeypatch.setattr(MatchProject, "stage_statuses", lambda self, root, **kw: {1: "audited", 2: "audited"})
+    monkeypatch.setattr(MatchProject, "stage_statuses", lambda self, **kw: {1: "audited", 2: "audited"})
     inputs = load_reel_inputs(project, root, label="Anna", probe=lambda p: META)
     assert inputs.readiness[0].state == "trim_missing"
 
@@ -185,13 +185,13 @@ def test_a_trim_cut_for_another_beep_is_not_used(tmp_path, monkeypatch):
 def test_an_unreviewed_secondary_beep_gives_no_replay(tmp_path, monkeypatch):
     project, root = _project(tmp_path)
     project.stage(1).videos[1].beep_reviewed = False
-    monkeypatch.setattr(MatchProject, "stage_statuses", lambda self, root, **kw: {1: "audited", 2: "audited"})
+    monkeypatch.setattr(MatchProject, "stage_statuses", lambda self, **kw: {1: "audited", 2: "audited"})
     inputs = load_reel_inputs(project, root, label="Anna", probe=lambda p: META)
     assert inputs.footage[1].secondary is None
 
 
 def _statuses(monkeypatch) -> None:
-    monkeypatch.setattr(MatchProject, "stage_statuses", lambda self, root, **kw: {1: "audited", 2: "audited"})
+    monkeypatch.setattr(MatchProject, "stage_statuses", lambda self, **kw: {1: "audited", 2: "audited"})
 
 
 def test_a_chosen_camera_is_the_picture_and_the_primary_the_replay(tmp_path, monkeypatch):

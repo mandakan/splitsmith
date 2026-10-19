@@ -111,17 +111,16 @@ class MatchBundle:
     """Every shooter of the bound match, loaded once (#1181).
 
     ``projects`` is keyed by slug in match order, minus shooters whose
-    project doc is missing. ``audits`` is ``{slug: {stage_number: doc}}`` in
-    hosted mode and ``None`` in local mode, the same contract
-    :meth:`AppState.load_audit_docs` has: ``None`` tells the status helpers
-    to read audits from disk.
+    project doc is missing. ``audits`` is ``{slug: {stage_number: doc}}``
+    on both sides, the same contract :meth:`AppState.load_audit_docs` has;
+    a shooter with no audits has an empty dict.
     """
 
     projects: dict[str, MatchProject]
-    audits: dict[str, dict[int, dict]] | None
+    audits: dict[str, dict[int, dict]]
 
-    def audit_docs(self, slug: str) -> dict[int, dict] | None:
-        return None if self.audits is None else self.audits.get(slug, {})
+    def audit_docs(self, slug: str) -> dict[int, dict]:
+        return self.audits.get(slug, {})
 
 
 @dataclass
@@ -669,19 +668,16 @@ class AppState:
         except (OSError, json.JSONDecodeError) as exc:
             raise HTTPException(status_code=500, detail=f"audit read failed: {exc}") from exc
 
-    def load_audit_docs(self, slug: str) -> dict[int, dict] | None:
-        """Per-stage audit docs for one shooter, for hosted-aware status.
-
-        Returns ``{stage_number: doc}`` in hosted mode (one bulk query
-        through the port), or ``None`` in local mode so the status helpers
-        fall back to their on-disk read. This is the single loader the
-        status/count endpoints hand to :meth:`MatchProject.stage_statuses` /
-        :meth:`MatchProject.audited_count`; step 5 of the port migration
-        makes the local side answer too and drops the ``None``.
-        """
-        if self.audit_doc_target() is None:
-            return None
-        return {stage: doc for stage, (doc, _version) in self.docstore().list_audits(slug).items()}
+    def load_audit_docs(self, slug: str) -> dict[int, dict]:
+        """Per-stage audit docs for one shooter, ``{stage_number: doc}``,
+        through the storage port: one bulk query hosted, the audit files
+        locally. This is the single loader the status and count routes hand
+        to :meth:`MatchProject.stage_statuses` / :meth:`audited_count` /
+        :meth:`export_overview`, which never read a file themselves."""
+        try:
+            return {stage: doc for stage, (doc, _version) in self.docstore().list_audits(slug).items()}
+        except (OSError, json.JSONDecodeError) as exc:
+            raise HTTPException(status_code=500, detail=f"audit read failed: {exc}") from exc
 
     def save_audit(self, slug: str, stage_number: int, doc: dict, *, version: int) -> int:
         """Persist a stage's audit doc through the storage port; return the
@@ -847,8 +843,8 @@ class AppState:
         binds each project through :meth:`_project_from_doc`. A shooter
         whose project doc is missing is left out, as the per-shooter loops
         skipped it. Local mode reads each ``project.json`` from disk and
-        reports ``audits=None`` so the status helpers keep their on-disk
-        audit read, exactly as :meth:`load_audit_docs` returns ``None``.
+        each shooter's audit files through the port, so ``audits`` is
+        filled on both sides.
         """
         match_id = current_match_id.get()
         store = self.project_state
@@ -862,7 +858,9 @@ class AppState:
                     projects[slug] = self.shooter_project(slug)
                 except Exception as exc:  # noqa: BLE001 -- isolate per shooter
                     logger.warning("Skipping shooter %s: %s", slug, exc)
-            return MatchBundle(projects=projects, audits=None)
+            return MatchBundle(
+                projects=projects, audits={slug: self.load_audit_docs(slug) for slug in projects}
+            )
         docs = run_sync(store.load_docs_for_matches([match_id]))[match_id]
         projects = {}
         for slug in match.shooters:

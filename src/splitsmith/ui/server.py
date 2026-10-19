@@ -4997,7 +4997,6 @@ def _hosted_detail_from_docs(
     stage_names = {
         int(s["stage_number"]): str(s.get("stage_name") or "") for s in (match_doc.get("stages") or [])
     }
-    project_root = Path(rp.path)  # unused by stage_statuses in docs mode
     for slug in shooters:
         pdoc = project_docs.get(slug)
         if pdoc is None:
@@ -5007,7 +5006,7 @@ def _hosted_detail_from_docs(
             proj = MatchProject.model_validate(pdoc)
             names.append(proj.competitor_name or slug)
             video_total += len(proj.all_videos())
-            statuses = proj.stage_statuses(project_root, audit_docs=audit_by_slug.get(slug, {}))
+            statuses = proj.stage_statuses(audit_docs=audit_by_slug.get(slug, {}))
             audited_total += sum(1 for st in statuses.values() if st == StageStatus.audited)
             per_shooter.append((slug, statuses))
             for st_entry in proj.stages:
@@ -7407,9 +7406,7 @@ def _classify_shooter(
     # One pass: derive both the per-stage status list and the audited
     # count from a single ``stage_statuses`` walk rather than also
     # calling ``audited_count`` (which repeats the same audit-dir read).
-    stage_status_map = legacy.stage_statuses(
-        shooter_root, audit_docs=state.load_audit_docs(shooter_root.name)
-    )
+    stage_status_map = legacy.stage_statuses(audit_docs=state.load_audit_docs(shooter_root.name))
     stages_audited = sum(1 for st in stage_status_map.values() if st == StageStatus.audited)
     # A stage counts once however many of its angles are uncached --
     # the field is a stage count, and the CTA it drives rebuilds the
@@ -7497,9 +7494,8 @@ def _build_triage_response(state: AppState) -> TriageResponse:
     """Assemble the cross-shooter, cross-stage triage grid (slice 4).
 
     Enumerates shooters exactly as :func:`list_match_shooters` does,
-    then per shooter bulk-loads audit docs once via
-    ``state.load_audit_docs`` (hosted: one query; local: ``None``,
-    falling back to per-stage ``state.load_audit`` below) and derives
+    with every shooter's audit docs loaded once through the match
+    bundle (hosted: one query; local: the audit files) and derives
     statuses via the same ``stage_statuses`` walk used by the project
     GET. Per non-placeholder stage, the anomaly computation mirrors
     :func:`get_stage_anomalies` exactly: same beep-time fallback, same
@@ -7511,7 +7507,7 @@ def _build_triage_response(state: AppState) -> TriageResponse:
     exactly the way ``get_hitl_queue`` resolves it (#823) - the gate
     is global to the match, not per-shooter.
     """
-    match_root, match = _resolve_match_context(state)
+    _match_root, match = _resolve_match_context(state)
     # The whole match in one query (#1181): every shooter's project doc
     # and audit docs, instead of two queries per shooter.
     bundle = state.match_bundle(match)
@@ -7519,7 +7515,6 @@ def _build_triage_response(state: AppState) -> TriageResponse:
     docs: list[dict | None] = []
     threshold: float | None = None
     for slug in match.shooters:
-        shooter_root = match_model.Match.shooter_root(match_root, slug)
         legacy = bundle.projects.get(slug)
         if legacy is None:
             continue
@@ -7528,15 +7523,13 @@ def _build_triage_response(state: AppState) -> TriageResponse:
             threshold = resolved.settings.beep_low_confidence_threshold
         name = legacy.competitor_name or slug
         audit_docs = bundle.audit_docs(slug)
-        status_map = legacy.stage_statuses(shooter_root, audit_docs=audit_docs)
+        status_map = legacy.stage_statuses(audit_docs=audit_docs)
         for stg in legacy.stages:
             if stg.placeholder:
                 continue
             prim = stg.primary()
             beep = prim.beep_time if prim is not None and prim.beep_time is not None else 0.0
-            doc = (audit_docs or {}).get(stg.stage_number)
-            if doc is None and audit_docs is None:
-                doc, _ = state.load_audit(slug, stg.stage_number)
+            doc = audit_docs.get(stg.stage_number)
             docs.append(doc)
             anomalies: list[dict] = []
             engine_shots: list[Shot] = []

@@ -11,7 +11,7 @@ from pathlib import Path
 
 from ...export_runs import LOG_FILENAME
 from ...match_model import MATCH_FILE, Match
-from ...match_project import PROJECT_FILE
+from ...match_project import PROJECT_FILE, audit_docs_on_disk
 from .port import Doc, MatchBundleDocs, Versioned
 
 AUDIT_DIR = "audit"
@@ -116,16 +116,7 @@ class FileDocStore:
 
     def list_audits(self, slug: str) -> dict[int, tuple[Doc, int]]:
         audit_dir = self._shooter_root(slug) / AUDIT_DIR
-        out: dict[int, tuple[Doc, int]] = {}
-        if not audit_dir.is_dir():
-            return out
-        for f in sorted(audit_dir.glob("stage*.json")):
-            stem = f.stem[len("stage") :]
-            if stem.isdigit():
-                doc, version = _read(f)
-                if doc is not None:
-                    out[int(stem)] = (doc, version)
-        return out
+        return {stage: (doc, 0) for stage, doc in audit_docs_on_disk(audit_dir).items()}
 
     def save_audit(self, slug: str, stage: int, doc: Doc, *, version: int) -> int:
         with self._audit_lock:

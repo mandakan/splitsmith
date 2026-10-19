@@ -523,7 +523,7 @@ def test_export_overview_status(tmp_path: Path) -> None:
         ),
         encoding="utf-8",
     )
-    overview = project.export_overview(root)
+    overview = project.export_overview(root, audit_docs=project.audit_docs_from_disk(root))
     assert len(overview) == 1
     row = overview[0]
     assert row.has_primary
@@ -626,7 +626,7 @@ def test_export_overview_surfaces_secondaries(tmp_path: Path) -> None:
         encoding="utf-8",
     )
 
-    overview = project.export_overview(root)
+    overview = project.export_overview(root, audit_docs=project.audit_docs_from_disk(root))
     row = overview[0]
     by_path = {s.path.name: s for s in row.secondaries}
     # Ignored videos are filtered; the four secondaries each get an entry.
@@ -698,11 +698,18 @@ def test_export_overview_ready_to_trim_branches(tmp_path: Path) -> None:
         _stage(4, skipped=True),  # explicitly skipped
         _stage(5, primary=False),  # no primary at all
     ]
-    ready = {r.stage_number: r.ready_to_trim for r in project.export_overview(root)}
+    ready = {
+        r.stage_number: r.ready_to_trim
+        for r in project.export_overview(root, audit_docs=project.audit_docs_from_disk(root))
+    }
     assert ready == {1: True, 2: False, 3: False, 4: False, 5: False}
     # Stage 1 is trim-ready without any of the shot-detection prerequisites
     # ``ready_to_export`` insists on -- the two flags are not the same gate.
-    row1 = next(r for r in project.export_overview(root) if r.stage_number == 1)
+    row1 = next(
+        r
+        for r in project.export_overview(root, audit_docs=project.audit_docs_from_disk(root))
+        if r.stage_number == 1
+    )
     assert row1.ready_to_export is False
     assert row1.source_reachable is False
 
@@ -908,7 +915,10 @@ def test_export_overview_ready_to_export_bare_needs_a_reviewed_beep_and_a_time(t
         _stage(3, reviewed=True, beep=None),
         _stage(4, reviewed=True, time=0.0),
     ]
-    rows = {r.stage_number: r for r in project.export_overview(root)}
+    rows = {
+        r.stage_number: r
+        for r in project.export_overview(root, audit_docs=project.audit_docs_from_disk(root))
+    }
     assert {n: r.ready_to_export_bare for n, r in rows.items()} == {1: True, 2: False, 3: False, 4: False}
     assert rows[1].ready_to_trim is True and rows[1].ready_to_export is False
     assert rows[2].ready_to_trim is True  # the trim rule does not care about review

@@ -65,15 +65,11 @@ class HighlightsOut(BaseModel):
 
 
 def stage_rows(state: Any, slug: str) -> tuple:
-    """Readiness for every stage of ``slug``: the audit docs in one query
-    hosted, one file per stage locally."""
+    """Readiness for every stage of ``slug``: the audit docs in one load
+    through the storage port."""
     project = state.shooter_project(slug)
-    root = state.shooter_root(slug)
     docs = state.load_audit_docs(slug)
-    statuses = project.stage_statuses(root, audit_docs=docs)
-    if docs is None:
-        docs = {stage.stage_number: state.load_audit(slug, stage.stage_number)[0] for stage in project.stages}
-    return readiness_for_project(project, statuses, docs)
+    return readiness_for_project(project, project.stage_statuses(audit_docs=docs), docs)
 
 
 @router.get("/api/shooters/{slug}/highlights", response_model=HighlightsOut)

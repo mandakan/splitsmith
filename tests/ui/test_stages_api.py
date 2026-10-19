@@ -1735,7 +1735,9 @@ def test_shot_detect_clears_beep_confirm_stub_marker(tmp_path: Path, monkeypatch
     assert saved["beep_time"] == pytest.approx(5.0)
 
     project_after = MatchProject.load(_shooter_root)
-    status = stage_audit_status(project_after.stages[0], project_after.audit_path(_shooter_root))
+    status = stage_audit_status(
+        project_after.stages[0], audit_docs=project_after.audit_docs_from_disk(_shooter_root)
+    )
     assert status == StageStatus.in_progress
 
 

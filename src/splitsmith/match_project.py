@@ -560,34 +560,54 @@ def is_stub_audit(payload: dict[str, Any]) -> bool:
     )
 
 
+def audit_docs_on_disk(audit_dir: Path) -> dict[int, dict]:
+    """Every audit doc under ``audit_dir`` (:meth:`MatchProject.audit_path`),
+    keyed by stage number: the one reader of the desktop's audit files.
+    The storage port's file store and the paths with no request (the CLI,
+    the reel, the local picker) both read through it, so a stage's status
+    derives from the same documents whichever world loaded them. A file
+    that is not JSON is left out, which reads as no audit yet (``ready``),
+    so the operator can re-run detection; the Audit page surfaces the read
+    error.
+    """
+    out: dict[int, dict] = {}
+    if not audit_dir.is_dir():
+        return out
+    for path in sorted(audit_dir.glob("stage*.json")):
+        stem = path.stem[len("stage") :]
+        if not stem.isdigit():
+            continue
+        try:
+            doc = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            logger.warning("Skipping unreadable audit doc %s: %s", path, exc)
+            continue
+        if isinstance(doc, dict):
+            out[int(stem)] = doc
+    return out
+
+
 def stage_audit_status(
     stage: StageEntry,
-    audit_dir: Path,
     *,
+    audit_docs: dict[int, dict],
     has_trim: bool | None = None,
-    audit_docs: dict[int, dict] | None = None,
 ) -> StageStatus:
     """Compute the lifecycle status of a single stage.
 
-    ``audit_dir`` is :meth:`MatchProject.audit_path` for the owning
-    project. ``has_trim`` can short-circuit a trim-cache existence check
-    when the caller already knows it (e.g. it just ran trim). When
-    omitted we don't require a trim cache for ``ready`` -- ``ready``
-    only means "all logical prerequisites met"; the absence of a trim
-    cache will surface as the Audit page's PrereqGate, not as a
-    different status here. Keeping this stat-light keeps the overview
-    cheap to render.
+    ``audit_docs`` (stage_number -> audit doc) is the shooter's audit
+    documents, whichever world holds them: ``state_docs`` hosted
+    (``AppState.load_audit_docs``, the match bundle) or the audit files
+    locally (:func:`audit_docs_on_disk`). A missing entry means the stage
+    has no audit yet (``ready``). Nothing here reads a file, so the two
+    sources cannot disagree; the hosted sidebar counter once stuck at 0/N
+    because this path read the container's disk.
 
-    ``audit_docs`` (stage_number -> audit doc) makes the derivation
-    hosted-aware: in hosted mode audit docs live in ``state_docs``, not
-    on this container's disk, so the caller loads them (via
-    ``state.load_audit`` / the bulk store query) and hands them in. When
-    ``audit_docs`` is not ``None`` the local ``audit_dir`` file is never
-    read -- a missing entry means the stage has no audit yet (``ready``).
-    ``None`` (local desktop / CLI) keeps the original on-disk read. This
-    is the same contract :meth:`MatchProject.export_overview` uses; the
-    status path was previously missed, which stuck the hosted sidebar
-    counter at 0/N.
+    ``has_trim`` can short-circuit a trim-cache existence check when the
+    caller already knows it (e.g. it just ran trim). When omitted we
+    don't require a trim cache for ``ready`` -- ``ready`` only means "all
+    logical prerequisites met"; the absence of a trim cache will surface
+    as the Audit page's PrereqGate, not as a different status here.
     """
     if stage.skipped:
         return StageStatus.skipped
@@ -596,27 +616,11 @@ def stage_audit_status(
         return StageStatus.todo
     if stage.time_seconds <= 0:
         return StageStatus.partial
-    if audit_docs is not None:
-        # Hosted: state_docs is authoritative. No entry -> detection
-        # hasn't produced an audit yet -> ready. The on-disk file (which
-        # may be a stale mirror or absent entirely) is deliberately
-        # ignored so the two sources can't disagree.
-        payload = audit_docs.get(stage.stage_number)
-        if payload is None:
-            return StageStatus.ready
-    else:
-        audit_file = audit_dir / f"stage{stage.stage_number}.json"
-        if not audit_file.exists():
-            # Has primary + has time, but no audit JSON means detection
-            # hasn't run yet. Beep absence falls under "ready" too -- the
-            # PrereqGate handles that distinction in-page.
-            return StageStatus.ready
-        try:
-            payload = json.loads(audit_file.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
-            # Corrupt audit JSON -- treat as ready so the operator can
-            # re-run detection. The Audit page surfaces the read error.
-            return StageStatus.ready
+    payload = audit_docs.get(stage.stage_number)
+    if payload is None:
+        # Detection hasn't produced an audit yet. Beep absence falls under
+        # "ready" too -- the PrereqGate handles that distinction in-page.
+        return StageStatus.ready
     if is_stub_audit(payload):
         # Beep-confirm placeholder: same meaning as no audit document.
         return StageStatus.ready
@@ -1348,24 +1352,27 @@ class MatchProject(BaseModel):
         # remove-video flow so it can clean up the per-stage JSON.
         return root / "audit"
 
-    def stage_statuses(
-        self, root: Path, *, audit_docs: dict[int, dict] | None = None
-    ) -> dict[int, StageStatus]:
+    def audit_docs_from_disk(self, root: Path) -> dict[int, dict]:
+        """This project's audit docs read from its files under ``root``:
+        for the paths with no request behind them (the CLI, the reel, the
+        local picker). A request hands :meth:`stage_statuses` the docs the
+        storage port loaded instead."""
+        return audit_docs_on_disk(self.audit_path(root))
+
+    def stage_statuses(self, *, audit_docs: dict[int, dict]) -> dict[int, StageStatus]:
         """Compute :class:`StageStatus` for every stage on this project.
 
         One-shot dict so the GET project endpoint can enrich every
         stage's serialized dict with its status without making the
-        client recompute. Local: reads one audit JSON per stage off disk
-        (cheap; ~12 stages typical). Hosted: pass ``audit_docs``
-        (stage_number -> doc, loaded from ``state_docs``) so the status
-        reflects the saved audit instead of an absent local file -- see
-        :func:`stage_audit_status`. Callers that only need ``audited``
-        counts can use :meth:`audited_count`, which is the same work.
+        client recompute. ``audit_docs`` (stage_number -> doc) is the
+        shooter's audit documents, from the storage port or
+        :meth:`audit_docs_from_disk` -- see :func:`stage_audit_status`.
+        Callers that only need ``audited`` counts can use
+        :meth:`audited_count`, which is the same work.
         """
-        audit_dir = self.audit_path(root)
-        return {s.stage_number: stage_audit_status(s, audit_dir, audit_docs=audit_docs) for s in self.stages}
+        return {s.stage_number: stage_audit_status(s, audit_docs=audit_docs) for s in self.stages}
 
-    def audited_count(self, root: Path, *, audit_docs: dict[int, dict] | None = None) -> int:
+    def audited_count(self, *, audit_docs: dict[int, dict]) -> int:
         """Number of stages that are ``audited`` (Save has been hit).
 
         Backend-side single source of truth for "how many stages did
@@ -1374,14 +1381,10 @@ class MatchProject(BaseModel):
         Skipped stages do not count as audited; they're a terminal
         state but represent operator intent to ignore, not work done.
 
-        ``audit_docs`` makes the count hosted-aware, same contract as
-        :meth:`stage_statuses`.
+        ``audit_docs`` is the same contract as :meth:`stage_statuses`.
         """
-        audit_dir = self.audit_path(root)
         return sum(
-            1
-            for s in self.stages
-            if stage_audit_status(s, audit_dir, audit_docs=audit_docs) == StageStatus.audited
+            1 for s in self.stages if stage_audit_status(s, audit_docs=audit_docs) == StageStatus.audited
         )
 
     # ------------------------------------------------------------------
@@ -1473,22 +1476,18 @@ class MatchProject(BaseModel):
         rows.sort(key=lambda r: (r.last_export_at is not None, r.last_export_at, r.filename), reverse=True)
         return rows
 
-    def export_overview(
-        self, root: Path, *, audit_docs: dict[int, dict] | None = None
-    ) -> list[StageExportStatus]:
+    def export_overview(self, root: Path, *, audit_docs: dict[int, dict]) -> list[StageExportStatus]:
         """Per-stage audit + export status for the Analysis & Export screen.
 
         Stat-only inspection; never re-runs detection. The returned list
         mirrors :attr:`stages` order so the SPA can iterate cards directly.
 
-        Hosted: the worker that produced the audit + export deliverables
-        ran in a different container, so neither lives on this process's
-        disk. ``audit_docs`` (stage_number -> audit doc, loaded from
-        ``state_docs`` by the caller) supplies the shot counts, and export
-        deliverables are looked up in object storage via a single
-        ``list`` rather than the local ``exports/`` dir. Local desktop
-        passes ``audit_docs=None`` and has no bound storage, so this stays
-        pure disk I/O.
+        ``audit_docs`` (stage_number -> audit doc) supplies the shot counts,
+        the same contract as :meth:`stage_statuses`. Hosted, the worker
+        that produced the audit + export deliverables ran in a different
+        container, so export deliverables are looked up in object storage
+        via a single ``list`` rather than the local ``exports/`` dir;
+        local desktop has no bound storage and stats the disk.
         """
 
         audit_dir = self.audit_path(root)
@@ -1516,21 +1515,10 @@ class MatchProject(BaseModel):
             audit_file = audit_dir / f"stage{stage.stage_number}.json"
             shot_count = 0
             total_candidates = 0
-            # Hosted: the audit doc comes from state_docs via ``audit_docs``;
-            # local: read it off disk. ``audit_present`` drives ``audit_path``
-            # below so the SPA still knows an audit exists in hosted mode.
-            if audit_docs is not None:
-                raw: dict | None = audit_docs.get(stage.stage_number)
-                audit_present = raw is not None
-            elif audit_file.exists():
-                try:
-                    raw = json.loads(audit_file.read_text(encoding="utf-8"))
-                except (OSError, json.JSONDecodeError):
-                    raw = {}
-                audit_present = True
-            else:
-                raw = None
-                audit_present = False
+            # ``audit_present`` drives ``audit_path`` below so the SPA still
+            # knows an audit exists in hosted mode.
+            raw: dict | None = audit_docs.get(stage.stage_number)
+            audit_present = raw is not None
             if isinstance(raw, dict):
                 shots = raw.get("shots")
                 if isinstance(shots, list):
