@@ -186,6 +186,61 @@ def test_update_audit_gives_up_after_max_attempts(store: DocStore) -> None:
     assert doc is not None and "mine" not in doc and doc["winner"] == 3
 
 
+def test_update_audit_at_hands_the_merge_the_version_and_returns_the_result(store: DocStore) -> None:
+    v0 = store.save_audit("anna", 1, {"n": 0}, version=0)
+    seen: list[tuple[dict | None, int]] = []
+
+    def merge(doc: dict | None, version: int) -> dict:
+        seen.append((doc, version))
+        assert doc is not None
+        return {**doc, "n": doc["n"] + 1}
+
+    merged, version = store.update_audit_at("anna", 1, merge)
+    assert seen == [({"n": 0}, v0)]
+    assert merged == {"n": 1}
+    assert store.load_audit("anna", 1) == ({"n": 1}, version)
+    assert version == (0 if not _is_db(store) else v0 + 1)
+    # no document yet: the merge sees (None, 0)
+    merged2, _ = store.update_audit_at("anna", 7, lambda doc, v: {"from": doc, "at": v})
+    assert merged2 == {"from": None, "at": 0}
+
+
+def test_update_audit_at_lets_the_merge_refuse_and_writes_nothing(store: DocStore) -> None:
+    """A handler's 409 or 404 is raised from inside the merge; it is not a
+    conflict, is not retried, and leaves the document as it was."""
+    store.save_audit("anna", 1, {"n": 0}, version=0)
+    calls = 0
+
+    def refuse(doc: dict | None, version: int) -> dict:
+        nonlocal calls
+        calls += 1
+        raise LookupError("expected version mismatch")
+
+    with pytest.raises(LookupError):
+        store.update_audit_at("anna", 1, refuse)
+    assert calls == 1
+    assert store.load_audit("anna", 1)[0] == {"n": 0}
+
+
+def test_update_audit_at_re_merges_with_the_winner_version(store: DocStore) -> None:
+    if not _is_db(store):
+        pytest.skip("files serialize on the lock; there is no race to lose")
+    store.save_audit("anna", 1, {"n": 0}, version=0)
+    versions: list[int] = []
+
+    def merge(doc: dict | None, version: int) -> dict:
+        versions.append(version)
+        assert doc is not None
+        if len(versions) == 1:
+            store.save_audit("anna", 1, {**doc, "other": True}, version=version)
+        return {**doc, "mine": True}
+
+    merged, new_version = store.update_audit_at("anna", 1, merge)
+    assert len(versions) == 2 and versions[1] == versions[0] + 1
+    assert merged == {"n": 0, "other": True, "mine": True}
+    assert new_version == versions[1] + 1
+
+
 def test_update_audit_builds_the_document_from_default(store: DocStore) -> None:
     store.update_audit("anna", 2, lambda d: {**d, "touched": True}, lambda: {"shots": [], "fresh": True})
     doc, _ = store.load_audit("anna", 2)
