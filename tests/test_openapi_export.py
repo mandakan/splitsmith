@@ -30,3 +30,17 @@ def test_the_document_resolves_every_body_model() -> None:
     schema builder (``PromoteFromAnchorBody`` was one); the export would raise."""
     doc = export_openapi.build_document()
     assert doc["components"]["schemas"], "no schemas at all"
+
+
+def test_a_response_only_schema_has_every_field_required() -> None:
+    """``Job`` is only ever a response and ``model_dump`` writes every field,
+    so the generated type must not mark its defaulted fields optional."""
+    job = export_openapi.build_document()["components"]["schemas"]["Job"]
+    assert set(job["required"]) == set(job["properties"])
+
+
+def test_a_request_body_schema_keeps_input_semantics() -> None:
+    """``ExportPresetBody`` is posted by the client, where a default means the
+    field may be omitted; it stays as pydantic describes it."""
+    body = export_openapi.build_document()["components"]["schemas"]["ExportPresetBody"]
+    assert set(body.get("required", [])) != set(body["properties"])

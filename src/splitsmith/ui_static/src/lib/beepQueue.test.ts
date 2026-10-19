@@ -33,6 +33,7 @@ function item(
     video_id: `${slug}-${stage}-${role}`,
     video_path: `raw/${slug}_${stage}_${role}.MOV`,
     beep_time: 4.2,
+    aligned_time: null,
     beep_confidence: 0.9,
     beep_reviewed: status === "confirmed",
     status,

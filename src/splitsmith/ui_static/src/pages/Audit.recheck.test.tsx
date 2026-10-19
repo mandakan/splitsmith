@@ -40,6 +40,7 @@ const video = (n: number, role: "primary" | "secondary") => ({
   path: `raw/${role}${n}.mp4`,
   added_at: "2026-10-01T00:00:00Z",
   beep_time: 6.0,
+  aligned_time: null,
   beep_source: "manual",
   beep_confidence: 0.99,
   beep_reviewed: true,
@@ -69,6 +70,7 @@ const queueItem = (n: number, role: "primary" | "secondary"): BeepQueueItem =>
     video_id: `${role}-${n}`,
     video_path: `raw/${role}${n}.mp4`,
     beep_time: 6.0,
+    aligned_time: null,
     beep_confidence: 0.99,
     beep_reviewed: true,
     status: "confirmed",
@@ -136,6 +138,7 @@ beforeEach(() => {
     bins: 40,
     peaks: Array.from({ length: 40 }, () => 0.4),
     beep_time: 1.0,
+    aligned_time: null,
     trimmed: true,
   });
   apiMock.getBeepQueue.mockResolvedValue({

@@ -203,18 +203,7 @@ export interface StageRounds {
 /** Per-shooter, per-stage scoring pulled from the SSI Scoreboard and
  *  persisted on the project so hosted share viewers (who cannot fetch
  *  live) still see scores. Null until a scoreboard sync populates it. */
-export interface StageScorecard {
-  hit_factor: number | null;
-  stage_points: number | null;
-  stage_pct: number | null;
-  alphas: number | null;
-  charlies: number | null;
-  deltas: number | null;
-  misses: number | null;
-  no_shoots: number | null;
-  procedurals: number | null;
-  dq: boolean | null;
-}
+export type StageScorecard = Schema["StageScorecard"];
 
 export interface StageEntry {
   stage_number: number;
@@ -274,11 +263,7 @@ export interface StageFigures {
 /** A shooter's identity (#1243): accent, logo file name (content-named,
  *  under the shooter's ``identity/``), club line. ``null`` means "the
  *  Look's default", never blank. */
-export interface ShooterIdentity {
-  accent: string | null;
-  logo: string | null;
-  club: string | null;
-}
+export type ShooterIdentity = Schema["ShooterIdentity"];
 
 export interface MatchProject {
   schema_version: number;
@@ -557,28 +542,13 @@ export interface StageEditRow {
  *  on disk. Individual files or storage objects the purge could not delete
  *  are best-effort and land in ``StageEditSummary.errors`` alone, so a
  *  shooter with orphaned cache files can still report ``error: null``. */
-export interface ShooterStageEditResult {
-  slug: string;
-  videos_unassigned: number;
-  audit_docs_deleted: number;
-  files_deleted: number;
-  objects_deleted: number;
-  error: string | null;
-  saved: boolean;
-}
+export type ShooterStageEditResult = Schema["ShooterStageEditResult"];
 
 /** Response from PUT /api/match/stages, mirrors ``stage_edit.StageEditSummary``.
  *  ``jobs_cancelled`` is always 0 -- cancellation was deliberately dropped
  *  (#645) but the field remains in the wire shape. A 200 with a non-empty
  *  ``errors`` means the edit committed but something did not get cleaned up. */
-export interface StageEditSummary {
-  removed: number[];
-  added: number[];
-  renamed: number[];
-  jobs_cancelled: number;
-  shooters: ShooterStageEditResult[];
-  errors: string[];
-}
+export type StageEditSummary = Schema["StageEditSummary"];
 
 export interface ProjectSettingsPatch {
   raw_dir?: string | null;
@@ -659,14 +629,7 @@ export interface NonEmptyOldDirsDetail {
   dirs: NonEmptyOldDir[];
 }
 
-export interface ScanResponse {
-  registered: string[];
-  /** Stage -> the clip made primary. */
-  auto_assigned: Record<string, string>;
-  /** Stage -> other cameras on the same run, attached as secondaries. */
-  auto_secondary: Record<string, string[]>;
-  skipped: string[];
-}
+export type ScanResponse = Schema["ScanResponse"];
 
 /** Footage sort (spec 2026-10-01): one folder sorted across the
  *  match's shooters. Shapes mirror ``ui/footage_sort_api.py``. */
@@ -809,15 +772,7 @@ export type RelinkApplyResponse = Schema["RelinkApplyResponse"];
 
 export type FsEntryKind = "dir" | "video" | "file";
 
-export interface FsEntry {
-  name: string;
-  kind: FsEntryKind;
-  video_count: number | null;
-  size_bytes: number | null;
-  mtime: number | null;
-  duration: number | null;
-  thumbnail_url: string | null;
-}
+export type FsEntry = Schema["FsEntry"];
 
 export interface FsProbeResponse {
   duration: number | null;
@@ -1000,12 +955,7 @@ export interface ExportRunYouTube {
 }
 
 /** GET /api/settings/youtube: the install's channel locally, the account's hosted. */
-export interface YouTubeSettings {
-  configured: boolean;
-  connected: boolean;
-  channel_title: string | null;
-  connected_at: string | null;
-}
+export type YouTubeSettings = Schema["YouTubeSettings"];
 
 /** GET /api/settings/youtube/connect/status. */
 export interface YouTubeConnectStatus {
@@ -1705,12 +1655,7 @@ export interface CleanupApplyResponse {
  *  right icon. Mirrors ``splitsmith.ui.server.SuggestedStart``. */
 export type SuggestedStart = Schema["SuggestedStart"];
 
-export interface FsListing {
-  path: string;
-  parent: string | null;
-  entries: FsEntry[];
-  suggested_starts: SuggestedStart[];
-}
+export type FsListing = Schema["FsListing"];
 
 /** One window of a video's spectrogram (spec 2026-10-17): ``data`` is base64
  *  uint8, column-major, ``hz.length`` bytes per column, low to high. */
@@ -2714,12 +2659,7 @@ export interface TakeOverview {
 }
 
 /** One shot point on a shooter's timeline in /compare (#328). */
-export interface CompareShotPoint {
-  shot_number: number;
-  time_after_beep: number;
-  source: "detected" | "manual";
-  interval_class: CoachIntervalClass | null;
-}
+export type CompareShotPoint = Schema["CompareShotPoint"];
 
 /** Per-shooter data for a stage in /compare (#328). Field is a logical
  *  ref (``exports/<name>`` | ``trimmed/<name>``), not a filesystem path
@@ -2782,44 +2722,14 @@ export interface BeepSnippetPeaks {
  *  shows the user the per-shooter slug assignments + reconciled stages +
  *  detected conflicts before they commit. execute_merge actually writes
  *  the new match folder and binds the first shooter as active. */
-export interface MergePlanStage {
-  stage_number: number;
-  stage_name: string;
-  expected_rounds: number | null;
-  placeholder: boolean;
-}
+export type MergePlanStage = Schema["MergePlanStage"];
 export type MergePlanShooterMove = Schema["MergePlanShooterMove"];
-export interface MergePlanResponse {
-  output_root: string;
-  name: string;
-  scoreboard_match_id: string | null;
-  scoreboard_content_type: number | null;
-  match_date: string | null;
-  stages: MergePlanStage[];
-  shooter_moves: MergePlanShooterMove[];
-}
+export type MergePlanResponse = Schema["MergePlanResponse"];
 
 /** Developer-mode model chip + workflow-stepper counts. Built once by the
  *  /api/dev/model endpoint from the shipped ensemble artifacts plus the
  *  review-queue tally on disk. */
-export interface DeveloperModelInfo {
-  active_version: string;
-  recall: number;
-  precision: number | null;
-  f1: number | null;
-  fixture_count: number;
-  built_at: string | null;
-  /** Per-camera-class GBDT CV metrics recorded at build time
-   *  (voter_c_precision_cv / voter_c_recall_cv / voter_c_f1_cv +
-   *  tp/fp/fn). Null on legacy artifacts. */
-  metrics_by_class: Record<string, Record<string, number>> | null;
-  step_counts: {
-    corpus: number;
-    review: number;
-    validate_runs: number;
-    retrain: number;
-  };
-}
+export type DeveloperModelInfo = Schema["DeveloperModelInfo"];
 
 export interface DevReviewQueueItem {
   slug: string;
@@ -3333,22 +3243,12 @@ export type DesktopTokenRevokeResponse = Schema["DesktopTokenRevokeResponse"];
  *  match and which desktop token it authenticates with. ``token_set``
  *  is a boolean, never the raw token - the server never echoes a
  *  bearer credential back over localhost HTTP. */
-export interface HostedSyncSettings {
-  base_url: string | null;
-  token_set: boolean;
-  account: HostedAccountInfo | null;
-}
+export type HostedSyncSettings = Schema["HostedSyncSettings"];
 
 /** The hosted account this install is linked to (#719). Cached from the
  *  device-flow poll on the server side, never a live lookup -- the
  *  sync-scoped token cannot read /api/me. */
-export interface HostedAccountInfo {
-  id: string;
-  email: string;
-  display_name: string | null;
-  device_name: string;
-  linked_at: string;
-}
+export type HostedAccountInfo = Schema["HostedAccountInfo"];
 
 /** Response from POST /api/settings/hosted-sync/device/start (#719).
  *  Carries no device_code: the secret stays on the local server.
