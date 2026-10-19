@@ -474,6 +474,8 @@ def test_create_app_auto_submits_model_download_when_missing(
     # Empty cache -> the one artifact in the spec is "missing".
     registry = ModelRegistry(spec, root=tmp_path / "cache")
     monkeypatch.setattr(registry_mod, "_default_registry", registry)
+    # ``tests/conftest.py`` switches the hook off for every other test.
+    monkeypatch.delenv("SPLITSMITH_NO_MODEL_PREFETCH", raising=False)
     # Don't actually fetch anything; just record that the worker was called.
     invoked: list[str] = []
     monkeypatch.setattr(

@@ -33,6 +33,7 @@ from typing import TYPE_CHECKING
 from ..match_model import MATCH_FILE
 
 if TYPE_CHECKING:
+    from .docstore import DocStore
     from .state import AppState
 
 logger = logging.getLogger(__name__)
@@ -60,6 +61,11 @@ class DeletionSummary:
     errors: list[str] = field(default_factory=list)
 
 
+def _project_doc_rows(docs: DocStore) -> list[tuple[str, dict]]:
+    """``(slug, doc)`` for every project document the port holds."""
+    return [(slug, doc) for slug, (doc, _version) in docs.list_projects().items()]
+
+
 def _raw_paths_from_docs(docs: list[tuple[str, dict]]) -> set[str]:
     """Collect every ``raw_videos[].storage_path`` across project docs.
 
@@ -85,12 +91,12 @@ async def _safe_to_delete_raws(
     O(matches x project-docs) reads -- a user's match count is bounded, so
     this is fine; revisit with a covering query if it ever isn't.
     """
-    assert state.matches_store is not None and state.project_state is not None
+    assert state.matches_store is not None
     still_referenced: set[str] = set()
     for other in await state.matches_store.list():
         if other.match_id == match_id:
             continue
-        other_docs = await state.project_state.list_project_docs(other.match_id)
+        other_docs = _project_doc_rows(state.docstore_for(other.match_id))
         still_referenced |= _raw_paths_from_docs(other_docs)
     safe = attached_raws - still_referenced
     skipped = attached_raws & still_referenced
@@ -147,12 +153,11 @@ async def _delete_hosted(
 
     # 2. Read project docs to harvest this match's attached raws.
     attached_raws: set[str] = set()
-    if state.project_state is not None:
-        try:
-            docs = await state.project_state.list_project_docs(match_id)
-            attached_raws = _raw_paths_from_docs(docs)
-        except Exception as exc:  # noqa: BLE001
-            summary.errors.append(f"read project docs: {exc}")
+    docs = state.docstore_for(match_id, Path(path))
+    try:
+        attached_raws = _raw_paths_from_docs(_project_doc_rows(docs))
+    except Exception as exc:  # noqa: BLE001
+        summary.errors.append(f"read project docs: {exc}")
 
     # 3. Compute the safe-to-delete raw set (only if opted in).
     safe_raws: set[str] = set()
@@ -176,12 +181,11 @@ async def _delete_hosted(
             except Exception as exc:  # noqa: BLE001
                 summary.errors.append(f"delete raw {raw_path!r}: {exc}")
 
-    # 6. Delete the match's state docs (match + project + audit, all kinds).
-    if state.project_state is not None:
-        try:
-            summary.state_docs_removed = await state.project_state.delete_match(match_id)
-        except Exception as exc:  # noqa: BLE001
-            summary.errors.append(f"delete state docs: {exc}")
+    # 6. Delete the match's documents (match + project + audit, all kinds).
+    try:
+        summary.state_docs_removed = docs.delete_match_docs()
+    except Exception as exc:  # noqa: BLE001
+        summary.errors.append(f"delete state docs: {exc}")
 
     # 6b. Delete the match's comments. Nothing cascades from the registry
     #     row, so this is explicit for the same reason state docs are.

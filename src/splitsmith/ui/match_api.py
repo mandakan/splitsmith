@@ -1824,7 +1824,7 @@ async def export_compare_grid(request: Request, req: CompareGridRequest) -> JSON
     # 4K render before the user learns the result has no sound at all;
     # catch it here instead, naming the shooter and the fix (a
     # different audio source, or a different stage selection).
-    audio_project = state.shooter_project(req.audio_from) if state.project_state is not None else None
+    audio_project = state.shooter_project(req.audio_from)
     audio_label = _server._shooter_label(match, match_root, req.audio_from, project=audio_project)
     audio_bundle = next((bundle for bundle in bundles if bundle.label == audio_label), None)
     if audio_bundle is None or not any(

@@ -101,6 +101,15 @@ Deploy facts (worker env, `FORWARDED_ALLOW_IPS`, the waitlist cut-over) are in
   none (the CLI, the reel, the local picker). `audit_docs_on_disk` is the one
   reader of the desktop's audit files and the port's file store goes through
   it, so the two worlds derive a status from the same documents.
+- The one mode fact a consumer may read is `documents_on_disk`: whether
+  the documents are the files under the match root. It decides whether a
+  file-path consumer materializes a copy (`AppState.materialize_audit`) and
+  whether a file read-modify-write takes `audit_lock` (`_audit_rmw`).
+  Nothing in `ui/*.py` outside `state.py` asks whether a state store is
+  bound; a hosted-only walk over a tenant's other matches binds each with
+  `docstore_for(match_id)` and no root. `delete_match_docs` removes every
+  document of a match and nothing else; the delete cascade's media and
+  registry steps stay its own.
 - The port holds documents only: media stays on `Storage` and
   `StoragePresence`, jobs on the job backends, merge rules in `sync.run`.
 

@@ -49,6 +49,7 @@ class DbDocStore:
     """
 
     confines_paths = True
+    documents_on_disk = False
 
     def __init__(self, store: ProjectStateStore, match_id: str, *, max_attempts: int = 32) -> None:
         self._store = store
@@ -75,6 +76,9 @@ class DbDocStore:
 
     def delete_project(self, slug: str) -> None:
         run_sync(self._store.delete_shooter(self._mid, slug))
+
+    def delete_match_docs(self) -> int:
+        return run_sync(self._store.delete_match(self._mid))
 
     # -- audits ------------------------------------------------------------
     def load_audit(self, slug: str, stage: int) -> Versioned:
