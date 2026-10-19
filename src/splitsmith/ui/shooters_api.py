@@ -32,16 +32,13 @@ from .. import camera_select, match_model, video_probe
 from .. import cleanup as cleanup_module
 from .. import coach as coach_module
 from .. import coach_distributions as coach_distributions_module
-from .. import events as events_module
 from .. import shooter_book as shooter_book_module
 from .. import thumbnail as thumbnail_helpers
 from .. import trim as trim_module
 from .. import waveform as waveform_helpers
 from ..async_bridge import run_sync
-from ..audit_data import audit_shots_to_engine_shots
 from ..auth import User
 from ..beep import windows as beep_windows
-from ..coach import statistic_splits
 from ..config import BeepWindowConfig
 from ..fingerprint import clip_fingerprint
 from ..identity import LOGO_DIR, LOGO_MAX_BYTES, LOGO_MAX_SIDE, ShooterIdentity, logo_name
@@ -54,7 +51,6 @@ from ..match_project import (
     VideoRole,
 )
 from ..runtime import runtime as process_runtime
-from ..share_card import stage_figures
 from ..storage import Storage
 from . import audio as audio_helpers
 from . import server as _server
@@ -62,7 +58,7 @@ from .context import current_match_origin, current_match_root, current_share_req
 from .http_errors import ensure_source_reachable
 from .identity_media import ensure_local_logo, identity_source
 from .jobs import Job, JobStatus
-from .presence import StoragePresence
+from .project_view import ProjectView, build_project_view
 from .scoreboard import CachingScoreboardClient, LocalJsonScoreboard, MatchNotFound, ScoreboardError
 from .server import (
     AttachRawVideoRequest,
@@ -379,31 +375,6 @@ class RemoveVideoRequest(BaseModel):
     stage_number: int | None = None
 
 
-def _stage_figures_payload(doc: dict | None, project: MatchProject, stage_number: int) -> dict | None:
-    """Per-stage splits summary for the project payload (UX PR 4). The
-    split rule is ``coach.statistic_splits``; ``share_card.stage_figures``
-    shapes draw + average, this adds the fastest split and the counts.
-    ``None`` (not zeros) when the stage has no audit doc."""
-    if doc is None:
-        return None
-    stage = next((s for s in project.stages if s.stage_number == stage_number), None)
-    prim = stage.primary() if stage is not None else None
-    beep = prim.beep_time if prim is not None and prim.beep_time is not None else 0.0
-    shots = audit_shots_to_engine_shots(doc, beep_time_in_source=beep)
-    fig = stage_figures(
-        shots, regions=events_module.confirmed_from_doc(doc, log_context=f"stage {stage_number}")
-    )
-    splits = statistic_splits(shots) if shots else []
-    return {
-        "draw": fig.draw,
-        "avg_split": fig.avg_split,
-        "fastest_split": min(splits) if splits else None,
-        "shot_count": len(shots),
-        "split_count": fig.split_count,
-        **_server._stage_region_figures(doc, stage_number),
-    }
-
-
 def _apply_raw_video_coverage(
     project: MatchProject,
     root: Path,
@@ -572,79 +543,13 @@ def _hosted_scrub(
     raise HTTPException(status_code=404, detail="trimmed clip not built yet")
 
 
-@router.get("/api/shooters/{slug}/project")
+@router.get("/api/shooters/{slug}/project", response_model=ProjectView)
 def get_project(request: Request, slug: str) -> JSONResponse:
+    """The project as the SPA reads it: the stored document plus the fields
+    ``build_project_view`` computes per request (``project_view.py``)."""
     state = request.app.state.splitsmith_state
     project = state.shooter_project(slug)
-    root = state.shooter_root(slug)
-    # Hosted: audit docs live in state_docs, not on this container's
-    # disk, so load them and derive status from there -- otherwise
-    # every stage reads as "ready" and the sidebar counter sticks at
-    # 0/N (and the anonymous share/Results view shows no audited
-    # stages to stream). Local: load_audit_docs returns None and the
-    # helper reads the on-disk audit files as before.
-    audit_docs = state.load_audit_docs(slug)
-    statuses = project.stage_statuses(root, audit_docs=audit_docs)
-    payload = project.model_dump(mode="json")
-    # Compute proxy_ready set once per request - one storage.list call
-    # covers all videos. Local mode (storage is None) reports True for
-    # all videos because source files stream directly.
-    _storage = state.storage
-    proxy_keys: set[str] = set()
-    if _storage is not None:
-        proxy_keys = {obj.path for obj in _storage.list("raw_proxy/")}
-
-    # Enrich each stage's serialized dict with its computed status
-    # so the SPA never recomputes "is this audited?" client-side.
-    # The status field is read-only (not on the StageEntry model);
-    # PUTting it back is a no-op since model parsing ignores
-    # unknown keys via Pydantic v2's default behavior.
-    # One listing of this shooter's trimmed/ prefix per request (#1209).
-    presence = StoragePresence(_storage) if _storage is not None and _storage.supports_presigned_get else None
-    for stage_dict in payload.get("stages", []):
-        n = stage_dict.get("stage_number")
-        if n is None:
-            continue
-        status = statuses.get(int(n))
-        if status is not None:
-            stage_dict["status"] = status.value
-        # Splits figures per stage (UX PR 4): the Splits page and the
-        # share surface read them here, not from triage (owner-only).
-        doc = (audit_docs or {}).get(int(n))
-        if doc is None and audit_docs is None:
-            try:
-                doc, _ = state.load_audit(slug, int(n))
-            except HTTPException:
-                # An unreadable audit file surfaces on the audit route;
-                # it must not take the project payload down with it.
-                doc = None
-        stage_dict["figures"] = _stage_figures_payload(doc, project, int(n))
-        stage_videos = project.stage(int(n)).videos
-        for video_dict, video in zip(stage_dict.get("videos", []), stage_videos, strict=True):
-            video_dict["proxy_ready"] = _server._proxy_ready_for(
-                _storage, proxy_keys, str(video_dict.get("path", ""))
-            )
-            video_dict["trim_version"] = _server._trim_version_for(root, int(n), video, project)
-            video_dict["scrub_version"] = (
-                _server._hosted_scrub_version_for(presence, root, int(n), video, project)
-                if presence is not None and not video.path.is_absolute()
-                else _server._scrub_version_for(root, int(n), video, project)
-            )
-    for video_dict in payload.get("unassigned_videos", []):
-        video_dict["proxy_ready"] = _server._proxy_ready_for(
-            _storage, proxy_keys, str(video_dict.get("path", ""))
-        )
-    # Which media surface is honest for this match (#821): mirrors
-    # have no proxies and never will - the SPA copy must not promise
-    # one is coming.
-    payload["origin"] = current_match_origin.get() or "local"
-    payload["capabilities"] = _server._serialized_capabilities()
-    # Strip owner-local scan directory from anonymous share responses -
-    # it is a server path that serves no purpose for read-only viewers.
-    # Video/trim paths are load-bearing for streaming and are kept.
-    if current_share_request.get():
-        payload["last_scanned_dir"] = None
-    return JSONResponse(payload)
+    return JSONResponse(build_project_view(state, slug, project))
 
 
 @router.get("/api/shooters/{slug}/project/export")

@@ -1372,6 +1372,20 @@
     "title": "CameraModelRequest",
     "type": "object"
    },
+   "CameraMount": {
+    "enum": [
+     "head",
+     "chest",
+     "belt",
+     "helmet",
+     "hand",
+     "tripod",
+     "monopod",
+     "gimbal"
+    ],
+    "title": "CameraMount",
+    "type": "string"
+   },
    "CameraMountRequest": {
     "description": "Body for PATCH /api/stages/{n}/videos/{vid}/camera-mount (#143).\n\nOverride the heuristic ``camera_mount`` stamped at register time.\nDrives the per-camera-class threshold dispatch in the 4-voter\nensemble. ``mount`` accepts any fixture-schema ``CameraMount``\nstring (\"head\", \"chest\", \"helmet\", \"belt\", \"hand\", \"gimbal\",\n\"tripod\", \"monopod\") or ``None`` to clear back to the heuristic\ndefault.",
     "properties": {
@@ -5898,291 +5912,6 @@
     "title": "MatchExportRequest",
     "type": "object"
    },
-   "MatchProject": {
-    "description": "Top-level on-disk match project.",
-    "properties": {
-     "audio_dir": {
-      "anyOf": [
-       {
-        "type": "string"
-       },
-       {
-        "type": "null"
-       }
-      ],
-      "title": "Audio Dir"
-     },
-     "automation": {
-      "$ref": "#/components/schemas/AutomationOverride"
-     },
-     "compare_camera": {
-      "anyOf": [
-       {
-        "type": "string"
-       },
-       {
-        "type": "null"
-       }
-      ],
-      "title": "Compare Camera"
-     },
-     "competitor_division": {
-      "anyOf": [
-       {
-        "type": "string"
-       },
-       {
-        "type": "null"
-       }
-      ],
-      "title": "Competitor Division"
-     },
-     "competitor_name": {
-      "anyOf": [
-       {
-        "type": "string"
-       },
-       {
-        "type": "null"
-       }
-      ],
-      "title": "Competitor Name"
-     },
-     "created_at": {
-      "format": "date-time",
-      "title": "Created At",
-      "type": "string"
-     },
-     "exports_dir": {
-      "anyOf": [
-       {
-        "type": "string"
-       },
-       {
-        "type": "null"
-       }
-      ],
-      "title": "Exports Dir"
-     },
-     "identity": {
-      "$ref": "#/components/schemas/ShooterIdentity"
-     },
-     "last_scanned_dir": {
-      "anyOf": [
-       {
-        "type": "string"
-       },
-       {
-        "type": "null"
-       }
-      ],
-      "title": "Last Scanned Dir"
-     },
-     "match_date": {
-      "anyOf": [
-       {
-        "format": "date",
-        "type": "string"
-       },
-       {
-        "type": "null"
-       }
-      ],
-      "title": "Match Date"
-     },
-     "name": {
-      "title": "Name",
-      "type": "string"
-     },
-     "nudges_dismissed_stages": {
-      "items": {
-       "type": "integer"
-      },
-      "title": "Nudges Dismissed Stages",
-      "type": "array"
-     },
-     "probes_dir": {
-      "anyOf": [
-       {
-        "type": "string"
-       },
-       {
-        "type": "null"
-       }
-      ],
-      "title": "Probes Dir"
-     },
-     "raw_dir": {
-      "anyOf": [
-       {
-        "type": "string"
-       },
-       {
-        "type": "null"
-       }
-      ],
-      "title": "Raw Dir"
-     },
-     "raw_videos": {
-      "items": {
-       "$ref": "#/components/schemas/RawVideo"
-      },
-      "title": "Raw Videos",
-      "type": "array"
-     },
-     "schema_version": {
-      "default": 3,
-      "title": "Schema Version",
-      "type": "integer"
-     },
-     "scoreboard_content_type": {
-      "anyOf": [
-       {
-        "type": "integer"
-       },
-       {
-        "type": "null"
-       }
-      ],
-      "title": "Scoreboard Content Type"
-     },
-     "scoreboard_match_id": {
-      "anyOf": [
-       {
-        "type": "string"
-       },
-       {
-        "type": "null"
-       }
-      ],
-      "title": "Scoreboard Match Id"
-     },
-     "selected_competitor_id": {
-      "anyOf": [
-       {
-        "type": "integer"
-       },
-       {
-        "type": "null"
-       }
-      ],
-      "title": "Selected Competitor Id"
-     },
-     "selected_shooter_id": {
-      "anyOf": [
-       {
-        "type": "integer"
-       },
-       {
-        "type": "null"
-       }
-      ],
-      "title": "Selected Shooter Id"
-     },
-     "shooter_token": {
-      "anyOf": [
-       {
-        "type": "string"
-       },
-       {
-        "type": "null"
-       }
-      ],
-      "description": "Public, PII-free token for the pinned shooter.\n\nMirrors :func:`splitsmith.lab.core.shooter_token` so the SPA can\nbuild fixture slugs that include the same suffix the promote\nendpoint stamps on the JSON. ``None`` when no SSI shooter is\npinned -- the SPA hides promote affordances in that case.",
-      "readOnly": true,
-      "title": "Shooter Token"
-     },
-     "stages": {
-      "items": {
-       "$ref": "#/components/schemas/StageEntry"
-      },
-      "title": "Stages",
-      "type": "array"
-     },
-     "thumbs_dir": {
-      "anyOf": [
-       {
-        "type": "string"
-       },
-       {
-        "type": "null"
-       }
-      ],
-      "title": "Thumbs Dir"
-     },
-     "trim_audit_encoder": {
-      "default": "auto",
-      "title": "Trim Audit Encoder",
-      "type": "string"
-     },
-     "trim_post_buffer_seconds": {
-      "default": 5.0,
-      "title": "Trim Post Buffer Seconds",
-      "type": "number"
-     },
-     "trim_pre_buffer_seconds": {
-      "default": 5.0,
-      "title": "Trim Pre Buffer Seconds",
-      "type": "number"
-     },
-     "trimmed_dir": {
-      "anyOf": [
-       {
-        "type": "string"
-       },
-       {
-        "type": "null"
-       }
-      ],
-      "title": "Trimmed Dir"
-     },
-     "unassigned_videos": {
-      "items": {
-       "$ref": "#/components/schemas/StageVideo"
-      },
-      "title": "Unassigned Videos",
-      "type": "array"
-     },
-     "updated_at": {
-      "format": "date-time",
-      "title": "Updated At",
-      "type": "string"
-     }
-    },
-    "required": [
-     "audio_dir",
-     "automation",
-     "compare_camera",
-     "competitor_division",
-     "competitor_name",
-     "created_at",
-     "exports_dir",
-     "identity",
-     "last_scanned_dir",
-     "match_date",
-     "name",
-     "nudges_dismissed_stages",
-     "probes_dir",
-     "raw_dir",
-     "raw_videos",
-     "schema_version",
-     "scoreboard_content_type",
-     "scoreboard_match_id",
-     "selected_competitor_id",
-     "selected_shooter_id",
-     "shooter_token",
-     "stages",
-     "thumbs_dir",
-     "trim_audit_encoder",
-     "trim_post_buffer_seconds",
-     "trim_pre_buffer_seconds",
-     "trimmed_dir",
-     "unassigned_videos",
-     "updated_at"
-    ],
-    "title": "MatchProject",
-    "type": "object"
-   },
    "MatchStageDefinition": {
     "description": "Stage as a property of the *match*: identity + rounds prior.\n\nPer-shooter data (their time, their videos, their audit) lives on the\n``Shooter`` side. The fields here are the ones every shooter shares\nbecause they describe the same physical stage.",
     "properties": {
@@ -6633,7 +6362,7 @@
       "$ref": "#/components/schemas/MoveShooterOutcome"
      },
      "source_project": {
-      "$ref": "#/components/schemas/MatchProject"
+      "$ref": "#/components/schemas/ProjectView"
      }
     },
     "required": [
@@ -6988,6 +6717,314 @@
      }
     },
     "title": "ProfileBody",
+    "type": "object"
+   },
+   "ProjectView": {
+    "properties": {
+     "audio_dir": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Audio Dir"
+     },
+     "automation": {
+      "$ref": "#/components/schemas/AutomationOverride"
+     },
+     "capabilities": {
+      "items": {
+       "enum": [
+        "edit",
+        "review",
+        "breakdown",
+        "share_manage",
+        "comment_write"
+       ],
+       "type": "string"
+      },
+      "title": "Capabilities",
+      "type": "array"
+     },
+     "compare_camera": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Compare Camera"
+     },
+     "competitor_division": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Competitor Division"
+     },
+     "competitor_name": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Competitor Name"
+     },
+     "created_at": {
+      "format": "date-time",
+      "title": "Created At",
+      "type": "string"
+     },
+     "exports_dir": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Exports Dir"
+     },
+     "identity": {
+      "$ref": "#/components/schemas/ShooterIdentity"
+     },
+     "last_scanned_dir": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Last Scanned Dir"
+     },
+     "match_date": {
+      "anyOf": [
+       {
+        "format": "date",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Match Date"
+     },
+     "name": {
+      "title": "Name",
+      "type": "string"
+     },
+     "nudges_dismissed_stages": {
+      "items": {
+       "type": "integer"
+      },
+      "title": "Nudges Dismissed Stages",
+      "type": "array"
+     },
+     "origin": {
+      "enum": [
+       "hosted",
+       "desktop",
+       "local"
+      ],
+      "title": "Origin",
+      "type": "string"
+     },
+     "probes_dir": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Probes Dir"
+     },
+     "raw_dir": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Raw Dir"
+     },
+     "raw_videos": {
+      "items": {
+       "$ref": "#/components/schemas/RawVideo"
+      },
+      "title": "Raw Videos",
+      "type": "array"
+     },
+     "schema_version": {
+      "default": 3,
+      "title": "Schema Version",
+      "type": "integer"
+     },
+     "scoreboard_content_type": {
+      "anyOf": [
+       {
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Scoreboard Content Type"
+     },
+     "scoreboard_match_id": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Scoreboard Match Id"
+     },
+     "selected_competitor_id": {
+      "anyOf": [
+       {
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Selected Competitor Id"
+     },
+     "selected_shooter_id": {
+      "anyOf": [
+       {
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Selected Shooter Id"
+     },
+     "shooter_token": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "description": "Public, PII-free token for the pinned shooter.\n\nMirrors :func:`splitsmith.lab.core.shooter_token` so the SPA can\nbuild fixture slugs that include the same suffix the promote\nendpoint stamps on the JSON. ``None`` when no SSI shooter is\npinned -- the SPA hides promote affordances in that case.",
+      "title": "Shooter Token"
+     },
+     "stages": {
+      "items": {
+       "$ref": "#/components/schemas/StageEntryView"
+      },
+      "title": "Stages",
+      "type": "array"
+     },
+     "thumbs_dir": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Thumbs Dir"
+     },
+     "trim_audit_encoder": {
+      "default": "auto",
+      "title": "Trim Audit Encoder",
+      "type": "string"
+     },
+     "trim_post_buffer_seconds": {
+      "default": 5.0,
+      "title": "Trim Post Buffer Seconds",
+      "type": "number"
+     },
+     "trim_pre_buffer_seconds": {
+      "default": 5.0,
+      "title": "Trim Pre Buffer Seconds",
+      "type": "number"
+     },
+     "trimmed_dir": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Trimmed Dir"
+     },
+     "unassigned_videos": {
+      "items": {
+       "$ref": "#/components/schemas/StageVideoView"
+      },
+      "title": "Unassigned Videos",
+      "type": "array"
+     },
+     "updated_at": {
+      "format": "date-time",
+      "title": "Updated At",
+      "type": "string"
+     }
+    },
+    "required": [
+     "audio_dir",
+     "automation",
+     "capabilities",
+     "compare_camera",
+     "competitor_division",
+     "competitor_name",
+     "created_at",
+     "exports_dir",
+     "identity",
+     "last_scanned_dir",
+     "match_date",
+     "name",
+     "nudges_dismissed_stages",
+     "origin",
+     "probes_dir",
+     "raw_dir",
+     "raw_videos",
+     "schema_version",
+     "scoreboard_content_type",
+     "scoreboard_match_id",
+     "selected_competitor_id",
+     "selected_shooter_id",
+     "shooter_token",
+     "stages",
+     "thumbs_dir",
+     "trim_audit_encoder",
+     "trim_post_buffer_seconds",
+     "trim_pre_buffer_seconds",
+     "trimmed_dir",
+     "unassigned_videos",
+     "updated_at"
+    ],
+    "title": "ProjectView",
     "type": "object"
    },
    "PromoteAgainstFixtureBody": {
@@ -8701,9 +8738,18 @@
     "title": "StageEditSummary",
     "type": "object"
    },
-   "StageEntry": {
-    "description": "A stage in the match: scoreboard data + assigned videos + audit status.",
+   "StageEntryView": {
     "properties": {
+     "figures": {
+      "anyOf": [
+       {
+        "$ref": "#/components/schemas/StageFiguresView"
+       },
+       {
+        "type": "null"
+       }
+      ]
+     },
      "placeholder": {
       "default": false,
       "title": "Placeholder",
@@ -8759,6 +8805,16 @@
       "title": "Start",
       "type": "string"
      },
+     "status": {
+      "anyOf": [
+       {
+        "$ref": "#/components/schemas/StageStatus"
+       },
+       {
+        "type": "null"
+       }
+      ]
+     },
      "time_seconds": {
       "title": "Time Seconds",
       "type": "number"
@@ -8770,13 +8826,14 @@
      },
      "videos": {
       "items": {
-       "$ref": "#/components/schemas/StageVideo"
+       "$ref": "#/components/schemas/StageVideoView"
       },
       "title": "Videos",
       "type": "array"
      }
     },
     "required": [
+     "figures",
      "placeholder",
      "scorecard",
      "scorecard_updated_at",
@@ -8785,11 +8842,12 @@
      "stage_number",
      "stage_rounds",
      "start",
+     "status",
      "time_seconds",
      "time_seconds_manual",
      "videos"
     ],
-    "title": "StageEntry",
+    "title": "StageEntryView",
     "type": "object"
    },
    "StageEventIn": {
@@ -8876,6 +8934,121 @@
      "events"
     ],
     "title": "StageEventsPutRequest",
+    "type": "object"
+   },
+   "StageFiguresView": {
+    "description": "Per-stage splits summary (UX PR 4). The split rule is\n``coach.statistic_splits``; ``share_card.stage_figures`` shapes draw and\naverage, the region figures add the breakdown counts.",
+    "properties": {
+     "avg_split": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Avg Split"
+     },
+     "draw": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Draw"
+     },
+     "exposed_reload_s": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Exposed Reload S"
+     },
+     "fastest_split": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Fastest Split"
+     },
+     "moving_shots": {
+      "anyOf": [
+       {
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Moving Shots"
+     },
+     "regions": {
+      "anyOf": [
+       {
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Regions"
+     },
+     "reload_avg_s": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Reload Avg S"
+     },
+     "reloads": {
+      "anyOf": [
+       {
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Reloads"
+     },
+     "shot_count": {
+      "title": "Shot Count",
+      "type": "integer"
+     },
+     "split_count": {
+      "title": "Split Count",
+      "type": "integer"
+     }
+    },
+    "required": [
+     "avg_split",
+     "draw",
+     "exposed_reload_s",
+     "fastest_split",
+     "moving_shots",
+     "regions",
+     "reload_avg_s",
+     "reloads",
+     "shot_count",
+     "split_count"
+    ],
+    "title": "StageFiguresView",
     "type": "object"
    },
    "StageNotePatchRequest": {
@@ -9165,8 +9338,8 @@
     "title": "StageTimeRequest",
     "type": "object"
    },
-   "StageVideo": {
-    "description": "One video file assigned to a stage.\n\n``role`` drives the pipeline: primary runs the full pipeline (beep + shot\ndetect + trim), secondary only needs beep + trim (anchored to primary's\ntimeline), ignored is skipped entirely.\n\n``processed`` is the source of truth for what's been done; the UI computes\nper-stage status by scanning these flags rather than re-running detection.",
+   "StageVideoView": {
+    "description": "A video as the SPA reads it. An unassigned video has no stage to trim\nfor, so its trim and scrub versions are ``None``; the shape is one type\non purpose, since the client moves videos between the two lists.",
     "properties": {
      "added_at": {
       "format": "date-time",
@@ -9378,13 +9551,12 @@
      "camera_mount": {
       "anyOf": [
        {
-        "type": "string"
+        "$ref": "#/components/schemas/CameraMount"
        },
        {
         "type": "null"
        }
-      ],
-      "title": "Camera Mount"
+      ]
      },
      "fingerprint": {
       "anyOf": [
@@ -9426,6 +9598,10 @@
       "title": "Processed",
       "type": "object"
      },
+     "proxy_ready": {
+      "title": "Proxy Ready",
+      "type": "boolean"
+     },
      "role": {
       "default": "secondary",
       "enum": [
@@ -9435,6 +9611,17 @@
       ],
       "title": "Role",
       "type": "string"
+     },
+     "scrub_version": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Scrub Version"
      },
      "stage_number": {
       "anyOf": [
@@ -9447,9 +9634,19 @@
       ],
       "title": "Stage Number"
      },
+     "trim_version": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Trim Version"
+     },
      "video_id": {
       "description": "Stable URL-safe identifier derived from path + owning stage.\n\nAssigned videos hash \"<path>#<stage_number>\" so one source file\ncovering N stages yields N distinct ids (per-video API routes and\ncache filenames stay collision-free). Unassigned videos keep the\nlegacy path-only hash so tray identity is stable across assigns.",
-      "readOnly": true,
       "title": "Video Id",
       "type": "string"
      }
@@ -9480,11 +9677,14 @@
      "notes",
      "path",
      "processed",
+     "proxy_ready",
      "role",
+     "scrub_version",
      "stage_number",
+     "trim_version",
      "video_id"
     ],
-    "title": "StageVideo",
+    "title": "StageVideoView",
     "type": "object"
    },
    "StarterInfo": {
@@ -18587,6 +18787,7 @@
   },
   "/api/shooters/{slug}/project": {
    "get": {
+    "description": "The project as the SPA reads it: the stored document plus the fields\n``build_project_view`` computes per request (``project_view.py``).",
     "operationId": "get_project_api_shooters__slug__project_get",
     "parameters": [
      {
@@ -18603,7 +18804,9 @@
      "200": {
       "content": {
        "application/json": {
-        "schema": {}
+        "schema": {
+         "$ref": "#/components/schemas/ProjectView"
+        }
        }
       },
       "description": "Successful Response"

@@ -14,7 +14,8 @@ import { useDeploymentMode } from "@/lib/features";
 import { scrubSource, type ScrubChoice } from "@/lib/scrubSource";
 import { useIsMobile } from "@/lib/useIsMobile";
 
-type ScrubVideo = Pick<StageVideo, "path" | "trim_version" | "scrub_version">;
+// What the scrub source needs of a video; a coach entry carries the versions optionally.
+type ScrubVideo = Pick<StageVideo, "path"> & Partial<Pick<StageVideo, "trim_version" | "scrub_version">>;
 
 const failureKey = (video: ScrubVideo) => `${video.path}\n${video.scrub_version ?? ""}`;
 

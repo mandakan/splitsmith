@@ -67,7 +67,7 @@ function makeCoach(): CoachStageResponse {
 }
 
 function makeVideo(overrides: Partial<StageVideo> = {}): StageVideo {
-  return {
+  return { beep_aligned_time: null, beep_ranker_version: null, beep_tone_for: null, beep_tone_offset_ms: null, beep_window: null, beep_window_source: null, fingerprint: null, proxy_ready: false, trim_version: null, scrub_version: null,
     path: "trimmed/stage3.mp4",
     video_id: "v1",
     role: "primary",
@@ -89,11 +89,13 @@ function makeVideo(overrides: Partial<StageVideo> = {}): StageVideo {
     camera_make: null,
     camera_model: null,
     ...overrides,
+    // Partial<> admits an explicit undefined; the wire never has one.
+    stage_number: overrides.stage_number ?? null,
   };
 }
 
 function makeStageEntry(videos: StageVideo[]): StageEntry {
-  return {
+  return { figures: null, start: "standard", status: null,
     stage_number: 3,
     stage_name: "Steel Rush",
     time_seconds: 20,
@@ -108,7 +110,7 @@ function makeStageEntry(videos: StageVideo[]): StageEntry {
 }
 
 function makeProject(videos: StageVideo[]): MatchProject {
-  return {
+  return { capabilities: [], competitor_division: null, identity: { accent: null, club: null, logo: null }, trim_audit_encoder: "auto",
     schema_version: 1,
     name: "bromma-2026",
     created_at: "2026-01-01T00:00:00Z",

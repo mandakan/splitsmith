@@ -66,8 +66,7 @@ function makeShooter(
 }
 
 function makeProject(): MatchProject {
-  return {
-    schema_version: 1,
+  return { capabilities: [], competitor_division: null, identity: { accent: null, club: null, logo: null }, trim_audit_encoder: "auto",    schema_version: 1,
     name: "bromma-2026",
     created_at: "2026-01-01T00:00:00Z",
     updated_at: "2026-01-01T00:00:00Z",
@@ -79,7 +78,7 @@ function makeProject(): MatchProject {
     shooter_token: null,
     match_date: "2026-06-27",
     stages: [
-      {
+      { start: "standard",
         stage_number: 1,
         stage_name: "Steel Rush",
         time_seconds: 20,
@@ -102,9 +101,9 @@ function makeProject(): MatchProject {
           procedurals: 0,
           dq: false,
         },
-        figures: { draw: 1.84, avg_split: 0.52, fastest_split: 0.31, shot_count: 28, split_count: 9 },
+        figures: { exposed_reload_s: null, moving_shots: null, regions: null, reload_avg_s: null, reloads: null, draw: 1.84, avg_split: 0.52, fastest_split: 0.31, shot_count: 28, split_count: 9 },
       },
-      {
+      { start: "standard",
         stage_number: 2,
         stage_name: "Brass Monkey",
         time_seconds: 0,
@@ -118,7 +117,7 @@ function makeProject(): MatchProject {
         scorecard: null,
         figures: null,
       },
-      {
+      { start: "standard",
         stage_number: 3,
         stage_name: "Quiet",
         time_seconds: 0,

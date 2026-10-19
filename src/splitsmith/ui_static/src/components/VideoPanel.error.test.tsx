@@ -10,7 +10,7 @@ import { describe, expect, it, vi } from "vitest";
 import { VideoPanel } from "@/components/VideoPanel";
 import type { StageVideo } from "@/lib/api";
 
-const video: StageVideo = {
+const video: StageVideo = { beep_window: null, beep_window_source: null, fingerprint: null, stage_number: null, proxy_ready: false, trim_version: null, scrub_version: null, beep_aligned_time: null, beep_ranker_version: null, beep_tone_for: null, beep_tone_offset_ms: null,
   path: "raw/stage1.mp4",
   video_id: "v1",
   role: "primary",

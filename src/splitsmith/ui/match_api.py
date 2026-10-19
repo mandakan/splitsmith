@@ -55,6 +55,7 @@ from .http_errors import ensure_source_reachable
 from .identity_media import effective_identity, ensure_local_event_logo, event_logo_storage_key
 from .jobs import Job
 from .presence import StoragePresence
+from .project_view import ProjectView, build_project_view
 from .scoreboard import MatchNotFound, ScoreboardError
 from .scoreboard.reconcile import CompetitorRef, LocalShooter, propose_shooter_links
 from .server import (
@@ -211,7 +212,7 @@ class MoveShooterResponse(BaseModel):
     """POST /api/match/videos/move-shooter response body."""
 
     outcome: shooter_move_module.MoveShooterOutcome
-    source_project: MatchProject
+    source_project: ProjectView
 
 
 class TriageSummaryResponse(BaseModel):
@@ -1490,7 +1491,7 @@ async def remove_match_shooter(request: Request, slug: str) -> ShooterListRespon
 
 
 @router.post("/api/match/videos/move-shooter", response_model=MoveShooterResponse)
-async def move_shooter_endpoint(request: Request, req: MoveShooterRequest) -> MoveShooterResponse:
+async def move_shooter_endpoint(request: Request, req: MoveShooterRequest) -> JSONResponse:
     """Relocate footage from one shooter to another (wrong-shooter correction).
 
     Moves each video in ``video_paths`` from ``source_slug`` to
@@ -1590,7 +1591,14 @@ async def move_shooter_endpoint(request: Request, req: MoveShooterRequest) -> Mo
                     item.stage_number,
                 )
 
-    return MoveShooterResponse(outcome=outcome, source_project=source_project)
+    # The SPA keeps this as the open project (no reload), so it carries the
+    # same computed fields GET project does.
+    return JSONResponse(
+        {
+            "outcome": outcome.model_dump(mode="json"),
+            "source_project": build_project_view(state, req.source_slug, source_project),
+        }
+    )
 
 
 @router.post("/api/match/shooters/{slug}/build-trim-caches")

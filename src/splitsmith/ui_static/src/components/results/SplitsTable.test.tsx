@@ -44,7 +44,7 @@ const SCORECARD: StageScorecard = {
   dq: false,
 };
 
-const FIGURES: StageFigures = {
+const FIGURES: StageFigures = { exposed_reload_s: null, moving_shots: null, regions: null, reload_avg_s: null, reloads: null,
   draw: 1.84,
   avg_split: 0.52,
   fastest_split: 0.31,
