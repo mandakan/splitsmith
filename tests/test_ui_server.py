@@ -9969,7 +9969,7 @@ def test_shooter_root_no_match_singleton_fallback(tmp_path: Path, _user_config_h
     fallback is gone; only the legacy single-shooter fallback
     survives (covered separately by the legacy test pattern).
     """
-    from splitsmith.ui.server import _no_project_error
+    from splitsmith.ui.state import _no_project_error
 
     app, _bound_match, _ = _make_match_app(tmp_path)
     state = app.state.splitsmith_state
@@ -9993,7 +9993,7 @@ def test_match_root_no_singleton_fallback(tmp_path: Path, _user_config_home: Pat
     project is bound on the singleton, a bare-path request must 409
     rather than silently resolve via ``_bound_root``.
     """
-    from splitsmith.ui.server import _no_project_error
+    from splitsmith.ui.state import _no_project_error
 
     app, _bound_match, _ = _make_match_app(tmp_path)
     state = app.state.splitsmith_state
