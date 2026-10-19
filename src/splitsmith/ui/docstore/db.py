@@ -121,6 +121,9 @@ class DbDocStore:
     def load_export_runs(self, slug: str) -> Versioned:
         return run_sync(self._store.load_export_runs(self._mid, slug))
 
+    def save_export_runs(self, slug: str, doc: Doc, *, version: int) -> int:
+        return run_sync(self._store.save_export_runs(self._mid, slug, doc, expected_version=version))
+
     def update_export_runs(self, slug: str, merge: Callable[[Doc | None], Doc]) -> int:
         conflicts = _conflict_excs()
         last: BaseException | None = None

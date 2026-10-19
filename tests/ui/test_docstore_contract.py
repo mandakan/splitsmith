@@ -150,6 +150,17 @@ def test_update_audit_re_merges_onto_the_winner(store: DocStore) -> None:
     assert doc == {"n": 0, "other": True, "mine": True}
 
 
+def test_export_runs_save_and_load_round_trip(store: DocStore) -> None:
+    v = store.save_export_runs("anna", {"runs": ["r0"]}, version=0)
+    doc, version = store.load_export_runs("anna")
+    assert doc == {"runs": ["r0"]} and version == v
+    if _is_db(store):
+        with pytest.raises(StateConflictError):
+            store.save_export_runs("anna", {"runs": []}, version=0)
+    else:
+        assert v == 0
+
+
 def test_update_audit_builds_the_document_from_default(store: DocStore) -> None:
     store.update_audit("anna", 2, lambda d: {**d, "touched": True}, lambda: {"shots": [], "fresh": True})
     doc, _ = store.load_audit("anna", 2)
