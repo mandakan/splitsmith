@@ -57,7 +57,11 @@ export function ReelPanel({
   const [format, setFormat] = useState<ReelFormat>("portrait");
   const [force, setForce] = useState(false);
   const [after, setAfter] = useState<ReelAfter>("keep");
-  const [mainCamera, setMainCamera] = useState("default");
+  const [chosenCamera, setMainCamera] = useState("default");
+  // A camera chosen and then gone (removed, ignored) goes out as the saved
+  // default, never as a choice the row no longer shows.
+  const mainCamera =
+    cameraChoices.length > 1 && cameraChoices.some((c) => c.value === chosenCamera) ? chosenCamera : "default";
   const [job, setJob] = useState<Job | null>(null);
   const [error, setError] = useState<string | null>(null);
   // In flight from the click until the job is known: a ref, so a second

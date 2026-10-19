@@ -65,4 +65,27 @@ describe("ReelPanel's main camera", () => {
     await waitFor(() => expect(api.submitHighlightReel).toHaveBeenCalledTimes(2));
     expect(vi.mocked(api.submitHighlightReel).mock.calls[1][1].main_camera).toBe("primary");
   });
+
+  it("sends the saved default once the chosen camera is gone", async () => {
+    const choices = [
+      { value: "primary", label: "Primary" },
+      { value: "head", label: "Head" },
+    ];
+    const props = { slug: "me", href: (...s: string[]) => `/${s.join("/")}`, youtubeConnected: false, onFinished: () => {} };
+    const { rerender } = render(
+      <MemoryRouter>
+        <ReelPanel {...props} cameraChoices={choices} />
+      </MemoryRouter>,
+    );
+    fireEvent.click(await screen.findByText("Advanced"));
+    fireEvent.click(within(screen.getByRole("group", { name: "Main camera" })).getByRole("button", { name: "Head" }));
+    rerender(
+      <MemoryRouter>
+        <ReelPanel {...props} cameraChoices={[choices[0]]} />
+      </MemoryRouter>,
+    );
+    fireEvent.click(screen.getByText("Render reel"));
+    await waitFor(() => expect(api.submitHighlightReel).toHaveBeenCalledTimes(1));
+    expect(vi.mocked(api.submitHighlightReel).mock.calls[0][1].main_camera).toBe("default");
+  });
 });
