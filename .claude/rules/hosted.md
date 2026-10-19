@@ -87,6 +87,14 @@ Deploy facts (worker env, `FORWARDED_ALLOW_IPS`, the waitlist cut-over) are in
   reads and writes the audit file under `audit_lock` this way.
 - `FileDocStore` takes the **same** `audit_lock` object the sync pull holds
   (#1075); a store that made its own lock would silently undo that.
+- `MatchProject.bind_state(docs, slug=, version=)` and `Match.bind_state(docs,
+  version=)` take the port, and `save()` writes through it at the version the
+  doc was loaded at; the models never see a `ProjectStateStore`. In a request
+  the port is `state.docstore()`; a creation route, whose match the alias
+  middleware has not seen, uses `state.docstore_for(match_id, root)`. Whether
+  to `confine_paths` is the store's answer (`confines_paths`), not a mode
+  check. `save_async` runs a bound save on a worker thread, since the port
+  is synchronous and `run_sync` from the loop thread would block the loop.
 - `MatchProject.stage_statuses`, `audited_count` and `export_overview` never
   read an audit file: `audit_docs` is required, from `state.load_audit_docs`
   or the match bundle in a request and `audit_docs_from_disk` where there is

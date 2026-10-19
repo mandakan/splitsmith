@@ -4790,8 +4790,8 @@ async def _register_match_at(
         # The id becomes a folder name hosted; an imported match.json can
         # carry any string.
         raise HTTPException(status_code=400, detail=f"invalid match id in {resolved}: {match.match_id!r}")
-    if state.project_state is not None and match.match_id:
-        doc, _ = await state.project_state.load_match(match.match_id)
+    if match.match_id:
+        doc, _ = state.docstore_for(match.match_id, resolved).load_match()
         if doc is not None:
             match = match_model.Match.model_validate(doc)
     if not match.shooters:
@@ -6223,10 +6223,11 @@ def _register_response(state: AppState, root: Path, name: str, match_id: str | N
     this response is for; the live ``/api/health`` route never
     returns these fields anymore.
     """
-    # Hosted: read the authoritative roster from Postgres (the on-disk
-    # match.json is the stale creation shell). Local: from disk.
-    if state.project_state is not None and match_id is not None:
-        doc, _ = run_sync(state.project_state.load_match(match_id))
+    # The authoritative roster through the port: hosted that is Postgres
+    # (the on-disk match.json is the stale creation shell), locally the
+    # file.
+    if match_id is not None:
+        doc, _ = state.docstore_for(match_id, root).load_match()
         shooters = sorted(doc.get("shooters", [])) if doc is not None else []
     else:
         shooters = sorted(match_model.Match.load(root).shooters)
