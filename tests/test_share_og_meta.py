@@ -55,16 +55,18 @@ def spa_index(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Path]
     tags reach the *served* HTML, which a two-line document proves just as
     well as a real bundle.
 
-    ``_shell`` does ``from .server import STATIC_DIR`` at call time, so
-    patching the attribute on the server module (not rebinding a local) is
-    what the handler actually reads.
+    ``share_og._shell`` and ``server.spa_fallback`` each bind ``STATIC_DIR``
+    at import (from ``ui.state``), so the attribute is patched on both
+    modules: rebinding it on one does not reach the other's handler.
     """
     from splitsmith.ui import server as server_module
+    from splitsmith.ui import share_og as share_og_module
 
     dist = tmp_path / "spa-dist"
     dist.mkdir()
     (dist / "index.html").write_text(_MINIMAL_INDEX_HTML, encoding="utf-8")
     monkeypatch.setattr(server_module, "STATIC_DIR", dist)
+    monkeypatch.setattr(share_og_module, "STATIC_DIR", dist)
     yield dist
 
 
