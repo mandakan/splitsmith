@@ -24,6 +24,7 @@ from splitsmith.db import (
 from splitsmith.match_model import MATCH_FILE
 from splitsmith.match_registry import MatchRegistry
 from splitsmith.storage import StorageObject
+from splitsmith.ui.docstore import DbDocStore
 from splitsmith.ui.match_delete import delete_match_cascade
 
 
@@ -87,9 +88,13 @@ def _hosted_state(tmp_path: Path, *, recent_paths: list[str], jobs: int = 1) -> 
             return user.id
 
     uid = asyncio.run(_setup())
+    state_store = ProjectStateStore(sf, user_id=uid)
     return SimpleNamespace(
         matches_store=PostgresMatchStore(sf, user_id=uid),
-        project_state=ProjectStateStore(sf, user_id=uid),
+        project_state=state_store,
+        # The cascade reads and deletes documents through the storage port,
+        # bound per match the way ``AppState.docstore_for`` binds it.
+        docstore_for=lambda match_id, root=None: DbDocStore(state_store, match_id),
         storage=FakeStorage(),
         jobs=FakeJobs(count=jobs),
         recent_projects=FakeRecentProjects(recent_paths),

@@ -630,26 +630,18 @@ class AppState:
             return match
         return match_model.Match.load(scoped_root)
 
-    def audit_doc_target(self) -> tuple[ProjectStateStore, str] | None:
-        """The hosted store + match id for audit docs, or ``None`` when they
-        are files. The audit twin of :meth:`export_runs_doc_target`: the
-        accessors below and ``_save_audit_with_remerge``'s desktop lock all
-        branch on this one answer."""
-        mid = current_match_id.get()
-        store = self.project_state
-        if store is not None and mid is not None:
-            return store, mid
-        return None
-
-    def docstore_for(self, match_id: str, root: Path) -> DocStore:
+    def docstore_for(self, match_id: str, root: Path | None = None) -> DocStore:
         """The storage port for a match named outright rather than by the
         request's context: ``DbDocStore`` when a state store is bound, else
         ``FileDocStore`` over ``root``. For the match creation routes, whose
-        match the alias middleware has not seen yet, and the registration
-        paths that hold a path and an id."""
+        match the alias middleware has not seen yet, the registration paths
+        that hold a path and an id, and the delete cascade's walk over a
+        tenant's other matches (hosted only, so no root)."""
         store = self.project_state
         if store is not None:
             return DbDocStore(store, match_id)
+        if root is None:
+            raise _no_project_error()
         return FileDocStore(root, audit_lock=self.audit_lock, export_run_lock=self.export_run_lock)
 
     def docstore(self) -> DocStore:
@@ -658,9 +650,9 @@ class AppState:
         middleware pinned a match id, else ``FileDocStore`` over the pinned
         match root with this process's locks (the audit lock is the one the
         sync pull holds, #1075)."""
-        target = self.audit_doc_target()
-        if target is not None:
-            store, mid = target
+        store = self.project_state
+        mid = current_match_id.get()
+        if store is not None and mid is not None:
             return DbDocStore(store, mid)
         root = current_match_root.get()
         if root is None:
@@ -728,22 +720,6 @@ class AppState:
         except OSError as exc:
             raise HTTPException(status_code=500, detail=f"audit delete failed: {exc}") from exc
 
-    def export_runs_doc_target(self) -> tuple[ProjectStateStore, str] | None:
-        """The hosted store + match id for the export history, or ``None``
-        when the history is file-based.
-
-        The one place the mode split for this document is decided. Both
-        accessors below branch on it, and ``_record_export_run`` takes its
-        desktop-only lock on exactly the ``None`` case -- so that lock can
-        never end up guarding a different set of calls than the file
-        writes it exists to serialise.
-        """
-        mid = current_match_id.get()
-        store = self.project_state
-        if store is not None and mid is not None:
-            return store, mid
-        return None
-
     def load_export_runs(self, slug: str) -> tuple[dict | None, int]:
         """The shooter's export history doc + version (#629), through the
         storage port. Hosted: ``state_docs``. Local:
@@ -778,8 +754,9 @@ class AppState:
         gone, and the export (and the overlay's audit revision) would read
         it as current."""
         audit_file = self._audit_file(slug, stage_number)
-        if self.audit_doc_target() is not None:
-            doc, _ = self.load_audit(slug, stage_number)
+        docs = self.docstore()
+        if not docs.documents_on_disk:
+            doc, _ = docs.load_audit(slug, stage_number)
             if doc is not None:
                 audit_file.parent.mkdir(parents=True, exist_ok=True)
                 audit_file.write_text(json.dumps(doc, indent=2) + "\n", encoding="utf-8")

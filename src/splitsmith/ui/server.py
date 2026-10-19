@@ -1562,11 +1562,12 @@ def _load_compare_bundles(
         # disk and ``ensure_trim=None`` checks the disk, as always.
         project: MatchProject | None = None
         ensure_trim: Callable[[Path], object] | None = None
-        if state is not None and state.project_state is not None:
+        if state is not None:
             project = state.shooter_project(slug)
-            hosted_project = project
+            bound_project = project
 
-            def _pull(trim: Path, _project: MatchProject = hosted_project) -> bool:
+            def _pull(trim: Path, _project: MatchProject = bound_project) -> bool:
+                # A no-op when the project has no storage scope bound.
                 return export_storage.pull_export_file(_project, trim)
 
             ensure_trim = _pull
@@ -1704,22 +1705,22 @@ def _run_compare_grid(
     in ``missing_trims``.
     """
     root = Path(match_root)
-    hosted = state is not None and state.project_state is not None
-    match = state.match() if state is not None and hosted else match_model.Match.load(root)
+    match = state.match() if state is not None else match_model.Match.load(root)
     stem = _compare_output_stem(req.output_name)
     requested = sorted(set(req.stage_numbers))
 
     handle.update(progress=0.02, message="Loading shooters...")
     with handle.timer.phase("load_shooters"):
-        if state is not None and hosted:
+        if state is not None:
             # The overlay reads each stage's audit off disk; materialize
-            # the selected stages' docs before the loader builds paths.
+            # the selected stages' docs before the loader builds paths (a
+            # no-op where the documents are the files).
             for slug in match.shooters:
                 for number in requested:
                     state.materialize_audit(slug, number)
         bundles = _load_compare_bundles(root, match, cameras=req.cameras, inset=req.inset_camera, state=state)
         filtered = _filter_bundles_to_stages(bundles, requested)
-        audio_project = state.shooter_project(req.audio_from) if state is not None and hosted else None
+        audio_project = state.shooter_project(req.audio_from) if state is not None else None
         audio_label = _shooter_label(match, root, req.audio_from, project=audio_project)
 
     output_dir = root / "exports"
@@ -1831,7 +1832,8 @@ def _run_compare_grid(
             ),
         )
 
-    if state is not None and hosted:
+    if state is not None and state.storage is not None:
+        # A no-op without a match id (local mode has no match-scoped store).
         handle.update(progress=0.98, message="Uploading the grid...")
         with handle.timer.phase("push"):
             export_storage.push_match_export_file(state.storage, current_match_id.get(), result.output_path)
@@ -7158,7 +7160,7 @@ def _audit_rmw(state: AppState) -> AbstractContextManager[object]:
     returns a no-op: the lock is process-global there, and the
     ``state_docs`` version already optimistic-locks every save.
     """
-    return state.audit_lock if state.audit_doc_target() is None else nullcontext()
+    return state.audit_lock if state.docstore().documents_on_disk else nullcontext()
 
 
 def _note_digest(text: str | None) -> dict[str, Any] | None:

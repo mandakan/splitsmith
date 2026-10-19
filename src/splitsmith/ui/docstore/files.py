@@ -63,6 +63,7 @@ class FileDocStore:
     """
 
     confines_paths = False
+    documents_on_disk = True
 
     def __init__(
         self,
@@ -101,6 +102,27 @@ class FileDocStore:
     def save_project(self, slug: str, doc: Doc, *, version: int) -> int:
         _write(self._shooter_root(slug) / PROJECT_FILE, doc, backup=False)
         return 0
+
+    def delete_match_docs(self) -> int:
+        removed = 0
+        for slug in self.list_projects():
+            root = self._shooter_root(slug)
+            removed += len(self.list_audits(slug))
+            self._delete_tree_docs(root / AUDIT_DIR)
+            for name in (PROJECT_FILE, LOG_FILENAME):
+                if (root / name).exists():
+                    (root / name).unlink()
+                    removed += 1
+        if (self._root / MATCH_FILE).exists():
+            (self._root / MATCH_FILE).unlink()
+            removed += 1
+        return removed
+
+    @staticmethod
+    def _delete_tree_docs(audit_dir: Path) -> None:
+        if audit_dir.is_dir():
+            for path in audit_dir.glob("stage*.json*"):
+                path.unlink(missing_ok=True)
 
     def delete_project(self, slug: str) -> None:
         root = self._shooter_root(slug)

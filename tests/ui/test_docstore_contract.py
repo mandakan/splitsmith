@@ -284,3 +284,24 @@ def test_bundle_equals_the_per_item_loads(store: DocStore) -> None:
     assert bundle.projects == store.list_projects()
     assert bundle.audits == {"anna": store.list_audits("anna"), "bo": store.list_audits("bo")}
     assert bundle.audits["anna"][1] == store.load_audit("anna", 1)
+
+
+def test_delete_match_docs_removes_every_document_and_counts_them(store: DocStore) -> None:
+    store.save_project("anna", {"name": "anna"}, version=0)
+    store.save_audit("anna", 1, {"shots": []}, version=0)
+    store.save_audit("anna", 2, {"shots": []}, version=0)
+    store.save_export_runs("anna", {"runs": []}, version=0)
+
+    assert store.delete_match_docs() == 5
+
+    assert store.load_match() == (None, 0)
+    assert store.list_projects() == {}
+    assert store.list_audits("anna") == {}
+    assert store.load_export_runs("anna") == (None, 0)
+
+
+def test_the_two_worlds_say_which_one_they_are(store: DocStore) -> None:
+    """The one mode fact a consumer may read: whether the documents are the
+    files under the match root. Everything else goes through the methods."""
+    assert store.documents_on_disk is not _is_db(store)
+    assert store.confines_paths is _is_db(store)

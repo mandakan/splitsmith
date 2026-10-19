@@ -18,6 +18,11 @@ os.environ.setdefault("SPLITSMITH_AUTO_SYNC", "0")
 # The rendered-segment cache lives under the real runtime cache dir (not
 # isolated, see below); no test should fill it. Cache tests pass their own.
 os.environ.setdefault("SPLITSMITH_RENDER_CACHE", "0")
+# The server's startup hook queues a ``model_download`` job when model
+# artifacts are missing, which in CI they are: the job then outlives
+# whichever unrelated test built the app and trips the drain assertion
+# below. The one test of the hook opts back in.
+os.environ.setdefault("SPLITSMITH_NO_MODEL_PREFETCH", "1")
 from splitsmith.match_model import Match, MatchStageDefinition
 from splitsmith.match_project import MatchProject, StageEntry, StageVideo
 
