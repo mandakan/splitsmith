@@ -1,6 +1,12 @@
 {
   "entries": [
     {
+      "id": "breakdown-review-keys",
+      "date": "2026-10-19",
+      "title": "Review proposals from the keyboard",
+      "body": "On Breakdown, K keeps the selected proposal and Delete rejects it, and both move on to the next one. N and Shift+N jump between proposals."
+    },
+    {
       "id": "reel-main-camera",
       "date": "2026-10-19",
       "title": "Choose the highlight reel's camera",

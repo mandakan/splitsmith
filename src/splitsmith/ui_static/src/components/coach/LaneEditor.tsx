@@ -38,6 +38,13 @@
  * *without* selecting it (the root when the lane is empty), so holding
  * Delete removes one region, never the stage. Read-only regions focus and
  * announce, and only the moves work.
+ *
+ * Reviewing proposals on the keyboard: on a selected proposal K keeps it and
+ * Delete / Backspace rejects it, and either moves focus and selection to the
+ * next proposal in stage order (``proposalQueue.adjacentId``, every lane)
+ * and seeks the video to its start, so the next press reviews the next one.
+ * Neither acts on auto-repeat. N / Shift+N jump to the next / previous
+ * proposal from anywhere on the page but a text field.
  */
 import type { KeyboardEvent as ReactKeyboardEvent, PointerEvent as ReactPointerEvent } from "react";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
@@ -45,7 +52,9 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Kbd } from "@/components/ui/Kbd";
 import { Label } from "@/components/ui/Label";
 import type { StageEvent, StageEventKind } from "@/lib/api";
-import { enclosingMovement, exposedSpans, shotIsMoving, snapTime, timeFromX } from "@/lib/events";
+import { isTypingTextTarget } from "@/lib/audit-input";
+import { enclosingMovement, exposedSpans, keepEvent, shotIsMoving, snapTime, timeFromX } from "@/lib/events";
+import { adjacentId } from "@/lib/proposalQueue";
 import { useSnapToShots } from "@/lib/timelinePrefs";
 import { CHIP_TICK_BG } from "@/components/ui/chipTicks";
 import { cn } from "@/lib/utils";
@@ -120,6 +129,8 @@ export function LaneEditor(props: LaneEditorProps) {
   // The list as last emitted: a drag frame reads it before the parent re-renders.
   const eventsRef = useRef(events);
   eventsRef.current = events;
+  const selectedRef = useRef(selectedId);
+  selectedRef.current = selectedId;
   // The time pill: where the drag's moving edge stands (what a release saves), null between
   // drags, with what it snapped to when the snap pulled it off the pointer (#1440). A
   // keyboard nudge shows it briefly too, at the edge it moved.
@@ -307,6 +318,31 @@ export function LaneEditor(props: LaneEditorProps) {
     return true;
   };
 
+  // Review: select, focus and show a proposal. False when there is none to go to.
+  const reviewTo = (id: string | null) => {
+    const target = id ? eventsRef.current.find((y) => y.id === id) : undefined;
+    if (!target || !focusRegion(target.id)) return false;
+    if (selectedRef.current !== target.id) onSelect(target.id);
+    onSeek(target.start);
+    setAnnouncement(regionLabel(target));
+    return true;
+  };
+  const reviewToRef = useRef(reviewTo);
+  reviewToRef.current = reviewTo;
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "n" && e.key !== "N") return;
+      if (e.defaultPrevented || e.metaKey || e.ctrlKey || e.altKey || dragRef.current) return;
+      if (isTypingTextTarget(e.target)) return;
+      const id = adjacentId(eventsRef.current, selectedRef.current, e.shiftKey ? -1 : 1);
+      if (id == null) return;
+      e.preventDefault();
+      reviewToRef.current(id);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
   const handleRegionKeyDown = (e: ReactKeyboardEvent<HTMLDivElement>, x: StageEvent) => {
     // Only keys aimed at the region itself: a focusable descendant (a handle,
     // a future control inside it) bubbles its keydown here too, and an arrow
@@ -332,6 +368,15 @@ export function LaneEditor(props: LaneEditorProps) {
     }
     if (readOnly) return;
     const current = eventsRef.current;
+    if ((e.key === "k" || e.key === "K") && !e.metaKey && !e.ctrlKey && !e.altKey) {
+      e.preventDefault();
+      if (e.repeat || selectedId !== x.id || x.source !== "auto") return;
+      // Read the next one off the list before the keep takes this one out of the queue.
+      const nextId = adjacentId(current, x.id, 1);
+      emit(keepEvent(current, x.id), true);
+      if (!reviewTo(nextId)) setAnnouncement(`${regionLabel({ ...x, source: "manual" })}. Every proposal reviewed`);
+      return;
+    }
     if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
       e.preventDefault();
       // A nudge is a save and confirms a proposal: like Delete it needs the
@@ -364,11 +409,16 @@ export function LaneEditor(props: LaneEditorProps) {
       // the selected one, so the neighbour focus lands on (unselected) survives
       // a held or doubled key until Enter selects it.
       if (e.repeat || selectedId !== x.id || i < 0) return;
+      // A rejected proposal hands the review to the next one, selected, so the
+      // next deliberate press reviews it; a confirmed region keeps the rule above.
+      const nextId = x.source === "auto" ? adjacentId(current, x.id, 1) : null;
       emit(
         current.filter((y) => y.id !== x.id),
         true,
       );
       onSelect(null);
+      if (reviewTo(nextId)) return;
+      if (x.source === "auto") setAnnouncement("Every proposal reviewed");
       // Focus stays in the lane (the next region in time, else the previous),
       // unselected; an emptied lane parks it on the root.
       if (!focusRegion((lane[i + 1] ?? lane[i - 1])?.id, false)) rootRef.current?.focus({ preventScroll: true });
@@ -525,6 +575,9 @@ export function LaneHints({ readOnly }: { readOnly?: boolean }) {
       </span>
       <span>
         <Kbd>Alt</Kbd>-drag {snapOn ? "skips snap" : "snaps to shots"}, <Kbd>Esc</Kbd> cancels, <Kbd>Del</Kbd> removes
+      </span>
+      <span>
+        Proposals: <Kbd>K</Kbd> keeps, <Kbd>Del</Kbd> rejects, <Kbd>N</Kbd> next, <Kbd>Shift</Kbd>+<Kbd>N</Kbd> previous
       </span>
     </div>
   );
