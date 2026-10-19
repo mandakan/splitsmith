@@ -6,7 +6,7 @@ once, pushes it to S3, and worker B's next detection on the same
 file pulls the 5 MB WAV instead of downloading the 500 MB raw to
 re-extract.
 
-These tests stub ffmpeg via a ``subprocess.run`` monkeypatch so they
+These tests stub ffmpeg via the audio module's ``subprocess`` so they
 don't depend on a real binary, and use ``FilesystemStorage`` against
 ``tmp_path`` as the storage backend -- the Protocol shape is the
 same as ``S3Storage`` (proven by ``test_s3_storage.py``), so behaviour
@@ -16,7 +16,9 @@ parity carries over.
 from __future__ import annotations
 
 import subprocess
+import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -48,7 +50,7 @@ CACHED_WAV = _wav(200)
 
 @pytest.fixture
 def fake_ffmpeg(monkeypatch: pytest.MonkeyPatch) -> list[list[str]]:
-    """Replace ``subprocess.run`` so ffmpeg invocations land in a list.
+    """Replace the audio module's ``subprocess.run`` so ffmpeg invocations land in a list.
 
     Whatever ``-i <src>`` / ``<dest>`` ffmpeg would have produced, the
     fake writes a sentinel byte to the dest path so the rest of the
@@ -77,7 +79,14 @@ def fake_ffmpeg(monkeypatch: pytest.MonkeyPatch) -> list[list[str]]:
         dest.write_bytes(FFMPEG_WAV)
         return subprocess.CompletedProcess(cmd, returncode=0, stdout="", stderr="")
 
-    monkeypatch.setattr("splitsmith.ui.audio.subprocess.run", fake_run)
+    # The audio module's own ``subprocess`` only: patching
+    # ``subprocess.run`` itself reaches every thread in the worker, and a
+    # job another test left running then ran its encoder probe through
+    # this fake (counted here, and ``-encoders`` written to the cwd).
+    monkeypatch.setattr(
+        "splitsmith.ui.audio.subprocess",
+        SimpleNamespace(run=fake_run, CalledProcessError=subprocess.CalledProcessError),
+    )
     return invocations
 
 
@@ -94,6 +103,17 @@ def _project_with_stage_video(root: Path, video_path: Path) -> tuple[MatchProjec
     ]
     project.save(root)
     return project, video
+
+
+def test_the_fake_reaches_only_the_audio_module(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fake_ffmpeg: list[list[str]]
+) -> None:
+    """A subprocess call from anywhere else (another test's job thread, an
+    encoder probe) runs for real and is not counted as an extraction."""
+    monkeypatch.chdir(tmp_path)
+    subprocess.run([sys.executable, "-c", "pass"], check=True)
+    assert fake_ffmpeg == []
+    assert not (tmp_path / "pass").exists()
 
 
 def test_local_mode_no_storage_runs_ffmpeg_and_never_touches_storage(
