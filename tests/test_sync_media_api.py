@@ -94,7 +94,7 @@ def test_create_part_url_complete_round_trip(
     body = create.json()
     assert body["key"] == VALID_KEY
     assert body["upload_id"]
-    from splitsmith.ui.server import _RAW_UPLOAD_PART_SIZE
+    from splitsmith.ui.state import _RAW_UPLOAD_PART_SIZE
 
     assert body["part_size"] == _RAW_UPLOAD_PART_SIZE
     upload_id = body["upload_id"]

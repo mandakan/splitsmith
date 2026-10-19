@@ -1,4 +1,4 @@
-"""' + DOC + '
+"""The per-shooter routes: ``/api/shooters/{slug}/...`` other than the per-stage ones.
 
 Lifted out of ``server.create_app`` (#680). Handlers read the process state
 from ``request.app.state.splitsmith_state``; helpers shared with other route
