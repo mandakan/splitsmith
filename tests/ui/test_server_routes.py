@@ -1405,7 +1405,7 @@ def test_match_export_redraws_a_short_head_overlay_drawn_before_the_fix(
     and the redraw's own record is then reused."""
     import json as _json
 
-    from splitsmith.overlay_hud import HudOptions, overlay_settings
+    from splitsmith.overlay.hud import HudOptions, overlay_settings
     from splitsmith.ui import exports as exports_mod
 
     client, root = _seed_match_export_project(tmp_path, stage_count=1, beep_time=3.0)

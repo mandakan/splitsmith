@@ -188,7 +188,7 @@ class _RedStingRasterizer:
     def render_template_frames(self, template, *, context, width, height, fps, max_seconds):
         import math
 
-        from splitsmith.overlay_raster import TemplateFrames
+        from splitsmith.overlay.raster import TemplateFrames
 
         count = max(1, math.ceil(max_seconds * fps - 1e-9))
         red = bytes((255, 0, 0, 255)) * (width * height)

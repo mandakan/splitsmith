@@ -21,7 +21,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from .. import csv_gen, fcpxml_gen, overlay_render, report, summary_card, trim
+from .. import csv_gen, fcpxml_gen, report, summary_card, trim
 from ..audit_data import StageExportError, audit_shots_to_engine_shots, read_audit_data
 from ..audit_revision import audit_revision
 from ..config import Config, ReportFiles, StageAnalysis, StageData, StageEvent
@@ -31,7 +31,8 @@ from ..export_naming import stage_file_base
 from ..hud_extras import HudExtras, hud_extras_from
 from ..looks import DEFAULT_VARIANT
 from ..match_project import MatchProject, StageEntry, StageScorecard
-from ..overlay_hud import (
+from ..overlay import render as overlay_render
+from ..overlay.hud import (
     LEGACY_OVERLAY_SETTINGS,
     HudOptions,
     overlay_data_identity,
@@ -39,8 +40,8 @@ from ..overlay_hud import (
     overlay_template_identity,
     overlay_theme_identity,
 )
-from ..overlay_render import OverlayCodec
-from ..overlay_theme import ThemeName
+from ..overlay.render import OverlayCodec
+from ..overlay.theme import ThemeName
 from ..safe_area import is_upright
 from ..segment_cache import SegmentCache
 from ..stage_summary_data import TileStageData, load_stage_events, load_stage_reloads, load_stage_shots

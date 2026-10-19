@@ -19,8 +19,8 @@ import pytest
 from PIL import Image
 
 from splitsmith.compare import overlay_live, overlay_sprites
-from splitsmith.overlay_raster import ChromiumRasterizer
-from splitsmith.overlay_theme import load_theme
+from splitsmith.overlay.raster import ChromiumRasterizer
+from splitsmith.overlay.theme import load_theme
 
 pytestmark = pytest.mark.integration
 

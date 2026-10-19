@@ -215,7 +215,7 @@ _GRIDS = [(1, 2), (2, 1), (2, 2), (3, 3), (4, 4)]
 def _corner_boxes(fit, cell_w, cell_h, *, counter_chars=5, clock_chars=5, advance=0.6):
     """``(counter, clock)`` as ``(left, top, right, bottom)`` in cell pixels:
     the advance width of the text, a line of one em tall."""
-    from splitsmith.overlay_layout import CellScale
+    from splitsmith.overlay.layout import CellScale
 
     pad = CellScale.for_cell(cell_h).pad
     counter_w = counter_chars * advance * fit.size
@@ -252,7 +252,7 @@ def test_the_counter_and_the_clock_keep_a_gap_in_every_cell(canvas, grid):
 def test_a_cell_that_fit_before_keeps_its_size_and_its_row():
     """Pixel identity for every grid that already fit: the live size it
     always drew at, counter top left."""
-    from splitsmith.overlay_layout import CellScale
+    from splitsmith.overlay.layout import CellScale
 
     for cell_w, cell_h in [(640, 360), (960, 540), (540, 960), (360, 640), (426, 240)]:
         fit = overlay_sprites.corner_fit(cell_w, cell_h, advance_em=0.6)
@@ -283,7 +283,7 @@ def test_a_longer_clock_than_the_floor_widens_the_fit():
 @pytest.mark.parametrize("canvas", _CANVASES)
 @pytest.mark.parametrize("grid", _GRIDS)
 def test_the_split_keeps_the_cells_size_unless_its_own_width_caps_it(canvas, grid):
-    from splitsmith.overlay_layout import CellScale
+    from splitsmith.overlay.layout import CellScale
 
     rows, cols = grid
     cell_w, cell_h = canvas[0] // cols, canvas[1] // rows

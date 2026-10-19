@@ -36,8 +36,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from .fonts import resolve as resolve_fonts
-from .looks import Look, LookError, LookNotFoundError, load_look
+from ..fonts import resolve as resolve_fonts
+from ..looks import Look, LookError, LookNotFoundError, load_look
 
 ThemeName = str
 """A Look name (#1246): any installed Look, shipped or the user's. The
@@ -94,7 +94,7 @@ class OverlayTheme:
     #: on top of it reaches AA-large contrast (mirrors the web UI's
     #: ``--color-led-fill``: "slightly darker than --color-led so cream
     #: text reaches AA-large + survives red-green colorblindness"). Every
-    #: :attr:`~splitsmith.overlay_layout.Emphasis.PLATE` background reads
+    #: :attr:`~splitsmith.overlay.layout.Emphasis.PLATE` background reads
     #: this, not :attr:`accent` -- see issue #683 Task 7c.
     accent_fill: RGB
     #: Body-size red text (10-14px) -- an unplated fault count reads

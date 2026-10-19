@@ -126,7 +126,7 @@ def test_the_fallback_plate_is_not_served_behind_a_year_long_cache(
     degraded fetch below moves the card (a different match name hashes to a
     different key) to force the miss the fallback needs.
     """
-    from splitsmith.overlay_raster import RasterizerUnavailableError
+    from splitsmith.overlay.raster import RasterizerUnavailableError
     from splitsmith.ui import share_og
 
     token = _setup_shared_match(hosted_env, hosted_app_with_storage)

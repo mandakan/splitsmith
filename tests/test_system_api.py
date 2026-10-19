@@ -11,7 +11,7 @@ from typing import Any
 import pytest
 from fastapi.testclient import TestClient
 
-from splitsmith.overlay_raster import RasterizerUnavailableError
+from splitsmith.overlay.raster import RasterizerUnavailableError
 from splitsmith.ui import system_api
 from splitsmith.ui.server import create_app
 

@@ -34,8 +34,8 @@ from .mp4_render import (
     _rate_string,
     _run,
 )
-from .overlay_card import card_backdrop, compose_card, first_frame_image
-from .overlay_raster import ChromiumRasterizer, Rasterizer, RasterizerUnavailableError
+from .overlay.card import card_backdrop, compose_card, first_frame_image
+from .overlay.raster import ChromiumRasterizer, Rasterizer, RasterizerUnavailableError
 from .reel_cards import reel_card_motion
 from .reel_plan import FrameRef, ReelCard, ReelClip, ReelItem, SfxKind
 from .segment_cache import SegmentCache

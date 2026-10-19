@@ -22,8 +22,8 @@ from splitsmith.compare.overlay_summary import build_hold_still, build_match_sum
 from splitsmith.events import ReloadFigure
 from splitsmith.match_project import StageScorecard
 from splitsmith.match_summary import build_match_summary
-from splitsmith.overlay_layout import MIN_FONT_SIZE
-from splitsmith.overlay_theme import load_theme
+from splitsmith.overlay.layout import MIN_FONT_SIZE
+from splitsmith.overlay.theme import load_theme
 from splitsmith.stage_summary_data import TileShot, TileStageData
 
 THEME = load_theme("splitsmith")
@@ -212,7 +212,7 @@ _PROBE_JS = r"""() => {
 
 
 def _probe(html: str, *, width: int, height: int, tmp_path: Path, js: str = _PROBE_JS):
-    from splitsmith.overlay_raster import ChromiumRasterizer, RasterizerUnavailableError
+    from splitsmith.overlay.raster import ChromiumRasterizer, RasterizerUnavailableError
 
     page_path = tmp_path / "grid.html"
     page_path.write_text(html, encoding="utf-8")
@@ -408,7 +408,7 @@ def test_a_reload_costs_its_own_row_and_no_more() -> None:
     """A confirmed reload in one tile of a 2x2 adds that tile's reload row
     to the grid's budget, three figures to a row where that tile has the
     room, so the whole grid shrinks by about one row's height, not two."""
-    from splitsmith.overlay_summary_cell import TileRoom, upright_grid_type
+    from splitsmith.overlay.summary_cell import TileRoom, upright_grid_type
 
     def rooms(reload: bool) -> list[TileRoom]:
         # 1080x1920, 2x2: the right column loses the button column, the
@@ -434,8 +434,8 @@ def test_one_tile_that_needs_less_type_takes_the_whole_upright_grid_with_it(
     figures) shrinks every tile of an upright grid with it, so the grid
     reads at one scale; a landscape grid keeps fitting each tile alone."""
     from splitsmith.compare.overlay_summary import upright_grid
-    from splitsmith.overlay_html import grid_html
-    from splitsmith.overlay_layout import Anchor, Element, Flow, Group, Role
+    from splitsmith.overlay.html import grid_html
+    from splitsmith.overlay.layout import Anchor, Element, Flow, Group, Role
     from splitsmith.safe_area import safe_area
 
     geometry = SpriteGeometry(canvas_width=1080, canvas_height=1920, rows=2, cols=2)

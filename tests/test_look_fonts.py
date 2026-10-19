@@ -13,10 +13,10 @@ import pytest
 
 from splitsmith import fonts, looks
 from splitsmith.compare.overlay_sprites import theme_font_face
-from splitsmith.overlay_html import single_css
-from splitsmith.overlay_layout import CellScale
-from splitsmith.overlay_text import overlay_font_file
-from splitsmith.overlay_theme import load_theme, theme_for
+from splitsmith.overlay.html import single_css
+from splitsmith.overlay.layout import CellScale
+from splitsmith.overlay.text import overlay_font_file
+from splitsmith.overlay.theme import load_theme, theme_for
 
 FONT_DIR = Path(str(resources.files("splitsmith.data").joinpath("fonts")))
 
@@ -96,7 +96,7 @@ def test_the_clock_draws_the_looks_mono_face(tmp_path: Path, monkeypatch: pytest
 
 def test_the_single_shooter_clock_uses_the_theme_too() -> None:
     """``overlay_render`` named the bundled mono outright; it now asks the theme."""
-    source = (Path(__file__).parent.parent / "src/splitsmith/overlay_render.py").read_text(encoding="utf-8")
+    source = (Path(__file__).parent.parent / "src/splitsmith/overlay/render.py").read_text(encoding="utf-8")
     assert 'resolve_overlay_face("splitsmith-mono")' not in source
     assert "resolve_overlay_face(palette.mono_font)" in source
 
@@ -152,7 +152,7 @@ def test_a_chosen_face_draws_differently(tmp_path: Path, monkeypatch: pytest.Mon
     from PIL import Image
 
     from splitsmith import look_tools
-    from splitsmith.overlay_raster import ChromiumRasterizer, RasterizerUnavailableError
+    from splitsmith.overlay.raster import ChromiumRasterizer, RasterizerUnavailableError
 
     def inked_width(look: looks.Look) -> int:
         case, ctx = look_tools.sample_contexts(look, "slate", "default", tmp_path)[0]

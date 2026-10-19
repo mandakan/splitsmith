@@ -1,7 +1,7 @@
 import pytest
 
 from splitsmith.looks import HIGHLIGHT_SLOT, highlight_template_for, load_look
-from splitsmith.overlay_theme import theme_for
+from splitsmith.overlay.theme import theme_for
 from splitsmith.reel_cards import reel_card_context
 from splitsmith.reel_plan import ReelCard
 
@@ -33,7 +33,7 @@ def test_context_carries_the_card_as_data():
 
 @pytest.mark.integration
 def test_trailer_card_renders_frames_in_chromium():
-    from splitsmith.overlay_raster import ChromiumRasterizer, RasterizerUnavailableError
+    from splitsmith.overlay.raster import ChromiumRasterizer, RasterizerUnavailableError
     from splitsmith.reel_cards import reel_card_motion
 
     owner = ChromiumRasterizer()

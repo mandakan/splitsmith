@@ -1,6 +1,6 @@
 """Write the ``splitsmith`` Look's colour tokens from the web UI's design tokens.
 
-The overlay renderer (``splitsmith.overlay_render``) needs the same colors
+The overlay renderer (``splitsmith.overlay.render``) needs the same colors
 the Shot Timer UI uses so the optional ``designsystem`` overlay variant
 stays in sync with whatever is in
 ``src/splitsmith/ui_static/src/styles/index.css``. Re-parsing the CSS at
@@ -16,7 +16,7 @@ Run::
 
 The script is intentionally narrow -- it only extracts the colors and
 font names overlays use today. Add tokens here as new overlay variants
-need them; the JSON schema is consumed by ``splitsmith.overlay_theme``.
+need them; the JSON schema is consumed by ``splitsmith.overlay.theme``.
 """
 
 from __future__ import annotations

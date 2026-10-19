@@ -28,9 +28,9 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
 from pathlib import Path
 
-from ..overlay_layout import MIN_FONT_SIZE, CellScale
-from ..overlay_text import OverlayFace, resolve_overlay_face
-from ..overlay_theme import OverlayTheme
+from ..overlay.layout import MIN_FONT_SIZE, CellScale
+from ..overlay.text import OverlayFace, resolve_overlay_face
+from ..overlay.theme import OverlayTheme
 from .overlay_data import TileShot, TileStageData
 
 # Shots land on the tolerance side of a boundary rather than the wrong
@@ -500,7 +500,7 @@ def theme_font_face(theme: OverlayTheme) -> OverlayFace:
 
     Only one consumer is left in Python: the running clock's ffmpeg
     ``drawtext`` filter, which ``mp4_grid`` materializes a TTF for via
-    :func:`splitsmith.overlay_text.overlay_font_file`. The sprites used to
+    :func:`splitsmith.overlay.text.overlay_font_file`. The sprites used to
     be the other, loading the same face through PIL; since issue #693 they
     are a browser render and take their typeface from ``overlay_html``'s
     ``@font-face`` rules.
@@ -509,7 +509,7 @@ def theme_font_face(theme: OverlayTheme) -> OverlayFace:
     declares the bundled faces unconditionally regardless of theme -- it
     chose determinism across machines over matching the ``clean`` theme's
     old system-font discovery (see
-    :func:`splitsmith.overlay_html.font_face_url`). Keeping the *old*
+    :func:`splitsmith.overlay.html.font_face_url`). Keeping the *old*
     branch here would have meant the counter and the clock drawing in two
     different typefaces inside the same cell on that theme, with the
     clock's own face varying by host: measured on the dev box, ``clean``

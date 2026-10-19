@@ -6,7 +6,7 @@ lower-third are all one operation: declare what the card says as
 with the Look's palette and the engine stylesheet to the Look's template
 for the card's slot (:func:`card_context`, the contract in
 :mod:`splitsmith.look_template`), rasterize it in headless Chromium
-through an injected :class:`~splitsmith.overlay_raster.Rasterizer`, and
+through an injected :class:`~splitsmith.overlay.raster.Rasterizer`, and
 composite the result over a backdrop. The shipped template draws the
 engine's own markup, so the default Look renders what ``overlay_html``
 renders; a user Look may draw the same data any way it likes. Nothing here
@@ -37,10 +37,10 @@ from typing import Literal, ParamSpec, TypeVar
 
 from PIL import Image
 
-from .composition import MatchTitle, TitleCard
-from .identity import ResolvedIdentity
-from .look_brand import brand_json
-from .look_template import (
+from ..composition import MatchTitle, TitleCard
+from ..identity import ResolvedIdentity
+from ..look_brand import brand_json
+from ..look_template import (
     TemplateContext,
     engine_block,
     group_json,
@@ -49,13 +49,13 @@ from .look_template import (
     template_digest,
     theme_tokens,
 )
-from .looks import CardSlot, Look, template_for
-from .overlay_html import single_css
-from .overlay_layout import Anchor, CellScale, Element, Emphasis, Flow, Group, Role
-from .overlay_raster import Rasterizer, TemplateFrames
-from .overlay_still import DEFAULT_DIM, backdrop_from_frame
-from .overlay_theme import OverlayTheme, theme_for
-from .safe_area import safe_area
+from ..looks import CardSlot, Look, template_for
+from ..safe_area import safe_area
+from .html import single_css
+from .layout import Anchor, CellScale, Element, Emphasis, Flow, Group, Role
+from .raster import Rasterizer, TemplateFrames
+from .still import DEFAULT_DIM, backdrop_from_frame
+from .theme import OverlayTheme, theme_for
 
 logger = logging.getLogger(__name__)
 
@@ -150,11 +150,11 @@ def card_groups(card: Card) -> tuple[Group, ...]:
 
     A full-frame card (a :class:`MatchTitle`, or a ``slate``
     :class:`TitleCard`) centres its text at
-    :attr:`~splitsmith.overlay_layout.Role.IDENTITY` size -- the largest
+    :attr:`~splitsmith.overlay.layout.Role.IDENTITY` size -- the largest
     the scale has, the same weight the summary gives the shooter's name
     -- with one :attr:`~Role.DETAIL` line per ``info`` entry stacked under
     it. A ``lower-third`` sits bottom-left, left-aligned, its text on an
-    accent plate (:attr:`~splitsmith.overlay_layout.Emphasis.PLATE`) at
+    accent plate (:attr:`~splitsmith.overlay.layout.Emphasis.PLATE`) at
     :attr:`~Role.HEADLINE` size so it reads over arbitrary footage without
     a halo, and the info lines plain beneath it.
 
@@ -425,7 +425,7 @@ def card_backdrop(
 ) -> Image.Image:
     """The picture under a card: ``backdrop`` (a frame on disk, the first
     visible frame of the stage the card precedes) blurred and dimmed with
-    the stage summary's own numbers (:mod:`splitsmith.overlay_still`);
+    the stage summary's own numbers (:mod:`splitsmith.overlay.still`);
     ``None``, or a frame that cannot be read, paints the Look's
     ``surface`` colour instead, so a failed frame grab costs the picture
     but never the card."""

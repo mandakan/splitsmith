@@ -19,18 +19,7 @@ import typer
 from rich.console import Console
 from rich.table import Table
 
-from . import (
-    audit,
-    beep_detect,
-    csv_gen,
-    fcpxml_gen,
-    overlay_render,
-    report,
-    shot_detect,
-    shot_refine,
-    trim,
-    video_match,
-)
+from . import audit, beep_detect, csv_gen, fcpxml_gen, report, shot_detect, shot_refine, trim, video_match
 from . import (
     automation as automation_settings,
 )
@@ -47,6 +36,7 @@ from .config import (
 )
 from .export_naming import stage_file_base
 from .match_project import MatchProject
+from .overlay import render as overlay_render
 from .runtime import runtime
 
 app = typer.Typer(
@@ -1298,7 +1288,7 @@ def overlay(
     _validate_theme(theme)
     from .config import Config
     from .looks import DEFAULT_VARIANT, OVERLAY_SLOT, load_look, variants_for
-    from .overlay_hud import HUD_POSITIONS, HudOptions
+    from .overlay.hud import HUD_POSITIONS, HudOptions
     from .ui.match_exports import render_segment_cache
 
     styles = (DEFAULT_VARIANT, *variants_for(load_look(theme), OVERLAY_SLOT))

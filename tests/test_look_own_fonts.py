@@ -14,10 +14,10 @@ import pytest
 
 from splitsmith import fonts, looks, own_fonts
 from splitsmith.compare.overlay_sprites import theme_font_face
-from splitsmith.overlay_html import single_css
-from splitsmith.overlay_layout import CellScale
-from splitsmith.overlay_text import overlay_font_file
-from splitsmith.overlay_theme import theme_for
+from splitsmith.overlay.html import single_css
+from splitsmith.overlay.layout import CellScale
+from splitsmith.overlay.text import overlay_font_file
+from splitsmith.overlay.theme import theme_for
 
 FONT_DIR = Path(str(resources.files("splitsmith.data").joinpath("fonts")))
 BEBAS = (FONT_DIR / "BebasNeue-Regular.ttf").read_bytes()
@@ -162,7 +162,7 @@ def test_an_own_face_draws_differently(tmp_path: Path, monkeypatch: pytest.Monke
     from PIL import Image
 
     from splitsmith import look_tools
-    from splitsmith.overlay_raster import ChromiumRasterizer, RasterizerUnavailableError
+    from splitsmith.overlay.raster import ChromiumRasterizer, RasterizerUnavailableError
 
     def inked_width(look: looks.Look) -> int:
         _case, ctx = look_tools.sample_contexts(look, "slate", "default", tmp_path)[0]

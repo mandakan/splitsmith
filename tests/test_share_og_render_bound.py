@@ -180,7 +180,7 @@ def test_render_slots_are_released_after_each_render(
 ) -> None:
     """More sequential renders than slots all succeed: a render gives its
     slot back, including one whose rasterizer raised."""
-    from splitsmith.overlay_raster import RasterizerUnavailableError
+    from splitsmith.overlay.raster import RasterizerUnavailableError
     from splitsmith.ui import share_og
 
     client, sender = hosted_app_with_storage

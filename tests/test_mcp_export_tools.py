@@ -431,7 +431,7 @@ def _export_match_with_overlay_on_disk(
     and run the MCP match export with the composer mocked. ``beep_time`` is
     the primary's beep in its source (under the 5 s pre-buffer, a short-head
     stage) and ``short_head`` what the record says about it (#1430)."""
-    from splitsmith.overlay_hud import HudOptions, overlay_settings
+    from splitsmith.overlay.hud import HudOptions, overlay_settings
     from splitsmith.ui import exports as exports_mod
 
     root, _src = _seed_export_project(tmp_path, beep_time=beep_time)

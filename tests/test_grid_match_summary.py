@@ -21,8 +21,8 @@ from splitsmith.compare.overlay_summary import (
 from splitsmith.composition import MatchTitle
 from splitsmith.match_project import StageScorecard
 from splitsmith.match_summary import build_match_summary, match_summary_groups
-from splitsmith.overlay_layout import Anchor, Emphasis, Role
-from splitsmith.overlay_summary_cell import summary_scale
+from splitsmith.overlay.layout import Anchor, Emphasis, Role
+from splitsmith.overlay.summary_cell import summary_scale
 from splitsmith.stage_summary_data import TileShot, TileStageData
 
 COUNT_TAGS = ("A", "C", "D", "M", "NS", "P")
@@ -256,9 +256,9 @@ def test_tiles_keep_their_splits_inside_the_cell_at_every_grid_size(
     from playwright.sync_api import sync_playwright
 
     from splitsmith.match_summary import match_summary_groups
-    from splitsmith.overlay_html import grid_html
-    from splitsmith.overlay_raster import CHROMIUM_CHANNEL, DEVICE_SCALE_FACTOR
-    from splitsmith.overlay_theme import load_theme
+    from splitsmith.overlay.html import grid_html
+    from splitsmith.overlay.raster import CHROMIUM_CHANNEL, DEVICE_SCALE_FACTOR
+    from splitsmith.overlay.theme import load_theme
     from tests.test_compare_mp4_grid_hold import _plan
 
     names = tuple(f"Shooter Number {i} Longname" for i in range(labels))
@@ -456,7 +456,7 @@ def test_the_grid_match_summary_asks_for_the_column_fit() -> None:
     columns the way the hold's do (fit.js ``fitColumns``); the title strip
     has no columns and keeps the old policy."""
     from splitsmith.compare.overlay_summary import build_match_summary_grid_still
-    from splitsmith.overlay_theme import load_theme
+    from splitsmith.overlay.theme import load_theme
     from tests.test_compare_mp4_grid_cards import _FakeRasterizer
     from tests.test_compare_mp4_grid_hold import _plan
 

@@ -26,8 +26,8 @@ from __future__ import annotations
 
 from html import escape
 
-from .overlay_html import FONT_FILES, font_face_url
-from .overlay_theme import RGB, OverlayTheme
+from .overlay.html import FONT_FILES, font_face_url
+from .overlay.theme import RGB, OverlayTheme
 from .share_card import CompareCard, MatchCard, StageCard
 
 CARD_WIDTH = 1200

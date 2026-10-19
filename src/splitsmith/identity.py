@@ -162,7 +162,7 @@ def resolve_identity(
         if look.accent_series:
             accent = look.accent_series[index % len(look.accent_series)]
         else:
-            from .overlay_theme import theme_for
+            from .overlay.theme import theme_for
 
             accent = _hex(theme_for(look).accent)
     logo_path: Path | None = None

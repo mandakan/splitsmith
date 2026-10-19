@@ -81,7 +81,7 @@ from PIL import Image, ImageFilter
 
 from splitsmith.compare import mp4_grid
 from splitsmith.compare.project_loader import CompareShooterBundle
-from splitsmith.overlay_theme import load_theme
+from splitsmith.overlay.theme import load_theme
 from tests.compare_fixture import (
     HEAD_PAD_SECONDS,
     POST_BEEP_SECONDS,
@@ -980,7 +980,7 @@ def test_sprite_states_decode_at_the_boundaries_they_were_written_at(tmp_path: P
     of arithmetic on this side fixes it; only the demuxer's own rate does.
     """
     from splitsmith.compare import overlay_live, overlay_sprites
-    from splitsmith.overlay_raster import ChromiumRasterizer
+    from splitsmith.overlay.raster import ChromiumRasterizer
 
     geometry = overlay_sprites.SpriteGeometry(canvas_width=320, canvas_height=180, rows=2, cols=2)
     theme = load_theme("splitsmith")

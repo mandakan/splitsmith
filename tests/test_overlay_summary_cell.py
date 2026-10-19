@@ -10,11 +10,11 @@ from pathlib import Path
 import pytest
 from PIL import Image
 
-from splitsmith import overlay_summary_cell as cell
 from splitsmith.match_project import StageScorecard
-from splitsmith.overlay_html import single_html
-from splitsmith.overlay_layout import Anchor, ColorToken, Element, Emphasis, Flow, Group, Role
-from splitsmith.overlay_theme import load_theme
+from splitsmith.overlay import summary_cell as cell
+from splitsmith.overlay.html import single_html
+from splitsmith.overlay.layout import Anchor, ColorToken, Element, Emphasis, Flow, Group, Role
+from splitsmith.overlay.theme import load_theme
 from splitsmith.stage_summary_data import TileShot, TileStageData, load_stage_reloads, load_stage_shots
 
 THEME = load_theme("splitsmith")
@@ -101,8 +101,8 @@ def test_summary_of_a_stage_without_shots_draws_time_and_scoring_only() -> None:
     gets a summary hold: the Scoring band with the stage time (and the
     scorecard when there is one), and no Splits band. Time-only when the
     stage was timed by hand and never scored."""
-    from splitsmith.overlay_layout import Role
-    from splitsmith.overlay_summary_cell import summary_groups, summary_scale
+    from splitsmith.overlay.layout import Role
+    from splitsmith.overlay.summary_cell import summary_groups, summary_scale
     from splitsmith.stage_summary_data import TileStageData
 
     tile = TileStageData(label="Mathias", stage_number=3, stage_time_seconds=21.37, stage_time_is_manual=True)
@@ -272,7 +272,7 @@ def test_a_stage_without_confirmed_regions_declares_exactly_what_it_did_before(
 
 
 def test_the_untouched_splits_grid_markup_is_unchanged() -> None:
-    from splitsmith.overlay_html import _group_div
+    from splitsmith.overlay.html import _group_div
 
     assert _group_div(_PINNED_UNTOUCHED[-1]) == _PINNED_SPLITS_GRID_HTML
 
@@ -517,7 +517,7 @@ def test_a_short_row_keeps_the_bands_four_columns(tmp_path: Path) -> None:
     """The reload row under Best/Avg/Worst/Draw has three figures; it is
     laid out on the same four columns so its figures sit under the ones
     above, not stretched to thirds."""
-    from splitsmith.overlay_html import _group_div
+    from splitsmith.overlay.html import _group_div
 
     groups = _groups(_events_tile(_audit(tmp_path, [_MOVE_2, _RELOAD])))
     reload_row = groups[-1]
@@ -563,7 +563,7 @@ _COLUMN_OVERFLOWS_JS = """() => {
 def _column_overflows(html: str, *, width: int, height: int, tmp_path: Path) -> list[str]:
     """Lay ``html`` out in the real browser exactly as ``ChromiumRasterizer.png``
     does (file URL, fonts ready, the fit policy run), then measure."""
-    from splitsmith.overlay_raster import ChromiumRasterizer, RasterizerUnavailableError
+    from splitsmith.overlay.raster import ChromiumRasterizer, RasterizerUnavailableError
 
     page_path = tmp_path / "summary.html"
     page_path.write_text(html, encoding="utf-8")
@@ -627,7 +627,7 @@ def test_the_stage_summary_asks_for_the_column_fit_and_the_live_race_does_not(tm
     to frame, keep the old policy."""
     from splitsmith.compare import overlay_summary as grid
     from splitsmith.compare.overlay_sprites import SpriteGeometry, TilePlacement
-    from splitsmith.overlay_html import grid_html
+    from splitsmith.overlay.html import grid_html
 
     flag = "window.__splitsmithFitColumns = true;"
     single, hold = _FakeRasterizer(), _FakeRasterizer()

@@ -15,7 +15,7 @@ from pathlib import Path
 
 import pytest
 
-from splitsmith import overlay_text
+from splitsmith.overlay import text as overlay_text
 
 
 def test_a_bundled_name_resolves_to_itself() -> None:

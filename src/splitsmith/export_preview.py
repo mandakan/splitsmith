@@ -47,14 +47,14 @@ from .looks import Look, overlay_template_for, sting_template_for
 from .match_model import is_standard_start
 from .match_project import MatchProject
 from .match_summary import MatchSummary, build_match_summary, build_match_summary_still
-from .overlay_card import build_card_still, build_lower_third, card_backdrop, card_motion, card_scale
-from .overlay_html import single_html
-from .overlay_hud import HudOptions, declared_positions, hud_options_data, hud_stage_data, resolve_position
-from .overlay_raster import Rasterizer, TemplateScriptError
-from .overlay_single import OverlayRun, run_groups
-from .overlay_still import letterbox
-from .overlay_summary_cell import build_summary_still
-from .overlay_theme import OverlayTheme, theme_for
+from .overlay.card import build_card_still, build_lower_third, card_backdrop, card_motion, card_scale
+from .overlay.html import single_html
+from .overlay.hud import HudOptions, declared_positions, hud_options_data, hud_stage_data, resolve_position
+from .overlay.raster import Rasterizer, TemplateScriptError
+from .overlay.single import OverlayRun, run_groups
+from .overlay.still import letterbox
+from .overlay.summary_cell import build_summary_still
+from .overlay.theme import OverlayTheme, theme_for
 from .shooter_book import EMPTY_BOOK, BookSnapshot
 from .stage_summary_data import TileShot, TileStageData, load_stage_events, load_stage_shots
 from .summary_template import (
@@ -767,7 +767,7 @@ def _hud_preview(
     if template is None:
         return None
     # Deferred: overlay_hud_render builds on the renderer's encoder module.
-    from .overlay_hud_render import hud_context
+    from .overlay.hud_render import hud_context
 
     stage = hud_stage_data(
         shots, beep_in_clip=HUD_PREVIEW_BEEP, events=_confirmed_regions(audit_doc, breakdown=spec.breakdown)

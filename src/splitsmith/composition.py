@@ -436,7 +436,7 @@ class TitleCard:
     The FCPXML renderer emits both styles via FCP's Basic Title
     generator, from ``text`` alone. The MP4 renderer (issue #973) draws
     the card itself through the overlay typography
-    (``splitsmith.overlay_card``) and also draws ``info`` -- optional
+    (``splitsmith.overlay.card``) and also draws ``info`` -- optional
     smaller lines under the text, such as the stage's round count.
     FCP users restyle a Basic Title in FCP, so the extra lines are not
     lowered there; the FCP7 XML renderer ignores titles altogether.

@@ -1,6 +1,6 @@
 """Moment badge + CompareCard HTML (spec 2026-08-12)."""
 
-from splitsmith.overlay_theme import load_theme
+from splitsmith.overlay.theme import load_theme
 from splitsmith.share_card import CompareCard, StageCard, StageFigures, card_hash
 from splitsmith.share_card_html import compare_card_html, stage_card_html
 

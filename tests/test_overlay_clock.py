@@ -7,7 +7,7 @@ reasoning, and a "harmless tidy" of it has to change a test deliberately.
 
 from pathlib import Path
 
-from splitsmith import overlay_clock
+from splitsmith.overlay import clock as overlay_clock
 
 
 def test_ffmpeg_color_is_hex_because_the_theme_ink_has_no_name() -> None:

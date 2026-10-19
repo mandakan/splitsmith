@@ -693,7 +693,7 @@ class _FakeRasterizer:
         import json
         import math
 
-        from splitsmith.overlay_raster import TemplateFrames
+        from splitsmith.overlay.raster import TemplateFrames
 
         self.calls.append(json.dumps(context.data, ensure_ascii=False))
         self.frame_requests.append((template, context.model_dump(), width, height, fps, max_seconds))
@@ -901,7 +901,7 @@ def test_render_mp4_skips_every_card_when_no_browser_launches(
     """The degradation path: no usable Chromium records one degradation,
     every card is skipped, the clips and stages still render and stitch,
     and the reported duration is what was actually written."""
-    from splitsmith.overlay_raster import RasterizerUnavailableError
+    from splitsmith.overlay.raster import RasterizerUnavailableError
 
     class _NoBrowser:
         def __enter__(self):
@@ -1523,7 +1523,7 @@ def test_summary_without_browser_or_frame_is_skipped_not_fatal(
 ) -> None:
     """The fake runner writes no frame and no browser launches: nothing
     to hold on, so the summary is skipped and the render still stitches."""
-    from splitsmith.overlay_raster import RasterizerUnavailableError
+    from splitsmith.overlay.raster import RasterizerUnavailableError
 
     class _NoBrowser:
         def __enter__(self):
@@ -2172,7 +2172,7 @@ def test_a_sting_the_look_lacks_is_a_fade_with_a_degradation(tmp_path: Path, mon
 def test_a_sting_without_a_browser_is_a_fade_with_a_degradation(tmp_path: Path, monkeypatch) -> None:
     """No rasterizer at all (the preflight found no Chromium): the
     boundary is still a fade, named as such, never a crash."""
-    from splitsmith.overlay_raster import RasterizerUnavailableError
+    from splitsmith.overlay.raster import RasterizerUnavailableError
 
     class _NoChromium:
         def __enter__(self):  # type: ignore[no-untyped-def]
@@ -2265,7 +2265,7 @@ def test_a_cached_boundary_with_a_sting_renders_no_frame(tmp_path: Path, monkeyp
 def test_a_card_whose_template_fails_is_named_in_the_degradations(tmp_path: Path) -> None:
     """A broken template used to drop its card with only a log line; the
     export reported success with the card missing (#1265 review)."""
-    from splitsmith.overlay_raster import TemplateScriptError
+    from splitsmith.overlay.raster import TemplateScriptError
 
     class _Broken(_FakeRasterizer):
         def render_template_frames(self, template, *, context, width, height, fps, max_seconds):

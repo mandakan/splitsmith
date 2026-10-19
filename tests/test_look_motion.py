@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 
 from splitsmith import look_motion
-from splitsmith.overlay_raster import TemplateFrames
+from splitsmith.overlay.raster import TemplateFrames
 
 FFMPEG = shutil.which("ffmpeg")
 

@@ -365,8 +365,9 @@ def test_the_overlay_cli_threads_the_choice(tmp_path: Path, monkeypatch: pytest.
 
     from typer.testing import CliRunner
 
-    from splitsmith import overlay_render, summary_card
+    from splitsmith import summary_card
     from splitsmith.cli import app
+    from splitsmith.overlay import render as overlay_render
 
     from .test_overlay_render import _write_audit
 

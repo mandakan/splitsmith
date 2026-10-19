@@ -41,26 +41,26 @@ from typing import Literal
 
 from PIL import Image, ImageFont
 
-from .config import VideoMetadata
-from .fcpxml_gen import probe_video
-from .hud_extras import HudExtras
-from .looks import DEFAULT_VARIANT, load_look, overlay_template_for
-from .overlay_clock import clock_common_options, clock_text, elapsed_text_option
-from .overlay_html import single_html
-from .overlay_hud import HudOptions
-from .overlay_layout import Anchor, CellScale, anchor_ffmpeg_expr
-from .overlay_raster import (
+from ..config import VideoMetadata
+from ..fcpxml_gen import probe_video
+from ..hud_extras import HudExtras
+from ..looks import DEFAULT_VARIANT, load_look, overlay_template_for
+from ..runtime import Runner, _probe, _probe_text, ffmpeg_capabilities, quote_filter_value
+from ..safe_area import safe_area
+from ..segment_cache import SegmentCache
+from .clock import clock_common_options, clock_text, elapsed_text_option
+from .html import single_html
+from .hud import HudOptions
+from .layout import Anchor, CellScale, anchor_ffmpeg_expr
+from .raster import (
     INSTALL_HINT,
     ChromiumRasterizer,
     Rasterizer,
     RasterizerUnavailableError,
 )
-from .overlay_single import build_overlay_runs, run_groups
-from .overlay_text import OverlayRenderError, overlay_font_file, resolve_overlay_face
-from .overlay_theme import ThemeName, load_theme
-from .runtime import Runner, _probe, _probe_text, ffmpeg_capabilities, quote_filter_value
-from .safe_area import safe_area
-from .segment_cache import SegmentCache
+from .single import build_overlay_runs, run_groups
+from .text import OverlayRenderError, overlay_font_file, resolve_overlay_face
+from .theme import ThemeName, load_theme
 
 logger = logging.getLogger(__name__)
 
@@ -317,7 +317,7 @@ def _clock_filter_graph(
 
     The gap is read off ``font_path`` rather than hard-coded as an em
     fraction, so it follows whatever face
-    :func:`~splitsmith.overlay_text.resolve_overlay_face` actually
+    :func:`~splitsmith.overlay.text.resolve_overlay_face` actually
     resolved -- including a system fallback on a host with no bundled
     font. ffmpeg cannot compute it: ``drawtext``'s own ``ascent``
     variable is the maximum ink above the baseline **of the glyphs it is
@@ -545,7 +545,7 @@ def render_overlay(
     ``theme``: palette preset. ``"splitsmith"`` (default) pulls colors
         from the web UI's @theme tokens so the overlay matches the brand.
         ``"clean"`` is the neutral white-on-amber alternative.
-    ``rasterizer``: injected :class:`~splitsmith.overlay_raster.Rasterizer`.
+    ``rasterizer``: injected :class:`~splitsmith.overlay.raster.Rasterizer`.
         Defaults to launching one headless Chromium for this call. A
         caller rendering several stages should supply one so the browser
         starts once (measured: 0.40 s of startup against 3.93 s of
@@ -606,7 +606,7 @@ def render_overlay(
     duration_seconds = probe.duration_seconds
 
     if variant is not None and variant != DEFAULT_VARIANT:
-        from .overlay_hud_render import HudFallbackError, render_hud_overlay
+        from .hud_render import HudFallbackError, render_hud_overlay
 
         template = overlay_template_for(load_look(theme), variant)
         if template is None:

@@ -7,10 +7,11 @@ from importlib import resources
 
 import pytest
 
-from splitsmith import overlay_text, overlay_theme
-from splitsmith.overlay_html import single_html
-from splitsmith.overlay_layout import Anchor, CellScale, ColorToken, Element, Flow, Group, Role
-from splitsmith.overlay_theme import load_theme
+from splitsmith.overlay import text as overlay_text
+from splitsmith.overlay import theme as overlay_theme
+from splitsmith.overlay.html import single_html
+from splitsmith.overlay.layout import Anchor, CellScale, ColorToken, Element, Flow, Group, Role
+from splitsmith.overlay.theme import load_theme
 from tests.test_overlay_html import _rule
 
 

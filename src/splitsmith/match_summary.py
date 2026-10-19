@@ -27,12 +27,12 @@ from PIL import Image
 from .coach import statistic_splits
 from .logo_spots import LogoBox, logo_box, paste_logo
 from .match_project import StageScorecard
-from .overlay_html import _face_source
-from .overlay_layout import MIN_FONT_SIZE, Anchor, CellScale, Element, Emphasis, Flow, Group, Role
-from .overlay_raster import Rasterizer
-from .overlay_still import DEFAULT_DIM, backdrop_from_frame
-from .overlay_summary_cell import _band_gap_extra, _counts_gap, _sgrid_gap, count_elements
-from .overlay_theme import RGB, OverlayTheme
+from .overlay.html import _face_source
+from .overlay.layout import MIN_FONT_SIZE, Anchor, CellScale, Element, Emphasis, Flow, Group, Role
+from .overlay.raster import Rasterizer
+from .overlay.still import DEFAULT_DIM, backdrop_from_frame
+from .overlay.summary_cell import _band_gap_extra, _counts_gap, _sgrid_gap, count_elements
+from .overlay.theme import RGB, OverlayTheme
 from .safe_area import is_upright, safe_area
 from .stage_summary_data import TileStageData
 
@@ -193,7 +193,7 @@ def match_summary_groups(
 ) -> tuple[Group, ...]:
     """One shooter's tile on the grid's match summary (spec
     2026-10-08-grid-match-summary-design), in the stage summary hold's bands
-    (:func:`splitsmith.overlay_summary_cell.summary_groups`) so the two read
+    (:func:`splitsmith.overlay.summary_cell.summary_groups`) so the two read
     as one family: the name (a ``DQ`` plate when DQ'd on any stage), then
     **Scoring** (the counts summed over the stages that reported each) and
     **Splits** (Avg, Best draw, Rounds), each with "N of M stages" when it

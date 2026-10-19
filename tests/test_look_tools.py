@@ -14,7 +14,7 @@ import pytest
 from PIL import Image
 
 from splitsmith import look_tools, looks
-from splitsmith.overlay_raster import TemplateProbe
+from splitsmith.overlay.raster import TemplateProbe
 
 
 @pytest.fixture
@@ -279,7 +279,7 @@ class _Prober:
     def render_template_timeline(
         self, template: Path, *, context, width: int, height: int, plan
     ):  # noqa: ANN001
-        from splitsmith.overlay_raster import TemplateFrames, TemplateScriptError
+        from splitsmith.overlay.raster import TemplateFrames, TemplateScriptError
 
         if template.name in self.refuses:
             raise TemplateScriptError(f"{template.name}: {self.refuses[template.name]}")
@@ -530,7 +530,7 @@ class _Raster:
         return "fake"
 
     def render_template_frames(self, template, *, context, width, height, fps, max_seconds):
-        from splitsmith.overlay_raster import TemplateFrames
+        from splitsmith.overlay.raster import TemplateFrames
 
         self.templates.append(template.name)
         return TemplateFrames(
@@ -582,12 +582,12 @@ def test_preview_refuses_a_broken_user_look_instead_of_drawing_the_shipped_one(u
 
 class _ThrowingRaster(_Raster):
     def render_template(self, template: Path, *, context, width: int, height: int) -> bytes:
-        from splitsmith.overlay_raster import TemplateScriptError
+        from splitsmith.overlay.raster import TemplateScriptError
 
         raise TemplateScriptError(f"{template.name}: boom")
 
     def render_template_frames(self, template, *, context, width, height, fps, max_seconds):
-        from splitsmith.overlay_raster import TemplateScriptError
+        from splitsmith.overlay.raster import TemplateScriptError
 
         raise TemplateScriptError(f"{template.name}: boom")
 

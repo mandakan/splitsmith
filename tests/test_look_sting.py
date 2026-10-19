@@ -10,8 +10,8 @@ from splitsmith import look_sting
 from splitsmith.identity import ResolvedIdentity
 from splitsmith.look_template import template_digest
 from splitsmith.looks import load_look
-from splitsmith.overlay_raster import TemplateFrames
-from splitsmith.overlay_theme import theme_for
+from splitsmith.overlay.raster import TemplateFrames
+from splitsmith.overlay.theme import theme_for
 
 
 class _FakeRasterizer:

@@ -100,8 +100,8 @@ def test_the_card_keeps_inside_the_frame_at_any_match_length(stages: int) -> Non
     from PIL import Image
 
     from splitsmith.match_summary import match_summary_html
-    from splitsmith.overlay_raster import ChromiumRasterizer, RasterizerUnavailableError
-    from splitsmith.overlay_theme import load_theme
+    from splitsmith.overlay.raster import ChromiumRasterizer, RasterizerUnavailableError
+    from splitsmith.overlay.theme import load_theme
 
     summary = build_match_summary(
         _long_match(stages), title="Stockholm IPSC Open 2026", label="Mathias Axell"
@@ -426,8 +426,8 @@ def test_an_upright_card_keeps_every_headline_figure_on_the_page(tmp_path, width
     title is ellipsized; a square one is sized as a 6:5 card of its width
     instead, an upright one takes its own layout (``test_upright_cards``)."""
     from splitsmith.match_summary import match_summary_html
-    from splitsmith.overlay_raster import ChromiumRasterizer, RasterizerUnavailableError
-    from splitsmith.overlay_theme import load_theme
+    from splitsmith.overlay.raster import ChromiumRasterizer, RasterizerUnavailableError
+    from splitsmith.overlay.theme import load_theme
 
     big = StageScorecard(
         hit_factor=6.12,
@@ -491,7 +491,7 @@ def test_a_landscape_card_sizes_its_type_by_its_height_as_it_always_has(width: i
     so its type is exactly what it was before upright cards were sized by
     their width."""
     from splitsmith.match_summary import match_summary_html
-    from splitsmith.overlay_theme import load_theme
+    from splitsmith.overlay.theme import load_theme
 
     summary = build_match_summary(
         [(f"Stage {n}", _tile(n, shots=_shots(1.23, 0.21), time=14.2, card=CARD)) for n in range(1, 4)],

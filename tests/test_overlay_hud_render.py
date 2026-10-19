@@ -12,12 +12,13 @@ from typing import Any
 import pytest
 from PIL import Image
 
-from splitsmith import looks, overlay_render
+from splitsmith import looks
 from splitsmith.config import VideoMetadata
 from splitsmith.hud_extras import HudExtras
 from splitsmith.match_project import StageScorecard
-from splitsmith.overlay_hud import HudOptions
-from splitsmith.overlay_raster import TemplateFrames, TemplateScriptError
+from splitsmith.overlay import render as overlay_render
+from splitsmith.overlay.hud import HudOptions
+from splitsmith.overlay.raster import TemplateFrames, TemplateScriptError
 from splitsmith.segment_cache import SegmentCache
 from tests.conftest import fake_ffmpeg_probe
 
@@ -393,7 +394,7 @@ def test_changed_template_bytes_miss_the_cache(tmp_path: Path, monkeypatch: pyte
 
 import subprocess as _subprocess  # noqa: E402
 
-from splitsmith.overlay_raster import ChromiumRasterizer  # noqa: E402
+from splitsmith.overlay.raster import ChromiumRasterizer  # noqa: E402
 from tests.synthetic_media import ffmpeg_available  # noqa: E402
 
 
@@ -542,9 +543,9 @@ def test_every_shipped_style_is_still_outside_its_live_span(variant: str, landin
     ``last shot + settle()``; a template that moves there would freeze
     mid-motion. Two instants either side must draw the same pixels."""
     from splitsmith.looks import load_look, overlay_template_for
-    from splitsmith.overlay_hud import hud_options_data, hud_stage_data
-    from splitsmith.overlay_hud_render import hud_context
-    from splitsmith.overlay_theme import theme_for
+    from splitsmith.overlay.hud import hud_options_data, hud_stage_data
+    from splitsmith.overlay.hud_render import hud_context
+    from splitsmith.overlay.theme import theme_for
     from splitsmith.stage_summary_data import TileShot
 
     look = load_look("splitsmith")
@@ -588,9 +589,9 @@ def test_every_shipped_style_is_still_outside_its_live_span(variant: str, landin
 def test_the_hud_digest_moves_when_a_confirmed_region_is_added() -> None:
     from splitsmith.config import StageEvent
     from splitsmith.look_template import template_digest
-    from splitsmith.overlay_hud import hud_options_data, hud_stage_data
-    from splitsmith.overlay_hud_render import hud_context
-    from splitsmith.overlay_theme import load_theme
+    from splitsmith.overlay.hud import hud_options_data, hud_stage_data
+    from splitsmith.overlay.hud_render import hud_context
+    from splitsmith.overlay.theme import load_theme
     from splitsmith.stage_summary_data import TileShot
 
     shots = [TileShot(time_from_beep=t, split=t, interval_class=None) for t in (0.3, 0.55, 0.8)]
@@ -652,9 +653,9 @@ def _timeline_view(
 ) -> Any:
     from splitsmith.config import StageEvent
     from splitsmith.looks import load_look, overlay_template_for
-    from splitsmith.overlay_hud import hud_options_data, hud_stage_data
-    from splitsmith.overlay_hud_render import hud_context
-    from splitsmith.overlay_theme import theme_for
+    from splitsmith.overlay.hud import hud_options_data, hud_stage_data
+    from splitsmith.overlay.hud_render import hud_context
+    from splitsmith.overlay.theme import theme_for
     from splitsmith.stage_summary_data import TileShot
 
     look = load_look("splitsmith")

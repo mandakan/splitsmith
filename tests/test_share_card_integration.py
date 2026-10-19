@@ -20,8 +20,8 @@ import numpy as np
 import pytest
 from PIL import Image
 
-from splitsmith.overlay_raster import ChromiumRasterizer, RasterizerUnavailableError
-from splitsmith.overlay_theme import load_theme
+from splitsmith.overlay.raster import ChromiumRasterizer, RasterizerUnavailableError
+from splitsmith.overlay.theme import load_theme
 from splitsmith.share_card import MatchCard, RosterEntry, StageCard, stage_figures
 from splitsmith.share_card_html import CARD_HEIGHT, CARD_WIDTH, match_card_html
 from splitsmith.share_card_render import render_card

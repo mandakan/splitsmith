@@ -33,7 +33,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from . import composition, looks, user_config
 from .logo_spots import DEFAULT_LOGO_SPOTS, LOGO_SPOTS
-from .overlay_hud import OverlayStyleFields
+from .overlay.hud import OverlayStyleFields
 
 logger = logging.getLogger(__name__)
 

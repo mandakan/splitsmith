@@ -12,7 +12,7 @@ from PIL import Image
 from splitsmith import summary_card
 from splitsmith.config import VideoMetadata
 from splitsmith.match_project import StageScorecard
-from splitsmith.overlay_raster import RasterizerUnavailableError
+from splitsmith.overlay.raster import RasterizerUnavailableError
 from splitsmith.stage_summary_data import TileShot, TileStageData
 
 
@@ -256,8 +256,8 @@ def test_overlay_verb_writes_the_card_beside_the_overlay(
     from typer.testing import CliRunner
 
     from splitsmith import cli as cli_mod
-    from splitsmith import overlay_render
     from splitsmith.cli import app
+    from splitsmith.overlay import render as overlay_render
 
     audit = tmp_path / "stage1.json"
     audit.write_text(

@@ -6,7 +6,7 @@ import pytest
 from pydantic import BaseModel, ValidationError
 
 from splitsmith.export_presets import ExportPresetBody
-from splitsmith.overlay_hud import HudOptions, OverlayStyleFields, overlay_settings
+from splitsmith.overlay.hud import HudOptions, OverlayStyleFields, overlay_settings
 from splitsmith.ui.export_preview_api import ExportPreviewRequest
 from splitsmith.ui.exports_api import ExportStageRequest, MatchExportRequest
 
@@ -108,7 +108,7 @@ def test_an_unrecorded_overlay_matches_no_request() -> None:
     reused it. It carries no audit revision and cannot vouch for the shots
     it shows, so it now matches no request: every such overlay is drawn
     once more."""
-    from splitsmith.overlay_hud import LEGACY_OVERLAY_SETTINGS
+    from splitsmith.overlay.hud import LEGACY_OVERLAY_SETTINGS
 
     assert LEGACY_OVERLAY_SETTINGS["audit_revision"] is None
     for revision in ("none", "0123456789abcdef"):

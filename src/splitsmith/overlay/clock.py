@@ -38,7 +38,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from .runtime import quote_filter_value
+from ..runtime import quote_filter_value
 
 
 def ffmpeg_color(rgb: tuple[int, int, int]) -> str:
@@ -95,7 +95,7 @@ def clock_common_options(
     ``font_path`` must be a real file that outlives the render --
     ``drawtext`` opens it itself, so a temp file from
     ``importlib.resources.as_file`` will not do. See
-    :func:`splitsmith.overlay_text.materialize_font`.
+    :func:`splitsmith.overlay.text.materialize_font`.
     """
     font = quote_filter_value(str(font_path))
     return (

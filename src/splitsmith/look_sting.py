@@ -36,10 +36,10 @@ from .look_template import (
     theme_tokens,
 )
 from .looks import Look, sting_template_for
-from .overlay_card import CardMotion, card_scale
-from .overlay_html import single_css
-from .overlay_raster import Rasterizer, TemplateFrames
-from .overlay_theme import OverlayTheme, theme_for
+from .overlay.card import CardMotion, card_scale
+from .overlay.html import single_css
+from .overlay.raster import Rasterizer, TemplateFrames
+from .overlay.theme import OverlayTheme, theme_for
 
 logger = logging.getLogger(__name__)
 

@@ -7,7 +7,7 @@ editor drops on the timeline after the stage: ``<base>_summary.png`` (the
 composed still) and ``<base>_summary.mov`` (that still held for a few
 seconds as ProRes 422 HQ, at the trim's own resolution and rate, video
 only). The still is the same one the rendered MP4 holds on
-(:func:`splitsmith.overlay_summary_cell.build_summary_still`), so the two
+(:func:`splitsmith.overlay.summary_cell.build_summary_still`), so the two
 deliverables agree.
 
 Degrades the way the rendered hold does: no usable browser keeps the
@@ -30,10 +30,10 @@ from .config import VideoMetadata
 from .fcpxml_gen import probe_video
 from .hud_extras import HudExtras
 from .looks import DEFAULT_VARIANT, LookError, load_look
-from .overlay_card import card_backdrop, card_failures, compose_card
-from .overlay_raster import ChromiumRasterizer, Rasterizer, RasterizerUnavailableError
-from .overlay_summary_cell import build_summary_still
-from .overlay_theme import ThemeName, load_theme
+from .overlay.card import card_backdrop, card_failures, compose_card
+from .overlay.raster import ChromiumRasterizer, Rasterizer, RasterizerUnavailableError
+from .overlay.summary_cell import build_summary_still
+from .overlay.theme import ThemeName, load_theme
 from .runtime import Runner, runtime
 from .stage_summary_data import TileStageData
 from .summary_template import resolve_stage_summary, summary_poster
@@ -84,7 +84,7 @@ def render_summary_card(
     fails is the engine's card plus a degradation.
 
     ``rasterizer`` left ``None`` opens one
-    :class:`~splitsmith.overlay_raster.ChromiumRasterizer` for the call; a
+    :class:`~splitsmith.overlay.raster.ChromiumRasterizer` for the call; a
     browser that cannot launch degrades to the blurred freeze without
     text, reported on the result. ``runner`` and ``probe`` are the seams
     tests inject; both default to the real ffmpeg / ffprobe.

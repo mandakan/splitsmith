@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from splitsmith.overlay_raster import ChromiumRasterizer, RasterizerUnavailableError, template_sounds
+from splitsmith.overlay.raster import ChromiumRasterizer, RasterizerUnavailableError, template_sounds
 
 from .test_overlay_raster import _context_fixture
 

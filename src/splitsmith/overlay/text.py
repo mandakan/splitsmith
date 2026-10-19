@@ -25,7 +25,7 @@ import logging
 from importlib.resources import files
 from pathlib import Path
 
-from .fonts import FONTS, is_font_path
+from ..fonts import FONTS, is_font_path
 
 logger = logging.getLogger(__name__)
 

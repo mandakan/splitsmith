@@ -500,7 +500,7 @@ def test_compare_does_not_reach_into_the_web_ui_layer() -> None:
     probe = (
         "import sys; import splitsmith.compare.overlay_data; "
         "leaked = sorted(m for m in sys.modules if m.startswith('splitsmith.ui')); "
-        "leaked += [m for m in ('splitsmith.overlay_render', 'splitsmith.overlay_html') "
+        "leaked += [m for m in ('splitsmith.overlay.render', 'splitsmith.overlay.html') "
         "if m in sys.modules]; "
         "assert not leaked, leaked"
     )

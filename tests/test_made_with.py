@@ -16,8 +16,8 @@ from splitsmith import match_model
 from splitsmith.compare.cards import CardOptions, title_cards
 from splitsmith.composition import MatchTitle
 from splitsmith.export_presets import ExportPresetBody
-from splitsmith.overlay_card import card_context
-from splitsmith.overlay_theme import load_theme
+from splitsmith.overlay.card import card_context
+from splitsmith.overlay.theme import load_theme
 from splitsmith.ui.exports_api import CompareGridRequest, MatchExportRequest
 from splitsmith.ui.match_exports import MatchExportRequestData
 
@@ -54,7 +54,7 @@ def test_the_grid_closing_card_carries_it_and_the_title_page_never() -> None:
 
 def _render(card: MatchTitle) -> Image.Image:
     from splitsmith import looks
-    from splitsmith.overlay_raster import ChromiumRasterizer, RasterizerUnavailableError
+    from splitsmith.overlay.raster import ChromiumRasterizer, RasterizerUnavailableError
 
     look = looks.load_look("splitsmith")
     ctx = card_context(card, slot="closing", width=1280, height=720, fps=30, theme=load_theme("splitsmith"))

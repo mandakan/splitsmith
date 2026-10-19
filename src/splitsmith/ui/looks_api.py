@@ -79,7 +79,7 @@ from ..looks import (
     user_looks_dir,
     variants_for,
 )
-from ..overlay_raster import ChromiumRasterizer, RasterizerUnavailableError
+from ..overlay.raster import ChromiumRasterizer, RasterizerUnavailableError
 from ..own_fonts import MAX_FONT_BYTES, OwnFont, OwnFontError, list_fonts, own_font_path, save_font
 from ..runtime import runtime
 

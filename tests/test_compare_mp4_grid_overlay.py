@@ -21,10 +21,11 @@ from urllib.request import url2pathname
 import pytest
 from PIL import Image
 
-from splitsmith import overlay_clock, overlay_html
 from splitsmith.compare import mp4_grid
 from splitsmith.compare.mp4_grid import GridCanvas, GridStagePlan, GridTile
 from splitsmith.compare.project_loader import CompareShooterBundle, CompareStageBundle
+from splitsmith.overlay import clock as overlay_clock
+from splitsmith.overlay import html as overlay_html
 from tests.conftest import fake_ffmpeg_probe
 
 CANVAS = GridCanvas(width=1920, height=1080, frame_rate_num=60000, frame_rate_den=1001)
@@ -500,7 +501,7 @@ def test_the_clock_colours_default_to_white_on_black(tmp_path):
 
 def test_the_render_gives_the_clock_the_themes_own_colours(tmp_path):
     """The clock and the sprite text beside it must not differ in colour."""
-    from splitsmith.overlay_theme import load_theme
+    from splitsmith.overlay.theme import load_theme
 
     calls, runner = _recorder()
     mp4_grid.render_grid_mp4(
@@ -560,7 +561,7 @@ def test_ffmpeg_parses_the_clock_filters(tmp_path):
     description parses and runs, which is the half of the clock no unit
     test reaches. Costs milliseconds and needs no media.
     """
-    from splitsmith.overlay_text import materialize_font
+    from splitsmith.overlay.text import materialize_font
 
     font = materialize_font("splitsmith-mono", tmp_path)
     clocks = (
@@ -1084,9 +1085,9 @@ def _sprite_face_file() -> Path:
 
 @pytest.mark.parametrize("theme_name", ["splitsmith", "clean"])
 def test_the_clock_and_the_sprite_resolve_to_the_same_face(theme_name, tmp_path):
-    from splitsmith import overlay_text
     from splitsmith.compare import overlay_sprites
-    from splitsmith.overlay_theme import load_theme
+    from splitsmith.overlay import text as overlay_text
+    from splitsmith.overlay.theme import load_theme
 
     face = overlay_sprites.theme_font_face(load_theme(theme_name))
     clock_path = overlay_text.overlay_font_file(face, tmp_path)
@@ -1110,9 +1111,9 @@ def test_a_host_with_no_system_fonts_still_gets_one_real_face(tmp_path):
     the assertion the old test was really making: the clock's file and
     the sprite's file are the same typeface, on any host.
     """
-    from splitsmith import overlay_text
     from splitsmith.compare import overlay_sprites
-    from splitsmith.overlay_theme import load_theme
+    from splitsmith.overlay import text as overlay_text
+    from splitsmith.overlay.theme import load_theme
 
     face = overlay_sprites.theme_font_face(load_theme("clean"))
     clock_path = overlay_text.overlay_font_file(face, tmp_path)
@@ -1474,7 +1475,7 @@ def test_the_clock_draws_at_the_corner_fits_size(tmp_path):
     the clock at the 137 px the cell height asks for, so both shrink to one
     size: the plan's clock reads the same fit the sprites are drawn with."""
     from splitsmith.compare.overlay_sprites import corner_fit
-    from splitsmith.overlay_layout import CellScale
+    from splitsmith.overlay.layout import CellScale
 
     shooters = _shooters(tmp_path)
     (plan,) = mp4_grid.build_stage_plans(

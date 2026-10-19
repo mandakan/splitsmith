@@ -20,7 +20,7 @@ from . import look_tools
 from .identity import ResolvedIdentity
 from .look_tools import CheckReport, LookToolError
 from .looks import LookError, list_looks, load_look, user_looks_dir, variants_for
-from .overlay_raster import INSTALL_HINT, ChromiumRasterizer, RasterizerUnavailableError
+from .overlay.raster import INSTALL_HINT, ChromiumRasterizer, RasterizerUnavailableError
 
 looks_app = typer.Typer(
     name="looks",

@@ -50,7 +50,7 @@ from ..look_brand import brand_mark_json
 from ..look_motion import MotionClipError, motion_overlay_filters, write_motion_clip
 from ..look_sting import sting_motion, sting_overlay_filters
 from ..looks import CardSlot, Look, load_look, sting_template_for
-from ..overlay_card import (
+from ..overlay.card import (
     CardMotion,
     card_backdrop,
     card_motion,
@@ -60,11 +60,11 @@ from ..overlay_card import (
     lower_third_filters,
     with_card_failures,
 )
-from ..overlay_clock import clock_common_options, clock_text, elapsed_text_option
-from ..overlay_layout import Anchor, CellScale, anchor_ffmpeg_expr
-from ..overlay_raster import ChromiumRasterizer, Rasterizer, RasterizerUnavailableError
-from ..overlay_text import FALLBACK_BUNDLED_FONT, overlay_font_file
-from ..overlay_theme import OverlayTheme, ThemeName, load_theme, theme_for
+from ..overlay.clock import clock_common_options, clock_text, elapsed_text_option
+from ..overlay.layout import Anchor, CellScale, anchor_ffmpeg_expr
+from ..overlay.raster import ChromiumRasterizer, Rasterizer, RasterizerUnavailableError
+from ..overlay.text import FALLBACK_BUNDLED_FONT, overlay_font_file
+from ..overlay.theme import OverlayTheme, ThemeName, load_theme, theme_for
 from ..runtime import FFmpegCapabilities, ffmpeg_capabilities, quote_filter_value, runtime
 from ..segment_cache import SegmentCache
 from ..youtube_sidecar import Chapter
@@ -1188,7 +1188,7 @@ class StageOverlayPlan:
     ``font_path`` must be a real file that outlives the render --
     ``drawtext`` opens it itself, so a temp file from
     ``importlib.resources.as_file`` will not do. See
-    :func:`splitsmith.overlay_text.materialize_font`.
+    :func:`splitsmith.overlay.text.materialize_font`.
 
     ``ink`` and ``stroke`` are the clock's fill and outline, defaulting to
     plain white on black for a caller that has no theme to hand.
@@ -1210,7 +1210,7 @@ def _clock_pad(cell_height: int) -> int:
     The sprite insets its shot counter by this same number -- since issue
     #693 as ``overlay_html``'s ``.anchor-top-left { top: pad; left: pad }``
     rather than as a PIL draw at ``(x0 + pad, y0 + pad)``, off the same
-    :class:`~splitsmith.overlay_layout.CellScale` field either way. The
+    :class:`~splitsmith.overlay.layout.CellScale` field either way. The
     clock sits at the opposite top corner of the same cell, so sharing
     the pad is what makes the two line up.
     """
@@ -3312,11 +3312,11 @@ def render_grid_mp4(
     decided; the same text is logged at warning level either way.
 
     ``rasterizer`` is the box-engine summary's own seam
-    (:mod:`splitsmith.overlay_raster`), mirroring the ``Runner`` pattern
+    (:mod:`splitsmith.overlay.raster`), mirroring the ``Runner`` pattern
     above rather than a new one: a caller injects a fake here for the
     same reason it injects a fake ``still_runner``. Left ``None`` (the
     default), a hold that needs one gets a real
-    :class:`~splitsmith.overlay_raster.ChromiumRasterizer`, opened once
+    :class:`~splitsmith.overlay.raster.ChromiumRasterizer`, opened once
     for the whole render -- not once per stage, since a 12-stage match
     would otherwise pay Chromium's process startup 12 times for an
     identical result -- and preflighted the same way the ffmpeg
