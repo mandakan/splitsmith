@@ -165,6 +165,32 @@ def test_the_job_renders_records_and_writes_a_sidecar(tmp_path, monkeypatch):
     assert upright["result"]["filename"] == result["filename"]
 
 
+def test_the_reel_follows_the_saved_camera_unless_one_is_chosen(tmp_path, monkeypatch):
+    from splitsmith.reel_inputs import ReelOutcome
+    from splitsmith.reel_render import ReelRenderResult
+
+    client, root = _ready_match(tmp_path)
+    calls: list = []
+
+    def make(project, root, *, output, **kw):
+        calls.append(kw.get("camera"))
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output.write_bytes(b"mp4")
+        return ReelOutcome((), ReelRenderResult(output, 31.5, ()), stages=(1, 2), camera_fallbacks=(2,))
+
+    monkeypatch.setattr("splitsmith.ui.highlights_api.make_reel", make)
+    first = _run_job(client, {"moments": ["fastest_draw"]})
+    assert calls == [None]  # nothing saved: the primary
+    assert first["result"]["camera_fallbacks"] == [2]
+    project = MatchProject.load(root / SHOOTER)
+    project.compare_camera = "head"
+    project.save(root / SHOOTER)
+    _run_job(client, {"moments": ["fastest_draw"]})
+    _run_job(client, {"moments": ["fastest_draw"], "main_camera": "default"})
+    _run_job(client, {"moments": ["fastest_draw"], "main_camera": "primary"})
+    assert calls[1:] == ["head", "head", "primary"]
+
+
 def _runs_from_route(client):
     return client.get("/api/shooters/me/exports/runs").json()["runs"]
 

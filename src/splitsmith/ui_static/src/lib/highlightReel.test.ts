@@ -56,6 +56,12 @@ describe("wording", () => {
     expect(resultLine({ filename: "a.mp4", duration_seconds: 19, left_out: [6, 7] })).toContain(
       "without stages 6, 7.",
     );
+    expect(
+      resultLine({ filename: "a.mp4", duration_seconds: 19, left_out: [], camera_fallbacks: [2] }),
+    ).toContain("Stage 2 shows the primary camera.");
+    expect(
+      resultLine({ filename: "a.mp4", duration_seconds: 19, left_out: [], camera_fallbacks: [2, 4] }),
+    ).toContain("Stages 2, 4 show the primary camera.");
   });
 });
 
@@ -118,7 +124,18 @@ describe("rendering", () => {
       force: false,
       youtube_upload: false,
       youtube_privacy: "unlisted",
+      main_camera: "default",
     });
+  });
+
+  it("sends the main camera chosen under Advanced", () => {
+    const body = reelBody(menu, new Set(["fastest_draw"]), {
+      cut: "normal",
+      format: "portrait",
+      force: false,
+      mainCamera: "head",
+    });
+    expect(body.main_camera).toBe("head");
   });
 
   it("asks for the YouTube upload only when the viewer chose a privacy", () => {

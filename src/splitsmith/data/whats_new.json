@@ -1,6 +1,12 @@
 {
   "entries": [
     {
+      "id": "reel-main-camera",
+      "date": "2026-10-19",
+      "title": "Choose the highlight reel's camera",
+      "body": "The reel now shows the shooter's saved camera, like the match export. Pick another under Advanced in Highlight reel on the Export page; the other camera plays the replays."
+    },
+    {
       "id": "broadcast-grade",
       "date": "2026-10-18",
       "title": "A colour grade for the Broadcast Look",

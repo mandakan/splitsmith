@@ -205,6 +205,7 @@ describe("Export highlight reel mode", () => {
       force: false,
       youtube_upload: false,
       youtube_privacy: "unlisted",
+      main_camera: "default",
     });
     expect(await screen.findByRole("status")).toHaveTextContent(/Wrote bromma-2026-highlights\.mp4 \(31\.5 s\)/);
     await waitFor(() => expect(vi.mocked(api.getExportRuns).mock.calls.length).toBeGreaterThan(runsBefore));

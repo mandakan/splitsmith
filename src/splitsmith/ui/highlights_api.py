@@ -140,6 +140,9 @@ class HighlightReelRequest(BaseModel):
     #: Chain the YouTube upload after the render, as the match export does.
     youtube_upload: bool = False
     youtube_privacy: Literal["unlisted", "private", "public"] = "unlisted"
+    #: The picture: "default" is the shooter's saved camera, as on the match
+    #: export; else a mount or a role, resolved per stage.
+    main_camera: str = Field(default="default", min_length=1, max_length=64)
 
 
 #: Renders that write this shooter's exports and must not run beside a reel.
@@ -270,6 +273,7 @@ def run_highlight_reel(handle: Any, slug: str, request: dict[str, Any], *, state
         config=config.highlights,
         segment_cache=match_exports.render_segment_cache(config.output),
         ffmpeg_binary=runtime().ffmpeg_binary,
+        camera=project.compare_camera if req.main_camera == "default" else req.main_camera,
     )
     if outcome.result is None:
         # The route counts a trimmed stage as ready; this job checks the file,
@@ -341,6 +345,7 @@ def run_highlight_reel(handle: Any, slug: str, request: dict[str, Any], *, state
             "duration_seconds": outcome.result.duration_seconds,
             "degradations": list(outcome.result.degradations),
             "left_out": [r.stage_number for r in outcome.blockers],
+            "camera_fallbacks": list(outcome.camera_fallbacks),
         }
     )
 

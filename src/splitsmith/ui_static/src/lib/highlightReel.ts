@@ -84,7 +84,7 @@ export type ReelAfter = "keep" | "unlisted" | "private" | "public";
 export function reelBody(
   menu: HighlightMenuItem[],
   chosen: Set<string>,
-  options: { cut: ReelCut; format: ReelFormat; force: boolean; after?: ReelAfter },
+  options: { cut: ReelCut; format: ReelFormat; force: boolean; after?: ReelAfter; mainCamera?: string },
 ): HighlightReelBody {
   const after = options.after ?? "keep";
   return {
@@ -94,6 +94,7 @@ export function reelBody(
     force: options.force,
     youtube_upload: after !== "keep",
     youtube_privacy: after === "keep" ? "unlisted" : after,
+    main_camera: options.mainCamera ?? "default",
   };
 }
 
@@ -104,12 +105,25 @@ export function runFormatLabel(format: string): string {
 }
 
 /** The finished render's line under the Render button. */
-export function resultLine(result: { filename: string; duration_seconds: number; left_out: number[] }): string {
+export function resultLine(result: {
+  filename: string;
+  duration_seconds: number;
+  left_out: number[];
+  camera_fallbacks?: number[];
+}): string {
   const without =
     result.left_out.length === 0
       ? ""
       : ` without stage${result.left_out.length === 1 ? "" : "s"} ${result.left_out.join(", ")}`;
-  return `Wrote ${result.filename} (${result.duration_seconds.toFixed(1)} s)${without}. Download or upload it from the export history.`;
+  // Stages the chosen main camera could not serve (not there, no trim, beep unconfirmed).
+  const fallbacks = result.camera_fallbacks ?? [];
+  const primary =
+    fallbacks.length === 0
+      ? ""
+      : fallbacks.length === 1
+        ? ` Stage ${fallbacks[0]} shows the primary camera.`
+        : ` Stages ${fallbacks.join(", ")} show the primary camera.`;
+  return `Wrote ${result.filename} (${result.duration_seconds.toFixed(1)} s)${without}.${primary} Download or upload it from the export history.`;
 }
 
 /** Why Render is disabled, or ``null`` when it is not. */

@@ -13,6 +13,7 @@ import { Chip } from "@/components/ui/Chip";
 import { Label } from "@/components/ui/Label";
 import { Segmented } from "@/components/ui/Segmented";
 import { type HighlightMenuItem, type HighlightReadiness, type Job, api, apiErrorText } from "@/lib/api";
+import type { CameraChoice } from "@/lib/camOptions";
 import {
   type ReelAfter,
   type ReelCut,
@@ -34,6 +35,8 @@ export function ReelPanel({
   href,
   youtubeConnected,
   onFinished,
+  cameraChoices = [],
+  savedCameraLabel = "Primary",
 }: {
   slug: string;
   href: (...segments: string[]) => string;
@@ -41,6 +44,11 @@ export function ReelPanel({
   youtubeConnected: boolean;
   /** A render finished: the page re-reads its export history. */
   onFinished: () => void;
+  /** `cameraChoices(...)` over every stage: Advanced offers the main camera
+   *  only when there is more than the primary to choose. */
+  cameraChoices?: CameraChoice[];
+  /** What "Saved default" lands on, e.g. "Head". */
+  savedCameraLabel?: string;
 }) {
   const [readiness, setReadiness] = useState<HighlightReadiness | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -49,6 +57,7 @@ export function ReelPanel({
   const [format, setFormat] = useState<ReelFormat>("portrait");
   const [force, setForce] = useState(false);
   const [after, setAfter] = useState<ReelAfter>("keep");
+  const [mainCamera, setMainCamera] = useState("default");
   const [job, setJob] = useState<Job | null>(null);
   const [error, setError] = useState<string | null>(null);
   // In flight from the click until the job is known: a ref, so a second
@@ -101,7 +110,13 @@ export function ReelPanel({
     try {
       const submitted = await api.submitHighlightReel(
         slug,
-        reelBody(readiness.menu, chosen, { cut, format, force, after: youtubeConnected ? after : "keep" }),
+        reelBody(readiness.menu, chosen, {
+          cut,
+          format,
+          force,
+          after: youtubeConnected ? after : "keep",
+          mainCamera,
+        }),
       );
       setJob(submitted);
       const final = await api.pollJob(submitted.id, setJob);
@@ -204,6 +219,27 @@ export function ReelPanel({
         ) : null}
       </div>
 
+      {cameraChoices.length > 1 ? (
+        <details className="text-sm">
+          <summary className="cursor-pointer text-muted hover:text-ink">Advanced</summary>
+          <div className="mt-2 flex flex-col gap-1.5">
+            <Segmented<string>
+              label="Main camera"
+              value={mainCamera}
+              onChange={setMainCamera}
+              options={[{ value: "default", label: "Saved default" }, ...cameraChoices]}
+            />
+            <p className="text-muted">
+              {mainCamera === "default"
+                ? `The shooter's saved camera (${savedCameraLabel}), as on the match export. `
+                : ""}
+              The other camera plays the replays. A stage without it, or whose beep is not confirmed, shows the
+              primary.
+            </p>
+          </div>
+        </details>
+      ) : null}
+
       <div className="flex flex-wrap items-center gap-3">
         <Button variant="primary" disabled={block != null || running || sending} onClick={() => void render()}>
           {running ? <Loader2 className="size-3.5 animate-spin" aria-hidden="true" /> : null}
@@ -235,6 +271,7 @@ interface ReelResult {
   duration_seconds: number;
   degradations: string[];
   left_out: number[];
+  camera_fallbacks?: number[];
 }
 
 /** "FASTEST DRAW" -> "Fastest draw": the cards shout, the menu does not. */
