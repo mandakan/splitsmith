@@ -154,6 +154,12 @@ class FileDocStore:
     def load_export_runs(self, slug: str) -> Versioned:
         return _read(self._shooter_root(slug) / LOG_FILENAME)
 
+    def save_export_runs(self, slug: str, doc: Doc, *, version: int) -> int:
+        """A plain write: the caller holds whatever lock its read-modify-write
+        needs (``update_export_runs`` is the locked form)."""
+        _write(self._shooter_root(slug) / LOG_FILENAME, doc, backup=False)
+        return 0
+
     def update_export_runs(self, slug: str, merge: Callable[[Doc | None], Doc]) -> int:
         path = self._shooter_root(slug) / LOG_FILENAME
         with self._export_run_lock:

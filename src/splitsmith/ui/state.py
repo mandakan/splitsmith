@@ -11,8 +11,6 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import os
-import tempfile
 import threading
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
@@ -38,6 +36,7 @@ from ..sync.reconcile import ReconcileStep
 from .account_backfill import local_backfill_source as _local_backfill_source
 from .auto_sync import AutoSyncService
 from .context import TenantContext, current_match_id, current_match_root, current_tenant
+from .docstore import DbDocStore, DocStore, FileDocStore
 from .jobs import JobBackend, JobBodyRegistry, JobRegistry
 
 if TYPE_CHECKING:
@@ -643,114 +642,68 @@ class AppState:
             return store, mid
         return None
 
-    def load_audit(self, slug: str, stage_number: int) -> tuple[dict | None, int]:
-        """Load a stage's audit doc + its version. ``(None, 0)`` when none
-        exists yet. Hosted: from ``state_docs``. Local: from the on-disk
-        ``audit/stage<N>.json`` (version always 0 -- no locking on files)."""
+    def docstore(self) -> DocStore:
+        """The storage port bound to the current request's match (spec
+        2026-10-19): ``DbDocStore`` when a state store is bound and the alias
+        middleware pinned a match id, else ``FileDocStore`` over the pinned
+        match root with this process's locks (the audit lock is the one the
+        sync pull holds, #1075)."""
         target = self.audit_doc_target()
         if target is not None:
             store, mid = target
-            return run_sync(store.load_audit(mid, slug, stage_number))
-        audit_file = self._audit_file(slug, stage_number)
-        if not audit_file.exists():
-            return None, 0
+            return DbDocStore(store, mid)
+        root = current_match_root.get()
+        if root is None:
+            raise _no_project_error()
+        # The pure path, not :meth:`shooter_root`: the file accessors never
+        # checked the roster (an unknown slug reads as "no document"), and
+        # the routes that must 404 resolve the project first.
+        return FileDocStore(root, audit_lock=self.audit_lock, export_run_lock=self.export_run_lock)
+
+    def load_audit(self, slug: str, stage_number: int) -> tuple[dict | None, int]:
+        """Load a stage's audit doc + its version through the storage port:
+        ``(None, 0)`` when none exists yet. Hosted: ``state_docs``. Local:
+        ``audit/stage<N>.json`` (version always 0)."""
         try:
-            return json.loads(audit_file.read_text(encoding="utf-8")), 0
+            return self.docstore().load_audit(slug, stage_number)
         except (OSError, json.JSONDecodeError) as exc:
             raise HTTPException(status_code=500, detail=f"audit read failed: {exc}") from exc
 
     def load_audit_docs(self, slug: str) -> dict[int, dict] | None:
         """Per-stage audit docs for one shooter, for hosted-aware status.
 
-        Returns ``{stage_number: doc}`` in hosted mode (one bulk
-        ``state_docs`` query), or ``None`` in local mode so the status
-        helpers fall back to their on-disk read. This is the single
-        loader the status/count endpoints hand to
-        :meth:`MatchProject.stage_statuses` /
-        :meth:`MatchProject.audited_count` -- keeping the state_docs
-        access in one place is what stops the disk-vs-state_docs
-        divergence from creeping back (the sidebar counter bug). Relies
-        on ``current_match_id`` being set by the ``/api/matches/{id}/...``
-        alias middleware, same as :meth:`load_audit`.
+        Returns ``{stage_number: doc}`` in hosted mode (one bulk query
+        through the port), or ``None`` in local mode so the status helpers
+        fall back to their on-disk read. This is the single loader the
+        status/count endpoints hand to :meth:`MatchProject.stage_statuses` /
+        :meth:`MatchProject.audited_count`; step 5 of the port migration
+        makes the local side answer too and drops the ``None``.
         """
-        mid = current_match_id.get()
-        store = self.project_state
-        if store is None or mid is None:
+        if self.audit_doc_target() is None:
             return None
-        return {stage_number: doc for _slug, stage_number, doc in run_sync(store.list_audit_docs(mid, slug))}
+        return {stage: doc for stage, (doc, _version) in self.docstore().list_audits(slug).items()}
 
     def save_audit(self, slug: str, stage_number: int, doc: dict, *, version: int) -> int:
-        """Persist a stage's audit doc; return the new version.
-
-        Hosted: ``state_docs`` under optimistic locking -- ``version==0``
-        INSERTs, ``>0`` UPDATEs at that version, a stale version raises
-        ``StateConflictError`` (-> 409). Local: temp file -> ``.bak``
-        rotate -> rename file write (returns 0).
-
-        The local temp file gets a unique ``mkstemp`` name and the rotate
-        runs under :attr:`audit_lock` (#931). A fixed ``stage<N>.json.tmp``
-        is shared by every writer to that stage, which is the idiom that
-        lost export-run records in #629; and two unlocked rotations race
-        on ``.bak`` (one unlinks it between the other's ``exists`` and
-        ``unlink``)."""
-        target = self.audit_doc_target()
-        if target is not None:
-            store, mid = target
-            return run_sync(store.save_audit(mid, slug, stage_number, doc, expected_version=version))
-        audit_file = self._audit_file(slug, stage_number)
-        audit_file.parent.mkdir(parents=True, exist_ok=True)
-        backup = audit_file.with_suffix(audit_file.suffix + ".bak")
-        with self.audit_lock:
-            fd, tmp_name = tempfile.mkstemp(
-                dir=audit_file.parent, prefix=f"{audit_file.name}.", suffix=".tmp"
-            )
-            tmp = Path(tmp_name)
-            try:
-                with os.fdopen(fd, "w", encoding="utf-8") as fh:
-                    fh.write(json.dumps(doc, indent=2) + "\n")
-                if audit_file.exists():
-                    backup.unlink(missing_ok=True)
-                    audit_file.replace(backup)
-                tmp.replace(audit_file)
-            except OSError as exc:
-                tmp.unlink(missing_ok=True)
-                raise HTTPException(status_code=500, detail=f"audit write failed: {exc}") from exc
-        return 0
+        """Persist a stage's audit doc through the storage port; return the
+        new version. Hosted: ``state_docs`` under optimistic locking
+        (``version==0`` INSERTs, ``>0`` UPDATEs at that version, a stale
+        version raises ``StateConflictError`` -> 409). Local: unique temp
+        file -> ``.bak`` rotate -> rename under :attr:`audit_lock` (#931),
+        returns 0."""
+        try:
+            return self.docstore().save_audit(slug, stage_number, doc, version=version)
+        except OSError as exc:
+            raise HTTPException(status_code=500, detail=f"audit write failed: {exc}") from exc
 
     def delete_audit(self, slug: str, stage_number: int) -> bool:
-        """Delete a stage's audit doc. Returns True when one was removed.
-
-        The hosted/local split mirrors :meth:`load_audit` and
-        :meth:`save_audit`. Used when a stage is removed from the match
-        (#521): the doc describes shots on a stage that no longer exists,
-        and leaving it behind risks a stale audit reattaching.
-
-        The local branch also removes the ``.bak`` sibling that
-        :meth:`save_audit` rotates the previous doc into -- deleting only
-        the live file would leave the previous audit recoverable on disk
-        after the user asked for the stage to be gone.
-        """
-        target = self.audit_doc_target()
-        if target is not None:
-            store, mid = target
-            return run_sync(store.delete_audit(mid, slug, stage_number)) > 0
-        audit_file = self._audit_file(slug, stage_number)
-        backup = audit_file.with_suffix(audit_file.suffix + ".bak")
-        removed = False
-        # Under the save's lock so a delete cannot land mid-rotation and
-        # leave the rotated-in doc (or its .bak) behind.
-        with self.audit_lock:
-            for victim in (audit_file, backup):
-                if victim.exists():
-                    try:
-                        victim.unlink()
-                        removed = removed or victim == audit_file
-                    except OSError as exc:
-                        raise HTTPException(
-                            status_code=500,
-                            detail=f"audit delete failed: {exc}",
-                        ) from exc
-        return removed
+        """Delete a stage's audit doc through the storage port. Returns True
+        when one was removed. Used when a stage is removed from the match
+        (#521): the doc describes shots on a stage that no longer exists.
+        Local: the file and its ``.bak`` go together, under the save's lock."""
+        try:
+            return self.docstore().delete_audit(slug, stage_number)
+        except OSError as exc:
+            raise HTTPException(status_code=500, detail=f"audit delete failed: {exc}") from exc
 
     def export_runs_doc_target(self) -> tuple[ProjectStateStore, str] | None:
         """The hosted store + match id for the export history, or ``None``
@@ -769,61 +722,22 @@ class AppState:
         return None
 
     def load_export_runs(self, slug: str) -> tuple[dict | None, int]:
-        """The shooter's export history doc + version (#629).
-
-        Hosted: ``state_docs``. Local: ``<shooter_root>/export_runs.json``
-        (version always 0 -- no locking on files; ``_record_export_run``
-        holds :attr:`export_run_lock` across the read-modify-write
-        instead). Unlike :meth:`load_audit`, an unreadable document
-        degrades to "no history" rather than a 500: this is bookkeeping,
-        and it must not be able to break a page that would otherwise
-        render.
-        """
-        target = self.export_runs_doc_target()
-        if target is not None:
-            store, mid = target
-            return run_sync(store.load_export_runs(mid, slug))
-        path = self.shooter_root(slug) / EXPORT_RUNS_FILE
-        if not path.exists():
-            return None, 0
+        """The shooter's export history doc + version (#629), through the
+        storage port. Hosted: ``state_docs``. Local:
+        ``<shooter_root>/export_runs.json``; an unreadable file degrades to
+        "no history" rather than a 500: this is bookkeeping."""
         try:
-            return json.loads(path.read_text(encoding="utf-8")), 0
+            return self.docstore().load_export_runs(slug)
         except (OSError, json.JSONDecodeError) as exc:
-            logger.warning("export run record: unreadable at %s: %s", path, exc)
+            logger.warning("export run record: unreadable for %s: %s", slug, exc)
             return None, 0
 
     def save_export_runs(self, slug: str, doc: dict, *, version: int) -> int:
-        """Persist the export history doc; return the new version.
-
-        Hosted: ``state_docs`` under optimistic locking, same contract as
-        :meth:`save_audit`. Local: write a temp file, then rename over the
-        real one (returns 0).
-
-        The temp file gets a unique ``mkstemp`` name rather than a fixed
-        ``export_runs.json.tmp``. A fixed name is shared by every writer
-        to the same shooter, so two concurrent stage exports write the one
-        temp file and the second ``replace`` raises ENOENT after the first
-        already consumed it -- a lost run for a reason that has nothing to
-        do with the document's contents. ``_record_export_run`` serialises
-        desktop writers anyway; this keeps the failure impossible rather
-        than merely unreached.
-        """
-        target = self.export_runs_doc_target()
-        if target is not None:
-            store, mid = target
-            return run_sync(store.save_export_runs(mid, slug, doc, expected_version=version))
-        path = self.shooter_root(slug) / EXPORT_RUNS_FILE
-        path.parent.mkdir(parents=True, exist_ok=True)
-        fd, tmp_name = tempfile.mkstemp(dir=path.parent, prefix=f"{path.name}.", suffix=".tmp")
-        tmp = Path(tmp_name)
-        try:
-            with os.fdopen(fd, "w", encoding="utf-8") as fh:
-                fh.write(json.dumps(doc, indent=2) + "\n")
-            tmp.replace(path)
-        except OSError:
-            tmp.unlink(missing_ok=True)
-            raise
-        return 0
+        """Persist the export history doc through the storage port; return
+        the new version (0 locally, where there is no version to lose a
+        race on; ``_record_export_run`` holds :attr:`export_run_lock` across
+        its read-modify-write)."""
+        return self.docstore().save_export_runs(slug, doc, version=version)
 
     def materialize_audit(self, slug: str, stage_number: int) -> Path:
         """Ensure the stage's audit doc is present at its on-disk path and
