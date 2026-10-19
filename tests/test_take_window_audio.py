@@ -15,7 +15,7 @@ from unittest.mock import patch
 
 import pytest
 
-from splitsmith import beep_detect
+from splitsmith.beep import detect as beep_detect
 from splitsmith.match_project import StageVideo
 from splitsmith.ui import audio as audio_helpers
 

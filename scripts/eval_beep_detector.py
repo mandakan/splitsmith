@@ -2,7 +2,7 @@
 
 This is the layer-1 baseline harness for issue #220. It reads the
 manifest produced by ``build_beep_calibration.py``, runs
-``splitsmith.beep_detect.detect_beep`` against both the trimmed clip
+``splitsmith.beep.detect.detect_beep`` against both the trimmed clip
 WAV and (when available) the wide-window full WAV, scores each call
 against the recorded ground truth, and prints:
 
@@ -28,7 +28,7 @@ import json
 from collections.abc import Iterable
 from pathlib import Path
 
-from splitsmith.beep_calibration import (
+from splitsmith.beep.calibration import (
     BeepFixtureEntry,
     EvalSummary,
     FixtureEvalResult,
@@ -36,7 +36,7 @@ from splitsmith.beep_calibration import (
     load_manifest,
     summarize,
 )
-from splitsmith.beep_detect import BeepNotFoundError, detect_beep, load_audio
+from splitsmith.beep.detect import BeepNotFoundError, detect_beep, load_audio
 from splitsmith.config import BeepDetectConfig, BeepRankerConfig
 
 REPO_ROOT = Path(__file__).resolve().parent.parent

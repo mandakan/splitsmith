@@ -46,7 +46,7 @@ import numpy as np
 from sklearn.ensemble import GradientBoostingClassifier
 from sklearn.model_selection import StratifiedKFold
 
-from splitsmith.beep_detect import load_audio
+from splitsmith.beep.detect import load_audio
 from splitsmith.config import ShotDetectConfig
 from splitsmith.ensemble.fixtures import fixture_stems
 from splitsmith.shot_detect import detect_shots

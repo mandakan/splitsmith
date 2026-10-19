@@ -20,7 +20,7 @@ import json
 import sys
 from pathlib import Path
 
-from splitsmith.beep_detect import load_audio
+from splitsmith.beep.detect import load_audio
 from splitsmith.ensemble import fixtures as fx_module
 from splitsmith.fixture_schema import review_status
 from splitsmith.lab.inventory import onset_spread_ms, review_priority, suggested_moves

@@ -35,8 +35,8 @@ import threading
 from typing import Any
 
 from .. import automation as automation_module
-from .. import beep_detect
 from .. import ensemble as ensemble_module
+from ..beep import detect as beep_detect
 from ..detection_merge import merge_detection_into
 from ..match_project import MatchProject
 from ..ui import audio as audio_helpers

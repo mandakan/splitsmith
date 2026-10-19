@@ -19,7 +19,7 @@ from typing import Any, Literal
 import numpy as np
 from pydantic import BaseModel, Field
 
-from ..beep_detect import load_audio
+from ..beep.detect import load_audio
 from ..ensemble.api import (
     EnsembleConfig,
     EnsembleRuntime,

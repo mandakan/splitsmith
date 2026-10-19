@@ -22,7 +22,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from splitsmith.beep_detect import load_audio
+from splitsmith.beep.detect import load_audio
 from splitsmith.ensemble import (
     EnsembleConfig,
     detect_shots_ensemble,

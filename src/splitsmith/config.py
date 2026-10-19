@@ -143,7 +143,7 @@ class StageAnalysis(BaseModel):
 class BeepFeatures(BaseModel):
     """Ranker inputs for one beep candidate (#949, spec 2026-10-06).
 
-    Computed by :func:`splitsmith.beep_features.candidate_features`, the one
+    Computed by :func:`splitsmith.beep.features.candidate_features`, the one
     implementation both ``detect_beep`` and the ranker's trainer use.
     Timer-agnostic (no tone frequency, no position in the window) and
     unchanged by recording gain.

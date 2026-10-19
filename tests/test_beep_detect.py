@@ -6,8 +6,8 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from splitsmith.beep_calibration import DEFAULT_TOLERANCE_MS
-from splitsmith.beep_detect import BeepNotFoundError, detect_beep, load_audio
+from splitsmith.beep.calibration import DEFAULT_TOLERANCE_MS
+from splitsmith.beep.detect import BeepNotFoundError, detect_beep, load_audio
 from splitsmith.config import BeepDetectConfig, BeepRankerConfig
 
 
@@ -226,7 +226,7 @@ def test_candidate_confidence_high_for_perfect_winner() -> None:
     detector tweak skewed the formula and the HITL gate (#219) needs
     re-tuning.
     """
-    from splitsmith.beep_detect import candidate_confidence
+    from splitsmith.beep.detect import candidate_confidence
 
     conf = candidate_confidence(
         silence_score=20.0,
@@ -240,7 +240,7 @@ def test_candidate_confidence_high_for_perfect_winner() -> None:
 
 def test_candidate_confidence_drops_when_runner_up_ties() -> None:
     """A near-tie with the runner-up demotes the winner into HITL territory."""
-    from splitsmith.beep_detect import candidate_confidence
+    from splitsmith.beep.detect import candidate_confidence
 
     conf = candidate_confidence(
         silence_score=20.0,
@@ -256,7 +256,7 @@ def test_candidate_confidence_drops_when_runner_up_ties() -> None:
 
 def test_candidate_confidence_low_for_short_broadband_transient() -> None:
     """Gunshot-shaped runs should land below the HITL threshold."""
-    from splitsmith.beep_detect import candidate_confidence
+    from splitsmith.beep.detect import candidate_confidence
 
     conf = candidate_confidence(
         silence_score=2.0,
@@ -269,7 +269,7 @@ def test_candidate_confidence_low_for_short_broadband_transient() -> None:
 
 
 def test_candidate_confidence_clamps_to_unit_interval() -> None:
-    from splitsmith.beep_detect import candidate_confidence
+    from splitsmith.beep.detect import candidate_confidence
 
     # Absurdly high silence + perfect tonal + ideal duration shouldn't
     # exceed 1.0; negative inputs shouldn't go below 0.0.

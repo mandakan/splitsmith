@@ -1,6 +1,6 @@
 from datetime import UTC, datetime, timedelta
 
-from splitsmith.beep_windows import (
+from splitsmith.beep.windows import (
     StagePrior,
     derive_scoreboard_windows,
     find_beep_conflicts,

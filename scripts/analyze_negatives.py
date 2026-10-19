@@ -25,7 +25,7 @@ from pathlib import Path
 
 import numpy as np
 
-from splitsmith.beep_detect import load_audio
+from splitsmith.beep.detect import load_audio
 from splitsmith.config import ShotDetectConfig
 from splitsmith.ensemble.features import _HAND_FEATURE_NAMES, compute_hand_features
 from splitsmith.ensemble.fixtures import fixture_stems

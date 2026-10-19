@@ -7,7 +7,7 @@ import numpy as np
 import pytest
 from scipy.signal import butter, sosfiltfilt
 
-from splitsmith.beep_detect import load_audio
+from splitsmith.beep.detect import load_audio
 from splitsmith.config import ShotDetectConfig
 from splitsmith.ensemble import features as feat
 from splitsmith.ensemble.tta import compute_tta_agreement

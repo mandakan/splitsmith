@@ -65,9 +65,9 @@ import soundfile as sf
 from scipy.fft import next_fast_len
 from scipy.signal import butter, hilbert, sosfiltfilt
 
-from . import beep_tone
-from .beep_features import candidate_features, feature_vector
-from .config import BeepCandidate, BeepDetectConfig, BeepDetection, BeepFeatures, BeepRankerConfig
+from ..config import BeepCandidate, BeepDetectConfig, BeepDetection, BeepFeatures, BeepRankerConfig
+from . import tone as beep_tone
+from .features import candidate_features, feature_vector
 
 # Rise-foot leading-edge parameters. Same definition as shot_detect (the
 # burst's own peak is the reference, so detection is insensitive to gain /

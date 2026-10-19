@@ -20,8 +20,8 @@ from typing import Any
 import typer
 import yaml
 
-from . import beep_detect
 from . import lab as lab_module
+from .beep import detect as beep_detect
 from .cross_align import CrossAlignError, align_secondary_to_primary
 from .ensemble.api import detect_shots_ensemble, load_ensemble_runtime
 from .fixture_schema import (

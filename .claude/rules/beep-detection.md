@@ -1,6 +1,6 @@
 ---
 paths:
-  - "src/splitsmith/beep_*.py"
+  - "src/splitsmith/beep/**"
   - "src/splitsmith/cross_align.py"
   - "src/splitsmith/lab/model_map.py"
   - "tests/fixtures/*.json"

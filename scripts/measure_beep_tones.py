@@ -15,7 +15,8 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-from splitsmith import beep_detect, beep_tone
+from splitsmith.beep import detect as beep_detect
+from splitsmith.beep import tone as beep_tone
 from splitsmith.match_project import MatchProject
 from splitsmith.ui import audio as audio_helpers
 

@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from splitsmith.beep_calibration import (
+from splitsmith.beep.calibration import (
     DEFAULT_TOLERANCE_MS,
     BeepCalibrationManifest,
     BeepFixtureEntry,

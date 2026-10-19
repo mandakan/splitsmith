@@ -43,7 +43,7 @@ from pathlib import Path
 import numpy as np
 from scipy.signal import fftconvolve
 
-from splitsmith.beep_detect import load_audio
+from splitsmith.beep.detect import load_audio
 from splitsmith.config import ShotDetectConfig
 from splitsmith.shot_detect import _POST_BEEP_SKIP_S, detect_shots
 

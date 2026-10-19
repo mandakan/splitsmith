@@ -11,7 +11,7 @@ import json
 import sys
 from pathlib import Path
 
-from splitsmith.beep_detect import load_audio
+from splitsmith.beep.detect import load_audio
 from splitsmith.ensemble.api import detect_shots_ensemble, load_ensemble_runtime
 from splitsmith.ensemble.calibration import camera_class_from_mount
 

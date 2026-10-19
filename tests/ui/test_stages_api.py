@@ -769,7 +769,8 @@ def test_detect_beep_auto_trims(tmp_path: Path, monkeypatch) -> None:
     resolved.parent.mkdir(parents=True, exist_ok=True)
     resolved.write_bytes(b"FAKE_SOURCE_MP4")
 
-    from splitsmith import beep_detect, trim
+    from splitsmith import trim
+    from splitsmith.beep import detect as beep_detect
     from splitsmith.ui import audio as audio_helpers
 
     class FakeBeep:
@@ -821,7 +822,8 @@ def test_detect_beep_high_confidence_auto_trusts_into_beep_reviewed(tmp_path: Pa
     assert primary is not None
     project.resolve_video_path(_shooter_root, primary.path).resolve().write_bytes(b"X")
 
-    from splitsmith import beep_detect, trim
+    from splitsmith import trim
+    from splitsmith.beep import detect as beep_detect
     from splitsmith.ui import audio as audio_helpers
 
     class FakeBeep:
@@ -865,7 +867,8 @@ def test_detect_beep_low_confidence_leaves_beep_for_hitl(tmp_path: Path, monkeyp
     assert primary is not None
     project.resolve_video_path(_shooter_root, primary.path).resolve().write_bytes(b"X")
 
-    from splitsmith import beep_detect, trim
+    from splitsmith import trim
+    from splitsmith.beep import detect as beep_detect
     from splitsmith.ui import audio as audio_helpers
 
     class FakeBeep:
@@ -913,7 +916,8 @@ def test_detect_beep_skips_trim_when_stage_time_zero(tmp_path: Path, monkeypatch
     assert primary is not None
     project.resolve_video_path(_shooter_root, primary.path).resolve().write_bytes(b"X")
 
-    from splitsmith import beep_detect, trim
+    from splitsmith import trim
+    from splitsmith.beep import detect as beep_detect
     from splitsmith.ui import audio as audio_helpers
 
     class FakeBeep:
@@ -2826,7 +2830,8 @@ def test_jobs_endpoints_list_and_get(tmp_path: Path, monkeypatch) -> None:
     assert primary is not None
     project.resolve_video_path(_shooter_root, primary.path).resolve().write_bytes(b"S")
 
-    from splitsmith import beep_detect, trim
+    from splitsmith import trim
+    from splitsmith.beep import detect as beep_detect
     from splitsmith.ui import audio as audio_helpers
 
     class FakeBeep:
@@ -2922,7 +2927,7 @@ def test_acknowledge_endpoint_noop_for_succeeded_job(tmp_path: Path, monkeypatch
     assert primary is not None
     project.resolve_video_path(_shooter_root, primary.path).resolve().write_bytes(b"S")
 
-    from splitsmith import beep_detect
+    from splitsmith.beep import detect as beep_detect
     from splitsmith.ui import audio as audio_helpers
 
     class FakeBeep:
@@ -3306,7 +3311,7 @@ def test_secondary_beep_not_found_soft_fails(tmp_path: Path, monkeypatch) -> Non
     one of those is the bad UX we're avoiding here.
     """
     client, _ = _seed_project_with_secondary(tmp_path)
-    from splitsmith import beep_detect as bd
+    from splitsmith.beep import detect as bd
     from splitsmith.ui import audio as audio_helpers
 
     def boom(*a, **kw):  # type: ignore[no-untyped-def]
@@ -3334,7 +3339,7 @@ def test_primary_beep_not_found_still_fails_job(tmp_path: Path, monkeypatch) -> 
     """Primary failure stays loud: the whole pipeline hangs off the primary's
     beep_time, so silently completing would mask a real problem."""
     client, _ = _seed_project_with_primary(tmp_path)
-    from splitsmith import beep_detect as bd
+    from splitsmith.beep import detect as bd
     from splitsmith.ui import audio as audio_helpers
 
     def boom(*a, **kw):  # type: ignore[no-untyped-def]
@@ -3357,9 +3362,9 @@ def test_secondary_falls_back_to_cross_align(tmp_path: Path, monkeypatch) -> Non
     cross-correlation result. This is the path that recovers iPhone /
     tripod-cam imports where the buzzer wasn't picked up cleanly."""
     client, _ = _seed_project_with_secondary(tmp_path)
-    from splitsmith import beep_cross as beep_cross_mod
-    from splitsmith import beep_detect as bd
     from splitsmith import cross_align as ca
+    from splitsmith.beep import cross as beep_cross_mod
+    from splitsmith.beep import detect as bd
     from splitsmith.ui import audio as audio_helpers
 
     # Prime the primary with a beep so the alignment branch has something
@@ -3420,9 +3425,9 @@ def test_secondary_low_confidence_alignment_stays_soft_failed(tmp_path: Path, mo
     diagnostic so the SPA can render "tried, sub-floor" distinctly from
     "never tried"."""
     client, _ = _seed_project_with_secondary(tmp_path)
-    from splitsmith import beep_cross as beep_cross_mod
-    from splitsmith import beep_detect as bd
     from splitsmith import cross_align as ca
+    from splitsmith.beep import cross as beep_cross_mod
+    from splitsmith.beep import detect as bd
     from splitsmith.ui import audio as audio_helpers
 
     _stub_detect(monkeypatch, beep_time=4.0)
@@ -3475,9 +3480,9 @@ def test_secondary_in_stream_success_runs_cross_align_sanity_check(tmp_path: Pat
     confidence + delta are surfaced as diagnostics so the SPA can tell
     "we double-checked" from "we never tried"."""
     client, _ = _seed_project_with_secondary(tmp_path)
-    from splitsmith import beep_cross as beep_cross_mod
-    from splitsmith import beep_detect as bd
     from splitsmith import cross_align as ca
+    from splitsmith.beep import cross as beep_cross_mod
+    from splitsmith.beep import detect as bd
 
     _stub_detect(monkeypatch, beep_time=4.0)
     primary_id = _video_id_for(client, 1, "primary")
@@ -3529,9 +3534,9 @@ def test_secondary_in_stream_disagreement_flagged_not_overridden(tmp_path: Path,
     cross-align doesn't, so we don't auto-override. The delta is
     surfaced so the SPA can show the user a "use cross-align?" prompt."""
     client, _ = _seed_project_with_secondary(tmp_path)
-    from splitsmith import beep_cross as beep_cross_mod
-    from splitsmith import beep_detect as bd
     from splitsmith import cross_align as ca
+    from splitsmith.beep import cross as beep_cross_mod
+    from splitsmith.beep import detect as bd
 
     _stub_detect(monkeypatch, beep_time=4.0)
     primary_id = _video_id_for(client, 1, "primary")
@@ -3583,9 +3588,9 @@ def test_a_confident_secondary_beep_that_disagrees_with_the_primary_is_not_auto_
     for review when a confident placement from the primary disagrees by more
     than 60 ms, and auto-trusted when they agree."""
     client, _ = _seed_project_with_secondary(tmp_path)
-    from splitsmith import beep_cross as beep_cross_mod
-    from splitsmith import beep_detect as bd
     from splitsmith import cross_align as ca
+    from splitsmith.beep import cross as beep_cross_mod
+    from splitsmith.beep import detect as bd
 
     _stub_detect(monkeypatch, beep_time=4.0)
     primary_id = _video_id_for(client, 1, "primary")
@@ -3665,7 +3670,7 @@ def test_secondary_soft_fail_clears_on_manual_override(tmp_path: Path, monkeypat
     """Manual beep override clears ``beep_auto_detect_failed`` so the
     "align manually" prompt disappears once the user does so."""
     client, _ = _seed_project_with_secondary(tmp_path)
-    from splitsmith import beep_detect as bd
+    from splitsmith.beep import detect as bd
     from splitsmith.ui import audio as audio_helpers
 
     def boom(*a, **kw):  # type: ignore[no-untyped-def]

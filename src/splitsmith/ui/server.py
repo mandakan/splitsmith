@@ -126,10 +126,8 @@ from starlette.concurrency import run_in_threadpool
 from .. import __version__ as splitsmith_version
 from .. import account_profile as account_profile_module
 from .. import automation as automation_settings
+from .. import coach as coach_module
 from .. import (
-    beep_cross,
-    beep_detect,
-    beep_windows,
     cross_align,
     derived,
     export_runs,
@@ -139,8 +137,6 @@ from .. import (
     video_probe,
     youtube_sidecar,
 )
-from .. import beep_tone as beep_tone_module
-from .. import coach as coach_module
 from .. import ensemble as ensemble_module
 from .. import events as events_module
 from .. import looks as looks_module
@@ -156,6 +152,10 @@ from ..async_bridge import DbRunner, get_runner, install_runner, run_sync
 from ..audit_data import StageExportError, audit_shots_to_engine_shots
 from ..audit_revision import REVISION_FIELD, AuditRevisionConflictError, audit_revision
 from ..auth import CompositeAuth, User
+from ..beep import cross as beep_cross
+from ..beep import detect as beep_detect
+from ..beep import tone as beep_tone_module
+from ..beep import windows as beep_windows
 from ..comment_identity import (
     MAX_AUTHOR_KEY_LEN,
     MIN_AUTHOR_KEY_LEN,

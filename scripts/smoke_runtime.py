@@ -38,7 +38,7 @@ from pathlib import Path
 
 import numpy as np
 
-from splitsmith.beep_detect import load_audio
+from splitsmith.beep.detect import load_audio
 from splitsmith.ensemble import (
     EnsembleConfig,
     detect_shots_ensemble,

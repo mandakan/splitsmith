@@ -221,7 +221,7 @@ def _run_body(
     raise_not_found: bool = False,
 ) -> list[tuple[float, float] | None]:
     """Run the body synchronously, capturing window kwargs passed to detect_video_beep."""
-    from splitsmith import beep_detect as _bd
+    from splitsmith.beep import detect as _bd
 
     captured_windows: list[tuple[float, float] | None] = []
 

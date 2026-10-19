@@ -21,8 +21,8 @@ from pathlib import Path
 
 import numpy as np
 
-from splitsmith.beep_cross import place_beep
-from splitsmith.beep_detect import load_audio
+from splitsmith.beep.cross import place_beep
+from splitsmith.beep.detect import load_audio
 from splitsmith.cross_align import CrossAlignError, align_secondary_to_primary
 from splitsmith.fixture_schema import REVIEWED, review_status
 

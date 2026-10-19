@@ -19,13 +19,14 @@ import typer
 from rich.console import Console
 from rich.table import Table
 
-from . import audit, beep_detect, csv_gen, fcpxml_gen, report, shot_detect, shot_refine, trim, video_match
+from . import audit, csv_gen, fcpxml_gen, report, shot_detect, shot_refine, trim, video_match
 from . import (
     automation as automation_settings,
 )
 from . import (
     cleanup as cleanup_mod,
 )
+from .beep import detect as beep_detect
 from .config import (
     CompetitorStages,
     Config,

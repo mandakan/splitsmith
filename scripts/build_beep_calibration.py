@@ -29,7 +29,7 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-from splitsmith.beep_calibration import (
+from splitsmith.beep.calibration import (
     DEFAULT_TOLERANCE_MS,
     BeepCalibrationManifest,
     BeepFixtureEntry,

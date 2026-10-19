@@ -21,8 +21,8 @@ from pathlib import Path
 
 import pytest
 
-from splitsmith.beep_calibration import load_manifest
-from splitsmith.beep_detect import detect_beep, load_audio
+from splitsmith.beep.calibration import load_manifest
+from splitsmith.beep.detect import detect_beep, load_audio
 from splitsmith.config import BeepDetectConfig, BeepRankerConfig
 
 FIXTURES_DIR = Path(__file__).resolve().parent / "fixtures"

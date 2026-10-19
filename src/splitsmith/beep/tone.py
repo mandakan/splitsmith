@@ -14,8 +14,8 @@ import numpy as np
 from pydantic import BaseModel
 from scipy.signal import butter, sosfiltfilt, stft
 
-from . import rise_foot
-from .config import BeepDetectConfig, BeepToneConfig
+from .. import rise_foot
+from ..config import BeepDetectConfig, BeepToneConfig
 
 _CFG = BeepToneConfig()
 _COLUMN_S = 0.005
@@ -63,8 +63,8 @@ def beep_tone_config() -> BeepToneConfig:
     import os
     from pathlib import Path
 
-    from .config import Config
-    from .runtime import ENV_CONFIG_FILE
+    from ..config import Config
+    from ..runtime import ENV_CONFIG_FILE
 
     raw = os.environ.get(ENV_CONFIG_FILE, "").strip()
     return Config.load(Path(raw).expanduser()).beep_tone if raw else BeepToneConfig()
