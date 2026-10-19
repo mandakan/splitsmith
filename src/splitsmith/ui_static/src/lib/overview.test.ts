@@ -17,6 +17,7 @@ function cell(over: Partial<TriageCell>): TriageCell {
     stage_name: "Stage",
     status: "todo",
     beep_confidence: null,
+    beep_tone_offset_ms: null,
     anomalies: [],
     needs_attention: null,
     video_count: 0,
@@ -31,7 +32,7 @@ function cell(over: Partial<TriageCell>): TriageCell {
 }
 
 function shooter(slug: string, name: string): ShooterListEntry {
-  return {
+  return { identity: { accent: null, club: null, logo: null },
     slug,
     name,
     selected_shooter_id: null,
@@ -47,7 +48,8 @@ function shooter(slug: string, name: string): ShooterListEntry {
 
 // Four stages off the Stockholm match: no footage, audited, detected with
 // flags, and a beep still to confirm.
-const STOCKHOLM: TriageResponse = {
+// Without the tone threshold, so the "older server" case below can spread it as is.
+const STOCKHOLM_BASE: Omit<TriageResponse, "beep_tone_flag_ms"> = {
   beep_low_confidence_threshold: 0.5,
   flagged_count: 0,
   cells: [
@@ -60,6 +62,7 @@ const STOCKHOLM: TriageResponse = {
       beep_time: 5.32,
       beep_reviewed: true,
       beep_confidence: 0.91,
+      beep_tone_offset_ms: null,
       shot_count: 30,
       draw: 1.97,
       avg_split: 0.386,
@@ -73,6 +76,7 @@ const STOCKHOLM: TriageResponse = {
       beep_time: 6.01,
       beep_reviewed: true,
       beep_confidence: 0.88,
+      beep_tone_offset_ms: null,
       shot_count: 33,
       anomalies: [{}, {}, {}, {}] as never,
       draw: 1.93,
@@ -87,10 +91,12 @@ const STOCKHOLM: TriageResponse = {
       beep_time: 4.9,
       beep_reviewed: false,
       beep_confidence: 0.42,
+      beep_tone_offset_ms: null,
       time_seconds: 24.0,
     }),
   ],
 };
+const STOCKHOLM: TriageResponse = { ...STOCKHOLM_BASE, beep_tone_flag_ms: 20 };
 
 const ONE = [shooter("s1", "Mathias Axell")];
 
@@ -206,10 +212,10 @@ describe("the tone check (spec 2026-10-17)", () => {
   const checkBeep = (offset: number | null, flag: number | null = 20) =>
     buildOverviewRows({
       triage: {
-        ...STOCKHOLM,
+        ...STOCKHOLM_BASE,
         ...(flag === null ? {} : { beep_tone_flag_ms: flag }),
         cells: [cell({ video_count: 1, beep_time: 5, beep_reviewed: true, beep_tone_offset_ms: offset })],
-      },
+      } as TriageResponse,
       shooters: [shooter("s1", "Mathias Axell")],
       leadSlug: null,
       jobs: [],

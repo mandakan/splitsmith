@@ -167,7 +167,7 @@ describe("decisions", () => {
     ]);
     // The earlier anchor clip keeps its answer as its own choice.
     expect(d.overrides).toEqual([
-      { clip_id: "head/VID_2.mp4", shooter: "mathias", stage: 2 },
+      { clip_id: "head/VID_2.mp4", shooter: "mathias", stage: 2, skip: false },
     ]);
     expect(d.checked["head/VID_1.mp4"]).toBe(true);
   });
@@ -196,7 +196,7 @@ describe("decisions", () => {
     const d = assignClip(view(), "from-martin/IMG_1.MOV", "mathias", 2);
 
     expect(d.overrides).toEqual([
-      { clip_id: "from-martin/IMG_1.MOV", shooter: "mathias", stage: 2 },
+      { clip_id: "from-martin/IMG_1.MOV", shooter: "mathias", stage: 2, skip: false },
     ]);
     expect(d.anchors).toEqual([]);
     expect(d.checked["from-martin/IMG_1.MOV"]).toBe(true);
@@ -205,7 +205,7 @@ describe("decisions", () => {
   it("skip replaces an earlier choice and unchecks; reset forgets both", () => {
     const v = view();
     v.overrides = [
-      { clip_id: "from-martin/IMG_1.MOV", shooter: "mathias", stage: 2 },
+      { skip: false, clip_id: "from-martin/IMG_1.MOV", shooter: "mathias", stage: 2 },
     ];
     v.user_checked = { "from-martin/IMG_1.MOV": true };
 

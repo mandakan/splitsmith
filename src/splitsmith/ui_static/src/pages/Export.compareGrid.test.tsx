@@ -41,7 +41,7 @@ vi.mock("@/lib/api", async (importOriginal) => {
 });
 
 function makeShooter(slug: string, name: string): ShooterListEntry {
-  return {
+  return { identity: { accent: null, club: null, logo: null },
     slug,
     name,
     selected_shooter_id: null,

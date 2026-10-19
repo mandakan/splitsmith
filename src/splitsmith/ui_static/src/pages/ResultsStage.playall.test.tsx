@@ -87,7 +87,7 @@ function makeCoach(cameras = 1): CoachStageResponse {
 }
 
 function makeShooter(slug: string, statuses: [number, StageStatus][]): ShooterListEntry {
-  return {
+  return { identity: { accent: null, club: null, logo: null },
     slug,
     name: slug,
     selected_shooter_id: null,

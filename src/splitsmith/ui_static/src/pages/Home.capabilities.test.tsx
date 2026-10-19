@@ -88,7 +88,7 @@ function projectFixture(): MatchProject {
 }
 
 function shooterFixture(): ShooterListEntry {
-  return {
+  return { identity: { accent: null, club: null, logo: null },
     slug: "mathias",
     name: "Mathias",
     selected_shooter_id: null,
@@ -142,8 +142,9 @@ describe("Home capability gating", () => {
     vi.mocked(api.getTriage).mockResolvedValue({
       beep_low_confidence_threshold: 0.5,
       flagged_count: 0,
+      beep_tone_flag_ms: 20,
       cells: [
-        {
+        { beep_tone_offset_ms: null,
           slug: "mathias",
           shooter_name: "Mathias",
           stage_number: 1,

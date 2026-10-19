@@ -100,7 +100,7 @@ function Link({ share, onSaved }: { share: ShareInfo; onSaved: (s: ShareInfo) =>
   return <LinkCameras share={share} data={useShareCameraData()} onSaved={onSaved} />;
 }
 
-const SHARE: ShareInfo = { id: "s1", url: "https://x/share/t", created_at: "2026-10-02T10:00:00Z", revoked_at: null };
+const SHARE: ShareInfo = { cameras: null, scope: "read", id: "s1", url: "https://x/share/t", created_at: "2026-10-02T10:00:00Z", revoked_at: null };
 
 describe("LinkCameras", () => {
   it("says what a link without its own cameras opens on: the defaults", async () => {

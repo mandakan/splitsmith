@@ -65,7 +65,7 @@ function makeShooter(
   name: string,
   statuses: [number, StageStatus][],
 ): ShooterListEntry {
-  return {
+  return { identity: { accent: null, club: null, logo: null },
     slug,
     name,
     selected_shooter_id: null,

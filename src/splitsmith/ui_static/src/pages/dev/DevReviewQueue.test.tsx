@@ -32,7 +32,7 @@ afterEach(() => {
 });
 
 function item(slug: string): DevReviewQueueItem {
-  return {
+  return { video_path: null, walk_decisions: 0,
     slug,
     audit_path: `/fixtures/${slug}.json`,
     status: "pending",

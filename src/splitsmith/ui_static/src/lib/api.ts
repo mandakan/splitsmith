@@ -1,5 +1,4 @@
 import type { Feature } from "@/lib/access";
-import type { Anomaly } from "@/lib/anomalies";
 import type { LogoSpot } from "@/lib/logoPlan";
 import type { components } from "./api/types.gen";
 import { stagesApi } from "./api/stages";
@@ -694,7 +693,7 @@ export interface SortOverride {
   clip_id: string;
   shooter?: string | null;
   stage?: number | null;
-  skip?: boolean;
+  skip: boolean;
 }
 
 export interface SortDecisions {
@@ -703,21 +702,7 @@ export interface SortDecisions {
   checked: Record<string, boolean>;
 }
 
-export interface SortView {
-  scan_id: string;
-  status: "scanning" | "ready" | "failed" | "imported" | "discarded";
-  error: string | null;
-  source_dir: string;
-  skipped_files: number;
-  shooters: { key: string; name: string; stages: number[] }[];
-  cameras: SortCamera[];
-  clips: SortClipView[];
-  /** Scrub strips still being built; poll while above 0. */
-  strips_pending: number;
-  anchors: SortAnchor[];
-  overrides: SortOverride[];
-  user_checked: Record<string, boolean>;
-}
+export type SortView = Schema["SortView"];
 
 /** An unfinished sort, offered on Footage to continue. */
 export type SortSummary = Schema["SortSummary"];
@@ -753,10 +738,7 @@ export interface RelinkEntry {
   found: boolean;
 }
 
-export interface RelinkScanResponse {
-  search_root: string;
-  entries: RelinkEntry[];
-}
+export type RelinkScanResponse = Schema["RelinkScanResponse"];
 
 export type RelinkAppliedEntry = Schema["RelinkAppliedEntry"];
 
@@ -1166,28 +1148,13 @@ export interface CheckFinding {
 }
 
 /** One What's new entry (``data/whats_new.json``). */
-export interface WhatsNewEntry {
-  id: string;
-  /** ``YYYY-MM-DD``. */
-  date: string;
-  title: string;
-  body: string;
-  /** The feature's "New" chip key, or null. */
-  chip: string | null;
-  /** A video about the change (an https YouTube link the server checked),
-   *  linked under the body. Null or absent on most entries. */
-  video?: WhatsNewVideo | null;
-}
+export type WhatsNewEntry = Schema["WhatsNewEntry"];
 
 /** A What's new entry's video link. */
 export type WhatsNewVideo = Schema["WhatsNewVideo"];
 
 /** ``GET /api/whats-new``: the entries and what this user has seen. */
-export interface WhatsNewPayload {
-  entries: WhatsNewEntry[];
-  /** Entry ids and ``chip:<key>`` dismissals. */
-  seen: string[];
-}
+export type WhatsNewPayload = Schema["WhatsNewPayload"];
 
 /** One ffmpeg xfade family as the gallery shows it (#1259): a tile, its
  *  directions (the first is what picking the tile selects) and a looping
@@ -1964,57 +1931,7 @@ export interface JobTimings {
 /** Mirror of splitsmith.ui.jobs.Job. Long-running endpoints (detect-beep,
  *  trim, future shot-detect/export) submit a job and return a snapshot;
  *  the SPA polls /api/me/jobs/{id} until status leaves "pending" / "running". */
-export interface Job {
-  id: string;
-  kind: string;
-  /** The match this job was submitted for. The jobs list is global
-   *  (cross-match), so per-match predicates - SyncCard's "is a
-   *  sync_match running for THIS match?" - must match on this id or
-   *  they collide across matches, the same way per-stage predicates
-   *  collide across shooters without shooter_slug (issue #664). Null
-   *  for jobs submitted outside a match-scoped request
-   *  (model_download). */
-  match_id: string | null;
-  stage_number: number | null;
-  /** The shooter this job belongs to. Stage numbers repeat across every
-   *  shooter in a match, so any per-stage predicate over the jobs list
-   *  must also match on this slug or it collides across shooters
-   *  (issue #664). Null only for jobs with no owning shooter
-   *  (model_download, generate_proxy, compare-grid). */
-  shooter_slug: string | null;
-  /** Targets a specific StageVideo when the operation is per-camera
-   *  (multi-cam beep / trim). Null for stage-level jobs (shot_detect,
-   *  export). The SPA disambiguates concurrent per-camera jobs in
-   *  jobs rail by this id. */
-  video_id: string | null;
-  status: JobStatus;
-  progress: number | null;
-  message: string | null;
-  error: string | null;
-  /** True after the SPA POSTed /api/me/jobs/{id}/cancel for this job. The flag
-   *  stays True on the terminal snapshot so the row can be labelled
-   *  "Cancelled by user" instead of "Aborted". */
-  cancel_requested: boolean;
-  /** True once the user has dismissed this failure via
-   *  /api/me/jobs/{id}/acknowledge (issue #73). Meaningful only on FAILED
-   *  jobs; the jobs rail badge counts failures with acknowledged=false
-   *  and the registry rolls acknowledged failures off faster than
-   *  unacknowledged ones. */
-  acknowledged: boolean;
-  /** Optional structured result payload set by the worker. Present on
-   *  successful jobs whose output is meaningful to the SPA -- e.g.
-   *  match-export emits ``{ fcpxml_path, stage_count, duration_seconds,
-   *  anomalies }``. The schema is per-kind: branch on ``Job.kind`` to
-   *  interpret. ``null`` for jobs that signal success only by writing
-   *  files. */
-  result: Record<string, unknown> | null;
-  /** Phase timings persisted when the job finishes; null while active. */
-  timings: JobTimings | null;
-  created_at: string;
-  updated_at: string;
-  started_at: string | null;
-  finished_at: string | null;
-}
+export type Job = Schema["Job"];
 
 /** Structured error payload emitted by source-bound endpoints (detect-beep,
  *  trim, beep-preview, video stream, export) when the primary's source file
@@ -2441,29 +2358,7 @@ export interface TriageAttention {
 
 /** One cell in the triage grid - a shooter's stage with its audit
  *  status, beep confidence, anomalies, and attention marker. */
-export interface TriageCell {
-  slug: string;
-  shooter_name: string;
-  stage_number: number;
-  stage_name: string;
-  status: StageStatus;
-  beep_confidence: number | null;
-  anomalies: Anomaly[];
-  needs_attention: TriageAttention | null;
-  /** UX PR 3: the Overview's pipeline table reads these instead of a
-   *  second per-stage walk. Split figures follow the share card's rule
-   *  (`share_card.stage_figures`); both null without an audit doc. */
-  video_count: number;
-  beep_time: number | null;
-  beep_reviewed: boolean;
-  shot_count: number;
-  draw: number | null;
-  avg_split: number | null;
-  time_seconds: number;
-  /** The stage's confirmed beeps' distance from their tone, ms, the largest
-   *  in magnitude (spec 2026-10-17); null or absent when none is measured. */
-  beep_tone_offset_ms?: number | null;
-}
+export type TriageCell = Schema["TriageCell"];
 
 /** Where one stage stands for the highlight reel
  *  (``GET /api/shooters/{slug}/highlights``, ``highlights.stage_readiness``). */
@@ -2520,18 +2415,7 @@ export interface HighlightReelBody {
 
 /** Response from GET /api/match/triage and POST accept/attention mutations.
  *  Returns the current triage list and the count of flagged cells. */
-export interface TriageResponse {
-  cells: TriageCell[];
-  flagged_count: number;
-  /** Resolved per-project HITL gate threshold (#219 / #220), same value
-   *  ``GET /api/automation`` reports at ``settings.beep_low_confidence_threshold``.
-   *  The SPA reads this instead of hardcoding the global default so a
-   *  project-level override is reflected in the low-confidence pill. */
-  beep_low_confidence_threshold: number;
-  /** A beep this far or farther from its tone gets Overview's Check beep;
-   *  absent from an older server, which never flags. */
-  beep_tone_flag_ms?: number;
-}
+export type TriageResponse = Schema["TriageResponse"];
 
 /** Response from GET /api/match/triage/summary - the cheap poll behind
  *  the sidebar/drawer flagged-count badge. Avoids paying for the full
@@ -2539,29 +2423,7 @@ export interface TriageResponse {
 export type TriageSummaryResponse = Schema["TriageSummaryResponse"];
 
 /** One shooter row in the /shooters page (#324). */
-export interface ShooterListEntry {
-  slug: string;
-  name: string;
-  selected_shooter_id: number | null;
-  selected_competitor_id: number | null;
-  stages_audited: number;
-  stages_total: number;
-  video_count: number;
-  cameras: ShooterCameraInfo[];
-  /** Stages with at least one rebuildable angle whose audit-mode trim
-   *  cache is missing. The stage must have a primary with a beep and a
-   *  non-zero stage time; within it, every non-ignored angle with its own
-   *  beep + reachable source counts, secondaries included. One stage
-   *  counts once however many of its angles are uncached, because the CTA
-   *  it drives rebuilds the whole stage. (#351) */
-  stages_missing_trim: number;
-  /** Per-stage status for this shooter (one entry per stage in the
-   *  shooter's own project). Drives the aggregate Overview grid. */
-  stage_statuses: StageStatusEntry[];
-  /** The shooter's identity (#1243). Always sent by the server; optional
-   *  here so fixtures built by hand predate it. */
-  identity?: ShooterIdentity;
-}
+export type ShooterListEntry = Schema["ShooterListEntry"];
 
 /** Response payload for POST /api/match/shooters/{slug}/build-trim-caches (#351). */
 export interface BuildTrimCachesResult {
@@ -2574,15 +2436,7 @@ export interface BuildTrimCachesResult {
   skipped: { stage: number; video_id?: string; reason: string }[];
 }
 
-export interface ShooterListResponse {
-  match_root: string;
-  match_name: string;
-  shooters: ShooterListEntry[];
-  /** See :type:`MatchOrigin` (#631). */
-  origin: MatchOrigin;
-  /** See :type:`MatchCapability` (#756). */
-  capabilities: MatchCapability[];
-}
+export type ShooterListResponse = Schema["ShooterListResponse"];
 
 /** One uploaded raw video in the operator's hosted-mode object
  *  storage, returned by ``GET /api/me/raw/list``. Mirrors the response
@@ -2656,23 +2510,9 @@ export type CompareShotPoint = Schema["CompareShotPoint"];
 /** Per-shooter data for a stage in /compare (#328). Field is a logical
  *  ref (``exports/<name>`` | ``trimmed/<name>``), not a filesystem path
  *  (#700) - resolved server-side against local dirs or storage. */
-export interface CompareShooterRecord {
-  slug: string;
-  name: string;
-  video_ref: string | null;
-  beep_offset_in_clip: number | null;
-  duration_seconds: number | null;
-  stage_time_seconds: number | null;
-  shots: CompareShotPoint[];
-  /** The shooter's identity (#1249): the roster draws their accent and logo. */
-  identity?: ShooterIdentity | null;
-}
+export type CompareShooterRecord = Schema["CompareShooterRecord"];
 
-export interface CompareStageResponse {
-  stage_number: number;
-  stage_name: string;
-  shooters: CompareShooterRecord[];
-}
+export type CompareStageResponse = Schema["CompareStageResponse"];
 
 /** One pending beep review item in the cross-shooter queue (#326). */
 export type BeepQueueAltCandidate = Schema["BeepQueueAltCandidate"];
@@ -2712,36 +2552,9 @@ export type MergePlanResponse = Schema["MergePlanResponse"];
  *  review-queue tally on disk. */
 export type DeveloperModelInfo = Schema["DeveloperModelInfo"];
 
-export interface DevReviewQueueItem {
-  slug: string;
-  audit_path: string;
-  source: "match" | "github" | "ad-hoc";
-  source_label: string;
-  status: "pending" | "flagged" | "done";
-  n_shots: number;
-  n_disagreements: number;
-  promoted_at: string | null;
-  venue: string | null;
-  stage_number: number | null;
-  shooter: string | null;
-  age_seconds: number | null;
-  /** Whether the shot times were checked on this fixture's own audio. */
-  review_status: "needs_review" | "reviewed";
-  /** Review order from scripts/fixture_review_inventory.py; null until it has run. */
-  priority: number | null;
-  /** Why this fixture is worth checking, in plain words. */
-  reasons: string[];
-  /** The fixture's source video when it is on this disk; the walk shows it. */
-  video_path?: string | null;
-  /** Decisions the review walk has saved on it; Continue resumes these first. */
-  walk_decisions?: number;
-}
+export type DevReviewQueueItem = Schema["DevReviewQueueItem"];
 
-export interface DevReviewQueueResponse {
-  pending: DevReviewQueueItem[];
-  flagged: DevReviewQueueItem[];
-  done: DevReviewQueueItem[];
-}
+export type DevReviewQueueResponse = Schema["DevReviewQueueResponse"];
 
 /** One (stage_number, video_id) pair in a bulk camera-set call.
  *  Mirrors ``BulkCameraSetItem`` in server.py. */
@@ -2846,19 +2659,7 @@ export interface WorkerInfo {
 }
 
 /** One compute worker row, mirrored from the backend WorkerView. */
-export interface WorkerView {
-  id: string;
-  name: string;
-  kind: "self_hosted" | "railway";
-  enabled: boolean;
-  priority: number;
-  status: "online" | "offline" | "disabled" | "pending";
-  registered: boolean;
-  last_seen_at: string | null;
-  last_wake_at: string | null;
-  version: string | null;
-  info: WorkerInfo | null;
-}
+export type WorkerView = Schema["WorkerView"];
 
 /** One access request, mirrored from the hosted admin API. */
 export interface AccessRequest {
@@ -3164,20 +2965,14 @@ export type MoveShooterResultItem = Schema["MoveShooterResultItem"];
 
 /** One video that could not be moved (occupied-stage rule). Mirrors
  *  ``MoveShooterBlocked`` on the backend. */
-export interface MoveShooterBlocked {
-  video_path: string;
-  stage_number: number | null;
-  reason: string;
-  code: "occupied_stage";
-}
+export type MoveShooterBlocked = Schema["MoveShooterBlocked"];
 
 /** Outcome of a moveShooter call (backend ``MoveShooterOutcome``). */
-export interface MoveShooterOutcome {
-  moved: MoveShooterResultItem[];
-  blocked: MoveShooterBlocked[];
-}
+export type MoveShooterOutcome = Schema["MoveShooterOutcome"];
 
 /** Full response from POST /api/match/videos/move-shooter. */
+// Hand-written until the project view model lands (#1591 group C): ``source_project``
+// is a ``MatchProject``, whose wire shape the schema does not describe yet.
 export interface MoveShooterResponse {
   outcome: MoveShooterOutcome;
   source_project: MatchProject;
@@ -3185,20 +2980,10 @@ export interface MoveShooterResponse {
 
 /** One share link for a match. Mirrors the backend ShareInfo Pydantic model.
  *  ``revoked_at`` is null while the link is live. */
-export interface ShareInfo {
-  id: string;
-  url: string;
-  created_at: string;
-  revoked_at: string | null;
-  /** Per shooter, the camera this link's viewers start on (a mount or
-   *  role); null follows each shooter's saved default. */
-  cameras?: Record<string, string> | null;
-}
+export type ShareInfo = Schema["ShareInfo"];
 
 /** Response from GET /api/match/shares. */
-export interface ShareListResponse {
-  shares: ShareInfo[];
-}
+export type ShareListResponse = Schema["ShareListResponse"];
 
 /** One desktop sync token as the owner-management routes return it
  *  (#631 Task 3). Mirrors the backend ``DesktopTokenInfo``. Never
@@ -3239,11 +3024,7 @@ export type DeviceStartResponse = Schema["DeviceStartResponse"];
 
 /** Response from GET /api/settings/hosted-sync/device/status (#719).
  *  ``denied`` and ``expired`` are distinct terminal states on purpose. */
-export interface DeviceStatusResponse {
-  status: "idle" | "pending" | "approved" | "denied" | "expired";
-  account: HostedAccountInfo | null;
-  device_name: string | null;
-}
+export type DeviceStatusResponse = Schema["DeviceStatusResponse"];
 
 /** Response from DELETE /api/settings/hosted-sync/session (#719, #737).
  *  ``hosted_revoked`` is tri-state: true - the hosted side confirmed the
@@ -3296,14 +3077,5 @@ export interface AutoSyncStatus {
  *  is a best-effort staleness hint (count of hosted docs newer than
  *  this desktop's last sync); null means unknown - sync unconfigured
  *  or the hosted side unreachable right now, not an error. */
-export interface SyncStatusResponse {
-  configured: boolean;
-  last_synced_at: string | null;
-  stale: boolean;
-  pending_media: number;
-  /** Docs the next push would send; optional for an older sidecar. */
-  pending_docs?: number;
-  errors: string[];
-  remote_changes: number | null;
-}
+export type SyncStatusResponse = Schema["SyncStatusResponse"];
 
