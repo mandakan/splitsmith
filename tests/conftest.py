@@ -613,3 +613,32 @@ def _stop_process_db_runner() -> Iterator[None]:
         runner.stop()
     leaked = [t.name for t in threading.enumerate() if t.name == "splitsmith-db-runner" and t.is_alive()]
     assert not leaked, f"a DbRunner thread outlived its test: {leaked}"
+
+
+@pytest.fixture(autouse=True)
+def _drain_test_jobs(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
+    """Let every job a test's app started finish before its patches go.
+
+    A beep confirm chains trim and detection, and a test that only waits
+    for the first job leaves the rest running on the registry's threads.
+    Once the test's monkeypatches are undone they run the real pipeline
+    under whatever the worker's next test patched: through one test's fake
+    ``subprocess.run`` an encoder probe wrote ``-encoders`` into the repo
+    root and counted as that test's ffmpeg call. Requesting ``monkeypatch``
+    puts this teardown before its undo; ``begin_shutdown`` refuses the
+    chain's next job.
+    """
+    from splitsmith.ui.jobs import JobRegistry
+
+    created: list[JobRegistry] = []
+    original_init = JobRegistry.__init__
+
+    def tracking_init(self: JobRegistry, *args: object, **kwargs: object) -> None:
+        original_init(self, *args, **kwargs)
+        created.append(self)
+
+    monkeypatch.setattr(JobRegistry, "__init__", tracking_init)
+    yield
+    for registry in created:
+        registry.begin_shutdown()
+        assert registry.wait_for_drain(30.0), "a job outlived its test by 30 s"
