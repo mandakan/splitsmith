@@ -1,6 +1,7 @@
 import type { Feature } from "@/lib/access";
 import type { Anomaly } from "@/lib/anomalies";
 import type { LogoSpot } from "@/lib/logoPlan";
+import type { components } from "./api/types.gen";
 import { stagesApi } from "./api/stages";
 import { shootersApi } from "./api/shooters";
 import { matchApi } from "./api/match";
@@ -8,6 +9,10 @@ import { meApi } from "./api/me";
 import { labApi } from "./api/lab";
 import { miscApi } from "./api/misc";
 import { ApiError, scopeRequestPath } from "./api/client";
+/** The server's own schemas (``pnpm gen:api`` over ``openapi.json``); a hand-written
+ *  type below is an alias into this wherever the two shapes already agree. */
+type Schema = components["schemas"];
+
 export { ApiError, HOSTED_ACCOUNT_CHANGED_EVENT, currentMatchIdFromLocation, currentShareTokenFromLocation, isUnauthorized, notifyHostedAccountChanged, scopeRequestPath } from "./api/client";
 export type VideoRole = "primary" | "secondary" | "ignored";
 /** ``"aligned"`` means the in-stream beep detector failed on a secondary
@@ -25,15 +30,7 @@ export type BeepSource = "auto" | "manual" | "aligned";
  *  candidate card can explain *why* a confidence is what it is.
  *  ``beep_candidates[0]`` matches the promoted ``beep_time`` on the
  *  parent ``StageVideo``. */
-export interface BeepCandidate {
-  time: number;
-  score: number;
-  peak_amplitude: number;
-  duration_ms: number;
-  silence_score: number;
-  tonal_score: number;
-  confidence: number;
-}
+export type BeepCandidate = Schema["BeepCandidate"];
 
 /** Response from POST /api/stages/{n}/videos/{vid}/beep/snap. The user
  *  placed a marker by ear; the server returns the rise-foot leading edge
@@ -192,13 +189,7 @@ export const CAMERA_MOUNTS: readonly CameraMount[] = [
 /** Per-stage lifecycle state, mirror of :class:`splitsmith.ui.project.StageStatus`.
  *  Computed by the backend on every GET project payload; the SPA never
  *  recomputes this -- see ``lib/stageStatus.ts`` for display mapping. */
-export type StageStatus =
-  | "todo"
-  | "partial"
-  | "ready"
-  | "in_progress"
-  | "audited"
-  | "skipped";
+export type StageStatus = Schema["StageStatus"];
 
 /** Round count + target breakdown for a stage, mirrored from the backend
  *  ``config.StageRounds``. Sourced from SSI Scoreboard on import; any field
@@ -606,14 +597,7 @@ export interface ProjectSettingsPatch {
 }
 
 /** Mirror of ``splitsmith.automation.AutomationOverride`` (#215). */
-export interface AutomationOverride {
-  shot_detect_on_beep_verified?: boolean | null;
-  /** HITL gate threshold (#219). Auto-detected beeps with confidence
-   *  at or above this value pre-flip ``beep_reviewed`` so the
-   *  shot-detect chain fires; below it the beep lands in the HITL
-   *  queue and the user (or an agent) has to pick. Range [0, 1]. */
-  beep_low_confidence_threshold?: number | null;
-}
+export type AutomationOverride = Schema["AutomationOverride"];
 
 /** Mirror of the resolved-settings shape returned by ``GET /api/automation``
  *  (#216). The SPA renders ``<SettingProvenance>`` next to each toggle by
@@ -696,15 +680,7 @@ export type SortIssue =
   | "needs_anchor"
   | "outside_match";
 
-export interface SortCamera {
-  key: string;
-  folder: string;
-  model: string | null;
-  scheme: string;
-  clip_ids: string[];
-  clock: SortCameraClock;
-  offset_seconds: number;
-}
+export type SortCamera = Schema["SortCamera"];
 
 export interface SortClipProposal {
   clip_id: string;
@@ -781,14 +757,7 @@ export interface SortView {
 }
 
 /** An unfinished sort, offered on Footage to continue. */
-export interface SortSummary {
-  scan_id: string;
-  source_dir: string;
-  created_at: string;
-  status: SortView["status"];
-  clips: number;
-  to_review: number;
-}
+export type SortSummary = Schema["SortSummary"];
 
 export interface SortImportResult {
   imported: { clip_id: string; shooter: string; stage: number; role: string; path: string }[];
@@ -834,17 +803,9 @@ export interface RelinkScanResponse {
   entries: RelinkEntry[];
 }
 
-export interface RelinkAppliedEntry {
-  video_id: string;
-  name: string;
-  link_path: string;
-  previous_target: string | null;
-  new_target: string;
-}
+export type RelinkAppliedEntry = Schema["RelinkAppliedEntry"];
 
-export interface RelinkApplyResponse {
-  applied: RelinkAppliedEntry[];
-}
+export type RelinkApplyResponse = Schema["RelinkApplyResponse"];
 
 export type FsEntryKind = "dir" | "video" | "file";
 
@@ -1241,14 +1202,7 @@ export interface FontInfo {
 }
 
 /** A font file of the Look's own (#1272), desktop only. */
-export interface OwnFontInfo {
-  /** What the Look's ``fonts`` names it by: ``own:font-<hash>.ttf``. */
-  value: string;
-  /** The family the file declares. */
-  family: string;
-  /** ``/api/looks/<name>/fonts/<file>``, for a sample. */
-  url: string;
-}
+export type OwnFontInfo = Schema["OwnFontInfo"];
 
 export interface StoredLook {
   name: string;
@@ -1257,21 +1211,10 @@ export interface StoredLook {
 }
 
 /** One template of a Look as the template editor lists it (#1265). */
-export interface TemplateInfo {
-  slot: string;
-  variant: string;
-  /** The Look's own file, or the shipped default's it borrows. */
-  file: string;
-  own: boolean;
-  content: string;
-}
+export type TemplateInfo = Schema["TemplateInfo"];
 
 /** Unsaved template text for a slot and variant. */
-export interface TemplateEdit {
-  slot: string;
-  variant: string;
-  content: string;
-}
+export type TemplateEdit = Schema["TemplateEdit"];
 
 /** One ``looks check`` finding. */
 export interface CheckFinding {
@@ -1295,10 +1238,7 @@ export interface WhatsNewEntry {
 }
 
 /** A What's new entry's video link. */
-export interface WhatsNewVideo {
-  url: string;
-  label: string;
-}
+export type WhatsNewVideo = Schema["WhatsNewVideo"];
 
 /** ``GET /api/whats-new``: the entries and what this user has seen. */
 export interface WhatsNewPayload {
@@ -1723,14 +1663,7 @@ export interface RemoveVideoResponse {
   plan: RemovalPlan;
 }
 
-export type CleanupCategory =
-  | "caches"
-  | "exports-light"
-  | "exports-overlays"
-  | "exports-trims"
-  | "audit-trims"
-  | "audio"
-  | "audit-data";
+export type CleanupCategory = Schema["CleanupCategory"];
 
 export interface CleanupItem {
   path: string;
@@ -1770,11 +1703,7 @@ export interface CleanupApplyResponse {
 /** One sidebar bookmark in the FolderPicker. ``kind`` lets the SPA
  *  group entries (Recent / Home / Removable & network) and pick the
  *  right icon. Mirrors ``splitsmith.ui.server.SuggestedStart``. */
-export interface SuggestedStart {
-  path: string;
-  label: string;
-  kind: "recent" | "home" | "removable" | "network";
-}
+export type SuggestedStart = Schema["SuggestedStart"];
 
 export interface FsListing {
   path: string;
@@ -2080,7 +2009,7 @@ export interface StageAudit {
   needs_attention?: TriageAttention | null;
 }
 
-export type JobStatus = "pending" | "running" | "succeeded" | "failed" | "cancelled";
+export type JobStatus = Schema["JobStatus"];
 
 export interface JobPhase {
   name: string;
@@ -2525,12 +2454,7 @@ export interface RecentProjectDetail {
   next_step: NextStep | null;
 }
 
-export interface CreateMatchStageDraft {
-  stage_number: number;
-  stage_name: string;
-  expected_rounds?: number | null;
-  target_type?: string | null;
-}
+export type CreateMatchStageDraft = Schema["CreateMatchStageDraft"];
 
 export interface CreateMatchManualBody {
   name: string;
@@ -2551,12 +2475,7 @@ export interface CreateMatchManualBody {
  *  "me" flag -- the operator running the app may be coaching and not in
  *  the roster at all (issue #350). Mirrors :class:`CreateMatchCompetitorPick`
  *  in the backend. */
-export interface CreateMatchCompetitorPick {
-  name: string;
-  division?: string | null;
-  selected_shooter_id?: number | null;
-  selected_competitor_id: number;
-}
+export type CreateMatchCompetitorPick = Schema["CreateMatchCompetitorPick"];
 
 export interface CreateMatchScoreboardBody {
   /** Optional in hosted mode (see :type:`CreateMatchManualBody`). */
@@ -2568,23 +2487,12 @@ export interface CreateMatchScoreboardBody {
 }
 
 /** One camera inside a shooter (#324). */
-export interface ShooterCameraInfo {
-  group_key: string;
-  make: string | null;
-  model: string | null;
-  mount: string | null;
-  role: "primary" | "secondary";
-  video_count: number;
-  stage_numbers: number[];
-}
+export type ShooterCameraInfo = Schema["ShooterCameraInfo"];
 
 /** One stage's lifecycle status for a single shooter, mirrored from the
  *  backend ``StageStatusEntry``. The match Overview pivots these across
  *  shooters into an aggregate per-stage grid. */
-export interface StageStatusEntry {
-  stage_number: number;
-  status: StageStatus;
-}
+export type StageStatusEntry = Schema["StageStatusEntry"];
 
 /** Triage attention marker for a single stage. */
 export interface TriageAttention {
@@ -2691,9 +2599,7 @@ export interface TriageResponse {
 /** Response from GET /api/match/triage/summary - the cheap poll behind
  *  the sidebar/drawer flagged-count badge. Avoids paying for the full
  *  triage cell list on every shell load and job settlement. */
-export interface TriageSummaryResponse {
-  flagged_count: number;
-}
+export type TriageSummaryResponse = Schema["TriageSummaryResponse"];
 
 /** One shooter row in the /shooters page (#324). */
 export interface ShooterListEntry {
@@ -2837,51 +2743,11 @@ export interface CompareStageResponse {
 }
 
 /** One pending beep review item in the cross-shooter queue (#326). */
-export interface BeepQueueAltCandidate {
-  time: number;
-  confidence: number | null;
-}
+export type BeepQueueAltCandidate = Schema["BeepQueueAltCandidate"];
 
-export interface BeepQueueItem {
-  slug: string;
-  shooter_name: string;
-  stage_number: number;
-  stage_name: string;
-  /** Secondaries queue too - their beep anchors that angle's trim. Only
-   *  shot detection stays gated on primaries. */
-  role: "primary" | "secondary";
-  video_id: string;
-  video_path: string;
-  beep_time: number | null;
-  beep_confidence: number | null;
-  beep_reviewed: boolean;
-  status: "missing" | "low_confidence" | "unreviewed" | "confirmed";
-  alt_candidates: BeepQueueAltCandidate[];
-  /** A secondary's beep found from the primary's (#1442): the stage's shots,
-   *  then the timer's tone. Optional: an older server omits it. */
-  aligned_time?: number | null;
-  /** True once the low-res proxy exists (always true in local mode). The
-   *  beep review video streams the proxy, so the SPA shows a "preview
-   *  generating" placeholder instead of a broken player when this is false. */
-  proxy_ready: boolean;
-  /** True once a desktop-pushed beep review snippet (audio + peaks) is
-   *  available for a mirror's video. Mobile beep review (slice 3) plays
-   *  this snippet instead of the raw/proxy media, which mirrors never
-   *  have. False everywhere else - snippets are hosted-mirror only. */
-  snippet_ready: boolean;
-  /** True once a beep has been set but the trim step hasn't run against
-   *  it yet - the clip boundaries on disk no longer match the reviewed
-   *  beep. Desktop re-trims on its next sync pull; this just flags it. */
-  trim_stale: boolean;
-}
+export type BeepQueueItem = Schema["BeepQueueItem"];
 
-export interface BeepQueueStageGroup {
-  stage_number: number;
-  stage_name: string;
-  items: BeepQueueItem[];
-  total_videos: number;
-  confirmed: number;
-}
+export type BeepQueueStageGroup = Schema["BeepQueueStageGroup"];
 
 export interface BeepQueueResponse {
   total_items: number;
@@ -2922,12 +2788,7 @@ export interface MergePlanStage {
   expected_rounds: number | null;
   placeholder: boolean;
 }
-export interface MergePlanShooterMove {
-  source_root: string;
-  slug: string;
-  destination_root: string;
-  competitor_name: string;
-}
+export type MergePlanShooterMove = Schema["MergePlanShooterMove"];
 export interface MergePlanResponse {
   output_root: string;
   name: string;
@@ -2993,10 +2854,7 @@ export interface DevReviewQueueResponse {
 
 /** One (stage_number, video_id) pair in a bulk camera-set call.
  *  Mirrors ``BulkCameraSetItem`` in server.py. */
-export interface BulkCameraSetItem {
-  stage_number: number;
-  video_id: string;
-}
+export type BulkCameraSetItem = Schema["BulkCameraSetItem"];
 
 /** Request body for POST /api/shooters/{slug}/stages/camera/bulk-set.
  *  ``set_mount`` / ``set_model`` flags distinguish "set to null" from
@@ -3413,11 +3271,7 @@ export interface SweepRunDetail {
 
 /** One successfully moved video in a moveShooter call. Mirrors the backend
  *  ``MoveShooterResultItem`` Pydantic model. */
-export interface MoveShooterResultItem {
-  video_path: string;
-  stage_number: number | null;
-  demoted_to_secondary: boolean;
-}
+export type MoveShooterResultItem = Schema["MoveShooterResultItem"];
 
 /** One video that could not be moved (occupied-stage rule). Mirrors
  *  ``MoveShooterBlocked`` on the backend. */
@@ -3460,32 +3314,19 @@ export interface ShareListResponse {
 /** One desktop sync token as the owner-management routes return it
  *  (#631 Task 3). Mirrors the backend ``DesktopTokenInfo``. Never
  *  carries the token hash or the raw value. */
-export interface DesktopTokenInfo {
-  id: string;
-  name: string;
-  created_at: string;
-  last_used_at: string | null;
-  revoked_at: string | null;
-}
+export type DesktopTokenInfo = Schema["DesktopTokenInfo"];
 
 /** Response from GET /api/me/desktop-tokens. */
-export interface DesktopTokenListResponse {
-  tokens: DesktopTokenInfo[];
-}
+export type DesktopTokenListResponse = Schema["DesktopTokenListResponse"];
 
 /** Response from POST /api/me/desktop-tokens. ``token`` is the raw
  *  bearer value - it appears here and only here; every other response
  *  (including this token's own future GET/DELETE entries) carries just
  *  the ``DesktopTokenInfo`` record. */
-export interface DesktopTokenCreateResponse {
-  token: string;
-  record: DesktopTokenInfo;
-}
+export type DesktopTokenCreateResponse = Schema["DesktopTokenCreateResponse"];
 
 /** Response from DELETE /api/me/desktop-tokens/{token_id}. */
-export interface DesktopTokenRevokeResponse {
-  revoked: boolean;
-}
+export type DesktopTokenRevokeResponse = Schema["DesktopTokenRevokeResponse"];
 
 /** Response from GET/PUT /api/settings/hosted-sync (#631 Task 9). Local
  *  install's hosted-sync target: where the desktop client pushes a
@@ -3515,14 +3356,7 @@ export interface HostedAccountInfo {
  *  this call handed that one back rather than starting a new one -- same
  *  user_code, same links, ``expires_in`` counting down the remainder of
  *  the original window. */
-export interface DeviceStartResponse {
-  user_code: string;
-  verification_uri: string;
-  verification_uri_complete: string;
-  expires_in: number;
-  interval: number;
-  resumed: boolean;
-}
+export type DeviceStartResponse = Schema["DeviceStartResponse"];
 
 /** Response from GET /api/settings/hosted-sync/device/status (#719).
  *  ``denied`` and ``expired`` are distinct terminal states on purpose. */
@@ -3536,10 +3370,7 @@ export interface DeviceStatusResponse {
  *  ``hosted_revoked`` is tri-state: true - the hosted side confirmed the
  *  revoke; false - a revoke was attempted and failed (warn); null -
  *  there was nothing to revoke (do not warn). */
-export interface DeviceUnlinkResponse {
-  cleared: boolean;
-  hosted_revoked: boolean | null;
-}
+export type DeviceUnlinkResponse = Schema["DeviceUnlinkResponse"];
 
 /** The device authorization awaiting approval (#719). */
 export interface DevicePendingInfo {
