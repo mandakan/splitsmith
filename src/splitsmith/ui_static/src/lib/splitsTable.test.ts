@@ -46,11 +46,11 @@ function scorecard(over: Partial<StageScorecard> = {}): StageScorecard {
 }
 
 function figures(over: Partial<StageFigures> = {}): StageFigures {
-  return { draw: 1.84, avg_split: 0.52, fastest_split: 0.31, shot_count: 28, split_count: 9, ...over };
+  return { exposed_reload_s: null, moving_shots: null, regions: null, reload_avg_s: null, reloads: null, draw: 1.84, avg_split: 0.52, fastest_split: 0.31, shot_count: 28, split_count: 9, ...over };
 }
 
 function stage(spec: StageSpec): StageEntry {
-  return {
+  return { start: "standard",
     stage_number: spec.n,
     stage_name: spec.name,
     time_seconds: spec.time ?? 0,

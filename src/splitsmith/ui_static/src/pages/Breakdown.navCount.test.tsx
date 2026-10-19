@@ -86,8 +86,7 @@ function ShellChromeHarness({ children }: { children: ReactNode }) {
 let serverRegions: number | null = null;
 
 function project(): MatchProject {
-  return {
-    schema_version: 1,
+  return { competitor_division: null, identity: { accent: null, club: null, logo: null }, trim_audit_encoder: "auto",    schema_version: 1,
     name: "bromma-2026",
     created_at: "2026-01-01T00:00:00Z",
     updated_at: "2026-01-01T00:00:00Z",
@@ -100,7 +99,7 @@ function project(): MatchProject {
     match_date: null,
     stages: [
       {
-        stage_number: 1,
+        start: "standard", status: null, stage_number: 1,
         stage_name: "Stage One",
         time_seconds: 20,
         scorecard_updated_at: null,
@@ -110,7 +109,18 @@ function project(): MatchProject {
         time_seconds_manual: false,
         stage_rounds: null,
         scorecard: null,
-        figures: { draw: 1, avg_split: 0.3, fastest_split: 0.2, shot_count: 2, split_count: 1, regions: serverRegions },
+        figures: {
+          draw: 1,
+          avg_split: 0.3,
+          fastest_split: 0.2,
+          shot_count: 2,
+          split_count: 1,
+          moving_shots: null,
+          reloads: null,
+          reload_avg_s: null,
+          exposed_reload_s: null,
+          regions: serverRegions,
+        },
       },
     ],
     unassigned_videos: [],

@@ -55,87 +55,7 @@ export interface FixtureReviewSignals {
   rounds: number | null;
 }
 
-export interface StageVideo {
-  path: string;
-  /** Stable URL-safe id derived from ``path``. Used by per-video API
-   *  endpoints (/api/stages/{n}/videos/{video_id}/...) so the SPA can
-   *  target a specific camera without re-encoding the path. Computed
-   *  server-side; do not generate it client-side. */
-  video_id: string;
-  role: VideoRole;
-  added_at: string;
-  /** The recording-finished time the match heuristic uses for this video
-   *  (UTC ISO-8601). Captured at registration via the canonical
-   *  ``video_match.video_timestamp`` helper so the SPA, the CLI, and the
-   *  classifier agree. Null on legacy projects -- the timeline omits the
-   *  tick rather than guessing. */
-  match_timestamp: string | null;
-  processed: { beep: boolean; shot_detect: boolean; trim: boolean };
-  beep_time: number | null;
-  beep_source: BeepSource | null;
-  /** Has the user explicitly listened to the detected beep and
-   *  confirmed it (issue #71)? Auto-detected beeps default to false
-   *  until the user clicks "Mark reviewed" or types a manual override.
-   *  Resets when ``beep_time`` changes. The pipeline doesn't gate on
-   *  this -- it's a UI nudge to reduce wrong-beep regressions. */
-  beep_reviewed: boolean;
-  beep_peak_amplitude: number | null;
-  beep_duration_ms: number | null;
-  /** Calibrated detector confidence in [0, 1] for the chosen beep
-   *  (#219 / #220 layer 3a). Manual entries clamp to 1.0; auto-detected
-   *  beeps carry the value the formula in ``beep_detect`` produced.
-   *  Null on legacy projects from before this field existed and on
-   *  ``beep_source == "aligned"`` where the detector confidence isn't
-   *  meaningful for a secondary. The HITL queue uses this against
-   *  ``automation.beep_low_confidence_threshold`` to decide whether
-   *  the beep needs review. */
-  beep_confidence: number | null;
-  /** Ranked alternative candidates from the most recent auto-detection run.
-   *  Empty when the project predates issue #22 or after a manual override. */
-  beep_candidates: BeepCandidate[];
-  /** True when both in-stream beep detection AND the cross-correlation
-   *  fallback ran on a secondary and neither produced a usable timestamp.
-   *  Distinguishes "tried and failed; pick on waveform" from "not started"
-   *  in the no-beep UI. False on primaries (in-stream failure is fatal
-   *  there). */
-  beep_auto_detect_failed: boolean;
-  /** Peak-to-runner-up confidence ratio from the cross-correlation
-   *  fallback / sanity check. Populated whenever cross-align ran on a
-   *  secondary -- as a promoted suggestion (``beep_source="aligned"``),
-   *  as a below-floor diagnostic (``beep_auto_detect_failed=true``), or
-   *  as a sanity check after in-stream succeeded. Null otherwise. */
-  beep_alignment_confidence: number | null;
-  /** Difference (in-stream minus cross-align) in milliseconds when both
-   *  methods produced a usable timestamp on a secondary. The SPA flags
-   *  large disagreements (> ~250 ms) since they typically mean the
-   *  in-stream detector locked onto a steel-strike or other transient
-   *  rather than the buzzer. Null when only one method ran. */
-  beep_alignment_delta_ms: number | null;
-  notes: string;
-  /** Selects the per-class threshold set used by the ensemble (issue #143):
-   *  ``head|chest|belt|helmet`` -> headcam; ``hand|tripod|monopod|gimbal``
-   *  -> handheld. Stamped heuristically from camera make at register time
-   *  and overridable via PATCH .../camera-mount. ``null`` falls back to
-   *  the artifact's default class. */
-  camera_mount: CameraMount | null;
-  /** Camera make/model from ffprobe, or null when the QuickTime tag is
-   *  missing (Meta Vanguard glasses are the present example). Drives the
-   *  per-camera-model amplitude-floor lookup (#304); unknown values fall
-   *  back to the generic-headcam floor. Overridable via PATCH
-   *  .../camera-model when ffprobe yielded nothing. */
-  camera_make: string | null;
-  camera_model: string | null;
-  /** Hosted only: the fast-scrub proxy exists in storage. Drives the "generating" badge. */
-  proxy_ready?: boolean;
-  /** Identity of the local audit trim (mtime + size), null when none is on
-   *  disk. Goes into a pinned ``kind=trim`` URL so a re-cut trim is a new
-   *  URL and remounts the player instead of leaving it on a dead stream. */
-  trim_version?: string | null;
-  /** Identity of the trim's fresh 720p rendition on local disk, null when
-   *  there is none. The Audit players stream ``kind=web`` with it instead
-   *  of the full-resolution trim (scrubbing a 4K trim stalls). */
-  scrub_version?: string | null;
-}
+export type StageVideo = Schema["StageVideoView"];
 
 /** Mirror of ``splitsmith.ensemble.calibration.normalize_camera_model_key``.
  *  Lower-cases and whitespace-collapses both fields so the SPA can
@@ -204,121 +124,20 @@ export interface StageRounds {
  *  live) still see scores. Null until a scoreboard sync populates it. */
 export type StageScorecard = Schema["StageScorecard"];
 
-export interface StageEntry {
-  stage_number: number;
-  stage_name: string;
-  time_seconds: number;
-  scorecard_updated_at: string | null;
-  videos: StageVideo[];
-  skipped: boolean;
-  placeholder: boolean;
-  /** True when the duration was entered manually (POST /api/stages/{n}/time)
-   *  rather than imported from a scoreboard. Preserved across scoreboard
-   *  syncs so a manual value isn't clobbered. */
-  time_seconds_manual: boolean;
-  /** ``standard`` or ``non_standard`` (#1528), the match's setting copied to
-   *  every shooter. Optional: an older server omits it (standard). */
-  start?: string;
-  /** Lifecycle status computed by the backend (see :class:`StageStatus`).
-   *  Optional in the type because legacy responses may omit it; callers
-   *  should fall back via :func:`deriveStageStatus` when missing. */
-  status?: StageStatus;
-  /** Round/target metadata already sent by the project API; surfaced in the
-   *  Ingest stage reference panel. Null when the match carries no round data. */
-  stage_rounds: StageRounds | null;
-  /** Full scoreboard scorecard for this shooter's run of the stage. Null
-   *  for placeholders and pre-scorecard projects. Populated on scoreboard
-   *  sync; displayed in the scored results view. */
-  scorecard: StageScorecard | null;
-  /** Splits summary derived server-side from the stage's audit doc (UX
-   *  PR 4). Null when the stage has no audit doc; optional because
-   *  legacy responses omit it. */
-  figures?: StageFigures | null;
-}
+export type StageEntry = Schema["StageEntryView"];
 
 /** Per-stage splits summary on the project payload. The split rule is
  *  the server's ``coach.statistic_splits`` (mirrored by ``statisticSplits``
  *  in ``lib/splits``); ``avg_split`` and ``fastest_split`` are null when
  *  the stage has no split-classed interval. */
-export interface StageFigures {
-  draw: number | null;
-  avg_split: number | null;
-  fastest_split: number | null;
-  shot_count: number;
-  split_count: number;
-  /** Region figures from confirmed regions only (spec 2026-10-08, part 2);
-   *  all null when the stage has none. `exposed_reload_s` is the reloads'
-   *  time not covered by a movement, set whenever there is a confirmed
-   *  reload. Optional: an older server omits them. */
-  moving_shots?: number | null;
-  reloads?: number | null;
-  reload_avg_s?: number | null;
-  exposed_reload_s?: number | null;
-  /** Confirmed regions of any kind (#1371): Breakdown's quiet nav count.
-   *  Null when the stage has none. */
-  regions?: number | null;
-}
+export type StageFigures = Schema["StageFiguresView"];
 
 /** A shooter's identity (#1243): accent, logo file name (content-named,
  *  under the shooter's ``identity/``), club line. ``null`` means "the
  *  Look's default", never blank. */
 export type ShooterIdentity = Schema["ShooterIdentity"];
 
-export interface MatchProject {
-  schema_version: number;
-  name: string;
-  created_at: string;
-  updated_at: string;
-  competitor_name: string | null;
-  scoreboard_match_id: string | null;
-  scoreboard_content_type: number | null;
-  selected_shooter_id: number | null;
-  selected_competitor_id: number | null;
-  // Server-computed PII-free token for the pinned shooter
-  // ("s" + first 8 chars of sha256("ssi-<id>")). Null when no shooter
-  // is pinned. Used to suffix fixture slugs so promotions on different
-  // shooters at the same match/stage don't collide on filename.
-  shooter_token: string | null;
-  match_date: string | null;
-  stages: StageEntry[];
-  unassigned_videos: StageVideo[];
-  last_scanned_dir: string | null;
-  raw_dir: string | null;
-  audio_dir: string | null;
-  trimmed_dir: string | null;
-  exports_dir: string | null;
-  probes_dir: string | null;
-  thumbs_dir: string | null;
-  trim_pre_buffer_seconds: number;
-  trim_post_buffer_seconds: number;
-  /** #215 -- project-level automation override. Each field is optional;
-   *  a ``null`` (or missing) value means the project inherits from the
-   *  global default. Resolved view available via ``getAutomation()``. */
-  automation: AutomationOverride;
-  /** #218 phase 4 -- per-project list of stage numbers whose audit-
-   *  pending nudge the user has explicitly dismissed. */
-  nudges_dismissed_stages: number[];
-  /** Which camera this shooter contributes to a multi-shooter compare
-   *  grid and to trim-only runs. A ``camera_mount`` value ("chest") or a
-   *  role ("primary" / "secondary"); ``null`` means the primary. Written
-   *  via ``setCompareCamera``. */
-  compare_camera: string | null;
-  /** The shooter's identity (#1243); every field defaults to null. Always
-   *  sent by the server; optional here so fixtures built by hand predate it. */
-  identity?: ShooterIdentity;
-  /** Registered raw source recordings (doc 05). One entry per source
-   *  file; a single take covering stages 1-4 is one entry with
-   *  ``covers_stages = [1, 2, 3, 4]``. StageVideo entries reference
-   *  these by ``storage_path``. */
-  raw_videos: RawVideoManifestEntry[];
-  /** Which install owns the media ("desktop" mirror / "hosted" native /
-   *  "local"). Only GET .../project injects it - mutating routes echo the
-   *  doc without it, so treat absence as "unknown, not a mirror". */
-  origin?: MatchOrigin;
-  /** See :type:`MatchCapability` (#756). Only GET .../project injects it,
-   *  same as `origin` - mutating routes echo the doc without it. */
-  capabilities?: MatchCapability[];
-}
+export type MatchProject = Schema["ProjectView"];
 
 /** GET /api/scoreboard/source response. ``mode === "local"`` means the
  *  offline JSON path will serve every scoreboard request -- no network is
@@ -2972,11 +2791,7 @@ export type MoveShooterOutcome = Schema["MoveShooterOutcome"];
 
 /** Full response from POST /api/match/videos/move-shooter. */
 // Hand-written until the project view model lands (#1591 group C): ``source_project``
-// is a ``MatchProject``, whose wire shape the schema does not describe yet.
-export interface MoveShooterResponse {
-  outcome: MoveShooterOutcome;
-  source_project: MatchProject;
-}
+export type MoveShooterResponse = Schema["MoveShooterResponse"];
 
 /** One share link for a match. Mirrors the backend ShareInfo Pydantic model.
  *  ``revoked_at`` is null while the link is live. */

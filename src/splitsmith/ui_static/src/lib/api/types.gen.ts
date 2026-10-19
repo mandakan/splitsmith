@@ -4207,7 +4207,11 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Get Project */
+        /**
+         * Get Project
+         * @description The project as the SPA reads it: the stored document plus the fields
+         *     ``build_project_view`` computes per request (``project_view.py``).
+         */
         get: operations["get_project_api_shooters__slug__project_get"];
         put?: never;
         post?: never;
@@ -7438,6 +7442,11 @@ export interface components {
             model: string | null;
         };
         /**
+         * CameraMount
+         * @enum {string}
+         */
+        CameraMount: "head" | "chest" | "belt" | "helmet" | "hand" | "tripod" | "monopod" | "gimbal";
+        /**
          * CameraMountRequest
          * @description Body for PATCH /api/stages/{n}/videos/{vid}/camera-mount (#143).
          *
@@ -9646,94 +9655,6 @@ export interface components {
             youtube_upload: boolean;
         };
         /**
-         * MatchProject
-         * @description Top-level on-disk match project.
-         */
-        MatchProject: {
-            /** Audio Dir */
-            audio_dir: string | null;
-            automation: components["schemas"]["AutomationOverride"];
-            /** Compare Camera */
-            compare_camera: string | null;
-            /** Competitor Division */
-            competitor_division: string | null;
-            /** Competitor Name */
-            competitor_name: string | null;
-            /**
-             * Created At
-             * Format: date-time
-             */
-            created_at: string;
-            /** Exports Dir */
-            exports_dir: string | null;
-            identity: components["schemas"]["ShooterIdentity"];
-            /** Last Scanned Dir */
-            last_scanned_dir: string | null;
-            /** Match Date */
-            match_date: string | null;
-            /** Name */
-            name: string;
-            /** Nudges Dismissed Stages */
-            nudges_dismissed_stages: number[];
-            /** Probes Dir */
-            probes_dir: string | null;
-            /** Raw Dir */
-            raw_dir: string | null;
-            /** Raw Videos */
-            raw_videos: components["schemas"]["RawVideo"][];
-            /**
-             * Schema Version
-             * @default 3
-             */
-            schema_version: number;
-            /** Scoreboard Content Type */
-            scoreboard_content_type: number | null;
-            /** Scoreboard Match Id */
-            scoreboard_match_id: string | null;
-            /** Selected Competitor Id */
-            selected_competitor_id: number | null;
-            /** Selected Shooter Id */
-            selected_shooter_id: number | null;
-            /**
-             * Shooter Token
-             * @description Public, PII-free token for the pinned shooter.
-             *
-             *     Mirrors :func:`splitsmith.lab.core.shooter_token` so the SPA can
-             *     build fixture slugs that include the same suffix the promote
-             *     endpoint stamps on the JSON. ``None`` when no SSI shooter is
-             *     pinned -- the SPA hides promote affordances in that case.
-             */
-            readonly shooter_token: string | null;
-            /** Stages */
-            stages: components["schemas"]["StageEntry"][];
-            /** Thumbs Dir */
-            thumbs_dir: string | null;
-            /**
-             * Trim Audit Encoder
-             * @default auto
-             */
-            trim_audit_encoder: string;
-            /**
-             * Trim Post Buffer Seconds
-             * @default 5
-             */
-            trim_post_buffer_seconds: number;
-            /**
-             * Trim Pre Buffer Seconds
-             * @default 5
-             */
-            trim_pre_buffer_seconds: number;
-            /** Trimmed Dir */
-            trimmed_dir: string | null;
-            /** Unassigned Videos */
-            unassigned_videos: components["schemas"]["StageVideo"][];
-            /**
-             * Updated At
-             * Format: date-time
-             */
-            updated_at: string;
-        };
-        /**
          * MatchStageDefinition
          * @description Stage as a property of the *match*: identity + rounds prior.
          *
@@ -9934,7 +9855,7 @@ export interface components {
          */
         MoveShooterResponse: {
             outcome: components["schemas"]["MoveShooterOutcome"];
-            source_project: components["schemas"]["MatchProject"];
+            source_project: components["schemas"]["ProjectView"];
         };
         /**
          * MoveShooterResultItem
@@ -10100,6 +10021,98 @@ export interface components {
              * @default
              */
             brand_line: string;
+        };
+        /** ProjectView */
+        ProjectView: {
+            /** Audio Dir */
+            audio_dir: string | null;
+            automation: components["schemas"]["AutomationOverride"];
+            /** Capabilities */
+            capabilities: ("edit" | "review" | "breakdown" | "share_manage" | "comment_write")[];
+            /** Compare Camera */
+            compare_camera: string | null;
+            /** Competitor Division */
+            competitor_division: string | null;
+            /** Competitor Name */
+            competitor_name: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Exports Dir */
+            exports_dir: string | null;
+            identity: components["schemas"]["ShooterIdentity"];
+            /** Last Scanned Dir */
+            last_scanned_dir: string | null;
+            /** Match Date */
+            match_date: string | null;
+            /** Name */
+            name: string;
+            /** Nudges Dismissed Stages */
+            nudges_dismissed_stages: number[];
+            /**
+             * Origin
+             * @enum {string}
+             */
+            origin: "hosted" | "desktop" | "local";
+            /** Probes Dir */
+            probes_dir: string | null;
+            /** Raw Dir */
+            raw_dir: string | null;
+            /** Raw Videos */
+            raw_videos: components["schemas"]["RawVideo"][];
+            /**
+             * Schema Version
+             * @default 3
+             */
+            schema_version: number;
+            /** Scoreboard Content Type */
+            scoreboard_content_type: number | null;
+            /** Scoreboard Match Id */
+            scoreboard_match_id: string | null;
+            /** Selected Competitor Id */
+            selected_competitor_id: number | null;
+            /** Selected Shooter Id */
+            selected_shooter_id: number | null;
+            /**
+             * Shooter Token
+             * @description Public, PII-free token for the pinned shooter.
+             *
+             *     Mirrors :func:`splitsmith.lab.core.shooter_token` so the SPA can
+             *     build fixture slugs that include the same suffix the promote
+             *     endpoint stamps on the JSON. ``None`` when no SSI shooter is
+             *     pinned -- the SPA hides promote affordances in that case.
+             */
+            shooter_token: string | null;
+            /** Stages */
+            stages: components["schemas"]["StageEntryView"][];
+            /** Thumbs Dir */
+            thumbs_dir: string | null;
+            /**
+             * Trim Audit Encoder
+             * @default auto
+             */
+            trim_audit_encoder: string;
+            /**
+             * Trim Post Buffer Seconds
+             * @default 5
+             */
+            trim_post_buffer_seconds: number;
+            /**
+             * Trim Pre Buffer Seconds
+             * @default 5
+             */
+            trim_pre_buffer_seconds: number;
+            /** Trimmed Dir */
+            trimmed_dir: string | null;
+            /** Unassigned Videos */
+            unassigned_videos: components["schemas"]["StageVideoView"][];
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
         };
         /**
          * PromoteAgainstFixtureBody
@@ -10944,11 +10957,9 @@ export interface components {
             /** Shooters */
             shooters: components["schemas"]["ShooterStageEditResult"][];
         };
-        /**
-         * StageEntry
-         * @description A stage in the match: scoreboard data + assigned videos + audit status.
-         */
-        StageEntry: {
+        /** StageEntryView */
+        StageEntryView: {
+            figures: components["schemas"]["StageFiguresView"] | null;
             /**
              * Placeholder
              * @default false
@@ -10972,6 +10983,7 @@ export interface components {
              * @default standard
              */
             start: string;
+            status: components["schemas"]["StageStatus"] | null;
             /** Time Seconds */
             time_seconds: number;
             /**
@@ -10980,7 +10992,7 @@ export interface components {
              */
             time_seconds_manual: boolean;
             /** Videos */
-            videos: components["schemas"]["StageVideo"][];
+            videos: components["schemas"]["StageVideoView"][];
         };
         /**
          * StageEventIn
@@ -11018,6 +11030,34 @@ export interface components {
             _version?: string | null;
             /** Events */
             events: components["schemas"]["StageEventIn"][];
+        };
+        /**
+         * StageFiguresView
+         * @description Per-stage splits summary (UX PR 4). The split rule is
+         *     ``coach.statistic_splits``; ``share_card.stage_figures`` shapes draw and
+         *     average, the region figures add the breakdown counts.
+         */
+        StageFiguresView: {
+            /** Avg Split */
+            avg_split: number | null;
+            /** Draw */
+            draw: number | null;
+            /** Exposed Reload S */
+            exposed_reload_s: number | null;
+            /** Fastest Split */
+            fastest_split: number | null;
+            /** Moving Shots */
+            moving_shots: number | null;
+            /** Regions */
+            regions: number | null;
+            /** Reload Avg S */
+            reload_avg_s: number | null;
+            /** Reloads */
+            reloads: number | null;
+            /** Shot Count */
+            shot_count: number;
+            /** Split Count */
+            split_count: number;
         };
         /**
          * StageNotePatchRequest
@@ -11161,17 +11201,12 @@ export interface components {
             time_seconds: number | null;
         };
         /**
-         * StageVideo
-         * @description One video file assigned to a stage.
-         *
-         *     ``role`` drives the pipeline: primary runs the full pipeline (beep + shot
-         *     detect + trim), secondary only needs beep + trim (anchored to primary's
-         *     timeline), ignored is skipped entirely.
-         *
-         *     ``processed`` is the source of truth for what's been done; the UI computes
-         *     per-stage status by scanning these flags rather than re-running detection.
+         * StageVideoView
+         * @description A video as the SPA reads it. An unassigned video has no stage to trim
+         *     for, so its trim and scrub versions are ``None``; the shape is one type
+         *     on purpose, since the client moves videos between the two lists.
          */
-        StageVideo: {
+        StageVideoView: {
             /**
              * Added At
              * Format: date-time
@@ -11222,8 +11257,7 @@ export interface components {
             camera_make: string | null;
             /** Camera Model */
             camera_model: string | null;
-            /** Camera Mount */
-            camera_mount: string | null;
+            camera_mount: components["schemas"]["CameraMount"] | null;
             /** Fingerprint */
             fingerprint: string | null;
             /** Match Timestamp */
@@ -11242,14 +11276,20 @@ export interface components {
             processed: {
                 [key: string]: boolean;
             };
+            /** Proxy Ready */
+            proxy_ready: boolean;
             /**
              * Role
              * @default secondary
              * @enum {string}
              */
             role: "primary" | "secondary" | "ignored";
+            /** Scrub Version */
+            scrub_version: string | null;
             /** Stage Number */
             stage_number: number | null;
+            /** Trim Version */
+            trim_version: string | null;
             /**
              * Video Id
              * @description Stable URL-safe identifier derived from path + owning stage.
@@ -11259,7 +11299,7 @@ export interface components {
              *     cache filenames stay collision-free). Unassigned videos keep the
              *     legacy path-only hash so tray identity is stable across assigns.
              */
-            readonly video_id: string;
+            video_id: string;
         };
         /** StarterInfo */
         StarterInfo: {
@@ -18044,7 +18084,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["ProjectView"];
                 };
             };
             /** @description Validation Error */

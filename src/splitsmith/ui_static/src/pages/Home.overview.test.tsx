@@ -46,7 +46,7 @@ vi.mock("@/lib/features", async (importOriginal) => {
 });
 
 function project(): MatchProject {
-  return {
+  return { capabilities: [], competitor_division: null, identity: { accent: null, club: null, logo: null }, trim_audit_encoder: "auto",
     schema_version: 1,
     name: "Stockholm IPSC Open 2026",
     created_at: "2026-01-01T00:00:00Z",
@@ -404,7 +404,7 @@ describe("Breakdown is optional by design (#1371)", () => {
 
   function withRegions(regions: number | null): MatchProject {
     const p = project();
-    p.stages = TRIAGE.cells.map((c) => ({
+    p.stages = TRIAGE.cells.map((c) => ({ start: "standard", status: null,
       stage_number: c.stage_number,
       stage_name: c.stage_name,
       time_seconds: c.time_seconds,
@@ -415,7 +415,7 @@ describe("Breakdown is optional by design (#1371)", () => {
       time_seconds_manual: false,
       stage_rounds: null,
       scorecard: null,
-      figures: {
+      figures: { exposed_reload_s: null, moving_shots: null, reload_avg_s: null, reloads: null,
         draw: c.draw,
         avg_split: c.avg_split,
         fastest_split: null,

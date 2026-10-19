@@ -65,6 +65,13 @@ def mark_response_fields_required(doc: dict) -> dict:
         props = schema.get("properties")
         if props:
             schema["required"] = sorted(props)
+    # pydantic marks a computed field ``readOnly``; openapi-typescript turns
+    # that into a TypeScript ``readonly`` property, which stops a response
+    # being held in the client's own mutable types for no gain: the client
+    # never sends these objects back.
+    for schema in schemas.values():
+        for prop in schema.get("properties", {}).values():
+            prop.pop("readOnly", None)
     return doc
 
 

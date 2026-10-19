@@ -30,7 +30,7 @@ vi.mock("@/lib/api", async (importOriginal) => {
 });
 
 function makeProject(): MatchProject {
-  return {
+  return { capabilities: [], competitor_division: null, identity: { accent: null, club: null, logo: null }, trim_audit_encoder: "auto",
     schema_version: 1,
     name: "bromma-2026",
     created_at: "2026-01-01T00:00:00Z",
