@@ -65,7 +65,7 @@ def test_loads_ready_stages_with_footage_and_reports_the_rest(tmp_path, monkeypa
     assert stage.secondary.beep_offset == 3.0  # the beep sat inside the pre-buffer
     assert [len(t.shots) for t in inputs.stages] == [3]
     assert [e.id for e in inputs.stages[0].events] == ["evt-1"]
-    assert inputs.primaries == (META,)
+    assert inputs.cameras == (META,)
 
 
 def _render_spy(calls: list):
@@ -188,3 +188,79 @@ def test_an_unreviewed_secondary_beep_gives_no_replay(tmp_path, monkeypatch):
     monkeypatch.setattr(MatchProject, "stage_statuses", lambda self, root, **kw: {1: "audited", 2: "audited"})
     inputs = load_reel_inputs(project, root, label="Anna", probe=lambda p: META)
     assert inputs.footage[1].secondary is None
+
+
+def _statuses(monkeypatch) -> None:
+    monkeypatch.setattr(MatchProject, "stage_statuses", lambda self, root, **kw: {1: "audited", 2: "audited"})
+
+
+def test_a_chosen_camera_is_the_picture_and_the_primary_the_replay(tmp_path, monkeypatch):
+    project, root = _project(tmp_path)
+    project.stage(1).videos[1].camera_mount = "head"
+    _statuses(monkeypatch)
+    for camera in ("head", "secondary"):
+        inputs = load_reel_inputs(project, root, label="Anna", probe=lambda p: META, camera=camera)
+        stage = inputs.footage[1]
+        assert stage.primary.path.name.endswith("_web.mp4"), camera
+        assert stage.primary.beep_offset == 3.0  # the head camera's own beep
+        assert stage.secondary is not None and stage.secondary.path.name.endswith("_trimmed.mp4")
+        assert inputs.camera_fallbacks == ()
+    # The audit stays the primary's: the shots are the same either way.
+    assert [len(t.shots) for t in inputs.stages] == [3]
+
+
+def test_no_camera_or_the_primary_reads_as_before(tmp_path, monkeypatch):
+    project, root = _project(tmp_path)
+    project.stage(1).videos[1].camera_mount = "head"
+    _statuses(monkeypatch)
+    for camera in (None, "primary"):
+        stage = load_reel_inputs(project, root, label="Anna", probe=lambda p: META, camera=camera).footage[1]
+        assert stage.primary.path.name.endswith("_trimmed.mp4")
+        assert stage.secondary is not None and stage.secondary.path.name.endswith("_web.mp4")
+
+
+def test_a_stage_the_camera_cannot_serve_shows_the_primary_and_says_so(tmp_path, monkeypatch):
+    _statuses(monkeypatch)
+    # Unconfirmed beep: the moment could land on the wrong shot.
+    project, root = _project(tmp_path)
+    project.stage(1).videos[1].camera_mount = "head"
+    project.stage(1).videos[1].beep_reviewed = False
+    inputs = load_reel_inputs(project, root, label="Anna", probe=lambda p: META, camera="head")
+    assert inputs.footage[1].primary.path.name.endswith("_trimmed.mp4")
+    assert inputs.camera_fallbacks == (1,)
+    # Not on the stage at all.
+    project, root = _project(tmp_path / "b")
+    inputs = load_reel_inputs(project, root, label="Anna", probe=lambda p: META, camera="chest")
+    assert inputs.footage[1].primary.path.name.endswith("_trimmed.mp4")
+    assert inputs.camera_fallbacks == (1,)
+    # Two cameras with the one mount: ambiguous, never a guess.
+    project, root = _project(tmp_path / "c")
+    for video in project.stage(1).videos:
+        video.camera_mount = "head"
+    inputs = load_reel_inputs(project, root, label="Anna", probe=lambda p: META, camera="head")
+    assert inputs.footage[1].primary.path.name.endswith("_trimmed.mp4")
+    assert inputs.camera_fallbacks == (1,)
+    # Its trim is gone.
+    project, root = _project(tmp_path / "d")
+    project.stage(1).videos[1].camera_mount = "head"
+    b = project.stage(1).videos[1].video_id
+    (project.trimmed_path(root) / f"stage1_cam_{b}_web.mp4").unlink()
+    inputs = load_reel_inputs(project, root, label="Anna", probe=lambda p: META, camera="head")
+    assert inputs.footage[1].primary.path.name.endswith("_trimmed.mp4")
+    assert inputs.camera_fallbacks == (1,)
+
+
+def test_make_reel_takes_the_camera_and_reports_its_fallbacks(tmp_path, monkeypatch):
+    from splitsmith import reel_inputs
+
+    project, root = _project(tmp_path)
+    project.stage(1).videos[1].camera_mount = "head"
+    _statuses(monkeypatch)
+    seen: list = []
+    monkeypatch.setattr(reel_inputs, "plan_reel", lambda picks, footage, **kw: seen.append(footage) or ())
+    monkeypatch.setattr(reel_inputs, "render_reel", _render_spy([]))
+    kw = {"label": "Anna", "output": tmp_path / "r.mp4", "force": True, "probe": lambda p: META}
+    outcome = reel_inputs.make_reel(project, root, camera="head", **kw)
+    assert seen[0][1].primary.path.name.endswith("_web.mp4") and outcome.camera_fallbacks == ()
+    outcome = reel_inputs.make_reel(project, root, camera="chest", **kw)
+    assert outcome.camera_fallbacks == (1,)

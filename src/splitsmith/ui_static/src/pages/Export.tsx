@@ -420,6 +420,8 @@ function ExportInner({ slug }: { slug: string }) {
     [view, sentBreakdown],
   );
 
+  // The reel's main camera: it takes every stage, not the selection.
+  const reelCameraChoices = useMemo(() => cameraChoices(project?.stages ?? []), [project]);
   // Secondaries with a confirmed beep on the selected stages: what the
   // cam rows offer, and zero is what hides them.
   const camChoices = useMemo(
@@ -952,6 +954,8 @@ function ExportInner({ slug }: { slug: string }) {
               href={href}
               youtubeConnected={youtubeSettings?.connected === true}
               onFinished={() => void reload()}
+              cameraChoices={reelCameraChoices}
+              savedCameraLabel={project?.compare_camera ? mountLabel(project.compare_camera) : "Primary"}
             />
           </Section>
           {history}

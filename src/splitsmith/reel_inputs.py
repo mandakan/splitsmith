@@ -17,6 +17,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from .camera_select import CameraResolutionError, resolve_camera
 from .coach import statistic_splits
 from .config import HighlightConfig, MomentKind, VideoMetadata
 from .export_naming import stage_display_name
@@ -31,7 +32,7 @@ from .highlights import (
     stage_readiness,
 )
 from .match_model import is_standard_start
-from .match_project import MatchProject, StageVideo
+from .match_project import MatchProject, StageEntry, StageVideo
 from .reel_plan import FootageClip, StageFootage, plan_reel
 from .reel_render import ReelRenderResult, reel_format, render_reel
 from .segment_cache import SegmentCache
@@ -55,8 +56,10 @@ class ReelInputs:
     footage: dict[int, StageFootage]
     #: Every stage.
     readiness: tuple[StageReadiness, ...]
-    #: The ready stages' primaries, for the canvas.
-    primaries: tuple[VideoMetadata, ...]
+    #: The ready stages' main cameras, for the canvas.
+    cameras: tuple[VideoMetadata, ...]
+    #: Ready stages the chosen camera could not serve, shown on the primary.
+    camera_fallbacks: tuple[int, ...] = ()
 
 
 #: How far a trim's recorded beep may sit from the video's before the trim
@@ -119,15 +122,45 @@ def _audit_doc(path: Path) -> dict[str, Any] | None:
     return doc if isinstance(doc, dict) else None
 
 
+def _main_camera(stage: StageEntry, camera: str | None) -> StageVideo | None:
+    """The video ``camera`` names on ``stage``, when it may be the picture:
+    its beep confirmed, since the audit's shots are placed on it through
+    that beep and an auto-detected one can sit off the primary's. ``None``
+    when the stage cannot serve it (not there, ambiguous, unconfirmed)."""
+    try:
+        chosen = resolve_camera(stage.videos, camera)
+    except CameraResolutionError as exc:
+        logger.warning("highlight reel: stage %d: %s; it shows the primary", stage.stage_number, exc)
+        return None
+    if chosen is None or chosen.beep_time is None:
+        return None
+    if chosen.role != "primary" and not chosen.beep_reviewed:
+        return None
+    return chosen
+
+
 def load_reel_inputs(
-    project: MatchProject, root: Path, *, label: str, probe: Probe = probe_video
+    project: MatchProject,
+    root: Path,
+    *,
+    label: str,
+    probe: Probe = probe_video,
+    camera: str | None = None,
 ) -> ReelInputs:
+    """Each stage's audit, tile and footage. ``camera`` is the main camera
+    (a mount or a role, resolved per stage like the match export's); the
+    audit and readiness stay the primary's, and only the picture moves: the
+    chosen camera's trim on its own beep, the primary as the replay angle.
+    A stage it cannot serve shows the primary and is named in
+    ``camera_fallbacks``."""
     statuses = project.stage_statuses(root)
     audit_dir = project.audit_path(root)
     stages: list[TileStageData] = []
     footage: dict[int, StageFootage] = {}
     readiness: list[StageReadiness] = []
-    primaries: list[VideoMetadata] = []
+    cameras: list[VideoMetadata] = []
+    fallbacks: list[int] = []
+    choosing = camera is not None and camera != "primary"
     for stage in project.stages:
         n = stage.stage_number
         primary = stage.primary()
@@ -145,17 +178,28 @@ def load_reel_inputs(
             continue
         clip, meta = found
         secondary: FootageClip | None = None
-        for video in stage.videos:
-            # Only a beep someone confirmed: an auto-detected one can sit
-            # off the primary's, and the replay would centre on the wrong shot.
-            if video.role == "secondary" and video.beep_reviewed:
-                other = _footage(project, root, n, video, probe)
-                if other is not None:
-                    secondary = other[0]
-                    break
+        main = _main_camera(stage, camera) if choosing else primary
+        chosen = _footage(project, root, n, main, probe) if main is not None and main is not primary else None
+        if chosen is not None:
+            secondary = clip
+            clip, meta = chosen
+        else:
+            if choosing and main is not primary:
+                logger.warning(
+                    "highlight reel: stage %d has no usable %s camera; it shows the primary", n, camera
+                )
+                fallbacks.append(n)
+            for video in stage.videos:
+                # Only a beep someone confirmed: an auto-detected one can sit
+                # off the primary's, and the replay would centre on the wrong shot.
+                if video.role == "secondary" and video.beep_reviewed:
+                    other = _footage(project, root, n, video, probe)
+                    if other is not None:
+                        secondary = other[0]
+                        break
         name = stage_display_name(n, stage.stage_name)
         footage[n] = StageFootage(n, name, clip, secondary)
-        primaries.append(meta)
+        cameras.append(meta)
         stages.append(
             TileStageData(
                 label=label,
@@ -170,7 +214,7 @@ def load_reel_inputs(
                 standard_start=is_standard_start(stage.start),
             )
         )
-    return ReelInputs(tuple(stages), footage, tuple(readiness), tuple(primaries))
+    return ReelInputs(tuple(stages), footage, tuple(readiness), tuple(cameras), tuple(fallbacks))
 
 
 def end_lines(stages: Sequence[TileStageData]) -> tuple[str, ...]:
@@ -198,6 +242,8 @@ class ReelOutcome:
     stages: tuple[int, ...] = ()
     #: The end card's figures (best draw, average split, rounds).
     end_lines: tuple[str, ...] = ()
+    #: Stages the chosen main camera could not serve; they show the primary.
+    camera_fallbacks: tuple[int, ...] = ()
 
 
 def make_reel(
@@ -215,14 +261,16 @@ def make_reel(
     segment_cache: SegmentCache | None = None,
     ffmpeg_binary: str = "ffmpeg",
     grade: ResolvedGrade | None = None,
+    camera: str | None = None,
 ) -> ReelOutcome:
     """Find, pick, plan and render the shooter's reel. Locked (a stage not
     yet audited or broken down) renders nothing and names the blockers,
     unless ``force``, which renders from the ready stages alone.
     ``moments`` is the menu's choice (else the config's); ``short`` the
-    Shorts / Reels cut, with fewer beats and a shorter montage."""
+    Shorts / Reels cut, with fewer beats and a shorter montage; ``camera``
+    the main camera (``load_reel_inputs``), the primary when ``None``."""
     cfg = config or HighlightConfig()
-    inputs = load_reel_inputs(project, root, label=label, probe=probe)
+    inputs = load_reel_inputs(project, root, label=label, probe=probe, camera=camera)
     blockers = tuple(r for r in inputs.readiness if r.state != "ready" and r.state not in OUT_OF_PLAY)
     if not inputs.stages or (not reel_unlocked(inputs.readiness) and not force):
         return ReelOutcome(blockers, None)
@@ -246,7 +294,7 @@ def make_reel(
     with tempfile.TemporaryDirectory(prefix="splitsmith-reel-") as tmp:
         result = render_reel(
             items,
-            sequence=reel_format(inputs.primaries, upright=upright),
+            sequence=reel_format(inputs.cameras, upright=upright),
             output_path=output,
             work_dir=Path(tmp),
             ffmpeg_binary=ffmpeg_binary,
@@ -254,5 +302,9 @@ def make_reel(
             grade=grade,
         )
     return ReelOutcome(
-        blockers, result, stages=tuple(s.stage_number for s in inputs.stages), end_lines=figures
+        blockers,
+        result,
+        stages=tuple(s.stage_number for s in inputs.stages),
+        end_lines=figures,
+        camera_fallbacks=inputs.camera_fallbacks,
     )

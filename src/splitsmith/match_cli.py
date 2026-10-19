@@ -1208,6 +1208,12 @@ def highlights(
     grade_strength: float | None = typer.Option(
         None, "--grade-strength", min=0.0, max=1.0, help="0..1; default full."
     ),
+    camera: str | None = typer.Option(
+        None,
+        "--camera",
+        help="Main camera: a mount ('head') or a role ('primary', 'secondary'), per stage; default the "
+        "shooter's saved camera. A stage without it, or whose beep is not confirmed, shows the primary.",
+    ),
 ) -> None:
     """Render a trailer-style highlight reel of a shooter's match: the moments
     chosen (fastest draw, split, streak, reload and best stage by default),
@@ -1269,6 +1275,7 @@ def highlights(
         config=full_config.highlights,
         segment_cache=match_exports.render_segment_cache(output_config),
         grade=chosen_grade,
+        camera=camera or project.compare_camera,
     )
 
     def _print_rows() -> None:
@@ -1295,6 +1302,12 @@ def highlights(
     result = outcome.result
     for note in result.degradations:
         console.print(f"[yellow]note:[/] {escape(note)}")
+    if outcome.camera_fallbacks:
+        stages = ", ".join(str(n) for n in outcome.camera_fallbacks)
+        console.print(
+            f"[yellow]note:[/] stage {stages} shows the primary: the chosen camera is not on it, "
+            "has no trim or its beep is not confirmed"
+        )
     console.print(f"[green]wrote[/] {result.output_path} ({result.duration_seconds:.1f} s)")
 
 

@@ -2684,6 +2684,8 @@ export interface HighlightReelBody {
   force: boolean;
   youtube_upload: boolean;
   youtube_privacy: "unlisted" | "private" | "public";
+  /** "default" is the shooter's saved camera; else a mount or a role. */
+  main_camera: string;
 }
 
 /** Response from GET /api/match/triage and POST accept/attention mutations.

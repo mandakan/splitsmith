@@ -95,3 +95,31 @@ def test_the_highlights_command_takes_a_grade(tmp_path: Path, monkeypatch) -> No
     assert seen[1] is None, "no grade unless asked"
     bad = CliRunner().invoke(app, [*args, "--grade", "preset:nope"])
     assert bad.exit_code == 2 and "no grade preset named" in bad.output
+
+
+def test_the_highlights_command_takes_a_camera_and_follows_the_saved_one(tmp_path: Path, monkeypatch) -> None:
+    from typer.testing import CliRunner
+
+    from splitsmith.cli import app
+    from splitsmith.match_model import Match
+    from splitsmith.match_project import MatchProject
+
+    from .test_match_cli_export import _seed
+
+    seen: list[Any] = []
+
+    def fake_make_reel(*args: Any, **kwargs: Any) -> Any:
+        seen.append(kwargs.get("camera"))
+        raise SystemExit(0)
+
+    monkeypatch.setattr("splitsmith.reel_inputs.make_reel", fake_make_reel)
+    root = _seed(tmp_path)
+    args = ["match", "highlights", str(root), "--shooter", "me", "-o", str(tmp_path / "r.mp4")]
+    CliRunner().invoke(app, args)
+    shooter_root = Match.shooter_root(root, "me")
+    project = MatchProject.load(shooter_root)
+    project.compare_camera = "head"
+    project.save(shooter_root)
+    CliRunner().invoke(app, args)
+    CliRunner().invoke(app, [*args, "--camera", "primary"])
+    assert seen == [None, "head", "primary"]
