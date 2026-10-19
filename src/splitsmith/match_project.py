@@ -23,6 +23,7 @@ is the foundation that makes incremental ingest safe.
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import logging
@@ -32,12 +33,11 @@ import tempfile
 from datetime import UTC, date, datetime
 from enum import StrEnum
 from pathlib import Path
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 from pydantic import BaseModel, Field, PrivateAttr, computed_field, model_validator
 
 from . import video_match
-from .async_bridge import run_sync
 from .automation import AutomationOverride
 from .config import BeepCandidate, StageData, StageRounds, VideoMatchConfig
 from .export_naming import is_match_export, stage_file_base
@@ -45,6 +45,9 @@ from .fingerprint import clip_fingerprint
 from .identity import ShooterIdentity
 from .storage import Storage
 from .video_match import match_videos_to_stages
+
+if TYPE_CHECKING:
+    from .ui.docstore.port import DocStore
 
 logger = logging.getLogger(__name__)
 
@@ -1131,7 +1134,6 @@ class MatchProject(BaseModel):
     # ``Any`` rather than the concrete store type to keep this module free
     # of the hosted-only db import.
     _state_store: Any = PrivateAttr(default=None)
-    _state_match_id: str | None = PrivateAttr(default=None)
     _state_slug: str | None = PrivateAttr(default=None)
     _state_version: int = PrivateAttr(default=0)
     # Hosted mode: resolve paths only inside the shooter root. Set by
@@ -1153,13 +1155,14 @@ class MatchProject(BaseModel):
         """
         self._confined = True
 
-    def bind_state(self, store: Any, *, match_id: str, slug: str, version: int) -> None:
-        """Bind a ``ProjectStateStore`` so ``save()`` round-trips through
-        Postgres (hosted mode). ``version`` is the optimistic-lock version
-        the doc was loaded at (0 for a not-yet-created project, so the
-        first save INSERTs)."""
-        self._state_store = store
-        self._state_match_id = match_id
+    def bind_state(self, docs: DocStore, *, slug: str, version: int) -> None:
+        """Bind the match's storage port so ``save()`` writes this shooter's
+        project document through it: ``state_docs`` under optimistic
+        locking hosted, ``project.json`` locally. ``version`` is the version
+        the doc was loaded at (0 for a not-yet-created project, so the first
+        hosted save INSERTs). The model never knows which world the port
+        is."""
+        self._state_store = docs
         self._state_slug = slug
         self._state_version = version
 
@@ -1256,25 +1259,18 @@ class MatchProject(BaseModel):
     def save(self, root: Path) -> None:
         """Persist the project.
 
-        Hosted mode (a :class:`ProjectStateStore` bound via
-        :meth:`bind_state`): the doc is written to the ``state_docs`` table
-        under optimistic locking and **no file is touched**. A stale
-        version raises ``StateConflictError`` (-> 409). The new version is
-        stashed back so a second ``save()`` on the same instance chains
-        cleanly.
-
-        Local desktop (no state store): atomic write to
-        ``root/project.json``, unchanged.
+        With a storage port bound (:meth:`bind_state`) the doc goes through
+        it at the version it was loaded at; hosted that is the ``state_docs``
+        table under optimistic locking, where a stale version raises
+        ``StateConflictError`` (-> 409), and **no file is touched**. The new
+        version is stashed back so a second ``save()`` on the same instance
+        chains cleanly. Unbound (the desktop's own paths, the CLI): atomic
+        write to ``root/project.json``.
         """
         self.updated_at = datetime.now(UTC)
         if self._state_store is not None:
-            self._state_version = run_sync(
-                self._state_store.save_project(
-                    self._state_match_id,
-                    self._state_slug,
-                    self.model_dump(mode="json"),
-                    expected_version=self._state_version,
-                )
+            self._state_version = self._state_store.save_project(
+                self._state_slug, self.model_dump(mode="json"), version=self._state_version
             )
             return
         atomic_write_json(root / PROJECT_FILE, self.model_dump(mode="json"))
@@ -1282,23 +1278,17 @@ class MatchProject(BaseModel):
     async def save_async(self, root: Path) -> None:
         """Async twin of :meth:`save`.
 
-        Awaits the state store directly instead of bouncing through
-        ``run_sync`` (which blocks the event loop on a throwaway worker
-        thread). Call this from hot async handlers - e.g. the assignment
-        endpoints, where blocking the loop per save serialized every other
-        request behind it. Local mode has no store, so it falls back to the
-        same atomic file write, run inline (a small local write, not worth a
-        thread hop).
+        The port is synchronous, so a bound save runs on a worker thread
+        rather than on the event loop (``run_sync`` from the loop thread
+        would block it). Call this from hot async handlers - e.g. the
+        assignment endpoints, where blocking the loop per save serialized
+        every other request behind it. Unbound, it is the same atomic file
+        write, run inline (a small local write, not worth a thread hop).
         """
-        self.updated_at = datetime.now(UTC)
         if self._state_store is not None:
-            self._state_version = await self._state_store.save_project(
-                self._state_match_id,
-                self._state_slug,
-                self.model_dump(mode="json"),
-                expected_version=self._state_version,
-            )
+            await asyncio.to_thread(self.save, root)
             return
+        self.updated_at = datetime.now(UTC)
         atomic_write_json(root / PROJECT_FILE, self.model_dump(mode="json"))
 
     def stage(self, stage_number: int) -> StageEntry:

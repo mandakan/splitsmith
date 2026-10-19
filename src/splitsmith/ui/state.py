@@ -626,7 +626,7 @@ class AppState:
             if doc is None:
                 raise HTTPException(status_code=404, detail=f"match {mid!r} has no state document")
             match = match_model.Match.model_validate(doc)
-            match.bind_state(store, match_id=mid, version=version)
+            match.bind_state(self.docstore(), version=version)
             return match
         return match_model.Match.load(scoped_root)
 
@@ -640,6 +640,17 @@ class AppState:
         if store is not None and mid is not None:
             return store, mid
         return None
+
+    def docstore_for(self, match_id: str, root: Path) -> DocStore:
+        """The storage port for a match named outright rather than by the
+        request's context: ``DbDocStore`` when a state store is bound, else
+        ``FileDocStore`` over ``root``. For the match creation routes, whose
+        match the alias middleware has not seen yet, and the registration
+        paths that hold a path and an id."""
+        store = self.project_state
+        if store is not None:
+            return DbDocStore(store, match_id)
+        return FileDocStore(root, audit_lock=self.audit_lock, export_run_lock=self.export_run_lock)
 
     def docstore(self) -> DocStore:
         """The storage port bound to the current request's match (spec
@@ -824,11 +835,12 @@ class AppState:
         alone and one loaded with its match are the same object.
         """
         match_id = current_match_id.get()
-        store = self.project_state
-        assert store is not None and match_id is not None  # callers are hosted-only
+        assert self.project_state is not None and match_id is not None  # callers are hosted-only
         project = MatchProject.model_validate(doc)
-        project.bind_state(store, match_id=match_id, slug=slug, version=version)
-        project.confine_paths()
+        docs = self.docstore()
+        project.bind_state(docs, slug=slug, version=version)
+        if docs.confines_paths:
+            project.confine_paths()
         project.bind_storage(self.storage, scope=_shooter_storage_scope(match_id, slug))
         return project
 

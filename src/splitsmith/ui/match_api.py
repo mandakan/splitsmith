@@ -907,12 +907,13 @@ async def create_match_manual(request: Request, req: CreateMatchManualRequest) -
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     match = match_model.Match.init(target, name=req.name)
-    # Hosted: bind the state store so every save() from here INSERTs /
-    # UPDATEs the match doc in Postgres (the ephemeral disk file
-    # Match.init just wrote is abandoned). version=0 -> the save below
-    # is the INSERT. Local: no store, saves stay file-based.
-    if state.project_state is not None and match.match_id is not None:
-        match.bind_state(state.project_state, match_id=match.match_id, version=0)
+    # Bind the storage port so every save() from here goes through it:
+    # hosted, version=0 makes the save below the INSERT into state_docs
+    # (the disk file Match.init just wrote is abandoned); locally it is
+    # the same match.json write.
+    assert match.match_id is not None  # Match.init assigns one
+    docs = state.docstore_for(match.match_id, target)
+    match.bind_state(docs, version=0)
     match.match_date = req.match_date
     match.stages = [
         match_model.MatchStageDefinition(
@@ -946,8 +947,7 @@ async def create_match_manual(request: Request, req: CreateMatchManualRequest) -
     # have stages to operate on. We seed it directly rather than relying
     # on the user re-importing scoreboard data.
     legacy = MatchProject.init(shooter_root, name=req.name)
-    if state.project_state is not None and match.match_id is not None:
-        legacy.bind_state(state.project_state, match_id=match.match_id, slug=shooter_slug, version=0)
+    legacy.bind_state(docs, slug=shooter_slug, version=0)
     legacy.competitor_name = req.primary_shooter.name
     legacy.match_date = req.match_date
     if not legacy.stages:
@@ -1023,8 +1023,9 @@ async def create_match_from_scoreboard(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     match = match_model.Match.init(target, name=req.name)
-    if state.project_state is not None and match.match_id is not None:
-        match.bind_state(state.project_state, match_id=match.match_id, version=0)
+    assert match.match_id is not None  # Match.init assigns one
+    docs = state.docstore_for(match.match_id, target)
+    match.bind_state(docs, version=0)
     match.scoreboard_match_id = str(req.match_id)
     match.scoreboard_content_type = req.content_type
     match.save(target)
@@ -1068,8 +1069,7 @@ async def create_match_from_scoreboard(
 
         shooter_root = match_model.Match.shooter_root(target, shooter_slug)
         legacy = MatchProject.init(shooter_root, name=req.name)
-        if state.project_state is not None and match.match_id is not None:
-            legacy.bind_state(state.project_state, match_id=match.match_id, slug=shooter_slug, version=0)
+        legacy.bind_state(docs, slug=shooter_slug, version=0)
         legacy.competitor_name = pick.name
         legacy.scoreboard_match_id = str(req.match_id)
         legacy.scoreboard_content_type = req.content_type
@@ -1280,11 +1280,10 @@ def add_match_shooter(request: Request, req: AddShooterRequest) -> ShooterListRe
 
     shooter_root = match_model.Match.shooter_root(match_root, slug)
     legacy = MatchProject.init(shooter_root, name=match.name)
-    # Hosted: bind the new project doc (version=0 -> the save below
-    # INSERTs it into state_docs). ``match.add_shooter`` above already
-    # persisted the updated roster to the match doc.
-    if state.project_state is not None and match.match_id is not None:
-        legacy.bind_state(state.project_state, match_id=match.match_id, slug=slug, version=0)
+    # Bind the new project doc to the port (version=0 -> the save below
+    # INSERTs it into state_docs hosted). ``match.add_shooter`` above
+    # already persisted the updated roster to the match doc.
+    legacy.bind_state(state.docstore(), slug=slug, version=0)
     legacy.competitor_name = req.name
     legacy.match_date = match.match_date
     legacy.scoreboard_match_id = match.scoreboard_match_id
@@ -1477,12 +1476,11 @@ async def remove_match_shooter(request: Request, slug: str) -> ShooterListRespon
         shutil.rmtree(shooter_root, ignore_errors=True)
     match.shooters = [s for s in match.shooters if s != slug]
     match.save(match_root)
-    # The store-bound match.save above persists the dropped roster.
-    # Hosted: also delete the shooter's project + per-stage audit docs
-    # from state_docs -- the on-disk rmtree doesn't touch Postgres, and
-    # the rows are otherwise unreachable (shooter_root rejects the slug).
-    if state.project_state is not None and match.match_id:
-        await state.project_state.delete_shooter(match.match_id, slug)
+    # The port-bound match.save above persists the dropped roster. The
+    # shooter's own documents go through the port too: hosted that sweeps
+    # the project and per-stage audit rows, which the rmtree never touched
+    # and which are otherwise unreachable (shooter_root rejects the slug).
+    state.docstore().delete_project(slug)
     return list_match_shooters(request)
 
 
