@@ -754,9 +754,8 @@ class AppState:
         gone, and the export (and the overlay's audit revision) would read
         it as current."""
         audit_file = self._audit_file(slug, stage_number)
-        docs = self.docstore()
-        if not docs.documents_on_disk:
-            doc, _ = docs.load_audit(slug, stage_number)
+        if not self.docstore().documents_on_disk:
+            doc, _ = self.load_audit(slug, stage_number)
             if doc is not None:
                 audit_file.parent.mkdir(parents=True, exist_ok=True)
                 audit_file.write_text(json.dumps(doc, indent=2) + "\n", encoding="utf-8")
