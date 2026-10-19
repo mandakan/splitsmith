@@ -87,6 +87,12 @@ Deploy facts (worker env, `FORWARDED_ALLOW_IPS`, the waitlist cut-over) are in
   reads and writes the audit file under `audit_lock` this way.
 - `FileDocStore` takes the **same** `audit_lock` object the sync pull holds
   (#1075); a store that made its own lock would silently undo that.
+- `MatchProject.stage_statuses`, `audited_count` and `export_overview` never
+  read an audit file: `audit_docs` is required, from `state.load_audit_docs`
+  or the match bundle in a request and `audit_docs_from_disk` where there is
+  none (the CLI, the reel, the local picker). `audit_docs_on_disk` is the one
+  reader of the desktop's audit files and the port's file store goes through
+  it, so the two worlds derive a status from the same documents.
 - The port holds documents only: media stays on `Storage` and
   `StoragePresence`, jobs on the job backends, merge rules in `sync.run`.
 

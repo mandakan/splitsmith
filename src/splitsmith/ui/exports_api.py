@@ -395,13 +395,8 @@ def export_overview(slug: str, request: Request) -> JSONResponse:
     # disk, so load each stage's doc and hand it to the overview
     # (which would otherwise read an absent local file -> 0 shots).
     # Local: load_audit reads the file, same as before.
-    audit_docs: dict[int, dict] = {}
-    for stg in project.stages:
-        doc, _ = state.load_audit(slug, stg.stage_number)
-        if doc is not None:
-            audit_docs[stg.stage_number] = doc
     root = state.shooter_root(slug)
-    rows = project.export_overview(root, audit_docs=audit_docs)
+    rows = project.export_overview(root, audit_docs=state.load_audit_docs(slug))
     match_files = project.match_export_files(root)
     return JSONResponse(
         {

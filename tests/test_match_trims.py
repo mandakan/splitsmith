@@ -188,7 +188,9 @@ def test_plan_agrees_with_export_overview_on_trim_eligibility(two_shooter_match:
     for slug in ("anders", "mathias"):
         shooter_root = Match.shooter_root(two_shooter_match, slug)
         project = MatchProject.load(shooter_root)
-        for row in project.export_overview(shooter_root):
+        for row in project.export_overview(
+            shooter_root, audit_docs=project.audit_docs_from_disk(shooter_root)
+        ):
             entry = _find(plan, slug, row.stage_number)
             if row.ready_to_trim:
                 assert entry.eligible or entry.reason in transient, (
@@ -211,7 +213,11 @@ def test_stage_time_alone_makes_a_stage_trim_ready(two_shooter_match: Path) -> N
     assert stage.scorecard_updated_at is None
     assert stage.time_seconds_manual is False
 
-    row = next(r for r in project.export_overview(shooter_root) if r.stage_number == 1)
+    row = next(
+        r
+        for r in project.export_overview(shooter_root, audit_docs=project.audit_docs_from_disk(shooter_root))
+        if r.stage_number == 1
+    )
     assert row.ready_to_trim is True
 
 

@@ -1249,10 +1249,7 @@ def get_match_triage_summary(request: Request) -> TriageSummaryResponse:
         for stg in legacy.stages:
             if stg.placeholder:
                 continue
-            doc = (audit_docs or {}).get(stg.stage_number)
-            if doc is None and audit_docs is None:
-                doc, _ = state.load_audit(slug, stg.stage_number)
-            docs.append(doc)
+            docs.append(audit_docs.get(stg.stage_number))
     return TriageSummaryResponse(flagged_count=_server._count_flagged(docs))
 
 

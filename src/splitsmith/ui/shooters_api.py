@@ -2617,9 +2617,7 @@ def cleanup_plan(
             # known ones, and a stale tab shouldn't crash here.
             continue
     root = state.shooter_root(slug)
-    audit_docs = state.load_audit_docs(slug)
-    audit_stages = None if audit_docs is None else set(audit_docs)
-    plan = cleanup_module.plan_cleanup(project, root, cats, audit_stages=audit_stages)
+    plan = cleanup_module.plan_cleanup(project, root, cats, audit_stages=set(state.load_audit_docs(slug)))
     return JSONResponse(plan.model_dump(mode="json"))
 
 
@@ -2659,9 +2657,7 @@ async def cleanup_apply(request: Request, slug: str, req: CleanupRequest) -> JSO
     root = state.shooter_root(slug)
     project = state.shooter_project(slug)
     cats = set(req.categories)
-    audit_docs = state.load_audit_docs(slug)
-    audit_stages = None if audit_docs is None else set(audit_docs)
-    plan = cleanup_module.plan_cleanup(project, root, cats, audit_stages=audit_stages)
+    plan = cleanup_module.plan_cleanup(project, root, cats, audit_stages=set(state.load_audit_docs(slug)))
     # ``without_unreconstructable`` -- not a local "drop everything
     # unreconstructable" -- because it goes through
     # ``needs_item_opt_in``, which exempts AUDIT_DATA. Audit docs are

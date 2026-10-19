@@ -267,7 +267,7 @@ def _enrich_recent_project(rp: user_config.RecentProject) -> RecentProjectDetail
                 except FileNotFoundError:
                     shooter_names.append(shooter.name or slug)
                     continue
-                statuses = legacy.stage_statuses(shooter_root)
+                statuses = legacy.stage_statuses(audit_docs=legacy.audit_docs_from_disk(shooter_root))
                 audited_total += sum(1 for st in statuses.values() if st == StageStatus.audited)
                 per_shooter.append((slug, statuses))
                 for st_entry in legacy.stages:

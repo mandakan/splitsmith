@@ -13,7 +13,6 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import HTTPException
 from pydantic import BaseModel
 
 from .. import events as events_module
@@ -101,7 +100,7 @@ def build_project_view(state: AppState, slug: str, project: MatchProject) -> dic
     per-video and per-match fields :class:`ProjectView` describes."""
     root = state.shooter_root(slug)
     audit_docs = state.load_audit_docs(slug)
-    statuses = project.stage_statuses(root, audit_docs=audit_docs)
+    statuses = project.stage_statuses(audit_docs=audit_docs)
     payload = project.model_dump(mode="json")
     storage = state.storage
     proxy_keys: set[str] = set()
@@ -114,13 +113,7 @@ def build_project_view(state: AppState, slug: str, project: MatchProject) -> dic
             continue
         status = statuses.get(int(n))
         stage_dict["status"] = status.value if status is not None else None
-        doc = (audit_docs or {}).get(int(n))
-        if doc is None and audit_docs is None:
-            try:
-                doc, _ = state.load_audit(slug, int(n))
-            except HTTPException:
-                doc = None
-        stage_dict["figures"] = stage_figures_payload(doc, project, int(n))
+        stage_dict["figures"] = stage_figures_payload(audit_docs.get(int(n)), project, int(n))
         stage_videos = project.stage(int(n)).videos
         for video_dict, video in zip(stage_dict.get("videos", []), stage_videos, strict=True):
             video_dict["proxy_ready"] = _server._proxy_ready_for(

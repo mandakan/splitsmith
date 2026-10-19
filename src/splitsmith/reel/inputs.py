@@ -153,7 +153,7 @@ def load_reel_inputs(
     chosen camera's trim on its own beep, the primary as the replay angle.
     A stage it cannot serve shows the primary and is named in
     ``camera_fallbacks``."""
-    statuses = project.stage_statuses(root)
+    statuses = project.stage_statuses(audit_docs=project.audit_docs_from_disk(root))
     audit_dir = project.audit_path(root)
     stages: list[TileStageData] = []
     footage: dict[int, StageFootage] = {}
