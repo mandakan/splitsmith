@@ -25,6 +25,8 @@ from typing import Any, Literal
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, ConfigDict
 
+from .context import _hosted_mode_active
+
 logger = logging.getLogger(__name__)
 
 
@@ -95,7 +97,6 @@ def _state(request: Request) -> Any:
 
 def _admin_gate(request: Request) -> None:
     """404 outside hosted mode, 403 unless the caller is an env admin."""
-    from .server import _hosted_mode_active
 
     state = _state(request)
     if not _hosted_mode_active() or state.access_requests is None or state.accounts is None:

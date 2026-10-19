@@ -6,4 +6,7 @@ existing engine modules unchanged.
 Sub-packages:
 - ``project``: Pydantic models for the on-disk match-project layout
 - ``server``: FastAPI app + static asset serving
+- ``context``: the per-request / per-job context variables, the tenant and
+  the hosted-mode switch
+- ``state``: ``AppState`` and what every project loader shares
 """

@@ -49,6 +49,7 @@ from ..youtube.upload import (
     upload_export,
 )
 from . import export_storage
+from .context import current_match_id
 
 if TYPE_CHECKING:
     # Hosted-only: ``splitsmith.db`` pulls sqlalchemy from the ``hosted``
@@ -541,8 +542,6 @@ def run_youtube_upload(
         if match_root is None:
             raise RuntimeError("a match-level upload needs the match root")
         exports_dir = (Path(match_root) / "exports").resolve()
-        # Lazy, as jobs.py does: ``server`` imports this module.
-        from .server import current_match_id
 
         match_id = current_match_id.get()
 
