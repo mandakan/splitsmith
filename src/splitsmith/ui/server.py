@@ -238,6 +238,7 @@ from .auto_sync import (
     write_marks_dirty,
 )
 from .capabilities import (
+    MatchOrigin,
     capabilities_for_origin,
     required_capability,
     share_scope_capabilities,
@@ -1111,10 +1112,10 @@ class WorkerView(BaseModel):
 
     id: str
     name: str
-    kind: str
+    kind: Literal["self_hosted", "railway"]
     enabled: bool
     priority: int
-    status: str  # "online" | "offline" | "pending" | "disabled"
+    status: Literal["online", "offline", "pending", "disabled"]
     registered: bool
     last_seen_at: datetime | None
     last_wake_at: datetime | None
@@ -4129,7 +4130,7 @@ class RecentProjectDetail(BaseModel):
     # filesystem-enricher default (single-operator desktop use); hosted
     # enrichment overrides it from the tenant's ``matches_store`` row so
     # the picker can flag a desktop-synced match as a read-only mirror.
-    origin: str = "local"
+    origin: MatchOrigin = "local"
     # Desktop only: the match has been synced to hosted at least once, so
     # a copy exists there that deleting it here does not touch. The delete
     # confirm says so; hosted and desktop deletes are separate actions.
@@ -4684,7 +4685,7 @@ class LinkStatusEntry(BaseModel):
     name: str
     link_path: str
     current_target: str | None
-    status: str
+    status: Literal["ok", "broken", "missing_link", "not_a_symlink"]
 
 
 class BulkCameraSetItem(BaseModel):

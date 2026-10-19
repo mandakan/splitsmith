@@ -7185,14 +7185,15 @@ export interface components {
              * Capabilities
              * @default []
              */
-            capabilities: string[];
+            capabilities: ("edit" | "review" | "breakdown" | "share_manage" | "comment_write")[];
             /** Confirmed Count */
             confirmed_count: number;
             /**
              * Origin
              * @default local
+             * @enum {string}
              */
-            origin: string;
+            origin: "hosted" | "desktop" | "local";
             /** Pending Count */
             pending_count: number;
             /** Stages */
@@ -7633,8 +7634,11 @@ export interface components {
         CommentAuthorOut: {
             /** Author Code */
             author_code: string;
-            /** Author Kind */
-            author_kind: string;
+            /**
+             * Author Kind
+             * @enum {string}
+             */
+            author_kind: "handle" | "account";
             /** Comment Count */
             comment_count: number;
             /**
@@ -7692,8 +7696,11 @@ export interface components {
             author_code: string;
             /** Author Handle */
             author_handle: string;
-            /** Author Kind */
-            author_kind: string;
+            /**
+             * Author Kind
+             * @enum {string}
+             */
+            author_kind: "handle" | "account";
             /** Body */
             body: string;
             /**
@@ -9344,8 +9351,11 @@ export interface components {
             link_path: string;
             /** Name */
             name: string;
-            /** Status */
-            status: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "ok" | "broken" | "missing_link" | "not_a_symlink";
             /** Video Id */
             video_id: string;
         };
@@ -10713,7 +10723,7 @@ export interface components {
              * Capabilities
              * @default []
              */
-            capabilities: string[];
+            capabilities: ("edit" | "review" | "breakdown" | "share_manage" | "comment_write")[];
             /** Match Name */
             match_name: string;
             /** Match Root */
@@ -10721,8 +10731,9 @@ export interface components {
             /**
              * Origin
              * @default local
+             * @enum {string}
              */
-            origin: string;
+            origin: "hosted" | "desktop" | "local";
             /** Shooters */
             shooters: components["schemas"]["ShooterListEntry"][];
         };
@@ -11971,8 +11982,11 @@ export interface components {
             info: {
                 [key: string]: unknown;
             } | null;
-            /** Kind */
-            kind: string;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "self_hosted" | "railway";
             /** Last Seen At */
             last_seen_at: string | null;
             /** Last Wake At */
@@ -11983,8 +11997,11 @@ export interface components {
             priority: number;
             /** Registered */
             registered: boolean;
-            /** Status */
-            status: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "online" | "offline" | "pending" | "disabled";
             /** Version */
             version: string | null;
         };

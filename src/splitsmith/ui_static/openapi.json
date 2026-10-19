@@ -865,6 +865,13 @@
      "capabilities": {
       "default": [],
       "items": {
+       "enum": [
+        "edit",
+        "review",
+        "breakdown",
+        "share_manage",
+        "comment_write"
+       ],
        "type": "string"
       },
       "title": "Capabilities",
@@ -876,6 +883,11 @@
      },
      "origin": {
       "default": "local",
+      "enum": [
+       "hosted",
+       "desktop",
+       "local"
+      ],
       "title": "Origin",
       "type": "string"
      },
@@ -1861,6 +1873,10 @@
       "type": "string"
      },
      "author_kind": {
+      "enum": [
+       "handle",
+       "account"
+      ],
       "title": "Author Kind",
       "type": "string"
      },
@@ -1964,6 +1980,10 @@
       "type": "string"
      },
      "author_kind": {
+      "enum": [
+       "handle",
+       "account"
+      ],
       "title": "Author Kind",
       "type": "string"
      },
@@ -5325,6 +5345,12 @@
       "type": "string"
      },
      "status": {
+      "enum": [
+       "ok",
+       "broken",
+       "missing_link",
+       "not_a_symlink"
+      ],
       "title": "Status",
       "type": "string"
      },
@@ -8219,6 +8245,13 @@
      "capabilities": {
       "default": [],
       "items": {
+       "enum": [
+        "edit",
+        "review",
+        "breakdown",
+        "share_manage",
+        "comment_write"
+       ],
        "type": "string"
       },
       "title": "Capabilities",
@@ -8234,6 +8267,11 @@
      },
      "origin": {
       "default": "local",
+      "enum": [
+       "hosted",
+       "desktop",
+       "local"
+      ],
       "title": "Origin",
       "type": "string"
      },
@@ -10998,6 +11036,10 @@
       "title": "Info"
      },
      "kind": {
+      "enum": [
+       "self_hosted",
+       "railway"
+      ],
       "title": "Kind",
       "type": "string"
      },
@@ -11038,6 +11080,12 @@
       "type": "boolean"
      },
      "status": {
+      "enum": [
+       "online",
+       "offline",
+       "pending",
+       "disabled"
+      ],
       "title": "Status",
       "type": "string"
      },

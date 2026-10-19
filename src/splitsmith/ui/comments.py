@@ -114,7 +114,7 @@ class CommentOut(BaseModel):
     anchor_t: float
     anchor_kind: str
     anchor_shot_id: str | None
-    author_kind: str
+    author_kind: Literal["handle", "account"]
     author_handle: str
     author_code: str
     body: str
@@ -161,7 +161,7 @@ class CommentAuthorOut(BaseModel):
     shows two names here under one code."""
 
     author_code: str
-    author_kind: str
+    author_kind: Literal["handle", "account"]
     first_comment_at: datetime
     comment_count: int
     handles: list[str]
