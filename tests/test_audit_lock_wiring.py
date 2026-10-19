@@ -109,21 +109,22 @@ def test_the_audit_put_compares_and_saves_under_the_lock(tmp_path: Path, monkeyp
     assert saves == [True]
 
 
-def test_the_remerge_save_reloads_and_saves_under_the_lock(tmp_path: Path, monkeypatch) -> None:
+def test_the_remerge_save_merges_under_the_lock(tmp_path: Path, monkeypatch) -> None:
+    """The storage port runs the merge inside the read-modify-write it
+    guards with ``state.audit_lock``, the same object the sync pull holds."""
     client, project_root = _seed_match_export_project(tmp_path, stage_count=1)
     state = client.app.state.splitsmith_state
-    _, loads, saves = _probe_saves(state, monkeypatch)
+    probe = _ProbeLock()
+    monkeypatch.setattr(state, "audit_lock", probe)
+    held: list[bool] = []
+
+    def merge(d: dict) -> dict:
+        held.append(probe.held())
+        return {**d, "probe": True}
+
     with _match_context(project_root):
-        server_mod._save_audit_with_remerge(
-            state,
-            "me",
-            1,
-            doc={},
-            version=0,
-            merge=lambda d: {**d, "probe": True},
-            default=dict,
-        )
-    assert loads == [True] and saves == [True]
+        server_mod._save_audit_with_remerge(state, "me", 1, merge=merge, default=dict)
+    assert held == [True]
     on_disk = json.loads((project_root / "shooters" / "me" / "audit" / "stage1.json").read_text())
     assert on_disk["probe"] is True
 

@@ -48,9 +48,7 @@ def test_remerge_on_desktop_keeps_an_edit_saved_after_the_caller_loaded(tmp_path
             doc.setdefault("audit_events", []).append({"kind": "shot_detect_run"})
             return doc
 
-        server_mod._save_audit_with_remerge(
-            state, "me", 1, doc=stale, version=version, merge=merge, default=lambda: {"shots": []}
-        )
+        server_mod._save_audit_with_remerge(state, "me", 1, merge=merge, default=lambda: {"shots": []})
         saved, _ = state.load_audit("me", 1)
 
     assert saved["shots"] == [{"shot_number": 1, "time": 1.23, "source": "manual"}]

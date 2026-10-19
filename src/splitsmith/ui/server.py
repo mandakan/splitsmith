@@ -528,37 +528,7 @@ def _configure_app_logging(stream: Any | None = None) -> None:
         pkg_logger.setLevel(logging.INFO)
 
 
-def _state_conflict_excs() -> tuple[type[BaseException], ...]:
-    """Resolve the optimistic-lock conflict type for the audit re-merge
-    retry, lazily so ``import splitsmith.ui.server`` never pulls the hosted
-    db deps (local-mode invariant; guarded by
-    ``test_local_mode_no_hosted_imports``). Empty tuple on a slim local
-    install without the db extras -- ``except ():`` then catches nothing,
-    which is correct: local file saves never raise a conflict."""
-    try:
-        from ..db import StateConflictError
-
-        return (StateConflictError,)
-    except Exception:  # pragma: no cover - slim local install without db extras
-        return ()
-
-
-# How many times the worker re-loads + re-merges a stage's audit doc when a
-# concurrent writer wins the optimistic-lock race before its save. Small:
-# real contention is a manual SPA edit landing while shot_detect runs, not a
-# thundering herd. Exhausting it re-raises -> the job fails loudly.
-_AUDIT_SAVE_MAX_ATTEMPTS = 4
-
-# How far before its clip a secondary camera's beep may sit: one that started
-# recording during the beep, whose tone is well under a second (2026-10-15).
 BEEP_BEFORE_CLIP_MAX_S = 2.0
-
-
-# How many times ``_record_export_run`` re-loads + re-appends when a
-# concurrent export job wins the version race. Batch export runs several
-# stages at once against one document, so contention is the normal case,
-# not the exotic one.
-_EXPORT_RUN_SAVE_MAX_ATTEMPTS = 4
 
 
 # The engine's ``StageData`` requires a non-None ``scorecard_updated_at``
@@ -682,103 +652,71 @@ def _record_reconcile_outcome(state: AppState, job: Job) -> None:
         update_auto_prefs(match_root, lambda p: p.reconcile_failures.pop(step.key, None))
 
 
+def _state_conflict_excs() -> tuple[type[BaseException], ...]:
+    """Resolve the optimistic-lock conflict type for the audit re-merge
+    retry, lazily so ``import splitsmith.ui.server`` never pulls the hosted
+    db deps (local-mode invariant; guarded by
+    ``test_local_mode_no_hosted_imports``). Empty tuple on a slim local
+    install without the db extras -- ``except ():`` then catches nothing,
+    which is correct: local file saves never raise a conflict."""
+    try:
+        from ..db import StateConflictError
+
+        return (StateConflictError,)
+    except Exception:  # pragma: no cover - slim local install without db extras
+        return ()
+
+
+# How many times the worker re-loads + re-merges a stage's audit doc when a
+# concurrent writer wins the optimistic-lock race before its save. Small:
+# real contention is a manual SPA edit landing while shot_detect runs, not a
+# thundering herd. Exhausting it re-raises -> the job fails loudly.
 def _save_audit_with_remerge(
     state: AppState,
     slug: str,
     stage_number: int,
     *,
-    doc: dict,
-    version: int,
     merge: Callable[[dict], dict],
     default: Callable[[], dict],
 ) -> int:
-    """Save an audit doc under optimistic locking with a bounded re-merge.
+    """Fold ``merge`` into a stage's audit doc through the storage port and
+    return the new version.
 
-    ``merge`` folds the caller's results into a doc; the first attempt
-    applies it to ``doc`` (loaded at ``version``). If the hosted save loses
-    the version race (a concurrent writer bumped it), re-load the winner's
-    doc and re-apply ``merge`` to *that* -- so the concurrent edit survives
-    instead of being clobbered -- then save again. ``default`` rebuilds a
-    fresh doc if the row vanished between attempts. Returns the new version.
-
-    Desktop has no version to lose (#931): the file accessors report and
-    ignore 0, so the retry below could never fire and a manual edit saved
-    while detection ran was overwritten by ``merge`` of the stale ``doc``.
-    There, re-load the doc from disk under :attr:`AppState.audit_lock` and
-    merge onto that -- the same "merge onto the winner" the hosted retry
-    does, with the lock standing in for the version check. ``doc`` is not
-    used on that path; ``merge`` is written to be re-applied to a freshly
-    loaded doc, which is what makes the substitution safe.
+    ``merge`` is a pure function from the current doc to the wanted one and
+    may run more than once: locally the port applies it under the audit
+    lock to the doc as it is on disk (so a manual edit saved while a job ran
+    survives, #931); hosted it saves under the optimistic version and, when
+    a concurrent writer won, reloads the winner's doc and re-applies
+    ``merge`` to that. ``default`` builds a fresh doc when none exists.
     """
-    if state.audit_doc_target() is None:
-        with state.audit_lock:
-            current, _ = state.load_audit(slug, stage_number)
-            return state.save_audit(
-                slug, stage_number, merge(current if current is not None else default()), version=0
-            )
-    conflict_excs = _state_conflict_excs()
-    for attempt in range(_AUDIT_SAVE_MAX_ATTEMPTS):
-        try:
-            return state.save_audit(slug, stage_number, merge(doc), version=version)
-        except conflict_excs:
-            if attempt + 1 >= _AUDIT_SAVE_MAX_ATTEMPTS:
-                raise  # bounded retries exhausted -> fail the job loudly
-            reloaded, version = state.load_audit(slug, stage_number)
-            doc = reloaded if reloaded is not None else default()
-    raise AssertionError("unreachable: loop returns or raises")  # pragma: no cover
+    return state.docstore().update_audit(slug, stage_number, merge, default)
 
 
 def _record_export_run(state: AppState, slug: str, run: export_runs.ExportRun) -> None:
     """Append one run to the shooter's export history. Never raises.
 
-    Hosted: re-loads and re-appends on an optimistic-lock conflict rather
-    than retrying the same write -- a conflict means a concurrent export
-    job's run landed first, and re-appending onto the winner's doc keeps
-    both. Blind overwrite would silently drop a run.
-
-    Desktop: there is no version to lose a race on -- the file accessors
-    report and ignore version 0 -- so the whole load/append/save runs
-    under :attr:`AppState.export_run_lock`. Without it the read-modify-
-    write is simply unprotected, and it loses runs in practice: the
-    Export page's bundle button submits one job per selected stage and
-    the job registry runs two at a time against one document. The lock is
-    process-local; see its definition for why that is enough and what it
-    does not cover.
-
-    Every other failure -- store unavailable, disk full, retries exhausted
-    -- logs at WARNING and returns. The deliverables are the product and
-    they are already written by the time this is called; failing the job
-    over bookkeeping would report a successful export as broken.
+    The storage port does the read-modify-write: under
+    :attr:`AppState.export_run_lock` on the desktop (the Export page's
+    bundle button submits one job per stage against one document, and an
+    unlocked read-modify-write lost runs in practice), under an optimistic
+    version with a re-merge onto the winner's log when hosted. Every
+    failure, a store that is down, a disk that is full, a log from a newer
+    build, retries exhausted, logs at WARNING and returns: the deliverables
+    are the product and they are already written by the time this runs;
+    failing the job over bookkeeping would report a successful export as
+    broken.
     """
-    guard: AbstractContextManager[object] = (
-        nullcontext() if state.export_runs_doc_target() is not None else state.export_run_lock
-    )
-    conflict_excs = _state_conflict_excs()
-    with guard:
-        for _attempt in range(_EXPORT_RUN_SAVE_MAX_ATTEMPTS):
-            try:
-                doc, version = state.load_export_runs(slug)
-                state.save_export_runs(slug, export_runs.append_run(doc, run), version=version)
-                return
-            except conflict_excs:
-                continue
-            except export_runs.NewerLogError as exc:
-                logger.warning(
-                    "export run record: run %s not written for %s, the log is from a newer build: %s",
-                    run.run_id,
-                    slug,
-                    exc,
-                )
-                return
-            except Exception as exc:  # noqa: BLE001 -- see docstring
-                logger.warning("export run record: not written for %s: %s", slug, exc)
-                return
-    logger.warning(
-        "export run record: lost %d version races for %s; run %s not recorded",
-        _EXPORT_RUN_SAVE_MAX_ATTEMPTS,
-        slug,
-        run.run_id,
-    )
+    try:
+        state.docstore().update_export_runs(slug, lambda doc: export_runs.append_run(doc, run))
+    except export_runs.NewerLogError as exc:
+        logger.warning(
+            "export run record: run %s not written for %s, the log is from a newer build: %s",
+            run.run_id,
+            slug,
+            exc,
+        )
+    except Exception as exc:  # noqa: BLE001 -- see docstring
+        logger.warning("export run record: not written for %s: %s", slug, exc)
 
 
 UI_SOURCE_DIR = Path(__file__).parent.parent / "ui_static"
@@ -3076,8 +3014,6 @@ def register_job_bodies(state: AppState) -> None:
                 state,
                 slug,
                 stage_number,
-                doc=existing_json,
-                version=audit_version,
                 merge=_merge_detection_into,
                 default=_default_audit_doc,
             )
