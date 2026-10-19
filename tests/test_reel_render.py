@@ -5,8 +5,8 @@ import pytest
 
 from splitsmith.composition import SequenceFormat
 from splitsmith.config import VideoMetadata
-from splitsmith.reel_plan import FrameRef, ReelCard, ReelClip
-from splitsmith.reel_render import (
+from splitsmith.reel.plan import FrameRef, ReelCard, ReelClip
+from splitsmith.reel.render import (
     SFX_STEMS,
     SfxCue,
     card_command,
@@ -169,7 +169,7 @@ def test_render_reel_encodes_every_item_then_stitches(tmp_path, monkeypatch):
             out.write_bytes(b"x")
         return subprocess.CompletedProcess(cmd, 0, "", "")
 
-    monkeypatch.setattr("splitsmith.reel_render._has_audio_stream", lambda p: True)
+    monkeypatch.setattr("splitsmith.reel.render._has_audio_stream", lambda p: True)
     items = (
         ReelCard("001_title", "title", 1.6, "Bromma", lines=("Anna",), sfx=("braam",)),
         ReelClip("002_beat", Path("/m/a.mp4"), 7.4, 1.2),
@@ -215,7 +215,7 @@ def test_a_reused_work_dir_never_serves_a_stale_card_clip(tmp_path, monkeypatch)
 
     written: list[Path] = []
     monkeypatch.setattr(
-        "splitsmith.reel_render.write_motion_clip", lambda frames, *, out, **kw: written.append(out)
+        "splitsmith.reel.render.write_motion_clip", lambda frames, *, out, **kw: written.append(out)
     )
     work = tmp_path / "w"
     work.mkdir()
@@ -245,7 +245,7 @@ def test_a_failed_render_never_leaves_a_file_under_the_reels_name(tmp_path, monk
             raise subprocess.CalledProcessError(1, cmd, "", "mix failed")
         return subprocess.CompletedProcess(cmd, 0, "", "")
 
-    monkeypatch.setattr("splitsmith.reel_render._has_audio_stream", lambda p: True)
+    monkeypatch.setattr("splitsmith.reel.render._has_audio_stream", lambda p: True)
     output = tmp_path / "out" / "bromma-highlights.mp4"
     output.parent.mkdir()
     output.write_bytes(b"the previous reel")
@@ -274,7 +274,7 @@ def test_a_failed_frame_grab_holds_the_callout_on_black(tmp_path, monkeypatch):
             out.write_bytes(b"x")
         return subprocess.CompletedProcess(cmd, 0, "", "")
 
-    monkeypatch.setattr("splitsmith.reel_render._has_audio_stream", lambda p: True)
+    monkeypatch.setattr("splitsmith.reel.render._has_audio_stream", lambda p: True)
     card = ReelCard("001_callout", "callout", 1.2, "FASTEST SPLIT", backdrop=FrameRef(Path("/m/a.mp4"), 99.0))
     result = render_reel(
         (card,),

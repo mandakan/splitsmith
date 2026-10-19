@@ -3,7 +3,7 @@ from pathlib import Path
 
 from splitsmith.config import VideoMetadata
 from splitsmith.match_project import MatchProject, StageEntry, StageVideo
-from splitsmith.reel_inputs import load_reel_inputs
+from splitsmith.reel.inputs import load_reel_inputs
 
 META = VideoMetadata(width=1920, height=1080, duration_seconds=30.0, frame_rate_num=30, frame_rate_den=1)
 
@@ -69,7 +69,7 @@ def test_loads_ready_stages_with_footage_and_reports_the_rest(tmp_path, monkeypa
 
 
 def _render_spy(calls: list):
-    from splitsmith.reel_render import ReelRenderResult
+    from splitsmith.reel.render import ReelRenderResult
 
     def render(items, *, sequence, output_path, work_dir, **kw):
         calls.append((items, sequence))
@@ -79,7 +79,7 @@ def _render_spy(calls: list):
 
 
 def test_a_locked_match_names_its_blockers_and_renders_nothing(tmp_path, monkeypatch):
-    from splitsmith import reel_inputs
+    from splitsmith.reel import inputs as reel_inputs
 
     project, root = _project(tmp_path)
     monkeypatch.setattr(MatchProject, "stage_statuses", lambda self, root, **kw: {1: "audited", 2: "audited"})
@@ -93,7 +93,7 @@ def test_a_locked_match_names_its_blockers_and_renders_nothing(tmp_path, monkeyp
 
 
 def test_force_renders_the_ready_stages_upright_or_landscape(tmp_path, monkeypatch):
-    from splitsmith import reel_inputs
+    from splitsmith.reel import inputs as reel_inputs
 
     project, root = _project(tmp_path)
     monkeypatch.setattr(MatchProject, "stage_statuses", lambda self, root, **kw: {1: "audited", 2: "audited"})
@@ -118,7 +118,7 @@ def test_force_renders_the_ready_stages_upright_or_landscape(tmp_path, monkeypat
 
 
 def test_the_chosen_moments_and_the_shorts_cut_reach_the_plan(tmp_path, monkeypatch):
-    from splitsmith import reel_inputs
+    from splitsmith.reel import inputs as reel_inputs
 
     project, root = _project(tmp_path)
     monkeypatch.setattr(MatchProject, "stage_statuses", lambda self, root, **kw: {1: "audited", 2: "audited"})
@@ -157,7 +157,7 @@ def test_a_done_stage_whose_trim_is_missing_blocks(tmp_path, monkeypatch):
 
 
 def test_an_untouched_stage_blocks_the_reel(tmp_path, monkeypatch):
-    from splitsmith import reel_inputs
+    from splitsmith.reel import inputs as reel_inputs
 
     project, root = _project(tmp_path)
     project.stage(2).primary().beep_time = None
@@ -251,7 +251,7 @@ def test_a_stage_the_camera_cannot_serve_shows_the_primary_and_says_so(tmp_path,
 
 
 def test_make_reel_takes_the_camera_and_reports_its_fallbacks(tmp_path, monkeypatch):
-    from splitsmith import reel_inputs
+    from splitsmith.reel import inputs as reel_inputs
 
     project, root = _project(tmp_path)
     project.stage(1).videos[1].camera_mount = "head"

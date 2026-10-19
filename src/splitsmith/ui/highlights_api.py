@@ -33,8 +33,8 @@ from ..highlights import (
     readiness_for_project,
     reel_unlocked,
 )
-from ..reel_inputs import make_reel
-from ..reel_plan import MOMENT_LABELS
+from ..reel.inputs import make_reel
+from ..reel.plan import MOMENT_LABELS
 from ..runtime import runtime
 from . import audio, export_storage, match_exports
 from .access_gate import require_feature

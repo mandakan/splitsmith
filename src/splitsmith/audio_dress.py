@@ -30,7 +30,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
 from .looks import sounds_folder_has_files
-from .reel_render import AUDIO_NORMALIZE
+from .reel.render import AUDIO_NORMALIZE
 from .render_timeline import TimelineEntry, read_timeline, timeline_path
 
 #: The spine kinds a cue can name (``mp4_render.ItemKind``).

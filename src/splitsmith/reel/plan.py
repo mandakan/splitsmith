@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
-from .highlights import Moment, MomentKind, ReelPicks
+from ..highlights import Moment, MomentKind, ReelPicks
 
 #: ``beep`` is the timer's tone, drawn in its card's own audio; every other
 #: kind is a shipped stem (``data/sfx``) the renderer lays over the stitched

@@ -3,7 +3,7 @@ from pathlib import Path
 import pytest
 
 from splitsmith.highlights import Moment, ReelPicks
-from splitsmith.reel_plan import (
+from splitsmith.reel.plan import (
     FootageClip,
     ReelCard,
     ReelClip,
@@ -134,7 +134,7 @@ def test_figure_text():
 
 def test_every_kind_has_a_card_label():
     from splitsmith.highlights import MOMENT_KINDS
-    from splitsmith.reel_plan import MOMENT_LABELS
+    from splitsmith.reel.plan import MOMENT_LABELS
 
     assert set(MOMENT_LABELS) == set(MOMENT_KINDS)
     assert MOMENT_LABELS["thinker"] == "THE THINKER"

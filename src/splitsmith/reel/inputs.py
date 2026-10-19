@@ -17,13 +17,13 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from .camera_select import CameraResolutionError, resolve_camera
-from .coach import statistic_splits
-from .config import HighlightConfig, MomentKind, VideoMetadata
-from .export_naming import stage_display_name
-from .fcpxml_gen import probe_video
-from .grade import ResolvedGrade
-from .highlights import (
+from ..camera_select import CameraResolutionError, resolve_camera
+from ..coach import statistic_splits
+from ..config import HighlightConfig, MomentKind, VideoMetadata
+from ..export_naming import stage_display_name
+from ..fcpxml_gen import probe_video
+from ..grade import ResolvedGrade
+from ..highlights import (
     OUT_OF_PLAY,
     StageReadiness,
     find_moments,
@@ -31,14 +31,14 @@ from .highlights import (
     reel_unlocked,
     stage_readiness,
 )
-from .match_model import is_standard_start
-from .match_project import MatchProject, StageEntry, StageVideo
-from .reel_plan import FootageClip, StageFootage, plan_reel
-from .reel_render import ReelRenderResult, reel_format, render_reel
-from .segment_cache import SegmentCache
-from .stage_summary_data import TileStageData, load_stage_events, load_stage_reloads, load_stage_shots
-from .trim import beep_in_trim, web_trim_path
-from .ui.audio import resolve_trim_for_read, trim_params_path, trim_pre_buffer_seconds_for
+from ..match_model import is_standard_start
+from ..match_project import MatchProject, StageEntry, StageVideo
+from ..segment_cache import SegmentCache
+from ..stage_summary_data import TileStageData, load_stage_events, load_stage_reloads, load_stage_shots
+from ..trim import beep_in_trim, web_trim_path
+from ..ui.audio import resolve_trim_for_read, trim_params_path, trim_pre_buffer_seconds_for
+from .plan import FootageClip, StageFootage, plan_reel
+from .render import ReelRenderResult, reel_format, render_reel
 
 logger = logging.getLogger(__name__)
 

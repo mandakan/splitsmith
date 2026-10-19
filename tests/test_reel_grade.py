@@ -9,8 +9,8 @@ from typing import Any
 
 from splitsmith import grade
 from splitsmith.grade import Lut, ResolvedGrade
-from splitsmith.reel_plan import FrameRef, ReelCard, ReelClip
-from splitsmith.reel_render import clip_command, frame_command, render_reel
+from splitsmith.reel.plan import FrameRef, ReelCard, ReelClip
+from splitsmith.reel.render import clip_command, frame_command, render_reel
 
 from .test_reel_render import UP, _FakeRaster
 
@@ -50,7 +50,7 @@ def test_a_graded_reel_grades_its_clips_and_backdrops_never_its_cards(tmp_path: 
             out.write_bytes(b"x")
         return subprocess.CompletedProcess(cmd, 0, "", "")
 
-    monkeypatch.setattr("splitsmith.reel_render._has_audio_stream", lambda p: True)
+    monkeypatch.setattr("splitsmith.reel.render._has_audio_stream", lambda p: True)
     items = (
         ReelCard("001_title", "title", 1.6, "Bromma", lines=("Anna",)),
         ReelClip("002_beat", Path("/m/a.mp4"), 7.4, 1.2),
@@ -86,7 +86,7 @@ def test_the_highlights_command_takes_a_grade(tmp_path: Path, monkeypatch) -> No
         seen.append(kwargs.get("grade"))
         raise SystemExit(0)
 
-    monkeypatch.setattr("splitsmith.reel_inputs.make_reel", fake_make_reel)
+    monkeypatch.setattr("splitsmith.reel.inputs.make_reel", fake_make_reel)
     root = _seed(tmp_path)
     args = ["match", "highlights", str(root), "--shooter", "me", "-o", str(tmp_path / "r.mp4")]
     CliRunner().invoke(app, [*args, "--grade", "preset:teal-orange", "--grade-strength", "0.8"])
@@ -112,7 +112,7 @@ def test_the_highlights_command_takes_a_camera_and_follows_the_saved_one(tmp_pat
         seen.append(kwargs.get("camera"))
         raise SystemExit(0)
 
-    monkeypatch.setattr("splitsmith.reel_inputs.make_reel", fake_make_reel)
+    monkeypatch.setattr("splitsmith.reel.inputs.make_reel", fake_make_reel)
     root = _seed(tmp_path)
     args = ["match", "highlights", str(root), "--shooter", "me", "-o", str(tmp_path / "r.mp4")]
     CliRunner().invoke(app, args)
