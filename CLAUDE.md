@@ -322,6 +322,14 @@ Rules in `.claude/rules/`, loaded with the files they cover:
   spectrum filter and the tone offset.
 - `breakdown-ui.md` -- Breakdown and Coach, the timeline band.
 
+**The SPA's wire types are generated.** `scripts/export_openapi.py` writes
+`ui_static/openapi.json` from the routes (`tests/test_openapi_export.py`
+fails when it is stale) and `pnpm gen:api` turns it into
+`lib/api/types.gen.ts` (the SPA CI job fails when that is stale). A type in
+`lib/api.ts` that agrees with its schema is an alias into `Schema[...]`;
+a new response model gets an alias, not a hand-written twin. After a
+route or model change: run the export, then `pnpm gen:api`, commit both.
+
 Three UI rules reach `ui/server.py`, which is too broad to scope:
 `_after_beep_reviewed` is the one place a beep confirm chains trim and
 detection; both recent-project enrichers derive `next_step` through

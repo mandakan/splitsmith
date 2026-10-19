@@ -4034,6 +4034,20 @@ class PromoteSecondaryBody(BaseModel):
     overwrite: bool = False
 
 
+class PromoteFromAnchorBody(BaseModel):
+    anchor_path: str
+    secondary_wav_path: str
+    slug: str
+    camera_id: str
+    mount: str
+    position: str
+    audio_source: str = "internal"
+    agc_state: str = "unknown"
+    snap_window_ms: float = 60.0
+    min_spacing_ms: float = 80.0
+    overwrite: bool = False
+
+
 class PromoteAgainstFixtureBody(BaseModel):
     """Body for ``/api/lab/projects/.../promote-against-fixture`` (issue #149 follow-up).
 
@@ -10190,23 +10204,8 @@ def create_app(
             job = await state.jobs.submit(kind="rebuild_calibration")
             return JSONResponse(job.model_dump(mode="json"))
 
-        # ------------------------------------------------------------------
-        # Promote-from-anchor (issue #125)
-        # ------------------------------------------------------------------
-
-        class PromoteFromAnchorBody(BaseModel):
-            anchor_path: str
-            secondary_wav_path: str
-            slug: str
-            camera_id: str
-            mount: str
-            position: str
-            audio_source: str = "internal"
-            agc_state: str = "unknown"
-            snap_window_ms: float = 60.0
-            min_spacing_ms: float = 80.0
-            overwrite: bool = False
-
+        # Promote-from-anchor (issue #125); the body model is module-level so the
+        # OpenAPI document can resolve it (a class inside this function cannot be).
         @app.post("/api/lab/promote-from-anchor")
         async def lab_promote_from_anchor(body: PromoteFromAnchorBody) -> JSONResponse:
             """Submit a promote-from-anchor job (issue #125).

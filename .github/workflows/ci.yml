@@ -269,6 +269,15 @@ jobs:
         working-directory: src/splitsmith/ui_static
         run: pnpm install --frozen-lockfile
 
+      - name: Generated API types are current
+        # src/lib/api/types.gen.ts is openapi-typescript over openapi.json, which
+        # scripts/export_openapi.py writes from the routes. A stale file here means
+        # someone changed the server and did not run gen:api.
+        working-directory: src/splitsmith/ui_static
+        run: |
+          pnpm gen:api
+          git diff --exit-code -- src/lib/api/types.gen.ts
+
       - name: Typecheck
         working-directory: src/splitsmith/ui_static
         run: pnpm typecheck
@@ -414,8 +423,9 @@ jobs:
           # The Python suite is skipped only when every change is inside the
           # SPA, less lookGallery.ts (tests/test_render_look_thumbnails.py
           # reads it). desktop/ counts as Python: tests read its scripts.
+          # openapi.json too: tests/test_openapi_export.py checks it against the routes.
           if echo "$changed" | grep -Ev '^src/splitsmith/ui_static/' | grep -q . \
-             || echo "$changed" | grep -Eq '^src/splitsmith/ui_static/src/lib/lookGallery\.ts$'; then
+             || echo "$changed" | grep -Eq '^src/splitsmith/ui_static/(src/lib/lookGallery\.ts|openapi\.json)$'; then
             echo "python=true" >> "$GITHUB_OUTPUT"
           else
             echo "python=false" >> "$GITHUB_OUTPUT"

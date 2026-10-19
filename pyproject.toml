@@ -170,6 +170,7 @@ exclude = [
   "**/ui_static/tsconfig*.json",
   "**/ui_static/index.html",
   "**/ui_static/.gitignore",
+  "**/ui_static/openapi.json",
   "**/ui_static/dist/**/*.map",
 ]
 
