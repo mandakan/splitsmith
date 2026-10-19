@@ -7,8 +7,8 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from splitsmith.beep_calibration import load_manifest
-from splitsmith.beep_detect import _candidate_runs, _learned_scores, detect_beep, load_audio
+from splitsmith.beep.calibration import load_manifest
+from splitsmith.beep.detect import _candidate_runs, _learned_scores, detect_beep, load_audio
 from splitsmith.config import BeepDetectConfig, BeepRankerConfig
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures"
@@ -99,7 +99,7 @@ def test_runtime_scores_equal_sklearn_and_the_trainers_rules() -> None:
     from sklearn.pipeline import make_pipeline
     from sklearn.preprocessing import StandardScaler
 
-    from splitsmith.beep_features import feature_vector
+    from splitsmith.beep.features import feature_vector
 
     path = Path(__file__).resolve().parent.parent / "scripts" / "train_beep_ranker.py"
     spec = importlib.util.spec_from_file_location("train_beep_ranker", path)

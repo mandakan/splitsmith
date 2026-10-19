@@ -9,8 +9,8 @@ from pathlib import Path
 
 import pytest
 
-from splitsmith.beep_cross import MIN_CONTRAST, place_beep
-from splitsmith.beep_detect import load_audio
+from splitsmith.beep.cross import MIN_CONTRAST, place_beep
+from splitsmith.beep.detect import load_audio
 
 FIXTURES = Path(__file__).parent / "fixtures"
 GOPRO = "stage-shots-hfo-masters-2026-stage3-s97dcec94-go3s"

@@ -9,7 +9,7 @@ from unittest.mock import patch
 
 import pytest
 
-from splitsmith.beep_detect import BeepNotFoundError
+from splitsmith.beep.detect import BeepNotFoundError
 from splitsmith.config import BeepCandidate, BeepDetection
 from splitsmith.events import SEED_VERSION
 from splitsmith.match_project import (

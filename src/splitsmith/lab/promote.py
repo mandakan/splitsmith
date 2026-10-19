@@ -34,7 +34,7 @@ from typing import Any
 
 import numpy as np
 
-from ..beep_detect import load_audio
+from ..beep.detect import load_audio
 from ..cross_align import CrossAlignResult, align_secondary_to_primary
 from ..ensemble.api import EnsembleResult, detect_shots_ensemble, load_ensemble_runtime
 from ..fixture_schema import (

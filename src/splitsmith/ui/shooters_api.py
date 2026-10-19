@@ -28,7 +28,7 @@ from starlette.concurrency import run_in_threadpool
 
 from .. import automation as automation_settings
 from .. import backup as backup_mod
-from .. import beep_windows, camera_select, match_model, video_probe
+from .. import camera_select, match_model, video_probe
 from .. import cleanup as cleanup_module
 from .. import coach as coach_module
 from .. import coach_distributions as coach_distributions_module
@@ -40,6 +40,7 @@ from .. import waveform as waveform_helpers
 from ..async_bridge import run_sync
 from ..audit_data import audit_shots_to_engine_shots
 from ..auth import User
+from ..beep import windows as beep_windows
 from ..coach import statistic_splits
 from ..config import BeepWindowConfig
 from ..fingerprint import clip_fingerprint

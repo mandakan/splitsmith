@@ -10,7 +10,7 @@ paths:
   - "src/splitsmith/ui_static/src/components/StageTimeSection.tsx"
   - "src/splitsmith/ui_static/src/components/BeepSection.tsx"
   - "src/splitsmith/ui_static/src/lib/overview*.ts"
-  - "src/splitsmith/beep_tone.py"
+  - "src/splitsmith/beep/tone.py"
   - "src/splitsmith/ui/beep_tone_check.py"
   - "scripts/measure_beep_tones.py"
 ---

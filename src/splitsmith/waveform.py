@@ -25,7 +25,7 @@ from pathlib import Path
 import numpy as np
 from pydantic import BaseModel, Field
 
-from . import beep_detect
+from .beep import detect as beep_detect
 
 
 class PeaksResult(BaseModel):
@@ -179,7 +179,7 @@ def ensure_peaks_window(
     lo = min(n, max(0, int(round(start * sr))))
     hi = min(n, max(lo, int(round(end * sr))))
     if band is not None:
-        from .beep_tone import band_pass
+        from .beep.tone import band_pass
 
         # Filter a little beyond the window so its edges carry no filter ramp.
         pad = int(0.05 * sr)

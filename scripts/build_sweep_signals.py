@@ -68,7 +68,7 @@ from build_ensemble_artifacts import (  # type: ignore[import-not-found]
     WRONG_CLIP_FIXTURES,
 )
 
-from splitsmith.beep_detect import load_audio
+from splitsmith.beep.detect import load_audio
 from splitsmith.config import ShotDetectConfig
 from splitsmith.ensemble import features as feat
 from splitsmith.ensemble import visual as vis

@@ -8,7 +8,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from splitsmith.beep_detect import load_audio
+from splitsmith.beep.detect import load_audio
 from splitsmith.config import ShotDetectConfig
 from splitsmith.shot_detect import _hf_lf_ratio, detect_shots
 

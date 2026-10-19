@@ -31,7 +31,8 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
-from .. import beep_detect, derived
+from .. import derived
+from ..beep import detect as beep_detect
 from ..config import BeepDetectConfig, BeepDetection
 from ..match_project import MatchProject, StageVideo
 from ..media_check import valid_mp4, valid_mp4_cached

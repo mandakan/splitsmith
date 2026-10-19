@@ -19,7 +19,7 @@ import argparse
 import json
 from pathlib import Path
 
-from splitsmith.beep_detect import load_audio
+from splitsmith.beep.detect import load_audio
 from splitsmith.config import ShotDetectConfig
 from splitsmith.ensemble.fixtures import fixture_stems
 from splitsmith.shot_detect import detect_shots

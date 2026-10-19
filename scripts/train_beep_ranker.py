@@ -28,9 +28,9 @@ from typing import Any
 
 import numpy as np
 
-from splitsmith.beep_calibration import BeepFixtureEntry, load_manifest
-from splitsmith.beep_detect import BeepNotFoundError, detect_beep, load_audio
-from splitsmith.beep_features import feature_vector
+from splitsmith.beep.calibration import BeepFixtureEntry, load_manifest
+from splitsmith.beep.detect import BeepNotFoundError, detect_beep, load_audio
+from splitsmith.beep.features import feature_vector
 from splitsmith.config import BeepDetectConfig, BeepDetection, BeepRankerConfig
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -407,7 +407,7 @@ def _models() -> dict[str, Callable[[], Any]]:
 def _final_fit(name: str, make: Callable[[], Any], clips: list[Clip]) -> dict[str, Any]:
     """Spec 2.7: fit on every reachable fixture and record what would ship.
     The report's figures stay the out-of-fold ones."""
-    from splitsmith.beep_features import FEATURE_NAMES
+    from splitsmith.beep.features import FEATURE_NAMES
 
     x, y = _matrix([c for c in clips if c.reachable])
     model = make()
@@ -432,7 +432,7 @@ def _final_fit(name: str, make: Callable[[], Any], clips: list[Clip]) -> dict[st
 
 
 def main() -> None:
-    from splitsmith.beep_features import FEATURE_NAMES
+    from splitsmith.beep.features import FEATURE_NAMES
 
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument("--report", type=Path, default=REPORT_PATH)

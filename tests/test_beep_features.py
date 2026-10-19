@@ -8,9 +8,9 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from splitsmith.beep_calibration import load_manifest
-from splitsmith.beep_detect import _candidate_runs, detect_beep, load_audio
-from splitsmith.beep_features import FEATURE_NAMES, candidate_features, feature_vector
+from splitsmith.beep.calibration import load_manifest
+from splitsmith.beep.detect import _candidate_runs, detect_beep, load_audio
+from splitsmith.beep.features import FEATURE_NAMES, candidate_features, feature_vector
 from splitsmith.config import BeepCandidate, BeepDetectConfig, BeepFeatures
 
 SR = 48_000

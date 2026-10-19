@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from splitsmith.beep_calibration import BeepFixtureEntry
+from splitsmith.beep.calibration import BeepFixtureEntry
 from splitsmith.config import BeepCandidate, BeepDetection, BeepFeatures
 
 SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "train_beep_ranker.py"
@@ -339,8 +339,8 @@ def test_collect_records_the_heuristic_ranking_whatever_the_default(tmp_path) ->
     model against itself."""
     import yaml
 
-    from splitsmith.beep_calibration import load_manifest as load
-    from splitsmith.beep_detect import detect_beep, load_audio
+    from splitsmith.beep.calibration import load_manifest as load
+    from splitsmith.beep.detect import detect_beep, load_audio
     from splitsmith.config import BeepDetectConfig, BeepRankerConfig
 
     fixtures = Path(__file__).resolve().parent / "fixtures"

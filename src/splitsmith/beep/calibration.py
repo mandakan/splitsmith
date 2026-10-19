@@ -2,7 +2,7 @@
 
 This module is the pure-data backbone of the layer-1 work for issue #220
 (``beep: improve detection accuracy``). The detector itself lives in
-``splitsmith.beep_detect``; this module only describes WHAT to detect and
+``splitsmith.beep.detect``; this module only describes WHAT to detect and
 HOW to score the result.
 
 Two tracks share the suite:

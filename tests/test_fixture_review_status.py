@@ -150,7 +150,7 @@ def test_a_promoted_shot_is_seated_on_its_rise_foot_on_the_fixture_clip(tmp_path
     is what the review page's Seat reads, and say how far they moved."""
     import soundfile as sf
 
-    from splitsmith.beep_detect import load_audio
+    from splitsmith.beep.detect import load_audio
     from splitsmith.rise_foot import peak_envelope, rise_foot
 
     sr = 48000

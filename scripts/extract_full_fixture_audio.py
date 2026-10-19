@@ -42,7 +42,7 @@ FIXTURES_DIR = Path("tests/fixtures")
 FULL_DIR = FIXTURES_DIR / "full"
 SOURCES_YAML = FULL_DIR / "_sources.yaml"
 PROBE_CACHE_DIR = FIXTURES_DIR / ".cache" / "video_probe"
-SAMPLE_RATE = 48000  # match splitsmith.beep_detect.load_audio
+SAMPLE_RATE = 48000  # match splitsmith.beep.detect.load_audio
 
 Runner = Callable[..., subprocess.CompletedProcess]
 

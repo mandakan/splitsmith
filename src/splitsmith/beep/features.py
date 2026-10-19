@@ -14,7 +14,7 @@ import math
 
 import numpy as np
 
-from .config import BeepFeatures
+from ..config import BeepFeatures
 
 FEATURE_NAMES: tuple[str, ...] = tuple(BeepFeatures.model_fields)
 

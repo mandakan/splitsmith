@@ -14,7 +14,7 @@ from typing import Literal
 
 from pydantic import BaseModel
 
-from .config import BeepWindowConfig
+from ..config import BeepWindowConfig
 
 
 class StagePrior(BaseModel):

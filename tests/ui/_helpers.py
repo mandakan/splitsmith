@@ -405,7 +405,7 @@ def _video_id_for(client: TestClient, stage_number: int, role: str) -> str:
 def _as_placement(fake_align):  # noqa: ANN001, ANN202
     """The server places a secondary's beep with ``beep_cross.place_beep``
     (#1442); these tests describe the alignment as a ``CrossAlignResult``."""
-    from splitsmith.beep_cross import BeepPlacement
+    from splitsmith.beep.cross import BeepPlacement
 
     def place(*args, **kwargs):  # noqa: ANN002, ANN003, ANN202
         r = fake_align(*args, **kwargs)

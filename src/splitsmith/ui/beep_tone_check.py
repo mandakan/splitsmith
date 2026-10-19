@@ -9,7 +9,8 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
-from .. import beep_detect, beep_tone
+from ..beep import detect as beep_detect
+from ..beep import tone as beep_tone
 from ..match_project import MatchProject, StageVideo
 from . import audio as audio_helpers
 

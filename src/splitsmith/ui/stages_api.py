@@ -20,14 +20,15 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from pydantic import BaseModel, ConfigDict, Field
 
-from .. import beep_detect, report
 from .. import coach as coach_module
 from .. import coach_distributions as coach_distributions_module
 from .. import events as events_module
+from .. import report
 from .. import waveform as waveform_helpers
 from ..access import Feature, FeatureRequiredError
 from ..audit_data import audit_shots_to_engine_shots, is_kept_shot
 from ..audit_revision import REVISION_FIELD, AuditRevisionConflictError, audit_revision
+from ..beep import detect as beep_detect
 from ..comment_identity import (
     MAX_AUTHOR_KEY_LEN,
     MIN_AUTHOR_KEY_LEN,
@@ -1497,7 +1498,8 @@ def video_spectrum(
     Reads the published WAV; when it is missing, queues ``derive_audio``
     and answers 202 like the peaks."""
     state = request.app.state.splitsmith_state
-    from .. import beep_detect, beep_tone
+    from ..beep import detect as beep_detect
+    from ..beep import tone as beep_tone
 
     if end <= start:
         raise HTTPException(status_code=422, detail="start before end")

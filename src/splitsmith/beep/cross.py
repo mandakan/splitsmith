@@ -27,7 +27,7 @@ import numpy as np
 from pydantic import BaseModel
 from scipy.signal import correlate
 
-from . import beep_tone
+from . import tone as beep_tone
 
 #: The onset envelope's rate: 1 ms steps.
 _ONSET_SR = 1000

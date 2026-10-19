@@ -31,7 +31,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from splitsmith import beep_detect
+from splitsmith.beep import detect as beep_detect
 from splitsmith.ensemble import fixtures as fx_module
 from splitsmith.ensemble.api import load_ensemble_runtime
 from splitsmith.fixture_schema import probe_camera_metadata, review_status

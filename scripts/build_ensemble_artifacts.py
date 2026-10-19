@@ -50,7 +50,7 @@ from sklearn.ensemble import GradientBoostingClassifier
 from sklearn.linear_model import LogisticRegression
 from sklearn.model_selection import LeaveOneGroupOut, StratifiedGroupKFold, StratifiedKFold
 
-from splitsmith.beep_detect import load_audio
+from splitsmith.beep.detect import load_audio
 from splitsmith.config import ShotDetectConfig
 from splitsmith.ensemble import features as feat
 from splitsmith.ensemble import visual as vis

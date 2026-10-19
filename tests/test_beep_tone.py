@@ -1,4 +1,4 @@
-"""splitsmith.beep_tone: the timer tone's start, in its band (spec
+"""splitsmith.beep.tone: the timer tone's start, in its band (spec
 2026-10-17-beep-spectral-view-design)."""
 
 from __future__ import annotations
@@ -10,7 +10,8 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from splitsmith import beep_detect, beep_tone
+from splitsmith.beep import detect as beep_detect
+from splitsmith.beep import tone as beep_tone
 
 SR = 48000
 FIXTURES = Path(__file__).parent / "fixtures"
