@@ -33,6 +33,14 @@ class DocStore(Protocol):
     document to the wanted one, applied under a process lock on files and
     under an optimistic version with a bounded re-merge in the database, so
     it must be safe to run more than once.
+
+    ``update_audit_at`` is the handler's shape of the same thing: ``merge``
+    receives the document (``None`` when there is none yet) and the version
+    it is being applied at, so it can compare a client's expected version
+    and answer 409, or raise any other HTTP error, from inside the
+    read-modify-write; and the call returns the merged document with its
+    new version, which is what the handler's response is built from. An
+    error ``merge`` raises is never a conflict and is never retried.
     """
 
     #: Whether a project document loaded from here may carry another
@@ -54,6 +62,9 @@ class DocStore(Protocol):
     def update_audit(
         self, slug: str, stage: int, merge: Callable[[Doc], Doc], default: Callable[[], Doc]
     ) -> int: ...
+    def update_audit_at(
+        self, slug: str, stage: int, merge: Callable[[Doc | None, int], Doc]
+    ) -> tuple[Doc, int]: ...
 
     def load_export_runs(self, slug: str) -> Versioned: ...
     def save_export_runs(self, slug: str, doc: Doc, *, version: int) -> int: ...

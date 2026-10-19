@@ -85,6 +85,8 @@ class DocStore(Protocol):
     def delete_audit(self, slug: str, stage: int) -> bool: ...
     def update_audit(self, slug: str, stage: int, merge: Callable[[dict], dict],
                      default: Callable[[], dict]) -> int: ...
+    def update_audit_at(self, slug: str, stage: int,
+                        merge: Callable[[dict | None, int], dict]) -> tuple[dict, int]: ...
 
     def load_export_runs(self, slug: str) -> tuple[dict | None, int]: ...
     def update_export_runs(self, slug: str, merge: Callable[[dict], dict]) -> int: ...
@@ -110,6 +112,17 @@ reads from the accessors.
   `_save_audit_with_remerge`: a pure function from the current doc to the
   desired doc, safe to run twice. `_classify_doc` stays what it is, a step
   inside such a `merge`.
+
+`update_audit_at` (amended 2026-10-19, after step 3) is the handler's shape
+of the same read-modify-write. The ten `_audit_rmw` sites compare the
+client's `expected_version` or audit revision against what they loaded and
+answer 409, raise 404 or 500 part-way, and build their response from the
+merged payload; a `merge(doc)` cannot do any of that. So `merge` receives
+`(doc | None, version)`, may raise, and the call returns `(merged, new
+version)`. An error the merge raises is the handler's answer: it is not a
+conflict and is never retried, and nothing is written. Hosted, a lost race
+re-applies the merge with the winner's document and version, which is what
+makes a 409 on `expected_version` correct even after a retry.
 
 `version` keeps its meaning (0 on files, the row version in the database),
 and the return value is the new version, so handlers that hand the client an
@@ -191,7 +204,8 @@ for #680) and the full suite, plus the contract suite below.
    goes through `_classify_doc` inside its `merge` (the rule in
    `stage-events.md` is unchanged).
 4. **Handlers of kind 2**, router by router, starting with `match_api` (15
-   sites). Each PR lists the sites it removed and the count left.
+   sites); the `_audit_rmw` sites become `update_audit_at` merges. Each PR
+   lists the sites it removed and the count left.
 5. **`MatchBundle` with audits on both sides**, and the `None` fallback in
    `MatchProject` removed.
 6. **`bind_state` on the port**, the last place a model knows the database

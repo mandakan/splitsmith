@@ -150,6 +150,16 @@ class FileDocStore:
             _write(path, merge(current if current is not None else default()), backup=True)
         return 0
 
+    def update_audit_at(
+        self, slug: str, stage: int, merge: Callable[[Doc | None, int], Doc]
+    ) -> tuple[Doc, int]:
+        path = _audit_file(self._shooter_root(slug), stage)
+        with self._audit_lock:
+            current, version = _read(path)
+            merged = merge(current, version)
+            _write(path, merged, backup=True)
+        return merged, 0
+
     # -- export runs -------------------------------------------------------
     def load_export_runs(self, slug: str) -> Versioned:
         return _read(self._shooter_root(slug) / LOG_FILENAME)

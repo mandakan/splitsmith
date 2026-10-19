@@ -117,6 +117,22 @@ class DbDocStore:
         assert last is not None
         raise last
 
+    def update_audit_at(
+        self, slug: str, stage: int, merge: Callable[[Doc | None, int], Doc]
+    ) -> tuple[Doc, int]:
+        conflicts = _conflict_excs()
+        last: BaseException | None = None
+        for attempt in range(self._max_attempts):
+            _backoff(attempt)
+            current, version = self.load_audit(slug, stage)
+            merged = merge(current, version)  # an error raised here is the handler's answer, not a conflict
+            try:
+                return merged, self.save_audit(slug, stage, merged, version=version)
+            except conflicts as exc:
+                last = exc
+        assert last is not None
+        raise last
+
     # -- export runs -------------------------------------------------------
     def load_export_runs(self, slug: str) -> Versioned:
         return run_sync(self._store.load_export_runs(self._mid, slug))
