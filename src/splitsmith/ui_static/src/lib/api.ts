@@ -3339,14 +3339,6 @@ export const api = {
   getProject: (slug: string) =>
     request<MatchProject>(`/api/shooters/${encodeURIComponent(slug)}/project`),
 
-  /** Fetch the canonical match-window analysis (per-stage windows +
-   *  per-video classification). Drives the ingest screen's timeline; SPA
-   *  carries no policy of its own beyond rendering. */
-  getMatchAnalysis: (slug: string) =>
-    request<MatchAnalysis>(
-      `/api/shooters/${encodeURIComponent(slug)}/project/match-analysis`,
-    ),
-
   listFolder: (slug: string, path?: string, opts?: { probe?: boolean }) => {
     const params = new URLSearchParams();
     if (path) params.set("path", path);
@@ -3414,58 +3406,6 @@ export const api = {
       },
     ),
 
-  importScoreboard: (slug: string, data: unknown, overwrite = false) =>
-    request<MatchProject>(
-      `/api/shooters/${encodeURIComponent(slug)}/scoreboard/import`,
-      {
-        method: "POST",
-        json: { data, overwrite },
-      },
-    ),
-
-  // SSI Scoreboard v1 wiring (#50). The UI calls these without picking the
-  // backend implementation -- the server resolves Local vs Http per request
-  // based on whether ``<project>/scoreboard/match.json`` exists.
-
-  getScoreboardSource: (slug: string) =>
-    request<ScoreboardSource>(
-      `/api/shooters/${encodeURIComponent(slug)}/scoreboard/source`,
-    ),
-
-  /** Drop-and-populate: the SPA reads the file as text, parses JSON, and
-   *  posts it here. Backend writes to ``<project>/scoreboard/match.json``
-   *  and uses LocalJsonScoreboard so subsequent requests stay fully offline. */
-  uploadScoreboard: (slug: string, data: unknown, overwrite = false) =>
-    request<MatchProject>(
-      `/api/shooters/${encodeURIComponent(slug)}/scoreboard/upload`,
-      {
-        method: "POST",
-        json: { data, overwrite },
-      },
-    ),
-
-  /** Free-text match search. In offline mode this hits the dropped match
-   *  only; in online mode it goes to ``GET /api/v1/events?q=``. */
-  searchScoreboardMatches: (slug: string, q: string) =>
-    request<ScoreboardMatchRef[]>(
-      `/api/shooters/${encodeURIComponent(slug)}/scoreboard/search?q=${encodeURIComponent(q)}`,
-    ),
-
-  /** Cache-first full match fetch -> populate project. */
-  fetchScoreboardMatch: (
-    slug: string,
-    contentType: number,
-    matchId: number,
-    overwrite = false,
-  ) =>
-    request<MatchProject>(
-      `/api/shooters/${encodeURIComponent(slug)}/scoreboard/fetch`,
-      {
-        method: "POST",
-        json: { content_type: contentType, match_id: matchId, overwrite },
-      },
-    ),
-
   /** Resolve the current source's ``MatchData``. The SPA uses this to map
    *  a picked ``shooterId`` to a per-match ``competitor_id`` before
    *  pinning. 404 when the project has no match loaded. */
@@ -3480,13 +3420,6 @@ export const api = {
   getScoreboardMatchData: (slug: string) =>
     request<ScoreboardMatchData>(
       `/api/shooters/${encodeURIComponent(slug)}/scoreboard/match-data`,
-    ),
-
-  /** Find shooters by name. Offline mode searches this match's competitor
-   *  list only; online mode hits the live shooter index. */
-  searchScoreboardShooters: (slug: string, q: string) =>
-    request<ScoreboardShooterRef[]>(
-      `/api/shooters/${encodeURIComponent(slug)}/scoreboard/shooter/search?q=${encodeURIComponent(q)}`,
     ),
 
   /** Pin (shooter, competitor) and merge stage times. The competitor id is
@@ -3671,15 +3604,6 @@ export const api = {
       },
     ),
 
-  updateSettings: (slug: string, patch: ProjectSettingsPatch) =>
-    request<MatchProject>(
-      `/api/shooters/${encodeURIComponent(slug)}/project/settings`,
-      {
-        method: "POST",
-        json: patch,
-      },
-    ),
-
   getAutomation: (slug: string) =>
     request<ResolvedAutomationResponse>(
       `/api/shooters/${encodeURIComponent(slug)}/automation`,
@@ -3693,15 +3617,6 @@ export const api = {
   getHitlQueue: (slug: string) =>
     request<HitlQueueResponse>(
       `/api/shooters/${encodeURIComponent(slug)}/hitl-queue`,
-    ),
-
-  dismissNudge: (slug: string, stageNumber: number, dismissed: boolean) =>
-    request<MatchProject>(
-      `/api/shooters/${encodeURIComponent(slug)}/project/nudges/dismiss`,
-      {
-        method: "POST",
-        json: { stage_number: stageNumber, dismissed },
-      },
     ),
 
   /** ``fromStageNumber`` names the registration that moves: a multi-stage
@@ -3787,30 +3702,6 @@ export const api = {
       },
     ),
 
-  /** Set the shooter's accent and club line (#1243). Only the keys sent
-   *  are applied; ``null`` clears one. The server validates the shape
-   *  (``#rrggbb``, at most 60 characters) and answers 422 otherwise. */
-  updateShooterIdentity: (
-    slug: string,
-    body: { accent?: string | null; club?: string | null; scope?: IdentityScope },
-  ) =>
-    request<MatchProject>(`/api/shooters/${encodeURIComponent(slug)}/identity`, {
-      method: "PATCH",
-      json: body,
-    }),
-
-  /** Upload the shooter's logo (#1243): PNG, JPEG or WebP, at most 2 MB.
-   *  The server sniffs the type and names the file by its content. */
-  uploadShooterLogo: (slug: string, file: File, scope: IdentityScope = "book") => {
-    const form = new FormData();
-    form.append("file", file, file.name);
-    form.append("scope", scope);
-    return request<MatchProject>(`/api/shooters/${encodeURIComponent(slug)}/identity/logo`, {
-      method: "POST",
-      body: form,
-    });
-  },
-
   /** The event's own logo (the branding work): PNG, JPEG or WebP, 2 MB. */
   uploadEventLogo: (file: File) => {
     const form = new FormData();
@@ -3819,22 +3710,6 @@ export const api = {
   },
   removeEventLogo: () =>
     request<{ event_logo: string | null }>("/api/match/branding/event-logo", { method: "DELETE" }),
-
-  /** Clear the shooter's logo (#1243). */
-  removeShooterLogo: (slug: string, scope: IdentityScope = "book") =>
-    request<MatchProject>(`/api/shooters/${encodeURIComponent(slug)}/identity/logo?scope=${scope}`, {
-      method: "DELETE",
-    }),
-
-  /** Where this shooter's look comes from, and what a render draws. */
-  getShooterIdentityView: (slug: string) =>
-    request<ShooterIdentityView>(`/api/shooters/${encodeURIComponent(slug)}/identity`),
-
-  /** Drop this match's own record so the shooter book applies again. */
-  useShooterBook: (slug: string) =>
-    request<ShooterIdentityView>(`/api/shooters/${encodeURIComponent(slug)}/identity/use-book`, {
-      method: "POST",
-    }),
 
   /** List the camera models calibrated in the shipped artifact. The SPA
    *  presents these as the camera-model dropdown options on Ingest. */
@@ -3875,17 +3750,6 @@ export const api = {
       },
     ),
 
-  /** Toggle the ``skipped`` flag on a stage. Skipped stages don't block
-   *  the "next step" gate even when they have no videos / no primary. */
-  setStageSkipped: (slug: string, stageNumber: number, skipped: boolean) =>
-    request<MatchProject>(
-      `/api/shooters/${encodeURIComponent(slug)}/stages/${stageNumber}/skip`,
-      {
-        method: "POST",
-        json: { skipped },
-      },
-    ),
-
   /** Submit a beep-detection job for the stage's primary. Returns a Job
    *  snapshot; poll via {@link api.pollJob} (or read /api/me/jobs/{id})
    *  until the status flips out of "pending"/"running". On success the
@@ -3914,15 +3778,6 @@ export const api = {
         force ? "?force=true" : ""
       }`,
       { method: "POST" },
-    ),
-
-  overrideBeep: (slug: string, stageNumber: number, beepTime: number | null) =>
-    request<MatchProject>(
-      `/api/shooters/${encodeURIComponent(slug)}/stages/${stageNumber}/beep`,
-      {
-        method: "POST",
-        json: { beep_time: beepTime },
-      },
     ),
 
   /** Manually set or clear a stage's duration. Used for projects without
@@ -3957,34 +3812,6 @@ export const api = {
       { method: "POST", json: { beep_time: beepTime } },
     ),
 
-  /** Promote one of the ranked auto-detected candidates as authoritative.
-   *  ``time`` is matched against ``primary.beep_candidates`` within 1 ms,
-   *  so the SPA can hold a slightly stale snapshot without breaking the
-   *  click. The server keeps the candidate list intact so the user can
-   *  switch again without re-running detection, and re-fires the trim job. */
-  selectBeepCandidate: (slug: string, stageNumber: number, time: number) =>
-    request<MatchProject>(
-      `/api/shooters/${encodeURIComponent(slug)}/stages/${stageNumber}/beep/select`,
-      {
-        method: "POST",
-        json: { time },
-      },
-    ),
-
-  /** Per-video candidate select. Same matching semantics as the primary
-   *  endpoint (1 ms epsilon) but targets the video carrying the candidate
-   *  list, so secondaries can pick from their own ranked alternatives. */
-  selectBeepCandidateForVideo: (
-    slug: string,
-    stageNumber: number,
-    videoId: string,
-    time: number,
-  ) =>
-    request<MatchProject>(
-      `/api/shooters/${encodeURIComponent(slug)}/stages/${stageNumber}/videos/${encodeURIComponent(videoId)}/beep/select`,
-      { method: "POST", json: { time } },
-    ),
-
   /** Snap a user-placed beep marker to the strongest tone in a tight
    *  window around the hint. Stateless -- the caller decides whether to
    *  accept the proposal as a manual override. 404 means "no run met
@@ -4008,36 +3835,12 @@ export const api = {
       { jobError: failedJobError },
     ),
 
-  /** Flip ``beep_reviewed`` on a single video (issue #71). Pure UI-state
-   *  endpoint -- no detection or trim chain runs. Setting ``true``
-   *  requires ``beep_time`` to already be set; the server returns 400
-   *  otherwise. */
-  setBeepReviewed: (
-    slug: string,
-    stageNumber: number,
-    videoId: string,
-    reviewed: boolean,
-  ) =>
-    request<MatchProject>(
-      `/api/shooters/${encodeURIComponent(slug)}/stages/${stageNumber}/videos/${encodeURIComponent(videoId)}/beep/review`,
-      { method: "POST", json: { reviewed } },
-    ),
-
   /** Submit an audit-mode short-GOP trim job. Returns a Job snapshot;
    *  idempotent on the worker side -- when the cached MP4 is fresh the
    *  job completes near-instantly without re-encoding. */
   trimStage: (slug: string, stageNumber: number) =>
     request<Job>(
       `/api/shooters/${encodeURIComponent(slug)}/stages/${stageNumber}/trim`,
-      { method: "POST" },
-    ),
-
-  /** Per-video audit-mode trim. Mirrors ``trimStage`` for primaries but
-   *  targets one specific camera, so multi-cam ingest can refresh a
-   *  single secondary's scrub clip without retriggering the primary. */
-  trimVideo: (slug: string, stageNumber: number, videoId: string) =>
-    request<Job>(
-      `/api/shooters/${encodeURIComponent(slug)}/stages/${stageNumber}/videos/${encodeURIComponent(videoId)}/trim`,
       { method: "POST" },
     ),
 
@@ -4059,31 +3862,12 @@ export const api = {
     );
   },
 
-  /** Submit shot detection on every eligible stage. A stage is eligible
-   *  when it has a primary with confirmed beep + non-zero time_seconds.
-   *  Returns the list of submitted (or already-active) jobs plus a
-   *  ``skipped`` array describing why ineligible stages were left alone. */
-  detectShotsAll: (slug: string, opts: { reset?: boolean } = {}) => {
-    const qs = opts.reset ? "?reset=true" : "";
-    return request<{
-      jobs: Job[];
-      skipped: { stage_number: number; reason: string }[];
-    }>(
-      `/api/shooters/${encodeURIComponent(slug)}/stages/shot-detect${qs}`,
-      { method: "POST" },
-    );
-  },
-
   /** Server-side feature flags (fetched once on app mount). Surfaces:
    *  - ``lab`` -- hide the Lab nav entry unless ``splitsmith ui --lab``.
    *  - ``mode`` -- ``"local"`` vs ``"hosted"``; SPA suppresses host
    *    filesystem pickers / project-folder inputs in hosted mode. */
   getServerFeatures: () =>
     request<{ lab: boolean; mode: "local" | "hosted" }>("/api/server/features"),
-
-  /** Whether the overlay rasterizer's Chromium is installed (local mode;
-   *  404 hosted). The desktop app installs it through ``installChromium``. */
-  getChromiumStatus: () => request<{ installed: boolean; channel: string }>("/api/system/chromium"),
 
   /** Enqueue the ``chromium_install`` job (idempotent while one runs). */
   installChromium: () => request<Job>("/api/system/chromium/install", { method: "POST" }),
@@ -4552,18 +4336,6 @@ export const api = {
       { method: "POST" },
     ),
 
-  /** Set or clear the attention flag on a stage. Returns the refreshed
-   *  triage list - same contract as confirmBeepInQueue. */
-  setStageAttention: (
-    slug: string,
-    stageNumber: number,
-    body: { flagged: boolean; note?: string | null },
-  ) =>
-    request<TriageResponse>(
-      `/api/shooters/${encodeURIComponent(slug)}/stages/${stageNumber}/attention`,
-      { method: "POST", json: body },
-    ),
-
   /** Create a new match from a picked scoreboard match (#322). The SPA
    *  follows up with /api/scoreboard/fetch + /select-shooter to populate
    *  stages and pin the primary competitor. */
@@ -4686,16 +4458,6 @@ export const api = {
   videoAudioUrl: (slug: string, stageNumber: number, videoId: string) =>
     scopeRequestPath(
       `/api/shooters/${encodeURIComponent(slug)}/stages/${stageNumber}/videos/${encodeURIComponent(videoId)}/audio`,
-    ),
-
-  /** URL for a tiny MP4 around a beep timestamp (#27, #22). ``t`` is
-   *  passed to the server (which centres the clip there) AND ms-rounded
-   *  into the cache key, so each distinct ``t`` gets its own MP4. The
-   *  candidate picker uses this with arbitrary candidate times; the
-   *  default flow passes ``primary.beep_time``. */
-  stageBeepPreviewUrl: (slug: string, stageNumber: number, beepTime: number) =>
-    scopeRequestPath(
-      `/api/shooters/${encodeURIComponent(slug)}/stages/${stageNumber}/beep-preview?t=${beepTime.toFixed(3)}`,
     ),
 
   /** Per-video beep preview URL. Same caching semantics as the primary
@@ -4948,30 +4710,11 @@ export const api = {
     });
   },
 
-  /** Per-stage histograms + summary stats for the Coach distributions
-   *  panel (#163). Empty classes still appear with count=0 so the UI
-   *  can render an empty histogram without a special case. */
-  getStageCoachDistributions: (slug: string, stageNumber: number) =>
-    request<CoachStageDistributions>(
-      `/api/shooters/${encodeURIComponent(slug)}/stages/${stageNumber}/coach/distributions`,
-    ),
-
   /** Match-level histograms aggregated across every stage with an audit
    *  JSON. Stages without an audit are silently skipped server-side. */
   getMatchCoachDistributions: (slug: string) =>
     request<CoachMatchDistributions>(
       `/api/shooters/${encodeURIComponent(slug)}/coach/distributions`,
-    ),
-
-  /** Structured anomalies for the *saved* audit JSON (issue #42).
-   *
-   *  The audit screen does its own live recompute (see ``lib/anomalies``)
-   *  so the panel updates without a network round-trip on every keep /
-   *  reject. This endpoint exists for external consumers + integration
-   *  tests that want the same flags ``report.txt`` will produce. */
-  getStageAnomalies: (slug: string, stageNumber: number) =>
-    request<{ anomalies: import("./anomalies").Anomaly[] }>(
-      `/api/shooters/${encodeURIComponent(slug)}/stages/${stageNumber}/anomalies`,
     ),
 
   /** Match-overview payload for the Analysis & Export screen. */
@@ -5067,16 +4810,6 @@ export const api = {
       },
     }),
 
-  /** List export templates (issue #198). Used by the export dialog
-   *  to populate a "Template" dropdown; selecting a template
-   *  pre-fills the dialog state with its values. User templates
-   *  ship under ``~/.splitsmith/templates/`` and override built-ins
-   *  by ``id``. */
-  getMatchTemplates: () =>
-    request<{ templates: MatchExportTemplateEntry[] }>(
-      "/api/match/templates",
-    ),
-
   /** Open the OS file manager at ``path`` (selecting the file on macOS /
    *  Windows; opening the parent dir on Linux). The backend rejects paths
    *  outside the project root. */
@@ -5085,27 +4818,6 @@ export const api = {
       method: "POST",
       json: { path },
     }),
-
-  /** Reveal a registered project video by following its symlink to the
-   *  original source location (USB / Downloads / wherever the user picked
-   *  it from). Use this for the per-video "open containing folder" button
-   *  -- ``revealFile`` would refuse because the resolved target lives
-   *  outside the project root. */
-  revealVideo: (slug: string, videoPath: string) =>
-    request<{ revealed: string }>(
-      `/api/shooters/${encodeURIComponent(slug)}/videos/reveal`,
-      {
-        method: "POST",
-        json: { path: videoPath },
-      },
-    ),
-
-  // -----------------------------------------------------------------------
-  // Fixture mode (closes #19): the /review SPA route reads + writes a single
-  // audit fixture (JSON + sibling WAV + optional video) without project
-  // context. Folds the old splitsmith.review_server standalone into this
-  // build so the audit primitives are shared.
-  // -----------------------------------------------------------------------
 
   getFixtureAudit: (fixturePath: string) =>
     request<StageAudit>(`/api/fixture/audit?path=${encodeURIComponent(fixturePath)}`),
@@ -5255,89 +4967,6 @@ export const api = {
    *  exposed. ``plotName`` is the file stem without ``.png``. */
   sweepPlotUrl: (runId: string, plotName: string): string =>
     `/api/lab/sweeps/${encodeURIComponent(runId)}/plot/${encodeURIComponent(plotName)}.png`,
-
-  promoteSecondary: (
-    shooterSlug: string,
-    stageNumber: number,
-    videoId: string,
-    payload: {
-      mount: string;
-      position: string;
-      audio_source?: string;
-      agc_state?: string;
-      snap_window_ms?: number;
-      slug?: string;
-      camera_id?: string;
-      overwrite?: boolean;
-    },
-  ) =>
-    request<{
-      job: Job;
-      fixture_path: string;
-      anchor_path: string;
-      slug: string;
-      camera_id: string;
-      anchor_slug: string;
-    }>(
-      `/api/shooters/${encodeURIComponent(shooterSlug)}/stages/${stageNumber}/videos/${encodeURIComponent(videoId)}/promote-secondary`,
-      { method: "POST", json: payload },
-    ),
-
-  /** Anchor a project video against an arbitrary fixture (issue #149
-   *  follow-up). Lab-only. Used when the headcam ground truth lives
-   *  as a fixture in ``tests/fixtures/`` and the project has a phone-cam
-   *  primary that should be aligned against it. */
-  promoteAgainstFixture: (
-    shooterSlug: string,
-    stageNumber: number,
-    videoId: string,
-    payload: {
-      anchor_slug: string;
-      mount: string;
-      position: string;
-      audio_source?: string;
-      agc_state?: string;
-      snap_window_ms?: number;
-      slug?: string;
-      camera_id?: string;
-      overwrite?: boolean;
-    },
-  ) =>
-    request<{
-      job: Job;
-      fixture_path: string;
-      anchor_path: string;
-      slug: string;
-      camera_id: string;
-      anchor_slug: string;
-    }>(
-      `/api/lab/projects/${encodeURIComponent(shooterSlug)}/${stageNumber}/videos/${encodeURIComponent(videoId)}/promote-against-fixture`,
-      { method: "POST", json: payload },
-    ),
-
-  /** Build the export URL for the currently bound project. Open in a new
-   *  tab / window to trigger a download; using a real URL (not fetch)
-   *  lets the browser write to disk without buffering the whole archive
-   *  in memory. */
-  exportProjectUrl: (
-    slug: string,
-    opts?: {
-      includeTrimmed?: boolean;
-      includeExports?: boolean;
-      includeRaw?: boolean;
-      includeAudio?: boolean;
-    },
-  ) => {
-    const params = new URLSearchParams();
-    if (opts?.includeTrimmed) params.set("include_trimmed", "true");
-    if (opts?.includeExports) params.set("include_exports", "true");
-    if (opts?.includeRaw) params.set("include_raw", "true");
-    if (opts?.includeAudio) params.set("include_audio", "true");
-    const qs = params.toString();
-    return scopeRequestPath(
-      `/api/shooters/${encodeURIComponent(slug)}/project/export${qs ? `?${qs}` : ""}`,
-    );
-  },
 
   /** Restore a previously exported project. The server extracts the
    *  archive under ``destRoot``. When ``bind`` is true the new project
