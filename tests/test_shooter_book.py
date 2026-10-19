@@ -16,7 +16,7 @@ from splitsmith.account_profile import (
     load_brand,
 )
 from splitsmith.identity import ShooterIdentity
-from splitsmith.look_brand import BrandError
+from splitsmith.look.brand import BrandError
 from splitsmith.looks import LookBrand
 from splitsmith.shooter_book import (
     EMPTY_BOOK,

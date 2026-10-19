@@ -6,8 +6,8 @@ from pathlib import Path
 
 import pytest
 
-from splitsmith import look_tools
-from splitsmith.look_template import TemplateContext, engine_block, shared_url, theme_tokens
+from splitsmith.look import tools as look_tools
+from splitsmith.look.template import TemplateContext, engine_block, shared_url, theme_tokens
 from splitsmith.overlay.html import single_css
 from splitsmith.overlay.layout import CellScale
 from splitsmith.overlay.raster import ChromiumRasterizer, RasterizerUnavailableError

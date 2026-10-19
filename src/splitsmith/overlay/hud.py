@@ -152,7 +152,7 @@ def overlay_template_identity(look: str, variant: str) -> str | None:
         return None
     # Deferred: look_template imports the theme and layout modules, which
     # nothing else here needs.
-    from ..look_template import shared_digest
+    from ..look.template import shared_digest
     from ..looks import LookError, load_look, overlay_template_for
 
     try:
@@ -197,7 +197,7 @@ def overlay_theme_identity(look: str) -> str | None:
     hash) gives the same identity. ``None`` when the Look cannot be loaded,
     which no reuse check matches."""
     # Deferred, like the template's: the theme module loads the Look machinery.
-    from ..look_template import theme_tokens
+    from ..look.template import theme_tokens
     from .theme import OverlayThemeError, load_theme
 
     try:

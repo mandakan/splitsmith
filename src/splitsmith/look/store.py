@@ -37,9 +37,9 @@ from typing import Protocol
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from .fonts import check as check_fonts
-from .fonts import normalize as normalize_fonts
-from .looks import (
+from ..fonts import check as check_fonts
+from ..fonts import normalize as normalize_fonts
+from ..looks import (
     DEFAULT_VARIANT,
     LOOK_NAME_RE,
     MANIFEST_FILE,

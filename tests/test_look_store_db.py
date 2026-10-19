@@ -14,7 +14,7 @@ import pytest
 
 from splitsmith import looks
 from splitsmith.db import Base, PostgresLookStore, User, create_engine, sessionmaker
-from splitsmith.look_store import LookStore, LookStoreError, StoredLookBody
+from splitsmith.look.store import LookStore, LookStoreError, StoredLookBody
 
 
 def _body(**changes) -> StoredLookBody:

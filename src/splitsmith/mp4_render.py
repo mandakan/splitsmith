@@ -83,9 +83,9 @@ from .composition import (
 )
 from .grade import lut_filter, materialize
 from .logo_spots import LOGO_MARGIN, WATERMARK_HEIGHT, watermark_image
-from .look_brand import brand_logo_path, brand_mark_json
-from .look_motion import MotionClipError, motion_overlay_filters, write_motion_clip
-from .look_sting import sting_motion, sting_overlay_filters
+from .look.brand import brand_logo_path, brand_mark_json
+from .look.motion import MotionClipError, motion_overlay_filters, write_motion_clip
+from .look.sting import sting_motion, sting_overlay_filters
 from .looks import LookError, load_look, look_credits, sting_template_for
 from .match_summary import MatchSummary, build_match_summary_still
 from .overlay.card import (

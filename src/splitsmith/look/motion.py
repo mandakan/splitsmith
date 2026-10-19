@@ -23,7 +23,7 @@ import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
-from .overlay.raster import TemplateFrames
+from ..overlay.raster import TemplateFrames
 
 logger = logging.getLogger(__name__)
 

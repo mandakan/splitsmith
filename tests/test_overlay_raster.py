@@ -35,7 +35,7 @@ import pytest
 from PIL import Image
 from playwright.sync_api import Error as PlaywrightError
 
-from splitsmith import look_sandbox
+from splitsmith.look import sandbox as look_sandbox
 from splitsmith.overlay import raster as overlay_raster
 from splitsmith.overlay.raster import ChromiumRasterizer, RasterizerUnavailableError
 
@@ -609,7 +609,7 @@ def test_bundled_font_face_actually_loads_not_the_browsers_fallback() -> None:
 
 
 def _context_fixture():
-    from splitsmith.look_template import TemplateContext, engine_block, shared_url
+    from splitsmith.look.template import TemplateContext, engine_block, shared_url
 
     return TemplateContext(
         theme={"ink": "#ffffff"},

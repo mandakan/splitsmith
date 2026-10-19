@@ -279,7 +279,7 @@ def test_the_shipped_sting_carries_your_brand_over_the_shooters_logo(tmp_path: P
 
     from splitsmith import looks
     from splitsmith.identity import ResolvedIdentity
-    from splitsmith.look_sting import sting_context
+    from splitsmith.look.sting import sting_context
     from splitsmith.overlay.raster import ChromiumRasterizer, RasterizerUnavailableError
     from splitsmith.overlay.theme import theme_for
 

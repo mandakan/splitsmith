@@ -1897,7 +1897,7 @@ def test_rendered_mp4_carries_the_chapter_atoms(tmp_path: Path) -> None:
 def _fake_clip_writer(frames, *, out: Path, fps: float, ffmpeg_binary: str):
     """Consumes the frames and touches the file, so the renderer tests
     never spawn ffmpeg for the clip."""
-    from splitsmith.look_motion import MotionClip
+    from splitsmith.look.motion import MotionClip
 
     count = sum(1 for _ in frames.frames)
     out.write_bytes(b"clip")
@@ -2197,7 +2197,7 @@ def test_a_sting_whose_frames_fail_becomes_a_cut(tmp_path: Path, monkeypatch) ->
     no clip and costs the transition, never the render."""
     import dataclasses
 
-    from splitsmith.look_motion import MotionClipError
+    from splitsmith.look.motion import MotionClipError
 
     class _Breaking(_FakeRasterizer):
         def render_template_frames(self, template, *, context, width, height, fps, max_seconds):

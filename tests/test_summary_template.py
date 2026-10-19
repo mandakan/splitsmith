@@ -240,7 +240,7 @@ def test_an_animated_summary_beside_a_transition_renders_its_edge(
 def test_a_summary_clip_that_fails_draws_the_built_in_card_and_says_so(
     tmp_path: Path, retro: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from splitsmith.look_motion import MotionClipError
+    from splitsmith.look.motion import MotionClipError
 
     def broken(frames, *, out: Path, fps: float, ffmpeg_binary: str):  # noqa: ANN001, ANN202
         raise MotionClipError("frame 12 failed")

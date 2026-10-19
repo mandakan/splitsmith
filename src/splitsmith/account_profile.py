@@ -26,7 +26,7 @@ from pydantic import BaseModel, ConfigDict
 from . import user_config
 from .async_bridge import run_sync
 from .composition import BrandMark
-from .look_brand import BrandError, save_brand_logo
+from .look.brand import BrandError, save_brand_logo
 from .looks import BRAND_DIR, LookBrand
 from .shooter_book import _safe_file, account_dir
 

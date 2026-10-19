@@ -40,9 +40,9 @@ from .grade import ResolvedGrade, apply_lut, blend, read_cube
 from .hud_extras import hud_extras_from
 from .identity import ResolvedIdentity
 from .logo_placeholder import PLACEHOLDER_REVISION
-from .look_brand import brand_mark_json
-from .look_sting import sting_context
-from .look_template import shared_digest
+from .look.brand import brand_mark_json
+from .look.sting import sting_context
+from .look.template import shared_digest
 from .looks import Look, overlay_template_for, sting_template_for
 from .match_model import is_standard_start
 from .match_project import MatchProject
@@ -503,7 +503,7 @@ def render_preview(
         seconds = beep + last_shot + spec.tail_pad_seconds
     frame: Path | None = None
     if spec.backdrop == "demo":
-        from .look_tools import demo_backdrop
+        from .look.tools import demo_backdrop
 
         frame = work_dir / "demo.png"
         demo_backdrop().save(frame)

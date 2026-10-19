@@ -34,8 +34,8 @@ from pydantic import BaseModel, Field
 from ..composition import XFADE_FAMILIES
 from ..fonts import FONTS
 from ..identity import LOGO_MAX_BYTES
-from ..look_brand import BrandError, save_brand_logo
-from ..look_store import (
+from ..look.brand import BrandError, save_brand_logo
+from ..look.store import (
     MAX_LABEL_LENGTH,
     TEMPLATE_SLOTS,
     FolderLookStore,
@@ -51,8 +51,8 @@ from ..look_store import (
     is_shipped_name,
     template_file,
 )
-from ..look_template import shared_digest
-from ..look_tools import (
+from ..look.template import shared_digest
+from ..look.tools import (
     EDITOR_STARTERS,
     STARTERS,
     LookToolError,
@@ -237,7 +237,7 @@ async def duplicate_look(name: str, req: DuplicateLookRequest, request: Request)
         raise HTTPException(status_code=404, detail=f"no Look named {req.source!r}") from None
     try:
         if isinstance(store, FolderLookStore):
-            from ..look_tools import LookToolError, new_look
+            from ..look.tools import LookToolError, new_look
 
             try:
                 new_look(name, from_look=req.source)

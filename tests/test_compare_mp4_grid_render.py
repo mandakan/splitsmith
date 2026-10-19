@@ -1746,7 +1746,7 @@ def test_a_sting_the_look_lacks_is_a_fade_on_the_grid(tmp_path: Path, monkeypatc
 
 
 def test_a_sting_whose_frames_fail_is_a_cut_on_the_grid(tmp_path: Path, monkeypatch) -> None:
-    from splitsmith.look_motion import MotionClipError
+    from splitsmith.look.motion import MotionClipError
 
     def writer_that_fails(frames, *, out: Path, fps: float, ffmpeg_binary: str):
         frames.close()

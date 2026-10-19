@@ -1,7 +1,7 @@
 ---
 paths:
   - "src/splitsmith/looks*.py"
-  - "src/splitsmith/look_*.py"
+  - "src/splitsmith/look/**"
   - "src/splitsmith/fonts.py"
   - "src/splitsmith/own_fonts.py"
   - "src/splitsmith/overlay/theme.py"

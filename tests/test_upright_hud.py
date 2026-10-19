@@ -14,7 +14,7 @@ from pathlib import Path
 import pytest
 from PIL import Image
 
-from splitsmith import look_tools
+from splitsmith.look import tools as look_tools
 from splitsmith.looks import load_look, overlay_template_for
 from splitsmith.overlay.html import single_css, single_html
 from splitsmith.overlay.hud import HudOptions, declared_positions, hud_options_data, hud_stage_data

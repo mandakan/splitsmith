@@ -24,7 +24,7 @@ from PIL import Image
 from .events import confirmed
 from .hud_extras import HudExtras, declared_data, hud_extras_data
 from .identity import ResolvedIdentity
-from .look_template import (
+from .look.template import (
     TemplateContext,
     engine_block,
     shared_url,

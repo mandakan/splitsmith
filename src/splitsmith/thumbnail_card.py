@@ -23,7 +23,7 @@ from typing import Any
 
 from PIL import Image, ImageOps
 
-from .look_template import TemplateContext, engine_block, shared_url, shooter_json, theme_tokens
+from .look.template import TemplateContext, engine_block, shared_url, shooter_json, theme_tokens
 from .looks import Look, thumbnail_template_for
 from .overlay.card import card_scale
 from .overlay.html import single_css

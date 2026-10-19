@@ -17,8 +17,8 @@ from pathlib import Path
 import pytest
 from PIL import Image
 
-from splitsmith import look_sandbox
-from splitsmith.look_template import TemplateContext, engine_block, shared_url
+from splitsmith.look import sandbox as look_sandbox
+from splitsmith.look.template import TemplateContext, engine_block, shared_url
 from splitsmith.overlay.raster import (
     ChromiumRasterizer,
     RasterizerUnavailableError,

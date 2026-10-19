@@ -46,9 +46,9 @@ from ..composition import (
 )
 from ..export_naming import stage_display_name
 from ..identity import ResolvedIdentity
-from ..look_brand import brand_mark_json
-from ..look_motion import MotionClipError, motion_overlay_filters, write_motion_clip
-from ..look_sting import sting_motion, sting_overlay_filters
+from ..look.brand import brand_mark_json
+from ..look.motion import MotionClipError, motion_overlay_filters, write_motion_clip
+from ..look.sting import sting_motion, sting_overlay_filters
 from ..looks import CardSlot, Look, load_look, sting_template_for
 from ..overlay.card import (
     CardMotion,

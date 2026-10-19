@@ -12,8 +12,9 @@ from pathlib import Path
 import pytest
 from PIL import Image
 
-from splitsmith import look_brand, looks
-from splitsmith.look_store import LookStoreError, StoredLookBody, body_from_manifest
+from splitsmith import looks
+from splitsmith.look import brand as look_brand
+from splitsmith.look.store import LookStoreError, StoredLookBody, body_from_manifest
 
 
 def _png(size: int = 64, colour: tuple[int, int, int] = (230, 20, 20)) -> bytes:
@@ -130,7 +131,7 @@ def test_a_logo_that_is_gone_or_a_symlink_draws_no_logo(
 def test_a_look_without_a_brand_sends_the_context_it_always_did(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from splitsmith import look_tools
+    from splitsmith.look import tools as look_tools
 
     look = _look(tmp_path, monkeypatch)
     _case, ctx = look_tools.sample_contexts(look, "title_page", "default", tmp_path)[0]
@@ -140,7 +141,7 @@ def test_a_look_without_a_brand_sends_the_context_it_always_did(
 def test_the_brand_is_the_title_pages_corner_mark(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """A real render: the logo's red sits top-left, the centre stays clear,
     and the card's text stays where it was."""
-    from splitsmith import look_tools
+    from splitsmith.look import tools as look_tools
     from splitsmith.overlay.raster import ChromiumRasterizer, RasterizerUnavailableError
 
     look = _look(tmp_path, monkeypatch)

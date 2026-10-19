@@ -6,9 +6,9 @@ from __future__ import annotations
 import math
 from pathlib import Path
 
-from splitsmith import look_sting
 from splitsmith.identity import ResolvedIdentity
-from splitsmith.look_template import template_digest
+from splitsmith.look import sting as look_sting
+from splitsmith.look.template import template_digest
 from splitsmith.looks import load_look
 from splitsmith.overlay.raster import TemplateFrames
 from splitsmith.overlay.theme import theme_for

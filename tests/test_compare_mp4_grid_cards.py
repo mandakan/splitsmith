@@ -427,7 +427,7 @@ def test_chapters_without_cards_start_at_the_first_stage(tmp_path: Path) -> None
 
 
 def _fake_clip_writer(frames, *, out: Path, fps: float, ffmpeg_binary: str):
-    from splitsmith.look_motion import MotionClip
+    from splitsmith.look.motion import MotionClip
 
     count = sum(1 for _ in frames.frames)
     out.write_bytes(b"clip")

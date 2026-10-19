@@ -23,7 +23,7 @@ from PIL import Image
 from .composition import SequenceFormat
 from .config import VideoMetadata
 from .grade import ResolvedGrade, lut_filter, materialize
-from .look_motion import motion_overlay_filters, write_motion_clip
+from .look.motion import motion_overlay_filters, write_motion_clip
 from .looks import load_look
 from .mp4_render import (
     FFmpegError,
