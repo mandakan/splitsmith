@@ -14,10 +14,10 @@ from fastapi import HTTPException, Request
 
 from ..access import ALL_FEATURES, Feature, features_for
 from ..auth import User
+from .context import _hosted_mode_active
 
 
 def features_of(request: Request, user: User) -> frozenset[Feature]:
-    from .server import _hosted_mode_active
 
     if not _hosted_mode_active():
         return ALL_FEATURES

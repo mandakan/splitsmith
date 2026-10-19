@@ -33,7 +33,7 @@ from typing import TYPE_CHECKING
 from ..match_model import MATCH_FILE
 
 if TYPE_CHECKING:
-    from .server import AppState
+    from .state import AppState
 
 logger = logging.getLogger(__name__)
 

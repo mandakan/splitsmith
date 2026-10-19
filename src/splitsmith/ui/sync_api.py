@@ -43,6 +43,8 @@ from ..storage import Storage
 from ..sync.plan import TRIMMED_SUFFIX, WEB_SUFFIX, doc_identity_key, trim_key_for
 from ..sync.pull import FEATURE_EVENTS, PULLABLE_DOC_KINDS, SYNC_FEATURES_HEADER
 from ..sync.state import versions_digest
+from .context import _hosted_mode_active
+from .state import _RAW_UPLOAD_PART_SIZE
 
 if TYPE_CHECKING:
     from ..db.desktop_commands import DesktopCommandStore
@@ -252,12 +254,10 @@ class SyncMediaDeleteResponse(BaseModel):
 def _hosted_gate() -> None:
     """Raise 404 outside hosted mode.
 
-    Imported lazily so that importing this module never requires the
-    hosted-only db deps (sqlalchemy et al) - the local-slim install
-    still imports and registers this router; every route just 404s at
-    request time. Same idiom as the desktop-token management routes.
+    The local-slim install still imports and registers this router;
+    every route just 404s at request time. Same idiom as the
+    desktop-token management routes.
     """
-    from .server import _hosted_mode_active
 
     if not _hosted_mode_active():
         raise HTTPException(status_code=404, detail="not found")
@@ -327,7 +327,7 @@ async def _register_recent_project(request: Request, match_id: str, name: str) -
     users/<user_id>/projects/<slug>``) so a synced match's row is
     indistinguishable in shape from one a browser-created match would
     get - one path-building implementation, not a second. Imported
-    lazily, same reason as ``_hosted_gate``.
+    lazily: ``server`` imports this module at module level.
     """
     from .server import _resolve_create_target
 
@@ -759,7 +759,6 @@ async def create_media_upload(
     await _resolve_mirror(request, match_id)
     _validate_media_key(body.key, match_id)
     storage = _require_storage(request)
-    from .server import _RAW_UPLOAD_PART_SIZE
 
     try:
         upload_id = storage.create_multipart_upload(body.key)

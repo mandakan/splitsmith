@@ -196,7 +196,7 @@ def test_hosted_mode_has_no_footage_sort(
     from splitsmith.ui import server
 
     _, client, _, base = _match_app(tmp_path)
-    monkeypatch.setattr(server, "_hosted_mode_active", lambda: True)
+    monkeypatch.setenv(server.SPLITSMITH_MODE_ENV, "hosted")
 
     resp = client.post(f"{base}/match/footage-sort/scan", json={"source_dir": str(tmp_path)})
 

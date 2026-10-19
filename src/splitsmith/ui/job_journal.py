@@ -56,6 +56,8 @@ from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel
 
+from .context import current_match_id, current_match_root
+
 if TYPE_CHECKING:
     from .jobs import Job, JobBackend
 
@@ -234,7 +236,6 @@ class JobJournal:
         """
         if job.kind in NON_RESUMABLE_KINDS:
             return
-        from .server import current_match_id, current_match_root
 
         match_root = current_match_root.get()
         match_id = current_match_id.get()
@@ -396,7 +397,6 @@ async def resume_journaled_jobs(backend: JobBackend, journal: JobJournal) -> int
     in the original request - the local analogue of the hosted worker's
     ``_bind_match``.
     """
-    from .server import current_match_id, current_match_root
 
     resumed = 0
     seen: set[tuple[Any, ...]] = set()

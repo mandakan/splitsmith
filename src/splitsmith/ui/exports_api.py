@@ -40,6 +40,7 @@ from ..match_project import trim_blocker
 from ..overlay_hud import OverlayStyleFields
 from ..overlay_theme import ThemeName
 from . import export_storage, match_exports
+from .context import _hosted_mode_active
 from .http_errors import source_unreachable
 
 router = APIRouter()
@@ -612,7 +613,6 @@ def check_match_export(state: Any, slug: str, req: MatchExportRequest) -> None:
     reachable source. Raises ``HTTPException`` with the route's status and
     message. Shared with the desktop's ``render_upload`` start, which
     reports the message to the phone instead of raising it."""
-    from .server import _hosted_mode_active
 
     if _hosted_mode_active():
         # Intro / outro clips are files on the machine running the server:

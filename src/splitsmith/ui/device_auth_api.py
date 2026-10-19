@@ -27,6 +27,8 @@ from typing import TYPE_CHECKING, Any
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
+from .context import SPLITSMITH_PUBLIC_URL_ENV, _hosted_mode_active
+
 if TYPE_CHECKING:
     from ..db.device_auth import DeviceAuthStore
 
@@ -107,8 +109,7 @@ class DeviceSessionResponse(BaseModel):
 
 
 def _hosted_gate() -> None:
-    """Raise 404 outside hosted mode. Lazy import, same as sync_api."""
-    from .server import _hosted_mode_active
+    """Raise 404 outside hosted mode."""
 
     if not _hosted_mode_active():
         raise HTTPException(status_code=404, detail="not found")
@@ -138,8 +139,6 @@ def _public_base(request: Request) -> str:
     always point at the same host.
     """
     import os
-
-    from .server import SPLITSMITH_PUBLIC_URL_ENV
 
     configured = os.environ.get(SPLITSMITH_PUBLIC_URL_ENV, "").strip()
     if configured:

@@ -46,6 +46,7 @@ from ..footage_sort import (
 from ..match_project import VIDEO_EXTENSIONS, StageAutoMatch, atomic_write_json
 from ..runtime import ENV_CONFIG_FILE
 from ..video_match import recording_start_from_tags
+from .context import _hosted_mode_active
 
 logger = logging.getLogger(__name__)
 
@@ -213,7 +214,6 @@ def _left_to_place(view: SortView) -> int:
 
 
 def _local_only() -> None:
-    from .server import _hosted_mode_active
 
     if _hosted_mode_active():
         raise HTTPException(status_code=404, detail="not found")

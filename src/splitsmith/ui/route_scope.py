@@ -25,6 +25,8 @@ from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 from fastapi.routing import APIRoute
 
+from .context import _hosted_mode_active
+
 #: (method, route path template) pairs served in local mode only.
 LOCAL_ONLY_ROUTES: frozenset[tuple[str, str]] = frozenset(
     {
@@ -169,7 +171,6 @@ HOSTED_CONFINED_ROUTES: dict[tuple[str, str], str] = {
 
 
 def _hosted() -> bool:
-    from .server import _hosted_mode_active
 
     return _hosted_mode_active()
 

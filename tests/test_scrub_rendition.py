@@ -247,7 +247,7 @@ def test_scrub_setting_is_local_only(tmp_path: Path, monkeypatch: pytest.MonkeyP
     from splitsmith.ui import server
 
     client, _base, _trim, _web = _bootstrap(tmp_path)
-    monkeypatch.setattr(server, "_hosted_mode_active", lambda: True)
+    monkeypatch.setenv(server.SPLITSMITH_MODE_ENV, "hosted")
     assert client.get("/api/settings/scrub").status_code == 404
     assert client.put("/api/settings/scrub", json={"full_res_scrub": True}).status_code == 404
 

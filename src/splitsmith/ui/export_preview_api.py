@@ -53,6 +53,7 @@ from ..overlay_raster import ChromiumRasterizer, Rasterizer, RasterizerUnavailab
 from ..runtime import runtime
 from ..shooter_book import identity_digest, load_snapshot
 from . import render_bound
+from .context import _hosted_mode_active, current_match_id, current_tenant
 from .exports_api import installed_look
 from .identity_media import ensure_local_event_logo, identity_source, resolved_identity_for
 
@@ -144,7 +145,6 @@ def _event_logo(state: Any) -> Path | None:
 def _owner() -> str | None:
     """``<user_id>/<match_id>`` in hosted mode, where one process and one
     cache folder serve every account; ``None`` locally."""
-    from .server import _hosted_mode_active, current_match_id, current_tenant
 
     if not _hosted_mode_active():
         return None
@@ -165,7 +165,6 @@ class _NoRasterizer:
 @router.post("/api/shooters/{slug}/export-preview")
 def export_preview(slug: str, req: ExportPreviewRequest, request: Request) -> Response:
     if req.templates:
-        from .server import _hosted_mode_active
 
         if _hosted_mode_active():
             # A template is code; hosted runs none of an account's (desktop only).

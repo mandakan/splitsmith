@@ -54,6 +54,8 @@ from ..overlay_theme import load_theme
 from ..share_card import CompareCard, MatchCard, RosterEntry, StageCard, card_hash, stage_figures
 from ..share_card_render import cached_card_png, render_card_png
 from . import render_bound
+from .context import _hosted_mode_active
+from .state import STATIC_DIR
 
 if TYPE_CHECKING:
     from contextlib import AbstractContextManager
@@ -66,8 +68,7 @@ router = APIRouter()
 
 
 def _hosted_gate() -> None:
-    """Raise 404 outside hosted mode. Lazy import, same as sync_api."""
-    from .server import _hosted_mode_active
+    """Raise 404 outside hosted mode."""
 
     if not _hosted_mode_active():
         raise HTTPException(status_code=404, detail="not found")
@@ -802,7 +803,6 @@ def _shell(tags_html: str) -> Response:
     would otherwise hit. Same 503 + no-cache contract as that fallback --
     a real browser must still get a working app, only a crawler cares
     about the injected tags."""
-    from .server import STATIC_DIR
 
     index = STATIC_DIR / "index.html"
     if not index.exists():

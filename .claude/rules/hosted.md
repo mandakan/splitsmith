@@ -4,6 +4,8 @@ paths:
   - "src/splitsmith/async_bridge.py"
   - "src/splitsmith/db/**"
   - "src/splitsmith/ui/access_gate.py"
+  - "src/splitsmith/ui/context.py"
+  - "src/splitsmith/ui/state.py"
   - "src/splitsmith/ui/admin_access_api.py"
   - "src/splitsmith/ui/presence.py"
   - "src/splitsmith/ui/jobs.py"

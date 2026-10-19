@@ -63,6 +63,7 @@ from typing import Any, Protocol
 from pydantic import BaseModel
 
 from ..observability import PhaseTimer, emit_job_event
+from .context import current_match_id, current_match_root
 
 logger = logging.getLogger(__name__)
 
@@ -607,10 +608,6 @@ class JobRegistry:
             raise ShutdownInProgressError("server is shutting down; no new jobs accepted")
         body = self.bodies.get(kind)
         call_args = args or {}
-        # In-method import: server.py imports this module at module level
-        # (register_job_bodies et al.), so a module-level import here would
-        # be circular.
-        from .server import current_match_id, current_match_root
 
         match_ctx = (current_match_id.get(), current_match_root.get())
         now = datetime.now(UTC)
@@ -807,8 +804,6 @@ class JobRegistry:
         unknown (submitted without a match context) still matches, since
         it cannot be ruled out.
         """
-        # In-method import: server.py imports this module (see submit()).
-        from .server import current_match_id
 
         calling_match = current_match_id.get()
         with self._lock:
@@ -874,10 +869,6 @@ class JobRegistry:
             stage_number = job.stage_number
             shooter_slug = job.shooter_slug
             video_id = job.video_id
-
-        # In-method import: circular at module level, matches submit()'s
-        # pattern above.
-        from .server import current_match_id, current_match_root
 
         id_token = current_match_id.set(match_id)
         root_token = current_match_root.set(match_root)

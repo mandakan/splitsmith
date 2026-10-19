@@ -92,7 +92,7 @@ import time
 from collections.abc import AsyncIterator, Awaitable, Callable, Iterable
 from contextlib import AbstractContextManager, asynccontextmanager, nullcontext
 from contextvars import ContextVar
-from dataclasses import dataclass, field, replace
+from dataclasses import replace
 from datetime import UTC, date, datetime, timedelta
 from math import isfinite
 from pathlib import Path
@@ -103,18 +103,9 @@ if TYPE_CHECKING:
     # so local mode stays free of the db (procrastinate/psycopg) dependency.
     from ..db import (
         LoopEngines,
-        PostgresMatchStore,
-        PostgresProfileStore,
-        PostgresYouTubeConnectionStore,
-        ProjectStateStore,
     )
-    from ..db.access_requests import AccessRequestStore, AccountAccessStore
-    from ..db.comments import CommentStore
-    from ..db.desktop_commands import DesktopCommandStore
-    from ..db.desktop_tokens import DesktopTokenRecord, DesktopTokenStore
-    from ..db.device_auth import DeviceAuthStore
-    from ..db.email import EmailSender
-    from ..db.share_tokens import ResolvedShare, ShareTokenStore
+    from ..db.desktop_tokens import DesktopTokenRecord
+    from ..db.share_tokens import ResolvedShare
     from ..db.workers import WorkersStore
     from ..worker_channel import WakeChannelRegistry
 
@@ -165,8 +156,6 @@ from .. import coach as coach_module
 from .. import coach_distributions as coach_distributions_module
 from .. import ensemble as ensemble_module
 from .. import events as events_module
-from .. import export_presets as export_presets_module
-from .. import look_store as look_store_module
 from .. import looks as looks_module
 from .. import media_check as media_check_module
 from .. import models as model_layer
@@ -175,12 +164,11 @@ from .. import shot_detect as shot_detect_module  # noqa: F401  (kept for legacy
 from .. import thumbnail as thumbnail_helpers
 from .. import trim as trim_module
 from .. import waveform as waveform_helpers
-from .. import whats_new as whats_new_module
-from ..access import AccessConfig, Feature, FeatureRequiredError, access_config, features_for
+from ..access import Feature, FeatureRequiredError, access_config, features_for
 from ..async_bridge import DbRunner, get_runner, install_runner, run_sync
 from ..audit_data import StageExportError, audit_shots_to_engine_shots, is_kept_shot
 from ..audit_revision import REVISION_FIELD, AuditRevisionConflictError, audit_revision
-from ..auth import AuthBackend, CompositeAuth, LoopbackAuth, User
+from ..auth import CompositeAuth, User
 from ..coach import statistic_splits
 from ..comment_identity import (
     MAX_AUTHOR_KEY_LEN,
@@ -192,7 +180,7 @@ from ..comment_identity import (
 from ..compare import cards as compare_cards
 from ..compare import mp4_grid, project_loader
 from ..composition import BrandMark, uniform_transitions
-from ..compute import ComputeBackend, LocalComputeBackend
+from ..compute import LocalComputeBackend
 from ..config import (
     BeepDetectConfig,
     BeepWindowConfig,
@@ -279,7 +267,6 @@ from . import match_exports as match_export_helpers
 from . import shooter_move as shooter_move_module
 from .access_gate import features_of, require_feature
 from .account_backfill import hosted_backfill_source
-from .account_backfill import local_backfill_source as _local_backfill_source
 from .auto_sync import (
     MATCH_SYNC_LOCK_FILE,
     OWNER_LOCK_FILE,
@@ -305,6 +292,20 @@ from .comments import (
     CommentRateLimiter,
     to_out,
 )
+from .context import (
+    SPLITSMITH_MODE_ENV,
+    SPLITSMITH_PUBLIC_URL_ENV,
+    TenantContext,
+    _hosted_mode_active,
+    current_match_capabilities,
+    current_match_id,
+    current_match_origin,
+    current_match_root,
+    current_share_cameras,
+    current_share_request,
+    current_share_viewer,
+    current_tenant,
+)
 from .exports_api import CompareGridRequest, ExportStageRequest, MatchExportRequest
 from .http_errors import ensure_source_reachable, source_unreachable
 from .identity_media import (
@@ -319,8 +320,6 @@ from .identity_media import (
 from .job_journal import JobJournal, default_journal_path, resume_journaled_jobs
 from .jobs import (
     Job,
-    JobBackend,
-    JobBodyRegistry,
     JobCancelled,
     JobHandle,
     JobNotRetryableError,
@@ -347,6 +346,12 @@ from .scoreboard import (
 )
 from .scoreboard.local import DEFAULT_MATCH_FILENAME, DEFAULT_SCOREBOARD_DIRNAME
 from .scoreboard.reconcile import CompetitorRef, LocalShooter, propose_shooter_links
+from .state import (
+    _RAW_UPLOAD_PART_SIZE,
+    STATIC_DIR,
+    AppState,
+    _no_project_error,
+)
 
 
 def _audit_trim_targets(
@@ -601,9 +606,6 @@ _AUDIT_SAVE_MAX_ATTEMPTS = 4
 # recording during the beep, whose tone is well under a second (2026-10-15).
 BEEP_BEFORE_CLIP_MAX_S = 2.0
 
-# Filename of the desktop export-run log; defined beside the model so
-# ``backup`` can archive it without importing the server.
-EXPORT_RUNS_FILE = export_runs.LOG_FILENAME
 
 # How many times ``_record_export_run`` re-loads + re-appends when a
 # concurrent export job wins the version race. Batch export runs several
@@ -611,11 +613,6 @@ EXPORT_RUNS_FILE = export_runs.LOG_FILENAME
 # not the exotic one.
 _EXPORT_RUN_SAVE_MAX_ATTEMPTS = 4
 
-# Chunk size the multipart-upload client splits a file into. 16 MiB is
-# comfortably above S3/R2's 5 MiB non-final-part minimum and keeps the part
-# count modest (a 2 GB file = 128 parts), so per-part presign round-trips
-# stay cheap.
-_RAW_UPLOAD_PART_SIZE = 16 * 1024 * 1024
 
 # The engine's ``StageData`` requires a non-None ``scorecard_updated_at``
 # (the video-matching heuristic keys off it), but manually-timed stages on
@@ -837,7 +834,6 @@ def _record_export_run(state: AppState, slug: str, run: export_runs.ExportRun) -
     )
 
 
-STATIC_DIR = Path(__file__).parent.parent / "ui_static" / "dist"
 UI_SOURCE_DIR = Path(__file__).parent.parent / "ui_static"
 
 
@@ -1468,26 +1464,6 @@ def _is_loopback(request: Request) -> bool:
     return client.host in _LOOPBACK_HOSTS
 
 
-def _no_project_error() -> HTTPException:
-    """Raised by :class:`AppState` when an endpoint that needs a bound
-    project is hit while the server is in unbound (picker) mode.
-
-    The SPA inspects ``detail.code == "no_project"`` to redirect to the
-    picker route instead of rendering a generic error.
-    """
-    return HTTPException(
-        status_code=409,
-        detail={
-            "code": "no_project",
-            "message": (
-                "No project is currently open. Pick one from the project "
-                "list (POST /api/user/recent-projects/bind) or restart "
-                "with `splitsmith ui --project <path>`."
-            ),
-        },
-    )
-
-
 def _valid_author_key_len(raw: str) -> bool:
     """Whether ``raw`` is a plausible client-minted author key.
 
@@ -1559,51 +1535,6 @@ def _require_comment_scope(state: AppState, slug: str, stage_number: int) -> Non
         raise HTTPException(status_code=404, detail="not found")
 
 
-# Per-request match root resolved by the ``/api/matches/{match_id}/...``
-# alias middleware (#353 Phase 3 PR C). When set, ``AppState.shooter_root``
-# reads from here instead of the process singleton -- which means two
-# concurrent requests carrying different match ids resolve to their own
-# match roots without fighting over ``state._bound_root``. The singleton
-# is kept as a fallback for legacy bare-path traffic + picker UX; it can
-# go away entirely once every endpoint is exercised under the new prefix.
-current_match_root: ContextVar[Path | None] = ContextVar("splitsmith_current_match_root", default=None)
-current_match_id: ContextVar[str | None] = ContextVar("splitsmith_current_match_id", default=None)
-# The bound match's origin ("hosted" | "desktop" | "local"), set by the
-# alias middleware from the same row it already fetched for the ownership
-# check (#631 Task 6) - so handlers that need to expose origin (e.g. the
-# shooter list) don't issue a second matches_store query. ``None`` outside
-# an aliased request (e.g. legacy bare-path traffic).
-current_match_origin: ContextVar[str | None] = ContextVar("splitsmith_current_match_origin", default=None)
-# The bound match's capability set (#756), computed by the alias
-# middleware from the same origin fact (or, on share requests, from the
-# token's scope) that decides the 403 - handlers serialize it so the SPA
-# gates affordances on the same truth the guard enforces. None outside
-# an aliased request.
-current_match_capabilities: ContextVar[frozenset[str] | None] = ContextVar(
-    "splitsmith_current_match_capabilities", default=None
-)
-# Set True by _share_alias for anonymous read requests so handlers can
-# strip server-local fields (e.g. match_root, last_scanned_dir) from their
-# response payloads before returning them to anonymous viewers.
-current_share_request: ContextVar[bool] = ContextVar("splitsmith_current_share_request", default=False)
-# The share link's own starting cameras (``ShareTokenRow.cameras``), set by
-# ``_share_alias`` beside ``current_share_request``. The coach payload
-# hands a shooter's entry to the viewer's pages as ``compare_camera``.
-current_share_cameras: ContextVar[dict[str, str] | None] = ContextVar(
-    "splitsmith_current_share_cameras", default=None
-)
-# The signed-in user behind a share request, or None. Set by
-# _share_alias purely so a comment can carry an account name instead of
-# a generated handle.
-#
-# It grants NOTHING. The tenant stays the match owner's, the allowlist
-# does not widen, and the scope gate does not soften. If a future change
-# makes this value authorize anything, that is the bug - the token is
-# the authorization on this surface, and a second one would mean two
-# answers to "who may do this".
-current_share_viewer: ContextVar[User | None] = ContextVar("splitsmith_current_share_viewer", default=None)
-
-
 def _may_mint_shot_ids() -> bool:
     """Whether this request's save boundary may invent a *non-convergent*
     shot id (#631 Task 7).
@@ -1661,79 +1592,6 @@ _SHARE_MEDIA_TTL: int = 15 * 60  # 15 minutes
 _OWNER_MEDIA_TTL: int = 6 * 3600  # 6 hours
 
 
-@dataclass
-class TenantContext:
-    """The per-user stores resolved for the lifetime of one request / job.
-
-    In hosted mode every ``/api/*`` request and every worker job runs as a
-    distinct user, so the per-user stores cannot be process singletons --
-    a singleton bound to user A would serve user B's request with A's
-    Row-Level-Security GUC. The hosted wiring builds one of these per
-    request (in the auth-gate middleware, from the resolved ``User``) and
-    per job (in the queue task, from the queued ``user_id``); the matching
-    :class:`AppState` properties read it via the :data:`current_tenant`
-    ContextVar. In local mode there is exactly one operator, so this is
-    never populated and the properties fall back to the process singletons.
-    """
-
-    user_id: str
-    recent_projects: user_config.RecentProjectsStore
-    scoreboard_identity: user_config.ScoreboardIdentityStore
-    jobs: JobBackend
-    matches_store: PostgresMatchStore | None
-    project_state: ProjectStateStore | None
-    storage: Storage | None
-    # Per-user owner-scoped share-token store (public share links, issue #349).
-    # None in local mode; in hosted mode built per-request with the tenant
-    # factory so write operations filter on this user's rows. share_tokens is
-    # not under RLS - isolation is by explicit user_id predicates on every
-    # query - but the tenant factory is still correct here because the GUC is
-    # inert on a non-RLS table and the store filters by user_id explicitly.
-    share_tokens: ShareTokenStore | None
-    # Per-user desktop-sync bearer token store (desktop-to-hosted sync MVP,
-    # #631). None in local mode; in hosted mode built per-request with the
-    # tenant factory, same rationale as share_tokens directly above -
-    # desktop_tokens is not under RLS either (see DesktopTokenRow), so the
-    # store's own user_id filter is the real isolation boundary, but the
-    # tenant factory is still the established construction pattern here.
-    desktop_tokens: DesktopTokenStore | None
-    # Per-user public comment-thread store (timestamped comments). None in
-    # local mode; in hosted mode built per-request with the tenant factory.
-    # Unlike share_tokens and desktop_tokens directly above, match_comments
-    # IS under the tenant_isolation RLS policy (Task 1's migration) - so
-    # here the tenant factory is load-bearing, not merely the established
-    # pattern: it is what sets the ``app.user_id`` GUC the policy keys on.
-    comments: CommentStore | None
-    # Per-user account-profile writer (#867). None in local mode: the
-    # loopback sentinel has no user row, and the PATCH route that uses
-    # this 404s there.
-    profile: PostgresProfileStore | None = None
-    # Per-user saved export presets (spec 2026-09-15 s1). ``None`` in
-    # local mode, where ``AppState.export_presets`` falls back to the
-    # JSON file store.
-    export_presets: export_presets_module.ExportPresetStore | None = None
-    # The account's YouTube connection (issue #1000, phase 2). ``None`` in
-    # local mode, where ``youtube_api`` reads the file under the user
-    # config dir instead.
-    youtube: PostgresYouTubeConnectionStore | None = None
-    # The account's shooter book and profile (spec 2026-10-08). Hosted builds
-    # one per tenant; ``AppState`` never falls back to the local files for a
-    # hosted request, so a container's own disk is never read as an account.
-    shooter_book: shooter_book_module.ShooterBookStore | None = None
-    account_profile: account_profile_module.AccountProfileStore | None = None
-    # The desktop command queue (#1100): requests the phone makes for the
-    # user's desktop to run. ``None`` in local mode; under the
-    # ``tenant_isolation`` RLS policy, so the tenant factory is load-bearing.
-    desktop_commands: DesktopCommandStore | None = None
-    # The account's saved Looks (#1263): manifests only, drawn by the
-    # shipped templates. ``None`` in local mode, where ``AppState.looks``
-    # is the Looks folder.
-    looks: look_store_module.HostedLookStore | None = None
-    # The What's new ids the account has seen. ``None`` in local mode, where
-    # ``AppState.whats_new`` is the prefs file.
-    whats_new: whats_new_module.WhatsNewStore | None = None
-
-
 def user_looks_cache_root() -> Path:
     """Where hosted accounts' Looks are materialized (#1263); one folder per
     account under it, content-named inside that."""
@@ -1752,890 +1610,6 @@ def tenant_looks_provider(tenant: TenantContext) -> looks_module.UserLooksProvid
         return tenant.looks.materialized_dir(user_looks_cache_root())
 
     return provide
-
-
-# Per-request / per-job tenant resolved by the hosted-mode auth gate
-# (API) and the ``run_compute_job`` queue task (worker). When set, the
-# per-user ``AppState`` properties (``jobs``, ``recent_projects``,
-# ``scoreboard_identity``, ``matches_store``, ``storage``) read from it
-# instead of the local-mode singleton -- the same pattern
-# ``current_match_root`` uses for match scoping. ``None`` in local mode
-# and on boot/non-request code paths.
-current_tenant: ContextVar[TenantContext | None] = ContextVar("splitsmith_current_tenant", default=None)
-
-
-def _shooter_storage_scope(match_id: str | None, slug: str) -> str | None:
-    """The per-shooter prefix for derived-artifact caches (audio, trims, peaks).
-
-    ``None`` outside a ``/api/matches/{id}/`` scope. Every project loader
-    binds storage with this, with or without a state store: the keys
-    ``ui/audio`` derives depend on it, so two loaders disagreeing on the
-    scope would make the same artifact live under two keys.
-    """
-    return f"matches/{match_id}/shooters/{slug}" if match_id is not None else None
-
-
-@dataclass
-class MatchBundle:
-    """Every shooter of the bound match, loaded once (#1181).
-
-    ``projects`` is keyed by slug in match order, minus shooters whose
-    project doc is missing. ``audits`` is ``{slug: {stage_number: doc}}`` in
-    hosted mode and ``None`` in local mode, the same contract
-    :meth:`AppState.load_audit_docs` has: ``None`` tells the status helpers
-    to read audits from disk.
-    """
-
-    projects: dict[str, MatchProject]
-    audits: dict[str, dict[int, dict]] | None
-
-    def audit_docs(self, slug: str) -> dict[int, dict] | None:
-        return None if self.audits is None else self.audits.get(slug, {})
-
-
-@dataclass
-class AppState:
-    """Process state. One bound Match folder at a time.
-
-    The bound project is always a Match folder; the legacy single-
-    shooter layout was retired in Tier 1 step 3 of doc 10.
-
-    - Match-level operations (list shooters, merge, export the whole
-      match) read :attr:`match_root`, which resolves from the per-
-      request ``current_match_root`` ContextVar set by the
-      ``/api/matches/{match_id}/`` alias middleware.
-    - Shooter-scoped operations require a slug from the URL path and
-      resolve via :meth:`shooter_root` / :meth:`shooter_project`,
-      which also read the same ContextVar.
-
-    There is no notion of an "active" or "current" shooter on the
-    server. Every shooter-scoped request must carry the slug in its
-    path; the SPA's URL is the single source of truth.
-
-    There is no notion of a "bound" project on the server -- the URL
-    prefix ``/api/matches/{match_id}/`` carries match identity per
-    request, and the alias middleware resolves it via
-    :class:`MatchRegistry`. ``splitsmith ui --project <path>`` and
-    the SPA picker register matches in :attr:`matches` and emit a
-    URL the browser navigates to; the server itself never has a
-    "current open project" state.
-    """
-
-    # The ``JobBackend`` Protocol (see ``splitsmith.ui.jobs``) is
-    # what handlers depend on; ``JobRegistry`` is the local in-memory
-    # implementation. In hosted mode the per-request / per-job tenant
-    # backend resolves through the ``jobs`` property below; this backing
-    # slot stays the local ``JobRegistry`` and is consulted only when no
-    # tenant is pinned (boot-time body registration), never for queries.
-    _jobs: JobBackend = field(default_factory=JobRegistry)
-    # Process-level ``kind`` -> body registry, shared by the local backend
-    # and every per-request hosted backend. ``register_job_bodies`` (and the
-    # dev routes) register here via ``state.jobs.bodies``; ``__post_init__``
-    # points the backing ``_jobs`` at it, and ``_apply_hosted_mode_wiring``
-    # injects it into each tenant backend. Decoupling the map from any one
-    # backend is what lets hosted mode build backends per request without
-    # re-registering bodies -- and what lets the loopback boot user go away.
-    job_bodies: JobBodyRegistry = field(default_factory=JobBodyRegistry)
-    matches: MatchRegistry = field(default_factory=MatchRegistry)
-    # Per-user ``matches`` table store (PR-delta). ``None`` in local mode;
-    # in hosted mode resolved per request / per job via the property below.
-    # See ``splitsmith.db.matches.PostgresMatchStore``.
-    _matches_store: PostgresMatchStore | None = None
-    # Per-user ``state_docs`` store (state refactor). Holds the match /
-    # per-shooter project / per-stage audit JSON docs in Postgres with
-    # optimistic locking. ``None`` in local mode (state stays file-based);
-    # in hosted mode resolved per request / per job via the property below.
-    # See ``splitsmith.db.project_state.ProjectStateStore``.
-    _project_state: ProjectStateStore | None = None
-    # Per-user preference stores (Tier 3 of doc 10). Local mode
-    # delegates to the ``~/.splitsmith/*.json`` module functions;
-    # in hosted mode resolved per request from the authenticated user
-    # via the properties below. See ``splitsmith.user_config``.
-    _recent_projects: user_config.RecentProjectsStore = field(
-        default_factory=user_config.JsonRecentProjectsStore
-    )
-    _scoreboard_identity: user_config.ScoreboardIdentityStore = field(
-        default_factory=user_config.JsonScoreboardIdentityStore
-    )
-    _looks: look_store_module.LookStore = field(default_factory=look_store_module.FolderLookStore)
-    _whats_new: whats_new_module.WhatsNewStore = field(default_factory=whats_new_module.PrefsWhatsNewStore)
-    _export_presets: export_presets_module.ExportPresetStore = field(
-        default_factory=export_presets_module.JsonExportPresetStore
-    )
-    _shooter_book: shooter_book_module.ShooterBookStore = field(
-        default_factory=lambda: shooter_book_module.JsonShooterBookStore(
-            backfill_source=_local_backfill_source
-        )
-    )
-    _account_profile: account_profile_module.AccountProfileStore = field(
-        default_factory=account_profile_module.JsonAccountProfileStore
-    )
-    # Hosted-mode factory: build a :class:`TenantContext` for a ``user_id``.
-    # ``None`` in local mode. Set by ``_apply_hosted_mode_wiring``; called
-    # per request (auth gate) and per job (queue task).
-    _build_tenant: Callable[[str], TenantContext] | None = None
-    # Auth backend. ``LoopbackAuth`` in local mode (every request
-    # resolves to the same sentinel user); a hosted-mode backend will
-    # be injected here when SaaS lands. See ``splitsmith.auth``.
-    auth: AuthBackend = field(default_factory=LoopbackAuth)
-    # Compute backend. ``LocalComputeBackend`` runs the shot-detection
-    # ensemble in this process; a hosted ``RemoteComputeBackend`` will
-    # ship audio to a cloud worker. See ``splitsmith.compute`` and
-    # ``docs/saas-readiness/04-compute-backends.md``. The default uses
-    # ``load_ensemble_runtime`` directly; ``create_app`` overrides this
-    # with one wired to the local ``_get_ensemble_runtime`` so test
-    # monkeypatches and the shared model cache still work.
-    compute: ComputeBackend = field(default_factory=LocalComputeBackend)
-    # Tenant-scoped object storage. ``None`` in local mode -- the
-    # desktop codepaths read/write the user's chosen project folder
-    # directly via ``pathlib.Path`` and never consult this slot. In
-    # hosted mode (``SPLITSMITH_MODE=hosted``) ``_apply_hosted_mode_wiring``
-    # constructs a per-user :class:`S3Storage` scoped to
-    # ``users/<user_id>/`` so the upload endpoints can stream raw
-    # footage into R2 / MinIO without ever touching the API
-    # container's filesystem. Resolved per request / per job via the
-    # property below. See ``docs/saas-readiness/03-storage-layer.md``.
-    _storage: Storage | None = None
-    # Stop callback registered by :func:`splitsmith.ui.embedded.run_embedded`
-    # so the /api/shutdown route can ask uvicorn to exit. None under the
-    # ``splitsmith ui`` CLI path -- Ctrl-C via _JobAwareServer.handle_exit
-    # is the stop mechanism there.
-    shutdown_handler: Callable[[], None] | None = None
-    # Idempotency latch for /api/shutdown: first call kicks the drain
-    # thread, subsequent calls return 202 without rescheduling.
-    shutdown_initiated: bool = False
-
-    # Hosted-mode auth config, set by ``_apply_hosted_mode_wiring`` from
-    # ``SPLITSMITH_PUBLIC_URL``. ``public_base_url`` is the origin the
-    # magic-link callback lives under; ``cookie_secure`` is True iff that
-    # origin is https (so the session cookie's Secure flag round-trips
-    # over docker-compose http but is set in production). Both stay at
-    # their defaults in local mode (no auth, no cookies).
-    public_base_url: str | None = None
-    cookie_secure: bool = False
-    # Lowercase email addresses granted admin access. Populated from
-    # ``SPLITSMITH_ADMIN_EMAILS`` by ``_apply_hosted_mode_wiring``; stays
-    # empty in local mode so nobody is admin there.
-    admin_emails: frozenset[str] = frozenset()
-    # Account tier registry (spec 2026-10-03). Populated from
-    # ``SPLITSMITH_CONFIG`` by ``_apply_hosted_mode_wiring``; local mode
-    # never consults it.
-    access: AccessConfig = field(default_factory=AccessConfig)
-    # Access requests and the admin's account list (spec 2026-10-03), plus
-    # the mail transport the app sends access mail through. Raw (non-tenant)
-    # session factory: requests arrive before any account exists. ``None``
-    # in local mode.
-    access_requests: AccessRequestStore | None = None
-    accounts: AccountAccessStore | None = None
-    email_sender: EmailSender | None = None
-    # Records an access request and alerts the admins when it is new. Set
-    # by ``_apply_hosted_mode_wiring``; ``None`` in local mode.
-    record_access_request: Callable[..., Awaitable[None]] | None = None
-    # Fire-and-forget tasks the app started off the request path (the
-    # access-request admin alerts). Held here so the event loop's weak
-    # reference is not the only one; each task removes itself when done.
-    background_tasks: set[asyncio.Task] = field(default_factory=set)
-    # Hosted + launcher only: serve-boot pending-jobs re-check, registered
-    # as a FastAPI startup handler by create_app. Runs on every cold start
-    # (incl. each wake from Railway app sleeping).
-    boot_retrigger: Callable[[], Awaitable[None]] | None = None
-    # Operator-scoped worker registry (self-hosted workers). ``None`` in
-    # local mode. Built over the RAW session factory - workers are operator
-    # infrastructure shared across tenants, not per-user data (no RLS; the
-    # unique token hash is the isolation boundary).
-    workers_store: WorkersStore | None = None
-    # Hosted only: the per-loop pooled engines (#1178). ``None`` in local
-    # mode, which has no database. The lifespan adopts the app loop and
-    # disposes it; the process ``DbRunner`` (``async_bridge.get_runner``)
-    # adopts its own.
-    db_engines: LoopEngines | None = None
-    # Device-flow authorizations (#719). Raw (non-tenant) session factory,
-    # same as workers_store: the poll authenticates from the device code
-    # alone, before any tenant is pinned. None in local mode.
-    device_auth: DeviceAuthStore | None = None
-    # In-flight device-flow state for the LOCAL install (#719): the
-    # device code, the hosted-declared interval, when it expires, and
-    # when we last forwarded a poll. Also the non-secret half of the
-    # hosted response - ``user_code``, ``verification_uri``,
-    # ``verification_uri_complete`` - so a second ``device/start`` can
-    # hand the still-live flow back to the SPA instead of dead-ending it
-    # (the operator who cancels the dialog and signs in again must get
-    # the code and the approve link, not a ten-minute wait). Only
-    # ``device_code`` is a secret and it never leaves this process.
-    # Deliberately in memory and not on disk - polling is lazy (the
-    # SPA's own poll drives it), so closing the tab leaves no orphaned
-    # poller, and restarting the local server mid-flow just means
-    # starting over inside a 10-minute window.
-    device_flow: dict[str, object] | None = None
-    # Monotonic timestamp of the last upstream account refresh (#877), or
-    # None when none has run in this process. Held here rather than in
-    # config.yaml because it is per-process liveness, not user
-    # preference: a restart should refresh, and two installs sharing a
-    # home directory should not share a cooldown.
-    hosted_account_refreshed_at: float | None = None
-    # Guards every read-modify-write of ``device_flow`` (#719). The three
-    # local device routes each ``await`` a threadpool HTTP call in the
-    # middle of reading/mutating ``device_flow``; without a lock, two
-    # concurrent status polls can both pass the throttle check before
-    # either records ``last_polled_at``, doubling load on the hosted side
-    # and letting one poll's approval response get discarded by the SPA
-    # while the other request that "won" the race serves a stale status.
-    # A plain ``asyncio.Lock`` is enough - this is one desktop process
-    # serving one operator, not a multi-worker server, so there is no
-    # cross-process case to cover.
-    device_flow_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
-    # Guards the whole load/append/save of the DESKTOP export-run log
-    # (#629). Local mode's ``load_export_runs`` always reports version 0
-    # and ``save_export_runs`` ignores the version it is handed, so the
-    # optimistic-lock retry in ``_record_export_run`` cannot protect the
-    # read-modify-write there -- and it genuinely races: the Export page's
-    # trims-only bundle button submits one export job per selected stage
-    # and ``JobRegistry`` runs two at a time against one document.
-    # A ``threading.Lock`` and not a file lock, deliberately: desktop is a
-    # single server process, so this serialises every writer that exists.
-    # It is NOT cross-process safe, and it does not need to be -- two
-    # ``splitsmith ui`` processes over one project folder already race on
-    # far more than this file. Hosted never takes it; its optimistic
-    # locking is the real mechanism there.
-    export_run_lock: threading.Lock = field(default_factory=threading.Lock)
-    # The same guard for DESKTOP audit docs (#931): ``save_audit`` holds it
-    # across the write and the ``.bak`` rotation, and
-    # ``_save_audit_with_remerge`` across its re-load/merge/save. A sibling
-    # of ``export_run_lock`` rather than that lock, because the two
-    # documents share no writer and a shot-detect save has no reason to
-    # queue behind an export's bookkeeping. Re-entrant because the re-merge
-    # calls ``save_audit`` while holding it. Same process-local scope, and
-    # hosted never takes it.
-    audit_lock: threading.RLock = field(default_factory=threading.RLock)
-    # Reconcile steps this process submitted, keyed by
-    # ``_reconcile_key`` (match, kind, slug, stage), so the terminal
-    # listener can record a failure with the inputs it ran on (spec
-    # 2026-09-27 s3). Registered before submit: a job that fails in
-    # milliseconds can reach the listener before submit() returns. Local
-    # only; an entry leaves on its job's terminal event.
-    reconcile_jobs: dict[tuple[str | None, str, str | None, int | None], tuple[Path, ReconcileStep]] = field(
-        default_factory=dict
-    )
-    # Desktop auto-sync service (spec 2026-09-27); None hosted and when
-    # SPLITSMITH_AUTO_SYNC=0.
-    auto_sync: AutoSyncService | None = None
-    # Live SSE wake channels, one asyncio.Queue per connected self-hosted
-    # worker. ``None`` in local mode and on the headless worker process
-    # (which must never hold launcher capabilities); set by the non-worker
-    # hosted wiring together with the dispatcher that pushes into it.
-    wake_channels: WakeChannelRegistry | None = None
-    # Connection material returned by ``POST /api/workers/register``:
-    # database_url + public_url, plus the S3 sub-dict when the bucket is
-    # configured (``None`` otherwise). ``None`` in local mode.
-    worker_credentials: dict[str, Any] | None = None
-    # Anonymous share-token resolver (public share links, issue #349). Set
-    # only by hosted wiring; None in local mode. Built over the RAW
-    # session_factory (not a tenant factory) because share_tokens is not
-    # under RLS - anonymous resolution happens before any app.user_id GUC
-    # exists, and the unique-token lookup is itself the isolation boundary.
-    resolve_share_token: Callable[[str], Awaitable[ResolvedShare | None]] | None = None
-
-    def __post_init__(self) -> None:
-        # Point the backing local backend's body map at the shared
-        # process-level registry so ``state.jobs.bodies.register(...)`` (used
-        # by ``register_job_bodies`` + the dev routes, all at boot with no
-        # tenant pinned) lands on the same registry the hosted per-tenant
-        # backends read from. In local mode this is also the registry the
-        # JobRegistry executes against.
-        self._jobs.bodies = self.job_bodies
-
-    # ------------------------------------------------------------------
-    # Per-user stores -- tenant-resolving in hosted mode, singletons local
-    # ------------------------------------------------------------------
-    #
-    # Each getter returns the request/job's :class:`TenantContext` store
-    # when ``current_tenant`` is set (hosted mode), else the process
-    # singleton in the backing field (local mode + boot/non-request code).
-    # The setters write the backing field so tests + the local path can
-    # inject fakes; hosted requests never assign these (they set
-    # ``current_tenant`` instead). This mirrors ``shooter_root`` reading
-    # ``current_match_root``.
-
-    @property
-    def jobs(self) -> JobBackend:
-        tenant = current_tenant.get()
-        return tenant.jobs if tenant is not None else self._jobs
-
-    @jobs.setter
-    def jobs(self, value: JobBackend) -> None:
-        self._jobs = value
-
-    @property
-    def recent_projects(self) -> user_config.RecentProjectsStore:
-        tenant = current_tenant.get()
-        return tenant.recent_projects if tenant is not None else self._recent_projects
-
-    @recent_projects.setter
-    def recent_projects(self, value: user_config.RecentProjectsStore) -> None:
-        self._recent_projects = value
-
-    @property
-    def scoreboard_identity(self) -> user_config.ScoreboardIdentityStore:
-        tenant = current_tenant.get()
-        return tenant.scoreboard_identity if tenant is not None else self._scoreboard_identity
-
-    @scoreboard_identity.setter
-    def scoreboard_identity(self, value: user_config.ScoreboardIdentityStore) -> None:
-        self._scoreboard_identity = value
-
-    @property
-    def shooter_book(self) -> shooter_book_module.ShooterBookStore:
-        """The account's shooter book: the tenant's hosted, the local files
-        locally, and an empty one for a hosted request with no tenant."""
-        tenant = current_tenant.get()
-        if tenant is not None:
-            return tenant.shooter_book or shooter_book_module.EmptyShooterBookStore()
-        if self._build_tenant is not None:
-            return shooter_book_module.EmptyShooterBookStore()
-        return self._shooter_book
-
-    @property
-    def account_profile(self) -> account_profile_module.AccountProfileStore:
-        tenant = current_tenant.get()
-        if tenant is not None:
-            return tenant.account_profile or account_profile_module.EmptyAccountProfileStore()
-        if self._build_tenant is not None:
-            return account_profile_module.EmptyAccountProfileStore()
-        return self._account_profile
-
-    @property
-    def export_presets(self) -> export_presets_module.ExportPresetStore:
-        tenant = current_tenant.get()
-        if tenant is not None and tenant.export_presets is not None:
-            return tenant.export_presets
-        return self._export_presets
-
-    @property
-    def whats_new(self) -> whats_new_module.WhatsNewStore:
-        tenant = current_tenant.get()
-        if tenant is not None and tenant.whats_new is not None:
-            return tenant.whats_new
-        return self._whats_new
-
-    @property
-    def looks(self) -> look_store_module.LookStore:
-        tenant = current_tenant.get()
-        if tenant is not None and tenant.looks is not None:
-            return tenant.looks
-        return self._looks
-
-    @property
-    def matches_store(self) -> PostgresMatchStore | None:
-        tenant = current_tenant.get()
-        return tenant.matches_store if tenant is not None else self._matches_store
-
-    @matches_store.setter
-    def matches_store(self, value: PostgresMatchStore | None) -> None:
-        self._matches_store = value
-
-    @property
-    def project_state(self) -> ProjectStateStore | None:
-        tenant = current_tenant.get()
-        return tenant.project_state if tenant is not None else self._project_state
-
-    @project_state.setter
-    def project_state(self, value: ProjectStateStore | None) -> None:
-        self._project_state = value
-
-    @property
-    def storage(self) -> Storage | None:
-        tenant = current_tenant.get()
-        return tenant.storage if tenant is not None else self._storage
-
-    @storage.setter
-    def storage(self, value: Storage | None) -> None:
-        self._storage = value
-
-    @property
-    def share_tokens(self) -> ShareTokenStore | None:
-        # Local mode has no per-user share-token store - share links are a
-        # hosted-only feature. Returns None when no tenant is pinned.
-        tenant = current_tenant.get()
-        return tenant.share_tokens if tenant is not None else None
-
-    @property
-    def desktop_tokens(self) -> DesktopTokenStore | None:
-        # Local mode has no per-user desktop-token store - desktop sync is a
-        # hosted-only feature. Returns None when no tenant is pinned.
-        tenant = current_tenant.get()
-        return tenant.desktop_tokens if tenant is not None else None
-
-    @property
-    def desktop_commands(self) -> DesktopCommandStore | None:
-        # Hosted-only, like desktop_tokens. None when no tenant is pinned.
-        tenant = current_tenant.get()
-        return tenant.desktop_commands if tenant is not None else None
-
-    @property
-    def comments(self) -> CommentStore | None:
-        # Local mode has no per-user comment store - public comments are a
-        # hosted-only feature. Returns None when no tenant is pinned.
-        tenant = current_tenant.get()
-        return tenant.comments if tenant is not None else None
-
-    @property
-    def profile(self) -> PostgresProfileStore | None:
-        # Local mode has no per-user profile store - display names are a
-        # hosted-account concept. Returns None when no tenant is pinned.
-        tenant = current_tenant.get()
-        return tenant.profile if tenant is not None else None
-
-    @property
-    def youtube_connections(self) -> PostgresYouTubeConnectionStore | None:
-        # None in local mode: the connection is the youtube.json file there.
-        tenant = current_tenant.get()
-        return tenant.youtube if tenant is not None else None
-
-    def build_tenant(self, user_id: str) -> TenantContext:
-        """Build the :class:`TenantContext` for ``user_id`` (hosted mode).
-
-        Raises if called in local mode -- there is no per-user tenancy
-        there, and a caller reaching this in local mode is a bug. The
-        hosted wiring sets :attr:`_build_tenant`.
-        """
-        if self._build_tenant is None:
-            raise RuntimeError(
-                "AppState.build_tenant called without a hosted-mode tenant "
-                "factory; this is only valid when SPLITSMITH_MODE=hosted "
-                "wiring has run."
-            )
-        return self._build_tenant(user_id)
-
-    @property
-    def match_root(self) -> Path:
-        """The match folder resolved from the request URL's
-        ``/api/matches/{match_id}/`` prefix.
-
-        Tier 1 of the singleton-elimination work (doc 10): match-level
-        operations are addressable only by URL, never via a process-
-        level bind. The alias middleware sets ``current_match_root``
-        after validating ``match_id``; this accessor reads only from
-        there. A bare-path request (no prefix) gets 409 ``no_project``.
-        Legacy single-shooter projects don't have a ``match_id`` and
-        are unreachable via match-level routes by construction.
-        """
-        scoped = current_match_root.get()
-        if scoped is None:
-            raise _no_project_error()
-        return scoped
-
-    def shooter_root(self, slug: str) -> Path:
-        """Resolve ``slug`` to the shooter's project directory on disk.
-
-        The path is always ``<match_root>/shooters/<slug>``. The
-        match root comes from the per-request ``current_match_root``
-        ContextVar set by the ``/api/matches/{match_id}/`` alias
-        middleware -- there is no process-level singleton fallback,
-        and there is no legacy single-shooter layout to support
-        (Tier 1 step 3 of doc 10 retired both). Bare-path requests
-        without the URL prefix get 409 ``no_project``.
-        """
-        scoped_root = current_match_root.get()
-        if scoped_root is None:
-            raise _no_project_error()
-        # Roster / ownership check. Hosted: the match doc lives in Postgres
-        # (state_docs), so read the shooter list from there -- a worker or a
-        # post-redeploy replica has no match.json on disk. Local: load the
-        # on-disk match.json. Either way the returned value is the on-disk
-        # path, which is where *media* (S3-mirrored) lives for ffmpeg.
-        mid = current_match_id.get()
-        store = self.project_state
-        if store is not None and mid is not None:
-            doc, _ = run_sync(store.load_match(mid))
-            if doc is None:
-                raise HTTPException(
-                    status_code=404,
-                    detail=f"match {mid!r} has no state document",
-                )
-            shooters = doc.get("shooters", [])
-        else:
-            shooters = match_model.Match.load(scoped_root).shooters
-        if slug not in shooters:
-            raise HTTPException(
-                status_code=404,
-                detail=f"shooter {slug!r} is not registered on this match",
-            )
-        return match_model.Match.shooter_root(scoped_root, slug)
-
-    def _audit_file(self, slug: str, stage_number: int) -> Path:
-        """The on-disk path for a stage's audit JSON. Used only by the
-        *local-mode* branches of ``load_audit`` / ``save_audit`` /
-        ``materialize_audit`` -- hosted mode keeps audit docs in
-        ``state_docs`` and never touches this file."""
-        scoped_root = current_match_root.get()
-        if scoped_root is None:
-            raise _no_project_error()
-        return match_model.Match.shooter_root(scoped_root, slug) / "audit" / f"stage{stage_number}.json"
-
-    # ------------------------------------------------------------------
-    # State-doc accessors (state refactor)
-    # ------------------------------------------------------------------
-
-    def match(self) -> match_model.Match:
-        """Load the match for the current ``/api/matches/{match_id}/`` scope.
-
-        Hosted: from the ``state_docs`` table, with the state store bound so
-        a subsequent ``.save()`` round-trips back under optimistic locking
-        (carrying the loaded version). Local: from the on-disk ``match.json``
-        (``Match.load`` may self-assign + save a pre-v4 ``match_id`` -- that
-        path is file-only and never reached for a store-backed match, whose
-        docs are born with an id).
-        """
-        scoped_root = current_match_root.get()
-        if scoped_root is None:
-            raise _no_project_error()
-        mid = current_match_id.get()
-        store = self.project_state
-        if store is not None and mid is not None:
-            doc, version = run_sync(store.load_match(mid))
-            if doc is None:
-                raise HTTPException(status_code=404, detail=f"match {mid!r} has no state document")
-            match = match_model.Match.model_validate(doc)
-            match.bind_state(store, match_id=mid, version=version)
-            return match
-        return match_model.Match.load(scoped_root)
-
-    def audit_doc_target(self) -> tuple[ProjectStateStore, str] | None:
-        """The hosted store + match id for audit docs, or ``None`` when they
-        are files. The audit twin of :meth:`export_runs_doc_target`: the
-        accessors below and ``_save_audit_with_remerge``'s desktop lock all
-        branch on this one answer."""
-        mid = current_match_id.get()
-        store = self.project_state
-        if store is not None and mid is not None:
-            return store, mid
-        return None
-
-    def load_audit(self, slug: str, stage_number: int) -> tuple[dict | None, int]:
-        """Load a stage's audit doc + its version. ``(None, 0)`` when none
-        exists yet. Hosted: from ``state_docs``. Local: from the on-disk
-        ``audit/stage<N>.json`` (version always 0 -- no locking on files)."""
-        target = self.audit_doc_target()
-        if target is not None:
-            store, mid = target
-            return run_sync(store.load_audit(mid, slug, stage_number))
-        audit_file = self._audit_file(slug, stage_number)
-        if not audit_file.exists():
-            return None, 0
-        try:
-            return json.loads(audit_file.read_text(encoding="utf-8")), 0
-        except (OSError, json.JSONDecodeError) as exc:
-            raise HTTPException(status_code=500, detail=f"audit read failed: {exc}") from exc
-
-    def load_audit_docs(self, slug: str) -> dict[int, dict] | None:
-        """Per-stage audit docs for one shooter, for hosted-aware status.
-
-        Returns ``{stage_number: doc}`` in hosted mode (one bulk
-        ``state_docs`` query), or ``None`` in local mode so the status
-        helpers fall back to their on-disk read. This is the single
-        loader the status/count endpoints hand to
-        :meth:`MatchProject.stage_statuses` /
-        :meth:`MatchProject.audited_count` -- keeping the state_docs
-        access in one place is what stops the disk-vs-state_docs
-        divergence from creeping back (the sidebar counter bug). Relies
-        on ``current_match_id`` being set by the ``/api/matches/{id}/...``
-        alias middleware, same as :meth:`load_audit`.
-        """
-        mid = current_match_id.get()
-        store = self.project_state
-        if store is None or mid is None:
-            return None
-        return {stage_number: doc for _slug, stage_number, doc in run_sync(store.list_audit_docs(mid, slug))}
-
-    def save_audit(self, slug: str, stage_number: int, doc: dict, *, version: int) -> int:
-        """Persist a stage's audit doc; return the new version.
-
-        Hosted: ``state_docs`` under optimistic locking -- ``version==0``
-        INSERTs, ``>0`` UPDATEs at that version, a stale version raises
-        ``StateConflictError`` (-> 409). Local: temp file -> ``.bak``
-        rotate -> rename file write (returns 0).
-
-        The local temp file gets a unique ``mkstemp`` name and the rotate
-        runs under :attr:`audit_lock` (#931). A fixed ``stage<N>.json.tmp``
-        is shared by every writer to that stage, which is the idiom that
-        lost export-run records in #629; and two unlocked rotations race
-        on ``.bak`` (one unlinks it between the other's ``exists`` and
-        ``unlink``)."""
-        target = self.audit_doc_target()
-        if target is not None:
-            store, mid = target
-            return run_sync(store.save_audit(mid, slug, stage_number, doc, expected_version=version))
-        audit_file = self._audit_file(slug, stage_number)
-        audit_file.parent.mkdir(parents=True, exist_ok=True)
-        backup = audit_file.with_suffix(audit_file.suffix + ".bak")
-        with self.audit_lock:
-            fd, tmp_name = tempfile.mkstemp(
-                dir=audit_file.parent, prefix=f"{audit_file.name}.", suffix=".tmp"
-            )
-            tmp = Path(tmp_name)
-            try:
-                with os.fdopen(fd, "w", encoding="utf-8") as fh:
-                    fh.write(json.dumps(doc, indent=2) + "\n")
-                if audit_file.exists():
-                    backup.unlink(missing_ok=True)
-                    audit_file.replace(backup)
-                tmp.replace(audit_file)
-            except OSError as exc:
-                tmp.unlink(missing_ok=True)
-                raise HTTPException(status_code=500, detail=f"audit write failed: {exc}") from exc
-        return 0
-
-    def delete_audit(self, slug: str, stage_number: int) -> bool:
-        """Delete a stage's audit doc. Returns True when one was removed.
-
-        The hosted/local split mirrors :meth:`load_audit` and
-        :meth:`save_audit`. Used when a stage is removed from the match
-        (#521): the doc describes shots on a stage that no longer exists,
-        and leaving it behind risks a stale audit reattaching.
-
-        The local branch also removes the ``.bak`` sibling that
-        :meth:`save_audit` rotates the previous doc into -- deleting only
-        the live file would leave the previous audit recoverable on disk
-        after the user asked for the stage to be gone.
-        """
-        target = self.audit_doc_target()
-        if target is not None:
-            store, mid = target
-            return run_sync(store.delete_audit(mid, slug, stage_number)) > 0
-        audit_file = self._audit_file(slug, stage_number)
-        backup = audit_file.with_suffix(audit_file.suffix + ".bak")
-        removed = False
-        # Under the save's lock so a delete cannot land mid-rotation and
-        # leave the rotated-in doc (or its .bak) behind.
-        with self.audit_lock:
-            for victim in (audit_file, backup):
-                if victim.exists():
-                    try:
-                        victim.unlink()
-                        removed = removed or victim == audit_file
-                    except OSError as exc:
-                        raise HTTPException(
-                            status_code=500,
-                            detail=f"audit delete failed: {exc}",
-                        ) from exc
-        return removed
-
-    def export_runs_doc_target(self) -> tuple[ProjectStateStore, str] | None:
-        """The hosted store + match id for the export history, or ``None``
-        when the history is file-based.
-
-        The one place the mode split for this document is decided. Both
-        accessors below branch on it, and ``_record_export_run`` takes its
-        desktop-only lock on exactly the ``None`` case -- so that lock can
-        never end up guarding a different set of calls than the file
-        writes it exists to serialise.
-        """
-        mid = current_match_id.get()
-        store = self.project_state
-        if store is not None and mid is not None:
-            return store, mid
-        return None
-
-    def load_export_runs(self, slug: str) -> tuple[dict | None, int]:
-        """The shooter's export history doc + version (#629).
-
-        Hosted: ``state_docs``. Local: ``<shooter_root>/export_runs.json``
-        (version always 0 -- no locking on files; ``_record_export_run``
-        holds :attr:`export_run_lock` across the read-modify-write
-        instead). Unlike :meth:`load_audit`, an unreadable document
-        degrades to "no history" rather than a 500: this is bookkeeping,
-        and it must not be able to break a page that would otherwise
-        render.
-        """
-        target = self.export_runs_doc_target()
-        if target is not None:
-            store, mid = target
-            return run_sync(store.load_export_runs(mid, slug))
-        path = self.shooter_root(slug) / EXPORT_RUNS_FILE
-        if not path.exists():
-            return None, 0
-        try:
-            return json.loads(path.read_text(encoding="utf-8")), 0
-        except (OSError, json.JSONDecodeError) as exc:
-            logger.warning("export run record: unreadable at %s: %s", path, exc)
-            return None, 0
-
-    def save_export_runs(self, slug: str, doc: dict, *, version: int) -> int:
-        """Persist the export history doc; return the new version.
-
-        Hosted: ``state_docs`` under optimistic locking, same contract as
-        :meth:`save_audit`. Local: write a temp file, then rename over the
-        real one (returns 0).
-
-        The temp file gets a unique ``mkstemp`` name rather than a fixed
-        ``export_runs.json.tmp``. A fixed name is shared by every writer
-        to the same shooter, so two concurrent stage exports write the one
-        temp file and the second ``replace`` raises ENOENT after the first
-        already consumed it -- a lost run for a reason that has nothing to
-        do with the document's contents. ``_record_export_run`` serialises
-        desktop writers anyway; this keeps the failure impossible rather
-        than merely unreached.
-        """
-        target = self.export_runs_doc_target()
-        if target is not None:
-            store, mid = target
-            return run_sync(store.save_export_runs(mid, slug, doc, expected_version=version))
-        path = self.shooter_root(slug) / EXPORT_RUNS_FILE
-        path.parent.mkdir(parents=True, exist_ok=True)
-        fd, tmp_name = tempfile.mkstemp(dir=path.parent, prefix=f"{path.name}.", suffix=".tmp")
-        tmp = Path(tmp_name)
-        try:
-            with os.fdopen(fd, "w", encoding="utf-8") as fh:
-                fh.write(json.dumps(doc, indent=2) + "\n")
-            tmp.replace(path)
-        except OSError:
-            tmp.unlink(missing_ok=True)
-            raise
-        return 0
-
-    def materialize_audit(self, slug: str, stage_number: int) -> Path:
-        """Ensure the stage's audit doc is present at its on-disk path and
-        return that path.
-
-        For file-path consumers that hand the audit *path* to downstream
-        readers (the FCPXML/report exporters, the lab). Hosted: the doc
-        lives in ``state_docs``, so write it to the local file first.
-        Local: the file is already on disk, return its path. When no audit
-        doc exists the returned path simply won't exist -- the caller's
-        existing "missing audit" handling fires, same as before.
-
-        Hosted with no doc, a local file an earlier job on this worker
-        materialized is removed (#1332): it is a copy of a doc that is
-        gone, and the export (and the overlay's audit revision) would read
-        it as current."""
-        audit_file = self._audit_file(slug, stage_number)
-        if self.audit_doc_target() is not None:
-            doc, _ = self.load_audit(slug, stage_number)
-            if doc is not None:
-                audit_file.parent.mkdir(parents=True, exist_ok=True)
-                audit_file.write_text(json.dumps(doc, indent=2) + "\n", encoding="utf-8")
-            else:
-                audit_file.unlink(missing_ok=True)
-        return audit_file
-
-    def shooter_project(self, slug: str) -> MatchProject:
-        """Load the per-shooter ``MatchProject`` (each shooter slot
-        inside a Match folder owns its own ``project.json``).
-
-        Binds :attr:`storage` onto the project so
-        :meth:`MatchProject.resolve_video_path` can mirror hosted-mode
-        raw videos into the local cache on first access. The bound
-        ``scope`` is ``matches/<match_id>/shooters/<slug>`` -- used as
-        the prefix for derived-artifact caches (audio WAVs today,
-        trim outputs later) so two shooters in different matches
-        can't collide on the same ``video_id``. Local mode leaves
-        ``storage`` at ``None``; the bind is a no-op and the legacy
-        disk-only resolvers win.
-        """
-        shooter_root = self.shooter_root(slug)
-        match_id = current_match_id.get()
-        store = self.project_state
-        if store is not None and match_id is not None:
-            # Hosted: the project doc lives in Postgres. Load it, then bind
-            # it exactly as a bundled doc is bound (``_project_from_doc``).
-            doc, version = run_sync(store.load_project(match_id, slug))
-            if doc is None:
-                raise HTTPException(
-                    status_code=404,
-                    detail=f"shooter {slug!r} has no project document",
-                )
-            return self._project_from_doc(slug, doc, version)
-        project = MatchProject.load(shooter_root)
-        # A disk-backed project under a ``/api/matches/{id}/`` scope still
-        # gets the per-shooter storage scope: storage without a state store
-        # is a valid configuration (local disk docs + an object store for
-        # derived artifacts), and its audio / peaks keys depend on it.
-        project.bind_storage(self.storage, scope=_shooter_storage_scope(match_id, slug))
-        return project
-
-    def _project_from_doc(self, slug: str, doc: dict, version: int) -> MatchProject:
-        """Bind a hosted project doc the way every hosted loader must.
-
-        The store is bound so ``save()`` round-trips back under optimistic
-        locking (carrying ``version``, the version the doc was read at);
-        the paths are confined because the doc may carry another machine's
-        (a desktop mirror's own sources and cache dirs), so they resolve
-        inside the shooter root only; storage is bound under the per-shooter
-        scope for derived-artifact caches. :meth:`shooter_project` and
-        :meth:`match_bundle` both go through here so one shooter loaded
-        alone and one loaded with its match are the same object.
-        """
-        match_id = current_match_id.get()
-        store = self.project_state
-        assert store is not None and match_id is not None  # callers are hosted-only
-        project = MatchProject.model_validate(doc)
-        project.bind_state(store, match_id=match_id, slug=slug, version=version)
-        project.confine_paths()
-        project.bind_storage(self.storage, scope=_shooter_storage_scope(match_id, slug))
-        return project
-
-    def match_bundle(self, match: match_model.Match) -> MatchBundle:
-        """Every shooter's project and audit docs for ``match``, in one query (#1181).
-
-        Triage, the triage summary and the beep queue each walked the match
-        shooter by shooter -- a ``state_docs`` query per project doc and
-        another per shooter's audit docs -- which is what made opening a
-        match cost 2.5-3.4 s per fetch on production. Hosted, this loads
-        them all with :meth:`ProjectStateStore.load_docs_for_matches` and
-        binds each project through :meth:`_project_from_doc`. A shooter
-        whose project doc is missing is left out, as the per-shooter loops
-        skipped it. Local mode reads each ``project.json`` from disk and
-        reports ``audits=None`` so the status helpers keep their on-disk
-        audit read, exactly as :meth:`load_audit_docs` returns ``None``.
-        """
-        match_id = current_match_id.get()
-        store = self.project_state
-        # One shooter's unloadable project (a missing or corrupt doc) skips
-        # that shooter, never the match: the per-shooter loops this replaces
-        # answered for the rest, and the Overview must still render.
-        if store is None or match_id is None:
-            projects: dict[str, MatchProject] = {}
-            for slug in match.shooters:
-                try:
-                    projects[slug] = self.shooter_project(slug)
-                except Exception as exc:  # noqa: BLE001 -- isolate per shooter
-                    logger.warning("Skipping shooter %s: %s", slug, exc)
-            return MatchBundle(projects=projects, audits=None)
-        docs = run_sync(store.load_docs_for_matches([match_id]))[match_id]
-        projects = {}
-        for slug in match.shooters:
-            doc = docs.projects.get(slug)
-            if doc is None:
-                logger.warning("Skipping shooter %s: no project document", slug)
-                continue
-            try:
-                projects[slug] = self._project_from_doc(slug, doc, docs.project_versions.get(slug, 0))
-            except Exception as exc:  # noqa: BLE001 -- isolate per shooter
-                logger.warning("Skipping shooter %s: %s", slug, exc)
-        return MatchBundle(projects=projects, audits=docs.audits)
-
-    async def shooter_project_async(self, slug: str) -> MatchProject:
-        """Async twin of :meth:`shooter_project`.
-
-        Awaits the store load directly instead of blocking the event loop
-        via ``run_sync``. Use from hot async handlers (assignment moves) so
-        one shooter's load doesn't stall every other in-flight request. Local
-        mode has no store and falls back to the sync file loader (cheap read).
-        """
-        shooter_root = self.shooter_root(slug)
-        match_id = current_match_id.get()
-        store = self.project_state
-        if store is not None and match_id is not None:
-            doc, version = await store.load_project(match_id, slug)
-            if doc is None:
-                raise HTTPException(
-                    status_code=404,
-                    detail=f"shooter {slug!r} has no project document",
-                )
-            return self._project_from_doc(slug, doc, version)
-        project = MatchProject.load(shooter_root)
-        project.bind_storage(self.storage, scope=_shooter_storage_scope(match_id, slug))
-        return project
 
 
 async def _any_active_job(state: AppState) -> Job | None:
@@ -7208,13 +6182,7 @@ def _hosted_detail_from_docs(
     return detail
 
 
-SPLITSMITH_MODE_ENV = "SPLITSMITH_MODE"
 SPLITSMITH_DATABASE_URL_ENV = "SPLITSMITH_DATABASE_URL"
-# Public origin the deployment is reached at (e.g. https://splitsmith.app,
-# or http://localhost:5174 for docker-compose). Required in hosted mode: it
-# is the base of the magic-link callback URL and decides the session
-# cookie's Secure flag (Secure iff the scheme is https).
-SPLITSMITH_PUBLIC_URL_ENV = "SPLITSMITH_PUBLIC_URL"
 # Comma-separated list of email addresses granted admin access. Comparison
 # is case-insensitive. Unset or empty means nobody is admin (the default).
 # Parsed only in hosted mode by ``_apply_hosted_mode_wiring``; local mode
@@ -7317,17 +6285,6 @@ def video_media_type(path: str | Path) -> str:
     (2026-10-02). Streams also go out ``inline`` for the same reason.
     """
     return _VIDEO_MEDIA_TYPES.get(Path(path).suffix.lower(), "application/octet-stream")
-
-
-def _hosted_mode_active() -> bool:
-    """Return True when ``SPLITSMITH_MODE=hosted`` is in the environment.
-
-    The single switch that picks Postgres-backed stores + the hosted
-    auth bootstrap over the local file-system defaults. Local-mode
-    (``splitsmith ui``) leaves the env var unset; ``splitsmith serve``
-    sets it before constructing the app.
-    """
-    return os.environ.get(SPLITSMITH_MODE_ENV, "").strip().lower() == "hosted"
 
 
 #: How long this process waits between upstream refresh *attempts* for

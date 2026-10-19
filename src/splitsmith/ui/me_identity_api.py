@@ -22,6 +22,7 @@ from ..identity import CLUB_MAX_CHARS, LOGO_MAX_BYTES, ShooterIdentity
 from ..look_brand import BrandError
 from ..looks import BRAND_LINE_MAX, LookBrand
 from ..shooter_book import EmptyShooterBookStore, ShooterBookEntry, ShooterBookStore, is_set
+from .context import _hosted_mode_active
 
 logger = logging.getLogger(__name__)
 
@@ -273,7 +274,6 @@ async def list_shooters(request: Request) -> JSONResponse:
     with the look the videos draw (the book's, else the newest match's own),
     one per match for a shooter without an id; you first. Writes nothing."""
     from . import shooter_roster
-    from .server import _hosted_mode_active
 
     state = request.app.state.splitsmith_state
     if _hosted_mode_active():
