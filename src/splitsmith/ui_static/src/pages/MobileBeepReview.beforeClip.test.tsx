@@ -49,6 +49,7 @@ const item = (over: Partial<BeepQueueItem>): BeepQueueItem => ({
   video_id: "sec",
   video_path: "videos/IMG_1.MOV",
   beep_time: 0,
+  aligned_time: null,
   beep_confidence: 1,
   beep_reviewed: true,
   status: "confirmed",

@@ -11,11 +11,65 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sys
 import tempfile
 from pathlib import Path
 
 OUT = Path(__file__).resolve().parent.parent / "src" / "splitsmith" / "ui_static" / "openapi.json"
+
+
+_REF = re.compile(r'"#/components/schemas/(\w+)"')
+_METHODS = ("get", "post", "put", "delete", "patch")
+
+
+def _reachable(schemas: dict, roots: set[str]) -> set[str]:
+    seen = set(roots)
+    stack = list(roots)
+    while stack:
+        for ref in _REF.findall(json.dumps(schemas.get(stack.pop(), {}))):
+            if ref not in seen:
+                seen.add(ref)
+                stack.append(ref)
+    return seen
+
+
+def mark_response_fields_required(doc: dict) -> dict:
+    """Make every field of a response-only schema required.
+
+    pydantic's JSON schema leaves a field with a default out of ``required``
+    even in serialization mode, so the generated TypeScript would say
+    ``acknowledged?: boolean`` for a ``Job`` the server always serializes
+    whole. A model that only ever appears in responses is emitted by
+    ``model_dump``, which writes every field (``None`` as ``null``), so for
+    those schemas "has a default" says nothing about presence. Schemas that
+    also appear in a request body keep pydantic's input semantics: there the
+    default really does mean the client may omit the field.
+
+    This holds because no response in the app is serialized with
+    ``exclude_none`` or ``exclude_unset``; a route that starts doing so must
+    name its model in ``_SERIALIZED_SPARSELY`` so it is left alone here.
+    """
+    schemas = doc.get("components", {}).get("schemas", {})
+    in_bodies: set[str] = set()
+    in_responses: set[str] = set()
+    for item in doc.get("paths", {}).values():
+        for method, op in item.items():
+            if method not in _METHODS:
+                continue
+            in_bodies |= set(_REF.findall(json.dumps(op.get("requestBody", {}))))
+            in_responses |= set(_REF.findall(json.dumps(op.get("responses", {}))))
+    inputs = _reachable(schemas, in_bodies)
+    for name in _reachable(schemas, in_responses) - inputs - _SERIALIZED_SPARSELY:
+        schema = schemas.get(name, {})
+        props = schema.get("properties")
+        if props:
+            schema["required"] = sorted(props)
+    return doc
+
+
+#: Response models a handler serializes with ``exclude_none`` or ``exclude_unset``.
+_SERIALIZED_SPARSELY: frozenset[str] = frozenset()
 
 
 def build_document() -> dict:
@@ -24,7 +78,7 @@ def build_document() -> dict:
     os.environ.setdefault("SPLITSMITH_HOME", tempfile.mkdtemp(prefix="splitsmith-openapi-"))
     from splitsmith.ui.server import create_app
 
-    return create_app(lab_enabled=True).openapi()
+    return mark_response_fields_required(create_app(lab_enabled=True).openapi())
 
 
 def render(doc: dict) -> str:

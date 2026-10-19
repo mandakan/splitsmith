@@ -184,17 +184,17 @@
      }
     },
     "required": [
-     "id",
-     "email",
-     "note",
-     "source",
-     "status",
-     "requested_at",
-     "last_requested_at",
      "decided_at",
      "decided_by",
-     "tier_granted",
-     "email_sent_at"
+     "email",
+     "email_sent_at",
+     "id",
+     "last_requested_at",
+     "note",
+     "requested_at",
+     "source",
+     "status",
+     "tier_granted"
     ],
     "title": "AdminAccessRequest",
     "type": "object"
@@ -237,11 +237,11 @@
      }
     },
     "required": [
-     "id",
-     "email",
-     "display_name",
      "access_tier",
      "created_at",
+     "display_name",
+     "email",
+     "id",
      "is_admin"
     ],
     "title": "AdminAccountView",
@@ -286,10 +286,10 @@
      }
     },
     "required": [
-     "worker",
-     "registration_token",
+     "docker_command",
      "expires_at",
-     "docker_command"
+     "registration_token",
+     "worker"
     ],
     "title": "AdminCreateWorkerResponse",
     "type": "object"
@@ -350,8 +350,8 @@
      }
     },
     "required": [
-     "workers",
-     "server_version"
+     "server_version",
+     "workers"
     ],
     "title": "AdminWorkerListResponse",
     "type": "object"
@@ -587,10 +587,14 @@
      }
     },
     "required": [
-     "time",
-     "score",
+     "confidence",
+     "duration_ms",
+     "features",
      "peak_amplitude",
-     "duration_ms"
+     "score",
+     "silence_score",
+     "time",
+     "tonal_score"
     ],
     "title": "BeepCandidate",
     "type": "object"
@@ -628,13 +632,13 @@
      }
     },
     "required": [
-     "log_silence",
-     "tonal_ratio",
      "duration_ms",
      "log_peak_over_floor",
+     "log_silence",
+     "log_spectral_prominence",
      "peak_over_global",
      "spectral_flatness",
-     "log_spectral_prominence"
+     "tonal_ratio"
     ],
     "title": "BeepFeatures",
     "type": "object"
@@ -679,8 +683,8 @@
      }
     },
     "required": [
-     "time",
-     "confidence"
+     "confidence",
+     "time"
     ],
     "title": "BeepQueueAltCandidate",
     "type": "object"
@@ -835,19 +839,22 @@
      }
     },
     "required": [
-     "slug",
-     "shooter_name",
-     "stage_number",
-     "stage_name",
-     "role",
-     "video_id",
-     "video_path",
-     "beep_time",
+     "aligned_time",
+     "alt_candidates",
      "beep_confidence",
      "beep_reviewed",
+     "beep_time",
+     "proxy_ready",
+     "role",
+     "shooter_name",
+     "slug",
+     "snippet_ready",
+     "stage_name",
+     "stage_number",
      "status",
-     "alt_candidates",
-     "proxy_ready"
+     "trim_stale",
+     "video_id",
+     "video_path"
     ],
     "title": "BeepQueueItem",
     "type": "object"
@@ -889,10 +896,12 @@
      }
     },
     "required": [
-     "total_items",
-     "pending_count",
+     "capabilities",
      "confirmed_count",
-     "stages"
+     "origin",
+     "pending_count",
+     "stages",
+     "total_items"
     ],
     "title": "BeepQueueResponse",
     "type": "object"
@@ -925,11 +934,11 @@
      }
     },
     "required": [
-     "stage_number",
-     "stage_name",
+     "confirmed",
      "items",
-     "total_videos",
-     "confirmed"
+     "stage_name",
+     "stage_number",
+     "total_videos"
     ],
     "title": "BeepQueueStageGroup",
     "type": "object"
@@ -1409,6 +1418,7 @@
      }
     },
     "required": [
+     "channel",
      "installed"
     ],
     "title": "ChromiumStatus",
@@ -1532,9 +1542,15 @@
      }
     },
     "required": [
-     "clip_id",
      "camera_key",
-     "confidence"
+     "clip_id",
+     "confidence",
+     "decided_by",
+     "reason",
+     "role",
+     "run_id",
+     "shooter",
+     "stage"
     ],
     "title": "ClipProposal",
     "type": "object"
@@ -1617,6 +1633,15 @@
       "title": "Scorecard At"
      }
     },
+    "required": [
+     "issue",
+     "lead_seconds",
+     "offset_seconds",
+     "rival",
+     "rival_stage",
+     "run_size",
+     "scorecard_at"
+    ],
     "title": "ClipReason",
     "type": "object"
    },
@@ -1711,19 +1736,19 @@
      }
     },
     "required": [
-     "clip_id",
-     "index",
-     "folder",
-     "filename",
-     "start",
-     "duration",
-     "model",
-     "imported_by",
-     "unassigned_in",
-     "thumbnail",
-     "strip",
      "checked",
-     "proposal"
+     "clip_id",
+     "duration",
+     "filename",
+     "folder",
+     "imported_by",
+     "index",
+     "model",
+     "proposal",
+     "start",
+     "strip",
+     "thumbnail",
+     "unassigned_in"
     ],
     "title": "ClipView",
     "type": "object"
@@ -1859,8 +1884,8 @@
     "required": [
      "author_code",
      "author_kind",
-     "first_comment_at",
      "comment_count",
+     "first_comment_at",
      "handles"
     ],
     "title": "CommentAuthorOut",
@@ -1961,15 +1986,15 @@
      }
     },
     "required": [
-     "id",
-     "anchor_t",
      "anchor_kind",
      "anchor_shot_id",
-     "author_kind",
-     "author_handle",
+     "anchor_t",
      "author_code",
+     "author_handle",
+     "author_kind",
      "body",
      "created_at",
+     "id",
      "mine"
     ],
     "title": "CommentOut",
@@ -2376,13 +2401,14 @@
      }
     },
     "required": [
-     "slug",
-     "name",
-     "video_ref",
      "beep_offset_in_clip",
      "duration_seconds",
+     "identity",
+     "name",
+     "shots",
+     "slug",
      "stage_time_seconds",
-     "shots"
+     "video_ref"
     ],
     "title": "CompareShooterRecord",
     "type": "object"
@@ -2427,9 +2453,10 @@
      }
     },
     "required": [
+     "interval_class",
      "shot_number",
-     "time_after_beep",
-     "source"
+     "source",
+     "time_after_beep"
     ],
     "title": "CompareShotPoint",
     "type": "object"
@@ -2454,9 +2481,9 @@
      }
     },
     "required": [
-     "stage_number",
+     "shooters",
      "stage_name",
-     "shooters"
+     "stage_number"
     ],
     "title": "CompareStageResponse",
     "type": "object"
@@ -2535,6 +2562,8 @@
      }
     },
     "required": [
+     "channel_title",
+     "error",
      "state"
     ],
     "title": "ConnectStatusResponse",
@@ -2913,8 +2942,8 @@
      }
     },
     "required": [
-     "token",
-     "record"
+     "record",
+     "token"
     ],
     "title": "DesktopTokenCreateResponse",
     "type": "object"
@@ -2961,10 +2990,10 @@
      }
     },
     "required": [
-     "id",
-     "name",
      "created_at",
+     "id",
      "last_used_at",
+     "name",
      "revoked_at"
     ],
     "title": "DesktopTokenInfo",
@@ -3162,13 +3191,23 @@
      }
     },
     "required": [
-     "slug",
+     "age_seconds",
      "audit_path",
+     "n_disagreements",
+     "n_shots",
+     "priority",
+     "promoted_at",
+     "reasons",
+     "review_status",
+     "shooter",
+     "slug",
      "source",
      "source_label",
+     "stage_number",
      "status",
-     "n_shots",
-     "n_disagreements"
+     "venue",
+     "video_path",
+     "walk_decisions"
     ],
     "title": "DevReviewQueueItem",
     "type": "object"
@@ -3198,9 +3237,9 @@
      }
     },
     "required": [
-     "pending",
+     "done",
      "flagged",
-     "done"
+     "pending"
     ],
     "title": "DevReviewQueueResponse",
     "type": "object"
@@ -3276,10 +3315,12 @@
     },
     "required": [
      "active_version",
-     "recall",
-     "precision",
+     "built_at",
      "f1",
      "fixture_count",
+     "metrics_by_class",
+     "precision",
+     "recall",
      "step_counts"
     ],
     "title": "DeveloperModelInfo",
@@ -3307,9 +3348,9 @@
     },
     "required": [
      "corpus",
+     "retrain",
      "review",
-     "validate_runs",
-     "retrain"
+     "validate_runs"
     ],
     "title": "DeveloperStepCounts",
     "type": "object"
@@ -3338,8 +3379,9 @@
      }
     },
     "required": [
-     "id",
-     "email"
+     "display_name",
+     "email",
+     "id"
     ],
     "title": "DeviceAccountInfo",
     "type": "object"
@@ -3388,11 +3430,11 @@
     },
     "required": [
      "device_code",
+     "expires_in",
+     "interval",
      "user_code",
      "verification_uri",
-     "verification_uri_complete",
-     "expires_in",
-     "interval"
+     "verification_uri_complete"
     ],
     "title": "DeviceAuthorizeResponse",
     "type": "object"
@@ -3436,11 +3478,11 @@
      }
     },
     "required": [
-     "user_code",
-     "device_name",
-     "scope",
      "created_at",
-     "expires_at"
+     "device_name",
+     "expires_at",
+     "scope",
+     "user_code"
     ],
     "title": "DevicePendingResponse",
     "type": "object"
@@ -3489,11 +3531,12 @@
      }
     },
     "required": [
+     "expires_in",
+     "interval",
+     "resumed",
      "user_code",
      "verification_uri",
-     "verification_uri_complete",
-     "expires_in",
-     "interval"
+     "verification_uri_complete"
     ],
     "title": "DeviceStartResponse",
     "type": "object"
@@ -3528,6 +3571,8 @@
      }
     },
     "required": [
+     "account",
+     "device_name",
      "status"
     ],
     "title": "DeviceStatusResponse",
@@ -3588,7 +3633,10 @@
      }
     },
     "required": [
-     "status"
+     "account",
+     "device_name",
+     "status",
+     "token"
     ],
     "title": "DeviceTokenResponse",
     "type": "object"
@@ -3671,8 +3719,10 @@
      }
     },
     "required": [
-     "preset_id",
+     "body",
+     "builtin",
      "name",
+     "preset_id",
      "updated_at"
     ],
     "title": "ExportPreset",
@@ -4537,8 +4587,13 @@
      }
     },
     "required": [
+     "duration",
+     "kind",
+     "mtime",
      "name",
-     "kind"
+     "size_bytes",
+     "thumbnail_url",
+     "video_count"
     ],
     "title": "FsEntry",
     "type": "object"
@@ -4576,9 +4631,9 @@
      }
     },
     "required": [
-     "path",
-     "parent",
      "entries",
+     "parent",
+     "path",
      "suggested_starts"
     ],
     "title": "FsListing",
@@ -4609,6 +4664,9 @@
       "type": "array"
      }
     },
+    "required": [
+     "detail"
+    ],
     "title": "HTTPValidationError",
     "type": "object"
    },
@@ -4685,7 +4743,14 @@
      }
     },
     "required": [
-     "bound"
+     "bound",
+     "default_shooter_slug",
+     "kind",
+     "match_id",
+     "project_name",
+     "project_root",
+     "status",
+     "version"
     ],
     "title": "HealthResponse",
     "type": "object"
@@ -4807,11 +4872,12 @@
      }
     },
     "required": [
-     "unlocked",
+     "cuts",
+     "menu",
      "ready",
-     "total",
      "stages",
-     "menu"
+     "total",
+     "unlocked"
     ],
     "title": "HighlightsOut",
     "type": "object"
@@ -4849,9 +4915,10 @@
      }
     },
     "required": [
-     "id",
-     "email",
      "device_name",
+     "display_name",
+     "email",
+     "id",
      "linked_at"
     ],
     "title": "HostedAccountInfo",
@@ -4887,6 +4954,11 @@
       "type": "boolean"
      }
     },
+    "required": [
+     "account",
+     "base_url",
+     "token_set"
+    ],
     "title": "HostedSyncSettings",
     "type": "object"
    },
@@ -4973,6 +5045,7 @@
     "required": [
      "imported",
      "not_imported",
+     "remaining",
      "report"
     ],
     "title": "ImportResponse",
@@ -5003,10 +5076,10 @@
     },
     "required": [
      "clip_id",
-     "shooter",
-     "stage",
+     "path",
      "role",
-     "path"
+     "shooter",
+     "stage"
     ],
     "title": "ImportedClip",
     "type": "object"
@@ -5172,11 +5245,24 @@
      }
     },
     "required": [
+     "acknowledged",
+     "cancel_requested",
+     "created_at",
+     "error",
+     "finished_at",
      "id",
      "kind",
+     "match_id",
+     "message",
+     "progress",
+     "result",
+     "shooter_slug",
+     "stage_number",
+     "started_at",
      "status",
-     "created_at",
-     "updated_at"
+     "timings",
+     "updated_at",
+     "video_id"
     ],
     "title": "Job",
     "type": "object"
@@ -5211,8 +5297,8 @@
     },
     "required": [
      "filename",
-     "short",
-     "finished_at"
+     "finished_at",
+     "short"
     ],
     "title": "LatestReelOut",
     "type": "object"
@@ -5248,11 +5334,11 @@
      }
     },
     "required": [
-     "video_id",
-     "name",
-     "link_path",
      "current_target",
-     "status"
+     "link_path",
+     "name",
+     "status",
+     "video_id"
     ],
     "title": "LinkStatusEntry",
     "type": "object"
@@ -6038,8 +6124,35 @@
      }
     },
     "required": [
+     "audio_dir",
+     "automation",
+     "compare_camera",
+     "competitor_division",
+     "competitor_name",
+     "created_at",
+     "exports_dir",
+     "identity",
+     "last_scanned_dir",
+     "match_date",
      "name",
-     "shooter_token"
+     "nudges_dismissed_stages",
+     "probes_dir",
+     "raw_dir",
+     "raw_videos",
+     "schema_version",
+     "scoreboard_content_type",
+     "scoreboard_match_id",
+     "selected_competitor_id",
+     "selected_shooter_id",
+     "shooter_token",
+     "stages",
+     "thumbs_dir",
+     "trim_audit_encoder",
+     "trim_post_buffer_seconds",
+     "trim_pre_buffer_seconds",
+     "trimmed_dir",
+     "unassigned_videos",
+     "updated_at"
     ],
     "title": "MatchProject",
     "type": "object"
@@ -6077,8 +6190,11 @@
      }
     },
     "required": [
+     "placeholder",
+     "stage_name",
      "stage_number",
-     "stage_name"
+     "stage_rounds",
+     "start"
     ],
     "title": "MatchStageDefinition",
     "type": "object"
@@ -6125,10 +6241,10 @@
      }
     },
     "required": [
-     "kind",
-     "label",
+     "default",
      "group",
-     "default"
+     "kind",
+     "label"
     ],
     "title": "MenuItem",
     "type": "object"
@@ -6270,13 +6386,13 @@
      }
     },
     "required": [
-     "output_root",
-     "name",
-     "scoreboard_match_id",
-     "scoreboard_content_type",
      "match_date",
-     "stages",
-     "shooter_moves"
+     "name",
+     "output_root",
+     "scoreboard_content_type",
+     "scoreboard_match_id",
+     "shooter_moves",
+     "stages"
     ],
     "title": "MergePlanResponse",
     "type": "object"
@@ -6302,10 +6418,10 @@
      }
     },
     "required": [
-     "source_root",
-     "slug",
+     "competitor_name",
      "destination_root",
-     "competitor_name"
+     "slug",
+     "source_root"
     ],
     "title": "MergePlanShooterMove",
     "type": "object"
@@ -6339,8 +6455,10 @@
      }
     },
     "required": [
-     "stage_number",
-     "stage_name"
+     "expected_rounds",
+     "placeholder",
+     "stage_name",
+     "stage_number"
     ],
     "title": "MergePlanStage",
     "type": "object"
@@ -6423,10 +6541,10 @@
      }
     },
     "required": [
-     "video_path",
-     "stage_number",
+     "code",
      "reason",
-     "code"
+     "stage_number",
+     "video_path"
     ],
     "title": "MoveShooterBlocked",
     "type": "object"
@@ -6449,8 +6567,8 @@
      }
     },
     "required": [
-     "moved",
-     "blocked"
+     "blocked",
+     "moved"
     ],
     "title": "MoveShooterOutcome",
     "type": "object"
@@ -6524,8 +6642,9 @@
      }
     },
     "required": [
-     "video_path",
-     "stage_number"
+     "demoted_to_secondary",
+     "stage_number",
+     "video_path"
     ],
     "title": "MoveShooterResultItem",
     "type": "object"
@@ -6725,9 +6844,9 @@
      }
     },
     "required": [
-     "value",
      "family",
-     "url"
+     "url",
+     "value"
     ],
     "title": "OwnFontInfo",
     "type": "object"
@@ -6774,8 +6893,8 @@
      }
     },
     "required": [
-     "footage",
      "average",
+     "footage",
      "logo"
     ],
     "title": "PaletteSources",
@@ -7128,8 +7247,14 @@
      }
     },
     "required": [
+     "covers_stages",
+     "duration_seconds",
      "original_filename",
-     "storage_path"
+     "recorded_start",
+     "sha256",
+     "size_bytes",
+     "storage_path",
+     "uploaded_at"
     ],
     "title": "RawVideo",
     "type": "object"
@@ -7206,11 +7331,11 @@
      }
     },
     "required": [
-     "video_id",
-     "name",
      "link_path",
+     "name",
+     "new_target",
      "previous_target",
-     "new_target"
+     "video_id"
     ],
     "title": "RelinkAppliedEntry",
     "type": "object"
@@ -7305,15 +7430,15 @@
      }
     },
     "required": [
-     "video_id",
-     "name",
-     "link_path",
-     "current_target",
-     "current_status",
+     "ambiguous",
      "candidates",
      "chosen_path",
-     "ambiguous",
-     "found"
+     "current_status",
+     "current_target",
+     "found",
+     "link_path",
+     "name",
+     "video_id"
     ],
     "title": "RelinkEntryResponse",
     "type": "object"
@@ -7347,8 +7472,8 @@
      }
     },
     "required": [
-     "search_root",
-     "entries"
+     "entries",
+     "search_root"
     ],
     "title": "RelinkScanResponse",
     "type": "object"
@@ -7451,8 +7576,9 @@
      }
     },
     "required": [
-     "registered",
      "auto_assigned",
+     "auto_secondary",
+     "registered",
      "skipped"
     ],
     "title": "ScanResponse",
@@ -7821,11 +7947,12 @@
      }
     },
     "required": [
-     "id",
-     "url",
+     "cameras",
      "created_at",
+     "id",
      "revoked_at",
-     "scope"
+     "scope",
+     "url"
     ],
     "title": "ShareInfo",
     "type": "object"
@@ -7913,8 +8040,8 @@
      "model",
      "mount",
      "role",
-     "video_count",
-     "stage_numbers"
+     "stage_numbers",
+     "video_count"
     ],
     "title": "ShooterCameraInfo",
     "type": "object"
@@ -7956,6 +8083,11 @@
       "title": "Logo"
      }
     },
+    "required": [
+     "accent",
+     "club",
+     "logo"
+    ],
     "title": "ShooterIdentity",
     "type": "object"
    },
@@ -8066,14 +8198,17 @@
      }
     },
     "required": [
-     "slug",
+     "cameras",
+     "identity",
      "name",
-     "selected_shooter_id",
      "selected_competitor_id",
+     "selected_shooter_id",
+     "slug",
+     "stage_statuses",
      "stages_audited",
+     "stages_missing_trim",
      "stages_total",
-     "video_count",
-     "cameras"
+     "video_count"
     ],
     "title": "ShooterListEntry",
     "type": "object"
@@ -8111,8 +8246,10 @@
      }
     },
     "required": [
-     "match_root",
+     "capabilities",
      "match_name",
+     "match_root",
+     "origin",
      "shooters"
     ],
     "title": "ShooterListResponse",
@@ -8189,7 +8326,13 @@
      }
     },
     "required": [
-     "slug"
+     "audit_docs_deleted",
+     "error",
+     "files_deleted",
+     "objects_deleted",
+     "saved",
+     "slug",
+     "videos_unassigned"
     ],
     "title": "ShooterStageEditResult",
     "type": "object"
@@ -8258,12 +8401,13 @@
      }
     },
     "required": [
-     "key",
-     "folder",
-     "model",
-     "scheme",
      "clip_ids",
-     "clock"
+     "clock",
+     "folder",
+     "key",
+     "model",
+     "offset_seconds",
+     "scheme"
     ],
     "title": "SortCamera",
     "type": "object"
@@ -8305,11 +8449,11 @@
      }
     },
     "required": [
+     "clips",
+     "created_at",
      "scan_id",
      "source_dir",
-     "created_at",
      "status",
-     "clips",
      "to_review"
     ],
     "title": "SortSummary",
@@ -8399,17 +8543,17 @@
      }
     },
     "required": [
-     "scan_id",
-     "status",
-     "error",
-     "source_dir",
-     "skipped_files",
-     "shooters",
+     "anchors",
      "cameras",
      "clips",
-     "strips_pending",
-     "anchors",
+     "error",
      "overrides",
+     "scan_id",
+     "shooters",
+     "skipped_files",
+     "source_dir",
+     "status",
+     "strips_pending",
      "user_checked"
     ],
     "title": "SortView",
@@ -8502,6 +8646,14 @@
       "type": "array"
      }
     },
+    "required": [
+     "added",
+     "errors",
+     "jobs_cancelled",
+     "removed",
+     "renamed",
+     "shooters"
+    ],
     "title": "StageEditSummary",
     "type": "object"
    },
@@ -8581,9 +8733,17 @@
      }
     },
     "required": [
-     "stage_number",
+     "placeholder",
+     "scorecard",
+     "scorecard_updated_at",
+     "skipped",
      "stage_name",
-     "time_seconds"
+     "stage_number",
+     "stage_rounds",
+     "start",
+     "time_seconds",
+     "time_seconds_manual",
+     "videos"
     ],
     "title": "StageEntry",
     "type": "object"
@@ -8730,9 +8890,9 @@
      }
     },
     "required": [
+     "proposals",
      "stage_number",
-     "state",
-     "proposals"
+     "state"
     ],
     "title": "StageReadinessOut",
     "type": "object"
@@ -8894,6 +9054,18 @@
       "title": "Stage Points"
      }
     },
+    "required": [
+     "alphas",
+     "charlies",
+     "deltas",
+     "dq",
+     "hit_factor",
+     "misses",
+     "no_shoots",
+     "procedurals",
+     "stage_pct",
+     "stage_points"
+    ],
     "title": "StageScorecard",
     "type": "object"
    },
@@ -9239,7 +9411,33 @@
      }
     },
     "required": [
+     "added_at",
+     "beep_aligned_time",
+     "beep_alignment_confidence",
+     "beep_alignment_delta_ms",
+     "beep_auto_detect_failed",
+     "beep_candidates",
+     "beep_confidence",
+     "beep_duration_ms",
+     "beep_peak_amplitude",
+     "beep_ranker_version",
+     "beep_reviewed",
+     "beep_source",
+     "beep_time",
+     "beep_tone_for",
+     "beep_tone_offset_ms",
+     "beep_window",
+     "beep_window_source",
+     "camera_make",
+     "camera_model",
+     "camera_mount",
+     "fingerprint",
+     "match_timestamp",
+     "notes",
      "path",
+     "processed",
+     "role",
+     "stage_number",
      "video_id"
     ],
     "title": "StageVideo",
@@ -9257,8 +9455,8 @@
      }
     },
     "required": [
-     "name",
-     "content"
+     "content",
+     "name"
     ],
     "title": "StarterInfo",
     "type": "object"
@@ -9279,8 +9477,9 @@
      }
     },
     "required": [
+     "body",
      "name",
-     "body"
+     "updated_at"
     ],
     "title": "StoredLook",
     "type": "object"
@@ -9480,9 +9679,9 @@
      }
     },
     "required": [
-     "path",
+     "kind",
      "label",
-     "kind"
+     "path"
     ],
     "title": "SuggestedStart",
     "type": "object"
@@ -9558,6 +9757,7 @@
      }
     },
     "required": [
+     "kept_fields",
      "version"
     ],
     "title": "SyncAuditDocVersionResponse",
@@ -9701,8 +9901,10 @@
     },
     "required": [
      "doc_kind",
-     "version",
-     "updated_at"
+     "slug",
+     "stage_number",
+     "updated_at",
+     "version"
     ],
     "title": "SyncDocMeta",
     "type": "object"
@@ -9766,10 +9968,11 @@
      }
     },
     "required": [
-     "match_id",
+     "digest",
      "doc_count",
-     "version_sum",
-     "digest"
+     "match_id",
+     "pending_commands",
+     "version_sum"
     ],
     "title": "SyncFingerprint",
     "type": "object"
@@ -9927,9 +10130,9 @@
      }
     },
     "required": [
-     "upload_id",
      "key",
-     "part_size"
+     "part_size",
+     "upload_id"
     ],
     "title": "SyncMediaCreateResponse",
     "type": "object"
@@ -10072,8 +10275,12 @@
     },
     "required": [
      "configured",
-     "stale",
-     "pending_media"
+     "errors",
+     "last_synced_at",
+     "pending_docs",
+     "pending_media",
+     "remote_changes",
+     "stale"
     ],
     "title": "SyncStatusResponse",
     "type": "object"
@@ -10102,8 +10309,9 @@
      }
     },
     "required": [
-     "id",
-     "email"
+     "display_name",
+     "email",
+     "id"
     ],
     "title": "SyncWhoAmIResponse",
     "type": "object"
@@ -10171,11 +10379,11 @@
      }
     },
     "required": [
-     "slot",
-     "variant",
+     "content",
      "file",
      "own",
-     "content"
+     "slot",
+     "variant"
     ],
     "title": "TemplateInfo",
     "type": "object"
@@ -10198,8 +10406,8 @@
      }
     },
     "required": [
-     "templates",
-     "starters"
+     "starters",
+     "templates"
     ],
     "title": "TemplatesPayload",
     "type": "object"
@@ -10219,8 +10427,8 @@
      }
     },
     "required": [
-     "name",
-     "features"
+     "features",
+     "name"
     ],
     "title": "TierInfo",
     "type": "object"
@@ -10240,8 +10448,8 @@
      }
     },
     "required": [
-     "tiers",
-     "default_tier"
+     "default_tier",
+     "tiers"
     ],
     "title": "TiersResponse",
     "type": "object"
@@ -10282,6 +10490,8 @@
     },
     "required": [
      "flagged",
+     "flagged_at",
+     "note",
      "updated_at"
     ],
     "title": "TriageAttentionOut",
@@ -10405,13 +10615,22 @@
      }
     },
     "required": [
-     "slug",
-     "shooter_name",
-     "stage_number",
-     "stage_name",
-     "status",
+     "anomalies",
+     "avg_split",
      "beep_confidence",
-     "anomalies"
+     "beep_reviewed",
+     "beep_time",
+     "beep_tone_offset_ms",
+     "draw",
+     "needs_attention",
+     "shooter_name",
+     "shot_count",
+     "slug",
+     "stage_name",
+     "stage_number",
+     "status",
+     "time_seconds",
+     "video_count"
     ],
     "title": "TriageCell",
     "type": "object"
@@ -10441,9 +10660,10 @@
      }
     },
     "required": [
+     "beep_low_confidence_threshold",
+     "beep_tone_flag_ms",
      "cells",
-     "flagged_count",
-     "beep_low_confidence_threshold"
+     "flagged_count"
     ],
     "title": "TriageResponse",
     "type": "object"
@@ -10553,8 +10773,14 @@
      }
     },
     "required": [
+     "access_tier",
+     "display_name",
+     "email",
+     "features",
      "id",
-     "email"
+     "is_admin",
+     "token_id",
+     "token_scope"
     ],
     "title": "User",
     "type": "object"
@@ -10592,6 +10818,8 @@
      }
     },
     "required": [
+     "ctx",
+     "input",
      "loc",
      "msg",
      "type"
@@ -10646,10 +10874,12 @@
      }
     },
     "required": [
-     "id",
+     "body",
+     "chip",
      "date",
+     "id",
      "title",
-     "body"
+     "video"
     ],
     "title": "WhatsNewEntry",
     "type": "object"
@@ -10694,8 +10924,8 @@
      }
     },
     "required": [
-     "url",
-     "label"
+     "label",
+     "url"
     ],
     "title": "WhatsNewVideo",
     "type": "object"
@@ -10737,9 +10967,9 @@
      }
     },
     "required": [
+     "credentials",
      "worker_id",
-     "worker_token",
-     "credentials"
+     "worker_token"
     ],
     "title": "WorkerRegisterResponse",
     "type": "object"
@@ -10824,17 +11054,17 @@
      }
     },
     "required": [
-     "id",
-     "name",
-     "kind",
      "enabled",
-     "priority",
-     "status",
-     "registered",
+     "id",
+     "info",
+     "kind",
      "last_seen_at",
      "last_wake_at",
-     "version",
-     "info"
+     "name",
+     "priority",
+     "registered",
+     "status",
+     "version"
     ],
     "title": "WorkerView",
     "type": "object"
@@ -10875,8 +11105,10 @@
      }
     },
     "required": [
+     "channel_title",
      "configured",
-     "connected"
+     "connected",
+     "connected_at"
     ],
     "title": "YouTubeSettings",
     "type": "object"

@@ -7048,7 +7048,7 @@ export interface components {
             confidence: number;
             /** Duration Ms */
             duration_ms: number;
-            features?: components["schemas"]["BeepFeatures"] | null;
+            features: components["schemas"]["BeepFeatures"] | null;
             /** Peak Amplitude */
             peak_amplitude: number;
             /** Score */
@@ -7132,7 +7132,7 @@ export interface components {
          */
         BeepQueueItem: {
             /** Aligned Time */
-            aligned_time?: number | null;
+            aligned_time: number | null;
             /** Alt Candidates */
             alt_candidates: components["schemas"]["BeepQueueAltCandidate"][];
             /** Beep Confidence */
@@ -7521,15 +7521,15 @@ export interface components {
              * @enum {string}
              */
             decided_by: "engine" | "user";
-            reason?: components["schemas"]["ClipReason"];
+            reason: components["schemas"]["ClipReason"];
             /** Role */
-            role?: ("primary" | "secondary") | null;
+            role: ("primary" | "secondary") | null;
             /** Run Id */
-            run_id?: string | null;
+            run_id: string | null;
             /** Shooter */
-            shooter?: string | null;
+            shooter: string | null;
             /** Stage */
-            stage?: number | null;
+            stage: number | null;
         };
         /**
          * ClipReason
@@ -7537,25 +7537,25 @@ export interface components {
          */
         ClipReason: {
             /** Issue */
-            issue?: ("ambiguous" | "conflict" | "no_candidate" | "no_timestamp" | "needs_anchor" | "outside_match") | null;
+            issue: ("ambiguous" | "conflict" | "no_candidate" | "no_timestamp" | "needs_anchor" | "outside_match") | null;
             /** Lead Seconds */
-            lead_seconds?: number | null;
+            lead_seconds: number | null;
             /**
              * Offset Seconds
              * @default 0
              */
             offset_seconds: number;
             /** Rival */
-            rival?: string | null;
+            rival: string | null;
             /** Rival Stage */
-            rival_stage?: number | null;
+            rival_stage: number | null;
             /**
              * Run Size
              * @default 1
              */
             run_size: number;
             /** Scorecard At */
-            scorecard_at?: string | null;
+            scorecard_at: string | null;
         };
         /** ClipView */
         ClipView: {
@@ -7909,7 +7909,7 @@ export interface components {
             beep_offset_in_clip: number | null;
             /** Duration Seconds */
             duration_seconds: number | null;
-            identity?: components["schemas"]["ShooterIdentity"] | null;
+            identity: components["schemas"]["ShooterIdentity"] | null;
             /** Name */
             name: string;
             /** Shots */
@@ -7927,7 +7927,7 @@ export interface components {
          */
         CompareShotPoint: {
             /** Interval Class */
-            interval_class?: ("first_shot" | "split" | "transition" | "movement" | "reload" | "activation") | null;
+            interval_class: ("first_shot" | "split" | "transition" | "movement" | "reload" | "activation") | null;
             /** Shot Number */
             shot_number: number;
             /**
@@ -7978,9 +7978,9 @@ export interface components {
         /** ConnectStatusResponse */
         ConnectStatusResponse: {
             /** Channel Title */
-            channel_title?: string | null;
+            channel_title: string | null;
             /** Error */
-            error?: string | null;
+            error: string | null;
             /**
              * State
              * @enum {string}
@@ -8231,7 +8231,7 @@ export interface components {
          */
         DevReviewQueueItem: {
             /** Age Seconds */
-            age_seconds?: number | null;
+            age_seconds: number | null;
             /** Audit Path */
             audit_path: string;
             /** N Disagreements */
@@ -8239,9 +8239,9 @@ export interface components {
             /** N Shots */
             n_shots: number;
             /** Priority */
-            priority?: number | null;
+            priority: number | null;
             /** Promoted At */
-            promoted_at?: string | null;
+            promoted_at: string | null;
             /**
              * Reasons
              * @default []
@@ -8254,7 +8254,7 @@ export interface components {
              */
             review_status: "needs_review" | "reviewed";
             /** Shooter */
-            shooter?: string | null;
+            shooter: string | null;
             /** Slug */
             slug: string;
             /**
@@ -8265,16 +8265,16 @@ export interface components {
             /** Source Label */
             source_label: string;
             /** Stage Number */
-            stage_number?: number | null;
+            stage_number: number | null;
             /**
              * Status
              * @enum {string}
              */
             status: "pending" | "flagged" | "done";
             /** Venue */
-            venue?: string | null;
+            venue: string | null;
             /** Video Path */
-            video_path?: string | null;
+            video_path: string | null;
             /**
              * Walk Decisions
              * @default 0
@@ -8299,13 +8299,13 @@ export interface components {
             /** Active Version */
             active_version: string;
             /** Built At */
-            built_at?: string | null;
+            built_at: string | null;
             /** F1 */
             f1: number | null;
             /** Fixture Count */
             fixture_count: number;
             /** Metrics By Class */
-            metrics_by_class?: {
+            metrics_by_class: {
                 [key: string]: {
                     [key: string]: number;
                 };
@@ -8339,7 +8339,7 @@ export interface components {
          */
         DeviceAccountInfo: {
             /** Display Name */
-            display_name?: string | null;
+            display_name: string | null;
             /** Email */
             email: string;
             /** Id */
@@ -8449,9 +8449,9 @@ export interface components {
          *     are different problems and get different copy.
          */
         DeviceStatusResponse: {
-            account?: components["schemas"]["HostedAccountInfo"] | null;
+            account: components["schemas"]["HostedAccountInfo"] | null;
             /** Device Name */
-            device_name?: string | null;
+            device_name: string | null;
             /** Status */
             status: string;
         };
@@ -8468,13 +8468,13 @@ export interface components {
          * @description One poll verdict. Only ``approved`` carries a credential, once.
          */
         DeviceTokenResponse: {
-            account?: components["schemas"]["DeviceAccountInfo"] | null;
+            account: components["schemas"]["DeviceAccountInfo"] | null;
             /** Device Name */
-            device_name?: string | null;
+            device_name: string | null;
             /** Status */
             status: string;
             /** Token */
-            token?: string | null;
+            token: string | null;
         };
         /**
          * DeviceUnlinkResponse
@@ -8502,7 +8502,7 @@ export interface components {
         };
         /** ExportPreset */
         ExportPreset: {
-            body?: components["schemas"]["ExportPresetBody"];
+            body: components["schemas"]["ExportPresetBody"];
             /**
              * Builtin
              * @default false
@@ -9029,22 +9029,22 @@ export interface components {
         /** FsEntry */
         FsEntry: {
             /** Duration */
-            duration?: number | null;
+            duration: number | null;
             /**
              * Kind
              * @enum {string}
              */
             kind: "dir" | "video" | "file";
             /** Mtime */
-            mtime?: number | null;
+            mtime: number | null;
             /** Name */
             name: string;
             /** Size Bytes */
-            size_bytes?: number | null;
+            size_bytes: number | null;
             /** Thumbnail Url */
-            thumbnail_url?: string | null;
+            thumbnail_url: string | null;
             /** Video Count */
-            video_count?: number | null;
+            video_count: number | null;
         };
         /** FsListing */
         FsListing: {
@@ -9068,22 +9068,22 @@ export interface components {
         /** HTTPValidationError */
         HTTPValidationError: {
             /** Detail */
-            detail?: components["schemas"]["ValidationError"][];
+            detail: components["schemas"]["ValidationError"][];
         };
         /** HealthResponse */
         HealthResponse: {
             /** Bound */
             bound: boolean;
             /** Default Shooter Slug */
-            default_shooter_slug?: string | null;
+            default_shooter_slug: string | null;
             /** Kind */
-            kind?: string | null;
+            kind: string | null;
             /** Match Id */
-            match_id?: string | null;
+            match_id: string | null;
             /** Project Name */
-            project_name?: string | null;
+            project_name: string | null;
             /** Project Root */
-            project_root?: string | null;
+            project_root: string | null;
             /**
              * Status
              * @default ok
@@ -9169,7 +9169,7 @@ export interface components {
             /** Device Name */
             device_name: string;
             /** Display Name */
-            display_name?: string | null;
+            display_name: string | null;
             /** Email */
             email: string;
             /** Id */
@@ -9190,9 +9190,9 @@ export interface components {
          *     rule applies to ``account``: it carries identity, never a credential.
          */
         HostedSyncSettings: {
-            account?: components["schemas"]["HostedAccountInfo"] | null;
+            account: components["schemas"]["HostedAccountInfo"] | null;
             /** Base Url */
-            base_url?: string | null;
+            base_url: string | null;
             /**
              * Token Set
              * @default false
@@ -9274,32 +9274,32 @@ export interface components {
              */
             created_at: string;
             /** Error */
-            error?: string | null;
+            error: string | null;
             /** Finished At */
-            finished_at?: string | null;
+            finished_at: string | null;
             /** Id */
             id: string;
             /** Kind */
             kind: string;
             /** Match Id */
-            match_id?: string | null;
+            match_id: string | null;
             /** Message */
-            message?: string | null;
+            message: string | null;
             /** Progress */
-            progress?: number | null;
+            progress: number | null;
             /** Result */
-            result?: {
+            result: {
                 [key: string]: unknown;
             } | null;
             /** Shooter Slug */
-            shooter_slug?: string | null;
+            shooter_slug: string | null;
             /** Stage Number */
-            stage_number?: number | null;
+            stage_number: number | null;
             /** Started At */
-            started_at?: string | null;
+            started_at: string | null;
             status: components["schemas"]["JobStatus"];
             /** Timings */
-            timings?: {
+            timings: {
                 [key: string]: unknown;
             } | null;
             /**
@@ -9308,7 +9308,7 @@ export interface components {
              */
             updated_at: string;
             /** Video Id */
-            video_id?: string | null;
+            video_id: string | null;
         };
         /**
          * JobStatus
@@ -9641,49 +9641,49 @@ export interface components {
          */
         MatchProject: {
             /** Audio Dir */
-            audio_dir?: string | null;
-            automation?: components["schemas"]["AutomationOverride"];
+            audio_dir: string | null;
+            automation: components["schemas"]["AutomationOverride"];
             /** Compare Camera */
-            compare_camera?: string | null;
+            compare_camera: string | null;
             /** Competitor Division */
-            competitor_division?: string | null;
+            competitor_division: string | null;
             /** Competitor Name */
-            competitor_name?: string | null;
+            competitor_name: string | null;
             /**
              * Created At
              * Format: date-time
              */
-            created_at?: string;
+            created_at: string;
             /** Exports Dir */
-            exports_dir?: string | null;
-            identity?: components["schemas"]["ShooterIdentity"];
+            exports_dir: string | null;
+            identity: components["schemas"]["ShooterIdentity"];
             /** Last Scanned Dir */
-            last_scanned_dir?: string | null;
+            last_scanned_dir: string | null;
             /** Match Date */
-            match_date?: string | null;
+            match_date: string | null;
             /** Name */
             name: string;
             /** Nudges Dismissed Stages */
-            nudges_dismissed_stages?: number[];
+            nudges_dismissed_stages: number[];
             /** Probes Dir */
-            probes_dir?: string | null;
+            probes_dir: string | null;
             /** Raw Dir */
-            raw_dir?: string | null;
+            raw_dir: string | null;
             /** Raw Videos */
-            raw_videos?: components["schemas"]["RawVideo"][];
+            raw_videos: components["schemas"]["RawVideo"][];
             /**
              * Schema Version
              * @default 3
              */
             schema_version: number;
             /** Scoreboard Content Type */
-            scoreboard_content_type?: number | null;
+            scoreboard_content_type: number | null;
             /** Scoreboard Match Id */
-            scoreboard_match_id?: string | null;
+            scoreboard_match_id: string | null;
             /** Selected Competitor Id */
-            selected_competitor_id?: number | null;
+            selected_competitor_id: number | null;
             /** Selected Shooter Id */
-            selected_shooter_id?: number | null;
+            selected_shooter_id: number | null;
             /**
              * Shooter Token
              * @description Public, PII-free token for the pinned shooter.
@@ -9695,9 +9695,9 @@ export interface components {
              */
             readonly shooter_token: string | null;
             /** Stages */
-            stages?: components["schemas"]["StageEntry"][];
+            stages: components["schemas"]["StageEntry"][];
             /** Thumbs Dir */
-            thumbs_dir?: string | null;
+            thumbs_dir: string | null;
             /**
              * Trim Audit Encoder
              * @default auto
@@ -9714,14 +9714,14 @@ export interface components {
              */
             trim_pre_buffer_seconds: number;
             /** Trimmed Dir */
-            trimmed_dir?: string | null;
+            trimmed_dir: string | null;
             /** Unassigned Videos */
-            unassigned_videos?: components["schemas"]["StageVideo"][];
+            unassigned_videos: components["schemas"]["StageVideo"][];
             /**
              * Updated At
              * Format: date-time
              */
-            updated_at?: string;
+            updated_at: string;
         };
         /**
          * MatchStageDefinition
@@ -9741,7 +9741,7 @@ export interface components {
             stage_name: string;
             /** Stage Number */
             stage_number: number;
-            stage_rounds?: components["schemas"]["StageRounds"] | null;
+            stage_rounds: components["schemas"]["StageRounds"] | null;
             /**
              * Start
              * @default standard
@@ -9856,7 +9856,7 @@ export interface components {
          */
         MergePlanStage: {
             /** Expected Rounds */
-            expected_rounds?: number | null;
+            expected_rounds: number | null;
             /**
              * Placeholder
              * @default false
@@ -10252,15 +10252,15 @@ export interface components {
          */
         RawVideo: {
             /** Covers Stages */
-            covers_stages?: number[];
+            covers_stages: number[];
             /** Duration Seconds */
-            duration_seconds?: number | null;
+            duration_seconds: number | null;
             /** Original Filename */
             original_filename: string;
             /** Recorded Start */
-            recorded_start?: string | null;
+            recorded_start: string | null;
             /** Sha256 */
-            sha256?: string | null;
+            sha256: string | null;
             /**
              * Size Bytes
              * @default 0
@@ -10272,7 +10272,7 @@ export interface components {
              * Uploaded At
              * Format: date-time
              */
-            uploaded_at?: string;
+            uploaded_at: string;
         };
         /**
          * ReconcileLink
@@ -10415,7 +10415,7 @@ export interface components {
                 [key: string]: string;
             };
             /** Auto Secondary */
-            auto_secondary?: {
+            auto_secondary: {
                 [key: string]: string[];
             };
             /** Registered */
@@ -10594,7 +10594,7 @@ export interface components {
          */
         ShareInfo: {
             /** Cameras */
-            cameras?: {
+            cameras: {
                 [key: string]: string;
             } | null;
             /**
@@ -10649,11 +10649,11 @@ export interface components {
          */
         ShooterIdentity: {
             /** Accent */
-            accent?: string | null;
+            accent: string | null;
             /** Club */
-            club?: string | null;
+            club: string | null;
             /** Logo */
-            logo?: string | null;
+            logo: string | null;
         };
         /**
          * ShooterIdentityRequest
@@ -10681,7 +10681,7 @@ export interface components {
         ShooterListEntry: {
             /** Cameras */
             cameras: components["schemas"]["ShooterCameraInfo"][];
-            identity?: components["schemas"]["ShooterIdentity"];
+            identity: components["schemas"]["ShooterIdentity"];
             /** Name */
             name: string;
             /** Selected Competitor Id */
@@ -10691,7 +10691,7 @@ export interface components {
             /** Slug */
             slug: string;
             /** Stage Statuses */
-            stage_statuses?: components["schemas"]["StageStatusEntry"][];
+            stage_statuses: components["schemas"]["StageStatusEntry"][];
             /** Stages Audited */
             stages_audited: number;
             /**
@@ -10772,7 +10772,7 @@ export interface components {
              */
             audit_docs_deleted: number;
             /** Error */
-            error?: string | null;
+            error: string | null;
             /**
              * Files Deleted
              * @default 0
@@ -10915,20 +10915,20 @@ export interface components {
          */
         StageEditSummary: {
             /** Added */
-            added?: number[];
+            added: number[];
             /** Errors */
-            errors?: string[];
+            errors: string[];
             /**
              * Jobs Cancelled
              * @default 0
              */
             jobs_cancelled: number;
             /** Removed */
-            removed?: number[];
+            removed: number[];
             /** Renamed */
-            renamed?: number[];
+            renamed: number[];
             /** Shooters */
-            shooters?: components["schemas"]["ShooterStageEditResult"][];
+            shooters: components["schemas"]["ShooterStageEditResult"][];
         };
         /**
          * StageEntry
@@ -10940,9 +10940,9 @@ export interface components {
              * @default false
              */
             placeholder: boolean;
-            scorecard?: components["schemas"]["StageScorecard"] | null;
+            scorecard: components["schemas"]["StageScorecard"] | null;
             /** Scorecard Updated At */
-            scorecard_updated_at?: string | null;
+            scorecard_updated_at: string | null;
             /**
              * Skipped
              * @default false
@@ -10952,7 +10952,7 @@ export interface components {
             stage_name: string;
             /** Stage Number */
             stage_number: number;
-            stage_rounds?: components["schemas"]["StageRounds"] | null;
+            stage_rounds: components["schemas"]["StageRounds"] | null;
             /**
              * Start
              * @default standard
@@ -10966,7 +10966,7 @@ export interface components {
              */
             time_seconds_manual: boolean;
             /** Videos */
-            videos?: components["schemas"]["StageVideo"][];
+            videos: components["schemas"]["StageVideo"][];
         };
         /**
          * StageEventIn
@@ -11070,25 +11070,25 @@ export interface components {
          */
         StageScorecard: {
             /** Alphas */
-            alphas?: number | null;
+            alphas: number | null;
             /** Charlies */
-            charlies?: number | null;
+            charlies: number | null;
             /** Deltas */
-            deltas?: number | null;
+            deltas: number | null;
             /** Dq */
-            dq?: boolean | null;
+            dq: boolean | null;
             /** Hit Factor */
-            hit_factor?: number | null;
+            hit_factor: number | null;
             /** Misses */
-            misses?: number | null;
+            misses: number | null;
             /** No Shoots */
-            no_shoots?: number | null;
+            no_shoots: number | null;
             /** Procedurals */
-            procedurals?: number | null;
+            procedurals: number | null;
             /** Stage Pct */
-            stage_pct?: number | null;
+            stage_pct: number | null;
             /** Stage Points */
-            stage_points?: number | null;
+            stage_points: number | null;
         };
         /**
          * StageStatus
@@ -11162,58 +11162,58 @@ export interface components {
              * Added At
              * Format: date-time
              */
-            added_at?: string;
+            added_at: string;
             /** Beep Aligned Time */
-            beep_aligned_time?: number | null;
+            beep_aligned_time: number | null;
             /** Beep Alignment Confidence */
-            beep_alignment_confidence?: number | null;
+            beep_alignment_confidence: number | null;
             /** Beep Alignment Delta Ms */
-            beep_alignment_delta_ms?: number | null;
+            beep_alignment_delta_ms: number | null;
             /**
              * Beep Auto Detect Failed
              * @default false
              */
             beep_auto_detect_failed: boolean;
             /** Beep Candidates */
-            beep_candidates?: components["schemas"]["BeepCandidate"][];
+            beep_candidates: components["schemas"]["BeepCandidate"][];
             /** Beep Confidence */
-            beep_confidence?: number | null;
+            beep_confidence: number | null;
             /** Beep Duration Ms */
-            beep_duration_ms?: number | null;
+            beep_duration_ms: number | null;
             /** Beep Peak Amplitude */
-            beep_peak_amplitude?: number | null;
+            beep_peak_amplitude: number | null;
             /** Beep Ranker Version */
-            beep_ranker_version?: string | null;
+            beep_ranker_version: string | null;
             /**
              * Beep Reviewed
              * @default false
              */
             beep_reviewed: boolean;
             /** Beep Source */
-            beep_source?: ("auto" | "manual" | "aligned") | null;
+            beep_source: ("auto" | "manual" | "aligned") | null;
             /** Beep Time */
-            beep_time?: number | null;
+            beep_time: number | null;
             /** Beep Tone For */
-            beep_tone_for?: number | null;
+            beep_tone_for: number | null;
             /** Beep Tone Offset Ms */
-            beep_tone_offset_ms?: number | null;
+            beep_tone_offset_ms: number | null;
             /** Beep Window */
-            beep_window?: [
+            beep_window: [
                 number,
                 number
             ] | null;
             /** Beep Window Source */
-            beep_window_source?: ("scoreboard" | "sequential" | "manual") | null;
+            beep_window_source: ("scoreboard" | "sequential" | "manual") | null;
             /** Camera Make */
-            camera_make?: string | null;
+            camera_make: string | null;
             /** Camera Model */
-            camera_model?: string | null;
+            camera_model: string | null;
             /** Camera Mount */
-            camera_mount?: string | null;
+            camera_mount: string | null;
             /** Fingerprint */
-            fingerprint?: string | null;
+            fingerprint: string | null;
             /** Match Timestamp */
-            match_timestamp?: string | null;
+            match_timestamp: string | null;
             /**
              * Notes
              * @default
@@ -11225,7 +11225,7 @@ export interface components {
              */
             path: string;
             /** Processed */
-            processed?: {
+            processed: {
                 [key: string]: boolean;
             };
             /**
@@ -11235,7 +11235,7 @@ export interface components {
              */
             role: "primary" | "secondary" | "ignored";
             /** Stage Number */
-            stage_number?: number | null;
+            stage_number: number | null;
             /**
              * Video Id
              * @description Stable URL-safe identifier derived from path + owning stage.
@@ -11263,7 +11263,7 @@ export interface components {
              * Updated At
              * Format: date-time
              */
-            updated_at?: string;
+            updated_at: string;
         };
         /**
          * StoredLookBody
@@ -11403,7 +11403,7 @@ export interface components {
          */
         SyncAuditDocVersionResponse: {
             /** Kept Fields */
-            kept_fields?: string[];
+            kept_fields: string[];
             /** Version */
             version: number;
         };
@@ -11456,9 +11456,9 @@ export interface components {
             /** Doc Kind */
             doc_kind: string;
             /** Slug */
-            slug?: string | null;
+            slug: string | null;
             /** Stage Number */
-            stage_number?: number | null;
+            stage_number: number | null;
             /**
              * Updated At
              * Format: date-time
@@ -11644,9 +11644,9 @@ export interface components {
             /** Configured */
             configured: boolean;
             /** Errors */
-            errors?: string[];
+            errors: string[];
             /** Last Synced At */
-            last_synced_at?: string | null;
+            last_synced_at: string | null;
             /**
              * Pending Docs
              * @default 0
@@ -11655,7 +11655,7 @@ export interface components {
             /** Pending Media */
             pending_media: number;
             /** Remote Changes */
-            remote_changes?: number | null;
+            remote_changes: number | null;
             /** Stale */
             stale: boolean;
         };
@@ -11674,7 +11674,7 @@ export interface components {
          */
         SyncWhoAmIResponse: {
             /** Display Name */
-            display_name?: string | null;
+            display_name: string | null;
             /** Email */
             email: string;
             /** Id */
@@ -11742,9 +11742,9 @@ export interface components {
             /** Flagged */
             flagged: boolean;
             /** Flagged At */
-            flagged_at?: string | null;
+            flagged_at: string | null;
             /** Note */
-            note?: string | null;
+            note: string | null;
             /** Updated At */
             updated_at: string;
         };
@@ -11758,7 +11758,7 @@ export interface components {
                 [key: string]: unknown;
             }[];
             /** Avg Split */
-            avg_split?: number | null;
+            avg_split: number | null;
             /** Beep Confidence */
             beep_confidence: number | null;
             /**
@@ -11767,12 +11767,12 @@ export interface components {
              */
             beep_reviewed: boolean;
             /** Beep Time */
-            beep_time?: number | null;
+            beep_time: number | null;
             /** Beep Tone Offset Ms */
-            beep_tone_offset_ms?: number | null;
+            beep_tone_offset_ms: number | null;
             /** Draw */
-            draw?: number | null;
-            needs_attention?: components["schemas"]["TriageAttentionOut"] | null;
+            draw: number | null;
+            needs_attention: components["schemas"]["TriageAttentionOut"] | null;
             /** Shooter Name */
             shooter_name: string;
             /**
@@ -11858,9 +11858,9 @@ export interface components {
          */
         User: {
             /** Access Tier */
-            access_tier?: string | null;
+            access_tier: string | null;
             /** Display Name */
-            display_name?: string | null;
+            display_name: string | null;
             /** Email */
             email: string;
             /**
@@ -11876,16 +11876,16 @@ export interface components {
              */
             is_admin: boolean;
             /** Token Id */
-            token_id?: string | null;
+            token_id: string | null;
             /** Token Scope */
-            token_scope?: string | null;
+            token_scope: string | null;
         };
         /** ValidationError */
         ValidationError: {
             /** Context */
-            ctx?: Record<string, never>;
+            ctx: Record<string, never>;
             /** Input */
-            input?: unknown;
+            input: unknown;
             /** Location */
             loc: (string | number)[];
             /** Message */
@@ -11898,7 +11898,7 @@ export interface components {
             /** Body */
             body: string;
             /** Chip */
-            chip?: string | null;
+            chip: string | null;
             /**
              * Date
              * Format: date
@@ -11908,7 +11908,7 @@ export interface components {
             id: string;
             /** Title */
             title: string;
-            video?: components["schemas"]["WhatsNewVideo"] | null;
+            video: components["schemas"]["WhatsNewVideo"] | null;
         };
         /** WhatsNewPayload */
         WhatsNewPayload: {
@@ -11994,13 +11994,13 @@ export interface components {
          */
         YouTubeSettings: {
             /** Channel Title */
-            channel_title?: string | null;
+            channel_title: string | null;
             /** Configured */
             configured: boolean;
             /** Connected */
             connected: boolean;
             /** Connected At */
-            connected_at?: string | null;
+            connected_at: string | null;
         };
         /**
          * YouTubeUploadRequest

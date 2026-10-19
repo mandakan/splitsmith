@@ -40,6 +40,7 @@ const item = (over: Partial<api.BeepQueueItem> = {}): api.BeepQueueItem => ({
   video_id: "v1",
   video_path: "videos/s1.mp4",
   beep_time: 2,
+  aligned_time: null,
   beep_confidence: 0.4,
   beep_reviewed: false,
   status: "low_confidence",

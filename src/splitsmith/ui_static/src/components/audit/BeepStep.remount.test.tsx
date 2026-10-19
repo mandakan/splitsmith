@@ -40,6 +40,7 @@ const ITEM: BeepQueueItem = {
   video_id: "v1",
   video_path: "raw/x.mp4",
   beep_time: 0,
+  aligned_time: null,
   beep_confidence: 0.42,
   beep_reviewed: false,
   status: "low_confidence",
