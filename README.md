@@ -20,7 +20,7 @@ Built to do two things from a single stage video: get per-shot splits for analys
 |---|---|
 | ![footage sort](https://raw.githubusercontent.com/mandakan/splitsmith/main/docs/screenshots/footage-sort.png) | **Footage.** Point it at a folder or a set of files, from one camera or several. Every video lands on the shooter and stage whose scorecard was typed right after it, head cam first when several cameras caught the run. You check the list, then import. |
 | ![beep review](https://raw.githubusercontent.com/mandakan/splitsmith/main/docs/screenshots/beep-review.png) | **Beep review.** The start beep is found on every clip. You confirm them one after the other in one queue, the primaries that unlock detection first. |
-| ![audit](https://raw.githubusercontent.com/mandakan/splitsmith/main/docs/screenshots/audit.png) | **Audit.** Waveform + per-shot markers from the 3-voter ensemble. Click a marker to inspect votes; drag to fine-tune. |
+| ![audit](https://raw.githubusercontent.com/mandakan/splitsmith/main/docs/screenshots/audit.png) | **Audit.** Waveform + per-shot markers from the 3-voter detection ensemble. Click a marker to inspect votes; drag to fine-tune. |
 | ![compare](https://raw.githubusercontent.com/mandakan/splitsmith/main/docs/screenshots/compare.png) | **Compare.** Multi-shooter grid, all beep-aligned to t=0. Audio from one shooter, video tiles for everyone else. |
 | ![export](https://raw.githubusercontent.com/mandakan/splitsmith/main/docs/screenshots/export.png) | **Export.** Pick a preset (Final Cut bundle, YouTube match video, quick trims, compare grid) or save your own. Every card and effect is a tile, previewed on your own footage before you render. FCPXML with a marker per shot, or a rendered MP4 straight to YouTube. |
 
@@ -73,7 +73,7 @@ The repo ships a real Stage 3 audio sample at `tests/fixtures/stage-shots-tallmi
 
 1. **Footage** -- Add footage takes a folder (every video below it) or picked files and sorts them onto shooters and stages from the scorecard times; you review the proposal and import. See [Adding footage](#adding-footage).
 2. **Beep review** -- the detector finds the start beep on every clip; Review beeps walks the unconfirmed ones one after the other, primaries first. Confirming a primary's beep trims the stage and starts shot detection.
-3. **Audit** -- the 3-voter ensemble (envelope onsets + CLAP prompts + GBDT over hand-crafted + PANN features) emits shot times; review the waveform and drag / drop markers to fix outliers.
+3. **Audit** -- the 3-voter ensemble (envelope onsets + CLAP prompts + GBDT over hand-crafted + PANN features) and a whole-stage decoder emit shot times; review the waveform and drag / drop markers to fix outliers.
 4. **Export** -- pick a preset or save your own, choose the look from a gallery previewed on your footage, and generate a per-stage or whole-match FCPXML (markers per shot), a rendered MP4, or a multi-shooter Compare grid. Splits CSV ships alongside for the cull workflow.
 
 ## Adding footage
@@ -354,11 +354,11 @@ Anyone with the repo can run the full pipeline (beep / shot detection, PANN + CL
 
 ## Detection methodology
 
-The detector is built around half-rise leading-edge timing (consistent across recordings; insensitive to AGC and gain) plus a 3-voter ensemble for shot classification. Full write-up in [`docs/METHODOLOGY.md`](docs/METHODOLOGY.md): beep detection, shot detection, the half-rise rationale, confidence ranking, and the ensemble performance dashboard.
+The detector times each shot at its rise foot, where the burst leaves the background (consistent across recordings; insensitive to AGC and gain), and classifies candidates with a 3-voter ensemble. Full write-up in [`docs/METHODOLOGY.md`](docs/METHODOLOGY.md): beep detection, shot detection, the rise-foot definition, confidence ranking, and the ensemble performance dashboard.
 
 ## The audited corpus
 
-Shot detection is driven by a 3-voter ensemble (envelope onsets, CLAP audio embeddings, and a per-camera-class GBDT) calibrated against the audited fixtures under `tests/fixtures/`. Each fixture is a real beep-to-last-shot audio slice with hand-labeled shot times plus a `camera` / `shooter` / `stage_rounds` provenance block.
+Shot detection is driven by a 3-voter ensemble (envelope onsets, CLAP audio embeddings, and a per-camera-class GBDT that also reads PANN's gunshot probability), with a whole-stage decoder choosing the final set, calibrated against the audited fixtures under `tests/fixtures/`. An optional visual Voter E (CLIP) exists for development and is off by default. Each fixture is a real beep-to-last-shot audio slice with hand-labeled shot times plus a `camera` / `shooter` / `stage_rounds` provenance block.
 
 The corpus grows over time -- right now I curate it by hand from my own matches and a few squadmates'. After dropping new audited fixtures into `tests/fixtures/`, rebuild the shipped calibration artifacts -- `src/splitsmith/data/ensemble_calibration.json` plus the ONNX voter graphs next to it (`voter_c_gbdt_headcam.onnx`, `voter_c_gbdt_handheld.onnx`, and `voter_e_visual_probe.onnx` when Voter E is trained) -- with:
 

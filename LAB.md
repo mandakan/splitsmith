@@ -19,8 +19,10 @@ This guide walks through:
 
 ## What the Lab actually does
 
-The shot-detection pipeline is a 4-voter ensemble (see `CLAUDE.md` for
-the architecture). Every Lab call runs against the audited fixtures
+The shot-detection pipeline is a 3-voter ensemble (envelope onsets, CLAP,
+and a GBDT over CLAP and PANN features), plus an optional visual Voter E
+that is off by default; a whole-stage decoder picks the final set (see
+`CLAUDE.md` and `.claude/rules/shot-detection.md` for the architecture). Every Lab call runs against the audited fixtures
 under `tests/fixtures/` -- short hand-labeled audio clips with ground
 truth in adjacent JSON.
 
