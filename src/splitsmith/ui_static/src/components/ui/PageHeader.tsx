@@ -37,7 +37,9 @@ export function PageHeader({ ordinal, title, sub, back, actions, children, class
         {sub ? <p className="mt-1.5 text-[13px] text-muted">{sub}</p> : null}
         {children ? <div className="mt-3">{children}</div> : null}
       </div>
-      {actions ? <div className="flex shrink-0 items-center gap-2">{actions}</div> : null}
+      {/* Wraps rather than widening the page: four actions on a phone (the
+          Matches page) pushed the page 30 px past the screen (#1453). */}
+      {actions ? <div className="flex max-w-full flex-wrap items-center gap-2">{actions}</div> : null}
     </header>
   );
 }

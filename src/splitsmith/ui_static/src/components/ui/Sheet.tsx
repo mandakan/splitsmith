@@ -41,7 +41,10 @@ export function Sheet({ open, onClose, label, children, className }: SheetProps)
           aria-label={label}
           className={cn(
             "absolute flex flex-col bg-surface shadow-lg",
-            "inset-x-0 bottom-0 max-h-[85vh] rounded-t-[10px] border-t border-rule-strong",
+            // dvh, not vh: on iPhone Safari vh is the height with the toolbars
+            // hidden, so an 85vh sheet ran taller than the visible screen and
+            // its header went under the address bar (#1453).
+            "inset-x-0 bottom-0 max-h-[85dvh] rounded-t-[10px] border-t border-rule-strong",
             "md:inset-y-0 md:left-auto md:right-0 md:max-h-none md:w-full md:max-w-[440px] md:rounded-none md:border-l md:border-t-0",
             className,
           )}

@@ -1,6 +1,12 @@
 {
   "entries": [
     {
+      "id": "phone-width-sheets",
+      "date": "2026-10-20",
+      "title": "Side panels fit your phone",
+      "body": "On a phone, What's new and the other side panels fit the screen with the browser's bars showing, and the Matches page no longer scrolls sideways."
+    },
+    {
       "id": "primary-needs-its-beep",
       "date": "2026-10-20",
       "title": "A primary camera needs its beep first",
