@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.85.0](https://github.com/mandakan/splitsmith/compare/v0.84.0...v0.85.0) (2026-10-20)
+
+
+### Features
+
+* **audit:** loop the beep audition on the beep step, with the L key ([#1630](https://github.com/mandakan/splitsmith/issues/1630)) ([2ab6a3b](https://github.com/mandakan/splitsmith/commit/2ab6a3b14a358ce241ad555f56a3e3d89cf5318f))
+
+
+### Bug Fixes
+
+* **desktop:** exports never silently drop overlays and cards for want of the renderer ([#1632](https://github.com/mandakan/splitsmith/issues/1632)) ([422c082](https://github.com/mandakan/splitsmith/commit/422c0827899ca746a117baa5a23874d805f9f6b4))
+
 ## [0.84.0](https://github.com/mandakan/splitsmith/compare/v0.83.0...v0.84.0) (2026-10-20)
 
 
