@@ -96,6 +96,7 @@ import { refreshLooks, useLooks } from "@/lib/useLooks";
 import { useMatchHref } from "@/lib/matchHref";
 import { ReelPanel } from "@/components/export/ReelPanel";
 import { useDesktopCommands } from "@/lib/useDesktopCommands";
+import { type RendererState, useRenderer } from "@/lib/useRenderer";
 import { visibleTransitionKind } from "@/lib/lookGallery";
 import { describeRenderOptions, renderOptionsSeconds, type OutputFormat } from "@/lib/renderOptions";
 import { cn } from "@/lib/utils";
@@ -131,6 +132,9 @@ export function Export() {
 
 function ExportInner({ slug }: { slug: string }) {
   const { mode: deploymentMode } = useDeploymentMode();
+  // Overlays and cards need the renderer; a local install without it is
+  // told so here, with the install, instead of exporting without them.
+  const renderer = useRenderer(deploymentMode === "local");
   const looksState = useLooks();
   const gradeCatalog = useGrades(deploymentMode === "hosted");
   const hosted = deploymentMode === "hosted";
@@ -1215,6 +1219,7 @@ function ExportInner({ slug }: { slug: string }) {
               {onDesktop && desktop.presence ? (
                 <p className="mt-2 text-sm text-muted">{renderPresenceLine(desktop.presence, renderRequests)}</p>
               ) : null}
+              <RendererLine state={renderer.state} onInstall={renderer.install} />
               {busy && job?.message ? (
                 <div className="mt-2 text-sm text-muted">
                   {job.message}
@@ -1363,6 +1368,32 @@ function ResultPanel({
           Reveal bundle <ExternalLink className="size-3" />
         </button>
       )}
+    </div>
+  );
+}
+
+/** The renderer's line under the export button on a local install: nothing
+ *  once it is there, otherwise why overlays and cards need it and the
+ *  install, then its progress. */
+function RendererLine({ state, onInstall }: { state: RendererState; onInstall: () => void }) {
+  if (state.kind === "unknown" || state.kind === "installed") return null;
+  if (state.kind === "installing") {
+    return (
+      <p className="mt-2 text-sm text-muted" role="status">
+        Installing the renderer{state.progress != null ? ` (${Math.round(state.progress * 100)}%)` : "..."}
+      </p>
+    );
+  }
+  return (
+    <div className="mt-2 flex flex-col items-start gap-1.5 text-sm text-ink-2">
+      <p>
+        {state.kind === "failed"
+          ? state.message
+          : "Overlays and cards need the renderer, which is not installed yet."}
+      </p>
+      <Button type="button" size="sm" onClick={onInstall}>
+        Install renderer (260 MB)
+      </Button>
     </div>
   );
 }

@@ -23,7 +23,13 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel
 
-from ..overlay.raster import CHROMIUM_CHANNEL, ChromiumRasterizer, Rasterizer, RasterizerUnavailableError
+from ..overlay.raster import (
+    CHROMIUM_CHANNEL,
+    ChromiumRasterizer,
+    Rasterizer,
+    RasterizerUnavailableError,
+    renderer_installed,
+)
 from .jobs import Job, JobHandle
 
 router = APIRouter()
@@ -90,6 +96,41 @@ def run_chromium_install(handle: JobHandle) -> None:
 
 def _jobs(request: Request) -> Any:
     return request.app.state.splitsmith_state.jobs
+
+
+#: Set to skip the startup install (tests: a fresh config dir must not start
+#: a 260 MB download per test, as with ``SPLITSMITH_NO_MODEL_PREFETCH``).
+ENV_NO_RENDERER_PREFETCH = "SPLITSMITH_NO_RENDERER_PREFETCH"
+
+#: What an export that needs the renderer answers while it is missing.
+RENDERER_MISSING = (
+    "This export draws overlays or cards, which need the renderer, and it is not installed yet. "
+    "Install renderer on the Export page (260 MB, once), then export again."
+)
+
+
+async def maybe_install_renderer(jobs: Any) -> None:
+    """Start the renderer install at startup when it is missing (local only),
+    as the detection models are fetched: a desktop user has no terminal, and
+    the only button for it used to appear only when a card preview failed,
+    so an export dropped every overlay and card instead (0.83.0). Reads the
+    disk (``renderer_installed``), never launches a browser at boot; an
+    unreadable answer starts nothing."""
+    if _hosted() or os.environ.get(ENV_NO_RENDERER_PREFETCH, "").lower() in {"1", "true", "yes", "on"}:
+        return
+    if renderer_installed() is not False:
+        return
+    if await jobs.find_active(kind=JOB_KIND) is not None:
+        return
+    await jobs.submit(kind=JOB_KIND)
+
+
+def require_renderer() -> None:
+    """409 with :data:`RENDERER_MISSING` when this local install has no
+    renderer: the export would otherwise run and leave out every overlay
+    and card, which reads as a finished video with things missing."""
+    if not _hosted() and renderer_installed() is False:
+        raise HTTPException(status_code=409, detail=RENDERER_MISSING)
 
 
 @router.get("/api/system/chromium", response_model=ChromiumStatus)
