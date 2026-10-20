@@ -5,7 +5,7 @@
 [![License](https://img.shields.io/pypi/l/splitsmith.svg)](https://github.com/mandakan/splitsmith/blob/main/LICENSE)
 [![CI](https://img.shields.io/github/actions/workflow/status/mandakan/splitsmith/ci.yml?branch=main&label=ci)](https://github.com/mandakan/splitsmith/actions/workflows/ci.yml)
 
-Extract per-shot split times from head-mounted camera footage of IPSC matches and generate Final Cut Pro timelines with per-shot markers. Project site: [splitsmith.app](https://splitsmith.app).
+Your camera already heard every shot. Splitsmith finds the beep and each shot in your IPSC stage videos and gives you splits you can audit, coach from, compare across shooters, and cut into Final Cut timelines or YouTube videos. Project site: [splitsmith.app](https://splitsmith.app).
 
 ![Splitsmith -- Detect. Coach. Cut.](https://raw.githubusercontent.com/mandakan/splitsmith/main/docs/screenshots/hero.png)
 
