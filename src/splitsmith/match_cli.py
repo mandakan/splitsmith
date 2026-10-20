@@ -1311,6 +1311,70 @@ def highlights(
     console.print(f"[green]wrote[/] {result.output_path} ({result.duration_seconds:.1f} s)")
 
 
+@match_app.command("audit-clocks")
+def audit_clocks(
+    path: Path = typer.Argument(..., exists=True, file_okay=False, dir_okay=True, help="Match folder."),
+    fix: bool = typer.Option(False, "--fix", help="Move each listed audit onto its clip's clock."),
+) -> None:
+    """List audits that are not on the clock of the clip Audit plays (#1497).
+
+    An audit made before its stage had a trim counts from the source's
+    start; one saved while the clip's beep was unknown kept a source beep
+    beside clip times. ``shifted`` moves the whole document by the
+    difference between the beeps; ``beep_fixed`` keeps the shots and takes
+    the clip's beep. Without ``--fix`` nothing is written; with it each doc
+    is saved the way Audit saves, its previous version kept as ``.bak``.
+    """
+    import json
+
+    from .audit_clock import rebase_to_clip
+    from .trim import beep_in_trim
+    from .ui.audio import trimmed_primary_path
+
+    if not is_match_folder(path):
+        console.print(f"[red]Not a match folder:[/] {path}")
+        raise typer.Exit(code=2)
+    match = Match.load(path)
+    found = 0
+    for slug in match.shooters:
+        root = Match.shooter_root(path, slug)
+        try:
+            project = match_model.MatchProject.load(root)
+        except FileNotFoundError:
+            continue
+        for stage in project.stages:
+            primary = stage.primary()
+            if primary is None or primary.beep_time is None:
+                continue
+            audit_path = project.audit_path(root) / f"stage{stage.stage_number}.json"
+            if not audit_path.is_file():
+                continue
+            trimmed = trimmed_primary_path(root, stage.stage_number, project=project).is_file()
+            clip_beep = (
+                beep_in_trim(primary.beep_time, project.trim_pre_buffer_seconds)
+                if trimmed
+                else primary.beep_time
+            )
+            doc = json.loads(audit_path.read_text(encoding="utf-8"))
+            moved, kind = rebase_to_clip(doc, clip_beep)
+            if kind == "ok":
+                continue
+            found += 1
+            console.print(
+                f"{slug} stage {stage.stage_number}: {kind} "
+                f"(stored beep {doc.get('beep_time')}, clip beep {round(clip_beep, 3)})"
+            )
+            if fix and moved is not None:
+                audit_path.with_suffix(".json.bak").write_text(
+                    audit_path.read_text(encoding="utf-8"), encoding="utf-8"
+                )
+                tmp = audit_path.with_suffix(".json.tmp")
+                tmp.write_text(json.dumps(moved, indent=2), encoding="utf-8")
+                tmp.replace(audit_path)
+    verb = "moved" if fix else "to move (run with --fix)"
+    console.print(f"{found} audit(s) {verb}" if found else "every audit is on its clip's clock")
+
+
 @match_app.command("reclassify")
 def reclassify(
     match_path: Path = typer.Argument(..., exists=True, readable=True, help="Match folder."),
