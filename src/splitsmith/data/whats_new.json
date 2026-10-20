@@ -1,6 +1,12 @@
 {
   "entries": [
     {
+      "id": "export-history-not-written",
+      "date": "2026-10-20",
+      "title": "Export history says what was not written",
+      "body": "A run's row under Export history now marks a format that wrote no file, such as an FCPXML asked for without a trim, instead of listing it like the rest."
+    },
+    {
       "id": "picker-audited-count-filmed-shooters",
       "date": "2026-10-20",
       "title": "Match progress counts the shooters you filmed",
