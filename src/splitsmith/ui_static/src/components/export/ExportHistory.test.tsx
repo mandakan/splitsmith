@@ -14,7 +14,10 @@ function run(over: Partial<ExportRun> = {}): ExportRun {
     stage_numbers: [3],
     formats: ["trim", "csv"],
     anomaly_count: 0,
-    artifacts: [{ filename: "stage3_wall_trimmed.mp4", kind: "trim", available: true }],
+    artifacts: [
+      { filename: "stage3_wall_trimmed.mp4", kind: "trim", available: true },
+      { filename: "stage3_wall_splits.csv", kind: "csv", available: true },
+    ],
     ...over,
   };
 }
@@ -29,6 +32,41 @@ describe("ExportHistory", () => {
     expect(screen.getByText("Stage 3")).toBeInTheDocument();
     expect(screen.getByText("trim, csv")).toBeInTheDocument();
     expect(screen.getByText("took 13s")).toBeInTheDocument();
+  });
+
+  it("says which requested format a stage run did not write", () => {
+    // The record keeps the request (trim off, FCPXML on) and the artefacts
+    // what was written; an FCPXML skips itself without a lossless trim.
+    render(
+      <ExportHistory
+        runs={[
+          run({
+            formats: ["csv", "fcpxml", "report"],
+            artifacts: [
+              { filename: "stage3_wall_splits.csv", kind: "csv", available: true },
+              { filename: "stage3_wall_report.txt", kind: "report", available: true },
+            ],
+          }),
+        ]}
+        exportFileUrl={(f) => `/dl/${f}`}
+      />,
+    );
+    expect(screen.getByText("csv, fcpxml (not written), report")).toBeInTheDocument();
+  });
+
+  it("counts a secondary trim as the trim format being written", () => {
+    render(
+      <ExportHistory
+        runs={[
+          run({
+            formats: ["trim"],
+            artifacts: [{ filename: "stage3_wall_cam2_trimmed.mp4", kind: "secondary_trim", available: true }],
+          }),
+        ]}
+        exportFileUrl={(f) => `/dl/${f}`}
+      />,
+    );
+    expect(screen.getByText("trim")).toBeInTheDocument();
   });
 
   it("groups a match run's stages into one row", () => {

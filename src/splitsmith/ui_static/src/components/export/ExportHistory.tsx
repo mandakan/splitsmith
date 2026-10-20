@@ -18,6 +18,21 @@ export interface ExportHistoryYouTube {
   busyFilename?: string | null;
 }
 
+/** The row's format line. The record keeps what a run was asked for and
+ *  the artefacts what it wrote, and the two differ on purpose: a stage
+ *  run's FCPXML skips itself without a lossless trim to reference, a CSV
+ *  without audited shots. A format that produced no file of its kind says
+ *  so here, so nobody goes looking for it. Match runs are summarised by
+ *  their one output format and left alone. */
+function runFormatsLine(run: Pick<ExportRun, "kind" | "formats" | "artifacts">): string {
+  const written = new Set(run.artifacts.map((a) => (a.kind === "secondary_trim" ? "trim" : a.kind)));
+  return run.formats
+    .map((f) =>
+      run.kind === "stage" && !written.has(f) ? `${runFormatLabel(f)} (not written)` : runFormatLabel(f),
+    )
+    .join(", ");
+}
+
 /** What each export run produced, newest first (#629).
  *
  *  Purely presentational: every input is a prop, nothing is fetched here.
@@ -62,7 +77,7 @@ export function ExportHistory({
             <li key={r.run_id} className="border-b border-rule px-3.5 py-2.5 last:border-b-0">
               <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1 text-md">
                 <span className="font-medium text-ink">{stageLabel(r.stage_numbers)}</span>
-                <span className="text-sm text-muted">{r.formats.map(runFormatLabel).join(", ")}</span>
+                <span className="text-sm text-muted">{runFormatsLine(r)}</span>
                 <span className="numeral text-sm text-muted">took {formatElapsed(r.duration_seconds)}</span>
                 {r.anomaly_count > 0 && (
                   <span className="numeral text-sm text-live">
