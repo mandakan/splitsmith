@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.84.0](https://github.com/mandakan/splitsmith/compare/v0.83.0...v0.84.0) (2026-10-20)
+
+
+### Features
+
+* **audit:** Play from beep on the beep step, with the B key ([#1623](https://github.com/mandakan/splitsmith/issues/1623)) ([d9d1a9d](https://github.com/mandakan/splitsmith/commit/d9d1a9d2599dcb0053d89404ea72e6486e895d0c))
+
+
+### Bug Fixes
+
+* **audit:** every audit is on the clock of the clip Audit plays ([#1626](https://github.com/mandakan/splitsmith/issues/1626)) ([0e72318](https://github.com/mandakan/splitsmith/commit/0e723185371849f81057a9bc89706a76b194cb7c))
+* **footage:** a camera without a confirmed beep never becomes an audited stage's primary by a move ([#1627](https://github.com/mandakan/splitsmith/issues/1627)) ([71bd749](https://github.com/mandakan/splitsmith/commit/71bd749c051f5ecca545e2eae281889991cbfe73))
+* **hosted:** the worker channel's goodbye stamp no longer leaks a pooled connection ([#1625](https://github.com/mandakan/splitsmith/issues/1625)) ([21b6f32](https://github.com/mandakan/splitsmith/commit/21b6f32023eebb91d582dca475abb8afb642e92f))
+* **ui:** side panels fit a phone's screen, and page headers wrap instead of widening the page ([#1628](https://github.com/mandakan/splitsmith/issues/1628)) ([1dbb4be](https://github.com/mandakan/splitsmith/commit/1dbb4be1c40fb0b349fa985bf5c95ccb4384672d))
+
+
+### Documentation
+
+* how to place a shot by eye, with annotated real waveforms ([#1387](https://github.com/mandakan/splitsmith/issues/1387)) ([3993fbb](https://github.com/mandakan/splitsmith/commit/3993fbbc4e980dc5a13eef093901cbba6f00de61))
+* README and LAB.md agree on a 3-voter ensemble, an optional Voter E and the rise foot ([#1629](https://github.com/mandakan/splitsmith/issues/1629)) ([ed67937](https://github.com/mandakan/splitsmith/commit/ed6793711d78bdc5e269d1c19d0fad84e1514b31))
+
 ## [0.83.0](https://github.com/mandakan/splitsmith/compare/v0.82.1...v0.83.0) (2026-10-20)
 
 
