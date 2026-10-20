@@ -284,6 +284,45 @@ def runtime() -> Runtime:
     return resolve_runtime()
 
 
+def put_bundle_on_path() -> None:
+    """Put the folder of the runtime's ffmpeg and ffprobe, when they are
+    real files, first on this process's ``PATH``. The desktop app names the
+    bundled ffmpeg through ``SPLITSMITH_FFMPEG``, but a producer reached
+    with the bare name still asks the OS, and a Mac started from the Finder
+    has no Homebrew on its PATH (the 0.81.0 DMG could not export a trim).
+    With the bundle's folder on PATH the bare name is the bundle too. Called
+    by the sidecar's entry point, never by the cached resolver: a test that
+    points the runtime at a fake binary must not leave it on PATH."""
+    rt = runtime()
+    dirs: list[str] = []
+    for value in (rt.ffmpeg_binary, rt.ffprobe_binary):
+        candidate = Path(value)
+        if candidate.is_absolute() and candidate.is_file() and str(candidate.parent) not in dirs:
+            dirs.append(str(candidate.parent))
+    if not dirs:
+        return
+    current = os.environ.get("PATH", "")
+    parts = [p for p in current.split(os.pathsep) if p and p not in dirs]
+    os.environ["PATH"] = os.pathsep.join(dirs + parts)
+
+
+def ffmpeg_path(binary: str | None = None) -> str:
+    """The ffmpeg a producer runs: ``binary`` when the caller named one,
+    else the runtime's. The bare default ``"ffmpeg"`` counts as unnamed, so
+    a function that was never handed the runtime's binary still runs the
+    bundled one instead of whatever PATH holds."""
+    if binary and binary != "ffmpeg":
+        return binary
+    return runtime().ffmpeg_binary
+
+
+def ffprobe_path(binary: str | None = None) -> str:
+    """The ffprobe a producer runs; see :func:`ffmpeg_path`."""
+    if binary and binary != "ffprobe":
+        return binary
+    return runtime().ffprobe_binary
+
+
 def _clear_runtime_cache() -> None:
     """Reset the ``lru_cache`` on :func:`resolve_runtime`. Test-only helper.
 

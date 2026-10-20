@@ -45,6 +45,7 @@ from typing import Any
 
 import httpx
 
+from ..runtime import put_bundle_on_path
 from ..runtime import runtime as process_runtime
 from .logging_setup import configure_file_logging
 from .server import create_app
@@ -156,6 +157,10 @@ def run_embedded(
     if port == 0:
         port = _pick_free_port(host)
 
+    # The bundle's ffmpeg folder first on PATH, so a producer reached with a
+    # bare "ffmpeg" (any the runtime does not resolve itself) finds the
+    # bundle, not nothing: a Finder-launched app has no Homebrew on PATH.
+    put_bundle_on_path()
     app = create_app(
         project_root=project_root,
         project_name=project_name,

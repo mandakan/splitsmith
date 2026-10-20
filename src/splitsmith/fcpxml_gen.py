@@ -258,7 +258,13 @@ def probe_video(
     ffprobe_binary: str = "ffprobe",
     runner: Runner = subprocess.run,
 ) -> VideoMetadata:
-    """Read width / height / duration / frame rate from ``path`` via ffprobe."""
+    """Read width / height / duration / frame rate from ``path`` via ffprobe.
+
+    A bare ``ffprobe`` resolves through the runtime (the bundled one on the
+    desktop), never through PATH alone."""
+    from .runtime import ffprobe_path
+
+    ffprobe_binary = ffprobe_path(ffprobe_binary)
     if not path.exists():
         raise FileNotFoundError(f"video not found: {path}")
     cmd = [
