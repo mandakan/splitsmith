@@ -3936,7 +3936,9 @@ def register_job_bodies(state: AppState) -> None:
 
 class HealthResponse(BaseModel):
     status: str = "ok"
-    version: str = splitsmith_version
+    # A factory, not a default: a default is written into the exported
+    # OpenAPI document, which then goes stale on every release bump.
+    version: str = Field(default_factory=lambda: splitsmith_version)
     bound: bool
     project_name: str | None = None
     project_root: str | None = None
