@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.83.0](https://github.com/mandakan/splitsmith/compare/v0.82.1...v0.83.0) (2026-10-20)
+
+
+### Features
+
+* **identity:** logos can be SVG, checked as an image and nothing else ([#1620](https://github.com/mandakan/splitsmith/issues/1620)) ([5d94727](https://github.com/mandakan/splitsmith/commit/5d947272d6eca8e62ff7c23cae81b6323a984f70))
+
 ## [0.82.1](https://github.com/mandakan/splitsmith/compare/v0.82.0...v0.82.1) (2026-10-20)
 
 
