@@ -23,12 +23,12 @@ from ..look.brand import BrandError
 from ..looks import BRAND_LINE_MAX, LookBrand
 from ..shooter_book import EmptyShooterBookStore, ShooterBookEntry, ShooterBookStore, is_set
 from .context import _hosted_mode_active
+from .identity_media import logo_media_for, logo_response
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
-_MEDIA = {".png": "image/png", ".jpeg": "image/jpeg", ".jpg": "image/jpeg", ".webp": "image/webp"}
 _NOT_YET = "Your brand and the shooter book are not available here yet."
 
 
@@ -46,14 +46,9 @@ def _writable(store: object) -> None:
 
 
 def _file(path, *, missing: str) -> FileResponse:  # type: ignore[no-untyped-def]
-    media = _MEDIA.get(path.suffix.lower()) if path is not None else None
-    if path is None or media is None:
+    if path is None or logo_media_for(path) is None:
         raise HTTPException(status_code=404, detail=missing)
-    return FileResponse(
-        path,
-        media_type=media,
-        headers={"X-Content-Type-Options": "nosniff", "Cache-Control": "private, no-cache"},
-    )
+    return logo_response(path, cache_control="private, no-cache")
 
 
 async def _read_upload(file: UploadFile) -> bytes:

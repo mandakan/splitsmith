@@ -70,7 +70,7 @@ def test_replacing_the_logo_removes_the_previous_file(seeded) -> None:
     assert (shooter_root / LOGO_DIR / new).exists()
 
 
-def test_logo_upload_refuses_svg_and_non_images_and_leaves_no_file(seeded) -> None:
+def test_logo_upload_refuses_a_scripted_svg_and_non_images_and_leaves_no_file(seeded) -> None:
     client, shooter_root = seeded
     svg = b"<svg xmlns='http://www.w3.org/2000/svg'><script>alert(1)</script></svg>"
     for payload, mime in ((svg, "image/svg+xml"), (b"not an image", "image/png")):
@@ -146,3 +146,26 @@ def test_the_shooter_list_carries_each_identity(seeded) -> None:
     rows = client.get("/api/match/shooters").json()["shooters"]
     me = next(row for row in rows if row["slug"] == "me")
     assert me["identity"] == {"accent": "#123456", "logo": None, "club": "PK"}
+
+
+SVG = (
+    b'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 20">'
+    b'<rect width="40" height="20" fill="#0c0"/></svg>'
+)
+
+
+def test_a_plain_svg_logo_is_stored_and_served_as_an_image_only(seeded) -> None:
+    """An SVG that is an image and nothing else is a logo (spec 2026-10-20):
+    stored as uploaded under a content name, served as ``image/svg+xml``
+    with ``nosniff`` and a policy that runs nothing."""
+    client, shooter_root = seeded
+    r = client.post(LOGO, files={"file": ("badge.svg", SVG, "image/svg+xml")})
+    assert r.status_code == 200, r.text
+    name = r.json()["identity"]["logo"]
+    assert name.startswith("logo-") and name.endswith(".svg")
+    assert (shooter_root / LOGO_DIR / name).read_bytes() == SVG
+    served = client.get(LOGO)
+    assert served.status_code == 200 and served.content == SVG
+    assert served.headers["content-type"].startswith("image/svg+xml")
+    assert served.headers["x-content-type-options"] == "nosniff"
+    assert served.headers["content-security-policy"] == "default-src 'none'; style-src 'unsafe-inline'"

@@ -552,8 +552,9 @@ def test_media_key_gate_admits_a_logo_and_refuses_other_identity_files() -> None
 
     sync_api._validate_media_key("matches/m1/shooters/alice/identity/logo-0123456789ab.png", "m1")
     sync_api._validate_media_key("matches/m1/shooters/alice/identity/logo-0123456789ab.webp", "m1")
+    sync_api._validate_media_key("matches/m1/shooters/alice/identity/logo-0123456789ab.svg", "m1")
     for bad in (
-        "matches/m1/shooters/alice/identity/logo-0123456789ab.svg",
+        "matches/m1/shooters/alice/identity/logo-0123456789ab.gif",
         "matches/m1/shooters/alice/identity/notes.txt",
         "matches/m1/shooters/alice/identity/logo.png",
     ):

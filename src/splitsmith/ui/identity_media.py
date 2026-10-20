@@ -18,6 +18,9 @@ from dataclasses import replace
 from pathlib import Path
 from typing import Literal
 
+from fastapi import HTTPException
+from fastapi.responses import FileResponse
+
 from ..identity import EVENT_LOGO_DIR, LOGO_DIR, ResolvedIdentity, ShooterIdentity, resolve_identity
 from ..looks import Look
 from ..match_model import MatchBranding
@@ -25,6 +28,37 @@ from ..match_project import MatchProject
 from ..shooter_book import EMPTY_BOOK, BookSnapshot, is_set
 
 logger = logging.getLogger(__name__)
+
+
+#: Media type by suffix for every logo route. An SVG passed
+#: ``svg_image.check_svg`` on upload; it is still served as an image only.
+LOGO_MEDIA = {
+    ".png": "image/png",
+    ".jpeg": "image/jpeg",
+    ".jpg": "image/jpeg",
+    ".webp": "image/webp",
+    ".svg": "image/svg+xml",
+}
+#: A navigated SVG runs nothing even if the upload check were ever wrong.
+_SVG_CSP = "default-src 'none'; style-src 'unsafe-inline'"
+
+
+def logo_media_for(path: Path) -> str | None:
+    """The media type a logo file is served as, ``None`` for any other file."""
+    return LOGO_MEDIA.get(path.suffix.lower())
+
+
+def logo_response(path: Path, *, cache_control: str) -> FileResponse:
+    """The one way a logo file leaves the server: media type by suffix
+    (404 for any other file), ``nosniff``, and for an SVG a policy that
+    forbids script and every external load."""
+    media = LOGO_MEDIA.get(path.suffix.lower())
+    if media is None:
+        raise HTTPException(status_code=404, detail="no logo")
+    headers = {"X-Content-Type-Options": "nosniff", "Cache-Control": cache_control}
+    if media == "image/svg+xml":
+        headers["Content-Security-Policy"] = _SVG_CSP
+    return FileResponse(path, media_type=media, headers=headers)
 
 
 def logo_storage_key(match_id: str, slug: str, name: str) -> str:

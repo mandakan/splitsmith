@@ -1,6 +1,12 @@
 {
   "entries": [
     {
+      "id": "svg-logos",
+      "date": "2026-10-20",
+      "title": "Logos can be SVG",
+      "body": "A shooter's logo, your brand, the event logo and a Look's brand file now take an SVG too, sharp on every card. One with script or links to other files is refused."
+    },
+    {
       "id": "desktop-export-bundled-ffmpeg",
       "date": "2026-10-20",
       "title": "Exports work without a separate ffmpeg",

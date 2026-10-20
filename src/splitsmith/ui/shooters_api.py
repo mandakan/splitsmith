@@ -9,7 +9,6 @@ move here, or to their own domain modules, as the split continues.
 
 from __future__ import annotations
 
-import io
 import json
 import logging
 import os
@@ -41,7 +40,7 @@ from ..auth import User
 from ..beep import windows as beep_windows
 from ..config import BeepWindowConfig
 from ..fingerprint import clip_fingerprint
-from ..identity import LOGO_DIR, LOGO_MAX_BYTES, LOGO_MAX_SIDE, ShooterIdentity, logo_name
+from ..identity import LOGO_DIR, LOGO_MAX_BYTES, ShooterIdentity, logo_name, sniff_logo
 from ..match_project import (
     VIDEO_EXTENSIONS,
     MatchProject,
@@ -56,7 +55,7 @@ from . import audio as audio_helpers
 from . import server as _server
 from .context import current_match_origin, current_match_root, current_share_request
 from .http_errors import ensure_source_reachable
-from .identity_media import ensure_local_logo, identity_source
+from .identity_media import ensure_local_logo, identity_source, logo_response
 from .jobs import Job, JobStatus
 from .project_view import ProjectView, build_project_view
 from .scoreboard import CachingScoreboardClient, LocalJsonScoreboard, MatchNotFound, ScoreboardError
@@ -2047,14 +2046,14 @@ def set_shooter_identity(request: Request, slug: str, req: ShooterIdentityReques
 async def upload_shooter_logo(
     request: Request, slug: str, file: UploadFile = File(...), scope: Literal["book", "match"] = Form("book")
 ) -> JSONResponse:
-    """Store the shooter's logo (#1243): a PNG, JPEG or WebP of at most
-    ``LOGO_MAX_BYTES``, content-named under ``<shooter>/identity/``
+    """Store the shooter's logo (#1243): a PNG, JPEG, WebP or SVG of at
+    most ``LOGO_MAX_BYTES``, content-named under ``<shooter>/identity/``
     (hosted: under the project's storage scope as well, which is the
     key the sync push writes), the previous logo file removed. The
-    type is sniffed, never trusted from the name: SVG can script and
-    a template loads the logo in Chromium."""
+    type is sniffed by ``identity.sniff_logo``, never trusted from the
+    name; an SVG is admitted only as an image and nothing else, since a
+    template loads the logo in Chromium."""
     state = request.app.state.splitsmith_state
-    from PIL import Image, UnidentifiedImageError
 
     project = state.shooter_project(slug)
     data = await file.read(LOGO_MAX_BYTES + 1)
@@ -2063,20 +2062,9 @@ async def upload_shooter_logo(
     if not data:
         raise HTTPException(status_code=422, detail="empty file")
     try:
-        with Image.open(io.BytesIO(data)) as image:
-            fmt = (image.format or "").upper()
-            side = max(image.size)
-    except (UnidentifiedImageError, OSError, Image.DecompressionBombError) as exc:
-        # A decompression bomb is an Exception, not an OSError: without
-        # this it was a 500 (review of #1243).
-        raise HTTPException(status_code=422, detail="logo must be a PNG, JPEG or WebP image") from exc
-    # MPO is what a phone camera writes: a JPEG with a multi-picture
-    # marker. Chromium decodes it as a JPEG.
-    ext = {"PNG": "png", "JPEG": "jpeg", "MPO": "jpeg", "WEBP": "webp"}.get(fmt)
-    if ext is None:
-        raise HTTPException(status_code=422, detail="logo must be a PNG, JPEG or WebP image")
-    if side > LOGO_MAX_SIDE:
-        raise HTTPException(status_code=422, detail=f"logo is over {LOGO_MAX_SIDE} px on a side")
+        ext = sniff_logo(data)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     name = logo_name(data, ext)
     previous = project.identity.logo
     logo_dir = _server._identity_logo_dir(state, slug)
@@ -2112,16 +2100,7 @@ def get_shooter_logo(request: Request, slug: str) -> FileResponse:
         path = ensure_local_logo(project, state.shooter_root(slug))
     if path is None or not path.is_file():
         raise HTTPException(status_code=404, detail="no logo")
-    media = {".png": "image/png", ".jpeg": "image/jpeg", ".jpg": "image/jpeg", ".webp": "image/webp"}.get(
-        path.suffix.lower()
-    )
-    if media is None:
-        raise HTTPException(status_code=404, detail="no logo")
-    return FileResponse(
-        path,
-        media_type=media,
-        headers={"X-Content-Type-Options": "nosniff", "Cache-Control": "private, max-age=3600"},
-    )
+    return logo_response(path, cache_control="private, max-age=3600")
 
 
 @router.delete("/api/shooters/{slug}/identity/logo")

@@ -12,7 +12,7 @@ request through Playwright routing:
 - ``/fonts/<path>``: the bundled faces;
 - ``/file/<digest>/<name>``: each ``logo`` value (a shooter's or the
   match's), rewritten here to a virtual URL, and only when it names a real
-  PNG, JPEG or WebP file that is not a symlink. Nothing else earns one: the
+  PNG, JPEG, WebP or checked SVG file that is not a symlink. Nothing else earns one: the
   context's ``data`` also carries what users typed (a stage name, a club
   line), so a stage named ``file:///proc/self/environ`` stays a string the
   page cannot load, and the engine stylesheet names fonts inside the mounted
@@ -72,8 +72,9 @@ HUD_LOAD_SECONDS = 30.0
 HUD_FRAME_SECONDS = 1.0
 
 _FILE_URL = re.compile(r"file://[^\"'\s)\\<>]+")
-#: What a ``logo`` value may name (``identity``'s upload writes these).
-_LOGO_SUFFIXES = frozenset({".png", ".jpg", ".jpeg", ".webp"})
+#: What a ``logo`` value may name (``identity``'s upload writes these). An
+#: SVG passed ``svg_image.check_svg`` on upload and is drawn as an image.
+_LOGO_SUFFIXES = frozenset({".png", ".jpg", ".jpeg", ".webp", ".svg"})
 
 
 def _bundled_fonts_dir() -> Path:

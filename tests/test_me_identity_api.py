@@ -38,7 +38,14 @@ def test_the_brand_line_and_logo_round_trip(client) -> None:
 def test_a_bad_brand_logo_is_refused(client) -> None:
     assert (
         client.post(
-            f"{PROFILE}/brand-logo", files={"file": ("x.svg", b"<svg/>", "image/svg+xml")}
+            f"{PROFILE}/brand-logo",
+            files={
+                "file": (
+                    "x.svg",
+                    b"<svg xmlns='http://www.w3.org/2000/svg'><script>alert(1)</script></svg>",
+                    "image/svg+xml",
+                )
+            },
         ).status_code
         == 422
     )

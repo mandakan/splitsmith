@@ -40,9 +40,9 @@ fonts, brand, one HTML template per card slot) plus its templates.
   hosted, is navigated from `https://look.invalid/look/<file>`, never
   `file://`, and every request is answered by `Sandbox.handle`: `/look/` (the
   template's folder, symlinks out refused), `/shared/`, `/fonts/`, and
-  `/file/<digest>/<name>` for each `logo` value naming a real PNG/JPEG/WebP that
-  is not a symlink. The stylesheet and `assets` may name files inside the
-  mounted folders only. `data` carries user text (a stage named
+  `/file/<digest>/<name>` for each `logo` value naming a real PNG/JPEG/WebP/SVG
+  (one that passed `svg_image.check_svg` on upload) that is not a symlink. The
+  stylesheet and `assets` may name files inside the mounted folders only. `data` carries user text (a stage named
   `file:///proc/self/environ` must never be mounted:
   `test_user_text_naming_a_file_is_never_mounted`); a symlinked own font was a
   way to read any file, so `fonts.resolve` and `own_fonts` refuse them.

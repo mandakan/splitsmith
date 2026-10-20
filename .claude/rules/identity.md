@@ -34,8 +34,19 @@ new URL and a new cache key.
 ## Shooter identity
 
 - `MatchProject.identity`: optional `#rrggbb` accent, a club line, a logo (PNG /
-  JPEG incl. MPO / WEBP, 2 MB, side capped at `LOGO_MAX_SIDE`; the upload sniffs
-  bytes and never reads the client's filename).
+  JPEG incl. MPO / WEBP / SVG, 2 MB, a raster's side capped at `LOGO_MAX_SIDE`;
+  the upload sniffs bytes and never reads the client's filename).
+- **An SVG logo is an image and nothing else** (`svg_image.check_svg`, run by
+  every sniffer: `identity.sniff_logo`, `look_brand.check_brand_logo`): no
+  script, `foreignObject`, `on*` attribute, `DOCTYPE` or entity, no `href` or
+  CSS `url()` that is not a fragment or a raster `data:` URL, and resvg must
+  draw it. The bytes are stored as uploaded under the usual content names. A
+  logo file leaves the server only through `identity_media.logo_response`
+  (media type by suffix, `nosniff`, and for an SVG a `default-src 'none'`
+  policy); the Pillow surfaces read every logo through `svg_image.open_image`,
+  which rasterises an SVG with resvg at `RASTER_MAX_SIDE`. The template
+  sandbox mounts `.svg` like a raster. Tests: `tests/test_svg_image.py` and
+  the upload tests. A new logo reader or route goes through those two helpers.
 - **Renderers never read identity raw.** The request layer (export jobs in
   `server.py`, `match_cli`, `compare/cli`, the preview API, the palette route)
   resolves it through `ui/identity_media.resolved_identity_for` /

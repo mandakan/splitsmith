@@ -13,7 +13,9 @@ release_url="https://github.com/mandakan/splitsmith/releases/tag/$tag"
 {
   sed "s|FFMPEG_SOURCE_RELEASE_URL|$release_url|" "$HERE/NOTICES.head.md"
   echo
-  uvx pip-licenses --python "$PY" --format=markdown --order=name
+  # resvg_py ships no licence metadata in its wheel (pip-licenses reads
+  # UNKNOWN); its licence and resvg's are written by hand in NOTICES.head.md.
+  uvx pip-licenses --python "$PY" --format=markdown --order=name --ignore-packages resvg_py
   echo
   echo "## JavaScript packages (the web UI)"
   echo

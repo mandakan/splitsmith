@@ -37,18 +37,28 @@ def check_brand_logo(data: bytes) -> str:
     (``brand-<12hex>.<ext>``). ``BrandError`` with the user's reason."""
     from PIL import Image, UnidentifiedImageError
 
+    from .. import svg_image
+
     if len(data) > LOGO_MAX_BYTES:
         raise BrandError("The logo is larger than 2 MB.")
+    if svg_image.is_svg(data):
+        # An image and nothing else (spec 2026-10-20); the sandbox mounts it
+        # for the template like a raster, and the Pillow spots rasterise it.
+        try:
+            svg_image.check_svg(data)
+        except ValueError as exc:
+            raise BrandError(str(exc)) from exc
+        return f"brand-{hashlib.sha256(data).hexdigest()[:12]}.svg"
     try:
         with Image.open(io.BytesIO(data)) as image:
             fmt = (image.format or "").upper()
             side = max(image.size)
             image.verify()
     except (UnidentifiedImageError, OSError, Image.DecompressionBombError, SyntaxError) as exc:
-        raise BrandError("The logo must be a PNG, JPEG or WebP image.") from exc
+        raise BrandError("The logo must be a PNG, JPEG, WebP or SVG image.") from exc
     ext = _FORMATS.get(fmt)
     if ext is None:
-        raise BrandError("The logo must be a PNG, JPEG or WebP image.")
+        raise BrandError("The logo must be a PNG, JPEG, WebP or SVG image.")
     if side > LOGO_MAX_SIDE:
         raise BrandError(f"The logo is over {LOGO_MAX_SIDE} px on a side.")
     return f"brand-{hashlib.sha256(data).hexdigest()[:12]}.{ext}"

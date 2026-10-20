@@ -13569,7 +13569,7 @@
   },
   "/api/looks/{name}/brand-logo": {
    "post": {
-    "description": "Store a PNG, JPEG or WebP in the Look's ``brand/`` folder\n(``look_brand``): sniffed and sized, never trusted by its name. Saving\nthe Look with ``brand.logo`` naming it is what puts it on the cards.",
+    "description": "Store a PNG, JPEG, WebP or checked SVG in the Look's ``brand/`` folder\n(``look_brand``): sniffed and sized, never trusted by its name. Saving\nthe Look with ``brand.logo`` naming it is what puts it on the cards.",
     "operationId": "upload_brand_logo_api_looks__name__brand_logo_post",
     "parameters": [
      {
@@ -14338,7 +14338,7 @@
     "summary": "Get Event Logo"
    },
    "post": {
-    "description": "Store the event's logo: a PNG, JPEG or WebP, sniffed and capped\nlike a shooter's (``identity.sniff_logo``), never trusted by name;\nthe previous file is removed.",
+    "description": "Store the event's logo: a PNG, JPEG, WebP or checked SVG, sniffed and capped\nlike a shooter's (``identity.sniff_logo``), never trusted by name;\nthe previous file is removed.",
     "operationId": "upload_event_logo_api_match_branding_event_logo_post",
     "requestBody": {
      "content": {
@@ -18651,7 +18651,7 @@
     "summary": "Get Shooter Logo"
    },
    "post": {
-    "description": "Store the shooter's logo (#1243): a PNG, JPEG or WebP of at most\n``LOGO_MAX_BYTES``, content-named under ``<shooter>/identity/``\n(hosted: under the project's storage scope as well, which is the\nkey the sync push writes), the previous logo file removed. The\ntype is sniffed, never trusted from the name: SVG can script and\na template loads the logo in Chromium.",
+    "description": "Store the shooter's logo (#1243): a PNG, JPEG, WebP or SVG of at\nmost ``LOGO_MAX_BYTES``, content-named under ``<shooter>/identity/``\n(hosted: under the project's storage scope as well, which is the\nkey the sync push writes), the previous logo file removed. The\ntype is sniffed by ``identity.sniff_logo``, never trusted from the\nname; an SVG is admitted only as an image and nothing else, since a\ntemplate loads the logo in Chromium.",
     "operationId": "upload_shooter_logo_api_shooters__slug__identity_logo_post",
     "parameters": [
      {

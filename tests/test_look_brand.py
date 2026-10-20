@@ -45,7 +45,8 @@ def _look(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, brand: dict | None = 
 def test_the_brand_is_a_content_named_file_and_a_short_line() -> None:
     brand = looks.LookBrand(logo="brand-0123456789ab.png", line="Bromma PK")
     assert brand.logo == "brand-0123456789ab.png"
-    for bad in ("../x.png", "brand-xyz.png", "brand-0123456789ab.svg", "logo-0123456789ab.png"):
+    assert looks.LookBrand(logo="brand-0123456789ab.svg").logo == "brand-0123456789ab.svg"
+    for bad in ("../x.png", "brand-xyz.png", "brand-0123456789ab.gif", "logo-0123456789ab.png"):
         with pytest.raises(ValueError):
             looks.LookBrand(logo=bad)
     with pytest.raises(ValueError):
@@ -83,8 +84,8 @@ def test_a_logo_is_stored_by_content_in_the_brand_folder(tmp_path: Path) -> None
 @pytest.mark.parametrize(
     "data, says",
     [
-        (b"<svg xmlns='http://www.w3.org/2000/svg'/>", "PNG, JPEG or WebP"),
-        (b"\x89PNG\r\n\x1a\n" + b"\0" * 40, "PNG, JPEG or WebP"),
+        (b"<svg xmlns='http://www.w3.org/2000/svg'><script>alert(1)</script></svg>", "plain image"),
+        (b"\x89PNG\r\n\x1a\n" + b"\0" * 40, "PNG, JPEG, WebP or SVG"),
         (b"\0" * (2 * 1024 * 1024 + 1), "2 MB"),
     ],
 )
@@ -217,8 +218,19 @@ def test_a_brand_logo_is_uploaded_served_and_saved_with_the_look(client) -> None
 
 
 def test_a_bad_brand_logo_is_a_422_and_other_files_are_404(client) -> None:
-    r = client.post("/api/looks/club/brand-logo", files={"file": ("x.png", b"<svg/>", "image/png")})
-    assert r.status_code == 422 and "PNG, JPEG or WebP" in r.json()["detail"]
+    r = client.post("/api/looks/club/brand-logo", files={"file": ("x.png", b"not an image", "image/png")})
+    assert r.status_code == 422 and "PNG, JPEG, WebP or SVG" in r.json()["detail"]
+    r = client.post(
+        "/api/looks/club/brand-logo",
+        files={
+            "file": (
+                "x.svg",
+                b"<svg xmlns='http://www.w3.org/2000/svg'><script>alert(1)</script></svg>",
+                "image/svg+xml",
+            )
+        },
+    )
+    assert r.status_code == 422 and "plain image" in r.json()["detail"]
     assert client.get("/api/looks/club/brand/look.json").status_code == 404
     assert client.get("/api/looks/club/brand/brand-000000000000.png").status_code == 404
     assert (

@@ -43,10 +43,11 @@ AUDIT_FILENAME_RE = re.compile(r"^stage(\d+)\.json$")
 
 #: ``trimmed/stage<N>_cam_<video_id>_trimmed.mp4`` filename shape.
 _TRIMMED_GLOB = "stage*_cam_*_trimmed.mp4"
-#: A shooter's logo under ``identity/`` (#1243): content-named, raster only,
-#: the same shape ``identity.ShooterIdentity`` admits and the hosted key
-#: gate accepts. Anything else in that directory is not synced.
-_LOGO_FILE_RE = re.compile(r"^logo-[0-9a-f]{12}\.(?:png|jpe?g|webp)$")
+#: A shooter's logo under ``identity/`` (#1243): content-named, an image
+#: file (a checked SVG included), the same shape ``identity.ShooterIdentity``
+#: admits and the hosted key gate accepts. Anything else in that directory
+#: is not synced.
+_LOGO_FILE_RE = re.compile(r"^logo-[0-9a-f]{12}\.(?:png|jpe?g|webp|svg)$")
 #: The trim's streaming rendition (#1031), ``..._web.mp4`` beside it. A
 #: ``..._web.partial.mp4`` from a crashed transcode does not match.
 _WEB_GLOB = "stage*_cam_*_web.mp4"

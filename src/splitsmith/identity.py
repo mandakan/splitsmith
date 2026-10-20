@@ -22,7 +22,7 @@ if TYPE_CHECKING:
     from .looks import Look
 
 LOGO_DIR = "identity"
-LOGO_EXTENSIONS: tuple[str, ...] = ("png", "jpg", "jpeg", "webp")
+LOGO_EXTENSIONS: tuple[str, ...] = ("png", "jpg", "jpeg", "webp", "svg")
 LOGO_MAX_BYTES = 2 * 1024 * 1024
 #: The longest side a logo may have, in pixels: a 17 KB PNG can be
 #: 12000 px square and Chromium would decode half a gigabyte of it on
@@ -31,7 +31,7 @@ LOGO_MAX_SIDE = 4096
 CLUB_MAX_CHARS = 60
 
 _HEX_RE = re.compile(r"^#[0-9a-fA-F]{6}$")
-_LOGO_RE = re.compile(r"^logo-[0-9a-f]{12}\.(?:png|jpg|jpeg|webp)$")
+_LOGO_RE = re.compile(r"^logo-[0-9a-f]{12}\.(?:png|jpg|jpeg|webp|svg)$")
 
 
 class ShooterIdentity(BaseModel):
@@ -59,7 +59,7 @@ class ShooterIdentity(BaseModel):
         if value is None:
             return None
         if not _LOGO_RE.match(value):
-            raise ValueError("logo must be a content-named raster file (logo-<hash>.png|jpg|jpeg|webp)")
+            raise ValueError("logo must be a content-named image file (logo-<hash>.png|jpg|jpeg|webp|svg)")
         return value
 
     @field_validator("club")
@@ -78,7 +78,7 @@ class ShooterIdentity(BaseModel):
 #: The event's own logo (the branding work): the match's, under the match
 #: root's ``identity/`` folder, content-named like a shooter's.
 EVENT_LOGO_DIR = LOGO_DIR
-EVENT_LOGO_RE = re.compile(r"^event-[0-9a-f]{12}\.(?:png|jpg|jpeg|webp)$")
+EVENT_LOGO_RE = re.compile(r"^event-[0-9a-f]{12}\.(?:png|jpg|jpeg|webp|svg)$")
 
 
 def event_logo_name(data: bytes, ext: str) -> str:
@@ -87,27 +87,34 @@ def event_logo_name(data: bytes, ext: str) -> str:
 
 
 def sniff_logo(data: bytes) -> str:
-    """The extension of a logo upload (``png``, ``jpeg``, ``webp``), sniffed
-    from its bytes and checked against the size and side caps; ``ValueError``
-    with the user's reason otherwise. Never the client's file name: SVG can
-    script, and a template loads the logo in Chromium."""
+    """The extension of a logo upload (``png``, ``jpeg``, ``webp``, ``svg``),
+    sniffed from its bytes and checked against the size cap and, for a
+    raster, the side cap; ``ValueError`` with the user's reason otherwise.
+    Never the client's file name. An SVG is admitted only when
+    :func:`svg_image.check_svg` finds an image and nothing else: a template
+    loads the logo in Chromium, and a document could script there."""
     import io
 
     from PIL import Image, UnidentifiedImageError
+
+    from . import svg_image
 
     if len(data) > LOGO_MAX_BYTES:
         raise ValueError(f"The logo is over {LOGO_MAX_BYTES // (1024 * 1024)} MB.")
     if not data:
         raise ValueError("The file is empty.")
+    if svg_image.is_svg(data):
+        svg_image.check_svg(data)
+        return "svg"
     try:
         with Image.open(io.BytesIO(data)) as image:
             fmt = (image.format or "").upper()
             side = max(image.size)
     except (UnidentifiedImageError, OSError, Image.DecompressionBombError) as exc:
-        raise ValueError("The logo must be a PNG, JPEG or WebP image.") from exc
+        raise ValueError("The logo must be a PNG, JPEG, WebP or SVG image.") from exc
     ext = {"PNG": "png", "JPEG": "jpeg", "MPO": "jpeg", "WEBP": "webp"}.get(fmt)
     if ext is None:
-        raise ValueError("The logo must be a PNG, JPEG or WebP image.")
+        raise ValueError("The logo must be a PNG, JPEG, WebP or SVG image.")
     if side > LOGO_MAX_SIDE:
         raise ValueError(f"The logo is over {LOGO_MAX_SIDE} px on a side.")
     return ext

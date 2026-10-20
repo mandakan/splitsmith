@@ -93,7 +93,7 @@ export function BrandingField({ busy }: { busy: boolean }) {
           <input
             id={inputId}
             type="file"
-            accept="image/png,image/jpeg,image/webp"
+            accept="image/png,image/jpeg,image/webp,image/svg+xml,.svg"
             aria-label="Event logo file"
             className="sr-only"
             disabled={busy || working}

@@ -138,7 +138,7 @@ export function ShooterSheet({ open, onClose, shooter, onChanged }: ShooterSheet
           </div>
           <Field
             label="Shooter logo"
-            help="Often their club badge. Top right on their title page, stage slates and closing card. PNG, JPEG or WebP, at most 2 MB."
+            help="Often their club badge. Top right on their title page, stage slates and closing card. PNG, JPEG, WebP or SVG, at most 2 MB."
           >
             <div className="flex items-center gap-3">
               {shownLogo ? (
@@ -149,7 +149,7 @@ export function ShooterSheet({ open, onClose, shooter, onChanged }: ShooterSheet
               <input
                 ref={fileInput}
                 type="file"
-                accept="image/png,image/jpeg,image/webp"
+                accept="image/png,image/jpeg,image/webp,image/svg+xml,.svg"
                 aria-label="Logo file"
                 className="hidden"
                 onChange={(e) => {

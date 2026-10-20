@@ -51,7 +51,7 @@ from .context import (
 )
 from .exports_api import CompareGridRequest, MatchExportRequest
 from .http_errors import ensure_source_reachable
-from .identity_media import effective_identity, ensure_local_event_logo, event_logo_storage_key
+from .identity_media import effective_identity, ensure_local_event_logo, event_logo_storage_key, logo_response
 from .jobs import Job
 from .presence import StoragePresence
 from .project_view import ProjectView, build_project_view
@@ -795,7 +795,7 @@ async def edit_match_stages(request: Request, req: StageEditRequest) -> stage_ed
 
 @router.post("/api/match/branding/event-logo")
 async def upload_event_logo(request: Request, file: UploadFile = File(...)) -> JSONResponse:
-    """Store the event's logo: a PNG, JPEG or WebP, sniffed and capped
+    """Store the event's logo: a PNG, JPEG, WebP or checked SVG, sniffed and capped
     like a shooter's (``identity.sniff_logo``), never trusted by name;
     the previous file is removed."""
     state = request.app.state.splitsmith_state
@@ -829,14 +829,7 @@ def get_event_logo(request: Request) -> FileResponse:
     path = ensure_local_event_logo(match.branding, match_root, storage=state.storage, match_id=match.match_id)
     if path is None or not path.is_file():
         raise HTTPException(status_code=404, detail="no event logo")
-    media = {".png": "image/png", ".jpeg": "image/jpeg", ".jpg": "image/jpeg", ".webp": "image/webp"}.get(
-        path.suffix.lower(), "application/octet-stream"
-    )
-    return FileResponse(
-        path,
-        media_type=media,
-        headers={"X-Content-Type-Options": "nosniff", "Cache-Control": "private, no-cache"},
-    )
+    return logo_response(path, cache_control="private, no-cache")
 
 
 @router.delete("/api/match/branding/event-logo")

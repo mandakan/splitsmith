@@ -90,6 +90,7 @@ dependencies = [
     # change (see CLAUDE.md): re-render the fixture frames and look at
     # them before merging the bump.
     "playwright>=1.60.0",
+    "resvg-py>=0.5.0",
 ]
 
 [project.scripts]

@@ -48,7 +48,7 @@ function FilePick({ onPick, label, disabled }: { onPick: (f: File) => void; labe
       <input
         ref={input}
         type="file"
-        accept="image/png,image/jpeg,image/webp"
+        accept="image/png,image/jpeg,image/webp,image/svg+xml,.svg"
         aria-label={label}
         className="hidden"
         onChange={(e) => {
@@ -235,7 +235,7 @@ function YourLook({ me, entry, onSaved }: { me: ScoreboardIdentity; entry: Shoot
       </Field>
       <Field
         label="Shooter logo"
-        help="You as a shooter, often your club badge. Top right on your title page, stage slates and closing card. PNG, JPEG or WebP, at most 2 MB."
+        help="You as a shooter, often your club badge. Top right on your title page, stage slates and closing card. PNG, JPEG, WebP or SVG, at most 2 MB."
       >
         <div className="flex items-center gap-3">
           {logo ? (

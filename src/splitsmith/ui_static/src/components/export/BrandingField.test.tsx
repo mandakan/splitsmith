@@ -35,8 +35,8 @@ describe("BrandingField", () => {
     fireEvent.click(screen.getByRole("button", { name: "Remove event logo" }));
     await waitFor(() => expect(api.removeEventLogo).toHaveBeenCalled());
 
-    vi.mocked(api.uploadEventLogo).mockRejectedValue(new Error("The logo must be a PNG, JPEG or WebP image."));
+    vi.mocked(api.uploadEventLogo).mockRejectedValue(new Error("The logo must be a PNG, JPEG, WebP or SVG image."));
     fireEvent.change(screen.getByLabelText("Event logo file"), { target: { files: [file] } });
-    expect(await screen.findByText(/PNG, JPEG or WebP/)).toBeTruthy();
+    expect(await screen.findByText(/PNG, JPEG, WebP or SVG/)).toBeTruthy();
   });
 });

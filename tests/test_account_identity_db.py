@@ -119,7 +119,7 @@ def test_logos_live_in_the_users_own_storage_and_mirror_to_the_cache(tmp_path: P
     for bad in ("../" + name, "", ".hidden", "a/b.png"):
         assert run(a.logo_file(bad)) is None
     with pytest.raises(ValueError):
-        run(a.put_logo(b"<svg/>"))
+        run(a.put_logo(b"<svg xmlns='http://www.w3.org/2000/svg'><script>alert(1)</script></svg>"))
 
 
 def test_a_snapshot_draws_the_logo_and_leaves_out_one_that_is_gone(tmp_path: Path) -> None:

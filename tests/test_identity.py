@@ -25,11 +25,15 @@ def test_accent_is_normalised_to_lower_case() -> None:
 
 
 @pytest.mark.parametrize(
-    "bad", ["logo.png", "logo-abc.png", "logo-0123456789ab.svg", "../logo-0123456789ab.png"]
+    "bad", ["logo.png", "logo-abc.png", "logo-0123456789ab.gif", "../logo-0123456789ab.png"]
 )
-def test_logo_is_a_hash_named_raster_file(bad: str) -> None:
+def test_logo_is_a_hash_named_image_file(bad: str) -> None:
     with pytest.raises(ValidationError):
         identity.ShooterIdentity(logo=bad)
+
+
+def test_a_checked_svg_is_a_logo_too() -> None:
+    assert identity.ShooterIdentity(logo="logo-0123456789ab.svg").logo == "logo-0123456789ab.svg"
 
 
 def test_club_is_stripped_bounded_and_blank_is_none() -> None:

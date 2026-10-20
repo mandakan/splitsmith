@@ -151,7 +151,7 @@ def check_styles(value: dict[str, str]) -> dict[str, str]:
 
 #: A Look's own brand logo lives in this folder of the Look, named by content.
 BRAND_DIR = "brand"
-BRAND_FILE_RE = re.compile(r"brand-[0-9a-f]{12}\.(?:png|jpg|jpeg|webp)")
+BRAND_FILE_RE = re.compile(r"brand-[0-9a-f]{12}\.(?:png|jpg|jpeg|webp|svg)")
 BRAND_LINE_MAX = 60
 
 

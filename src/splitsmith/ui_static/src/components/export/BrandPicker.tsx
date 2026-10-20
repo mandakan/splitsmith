@@ -87,7 +87,7 @@ export function BrandPicker({
             <input
               id={inputId}
               type="file"
-              accept="image/png,image/jpeg,image/webp"
+              accept="image/png,image/jpeg,image/webp,image/svg+xml,.svg"
               aria-label="Brand logo file"
               className="sr-only"
               disabled={busy}
@@ -123,7 +123,7 @@ export function BrandPicker({
       </label>
       {!hosted ? (
         <p className="text-sm text-subtle">
-          PNG, JPEG or WebP, up to 2 MB. A transparent PNG looks best.
+          PNG, JPEG, WebP or SVG, up to 2 MB. A transparent PNG or an SVG looks best.
         </p>
       ) : null}
       {refused ? <p className="text-sm text-destructive">{refused}</p> : null}
