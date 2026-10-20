@@ -263,7 +263,6 @@ def resolve_runtime(
     ffp = _resolve_binary(ffprobe_binary, ENV_FFPROBE, "ffprobe")
     _validate_binary(ffm, "ffmpeg")
     _validate_binary(ffp, "ffprobe")
-    _put_binaries_on_path(ffm, ffp)
 
     # Point HuggingFace / Torch caches into our cleanable cache dir so
     # CLAP/PANN downloads don't pollute ``~``. ``setdefault`` so users
@@ -285,15 +284,18 @@ def runtime() -> Runtime:
     return resolve_runtime()
 
 
-def _put_binaries_on_path(*binaries: str) -> None:
-    """Put the folder of every resolved binary that is a real file first on
-    ``PATH``. The desktop app and the Linux CLI wrapper name the bundled
-    ffmpeg through ``SPLITSMITH_FFMPEG``, but a producer reached with the
-    bare name still asks the OS, and a Mac started from the Finder has no
-    Homebrew on its PATH (the 0.81.0 DMG could not export a trim). With the
-    bundle's folder on PATH the bare name is the bundle too."""
+def put_bundle_on_path() -> None:
+    """Put the folder of the runtime's ffmpeg and ffprobe, when they are
+    real files, first on this process's ``PATH``. The desktop app names the
+    bundled ffmpeg through ``SPLITSMITH_FFMPEG``, but a producer reached
+    with the bare name still asks the OS, and a Mac started from the Finder
+    has no Homebrew on its PATH (the 0.81.0 DMG could not export a trim).
+    With the bundle's folder on PATH the bare name is the bundle too. Called
+    by the sidecar's entry point, never by the cached resolver: a test that
+    points the runtime at a fake binary must not leave it on PATH."""
+    rt = runtime()
     dirs: list[str] = []
-    for value in binaries:
+    for value in (rt.ffmpeg_binary, rt.ffprobe_binary):
         candidate = Path(value)
         if candidate.is_absolute() and candidate.is_file() and str(candidate.parent) not in dirs:
             dirs.append(str(candidate.parent))

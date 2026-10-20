@@ -89,14 +89,16 @@ def test_ffprobe_resolves_the_same_way(bundle: Path, tmp_path: Path) -> None:
     assert runner.calls[0][0] == str(bundle / "ffprobe")
 
 
-def test_the_bundle_folder_leads_path_once_the_runtime_resolved(bundle: Path) -> None:
+def test_the_sidecar_puts_the_bundle_folder_first_on_path(bundle: Path) -> None:
     """The safety net for producers reached with a bare name through code
-    this module does not know about: the OS finds the bundle first."""
+    this module does not know about: the OS finds the bundle first. The
+    resolver itself never touches PATH (a test's fake binary would leak)."""
     runtime.runtime()
+    assert str(bundle) not in os.environ["PATH"]
+    runtime.put_bundle_on_path()
     assert os.environ["PATH"].split(os.pathsep)[0] == str(bundle)
-    runtime._clear_runtime_cache()
-    runtime.runtime()
-    assert os.environ["PATH"].split(os.pathsep).count(str(bundle)) == 1, "added once, not per resolution"
+    runtime.put_bundle_on_path()
+    assert os.environ["PATH"].split(os.pathsep).count(str(bundle)) == 1, "added once, not per call"
 
 
 def test_a_bare_name_resolution_leaves_path_alone(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -106,6 +108,7 @@ def test_a_bare_name_resolution_leaves_path_alone(monkeypatch: pytest.MonkeyPatc
     runtime._clear_runtime_cache()
     try:
         runtime.runtime()
+        runtime.put_bundle_on_path()
         assert os.environ["PATH"] == "/usr/bin:/bin"
     finally:
         runtime._clear_runtime_cache()
