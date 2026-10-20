@@ -4,7 +4,7 @@ import { StrictMode, useState } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { PeaksResult } from "@/lib/api";
-import { AUDITION_LEAD_S, AUDITION_WINDOW_S } from "@/lib/beepAudition";
+import { AUDITION_GAP_S, AUDITION_LEAD_S, AUDITION_WINDOW_S } from "@/lib/beepAudition";
 import { snapToLeadingEdge } from "@/lib/peak-snap";
 import { resetTimelinePrefsForTests } from "@/lib/timelinePrefs";
 
@@ -650,6 +650,38 @@ describe("review fixes (2026-10-17)", () => {
       expect(playSpy).toHaveBeenCalledTimes(2);
       // Cmd-B is the browser's.
       fireEvent.keyDown(window, { key: "b", metaKey: true });
+      expect(playSpy).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+      playSpy.mockRestore();
+      pauseSpy.mockRestore();
+    }
+  });
+  it("Loop repeats the audition with a silence between passes, follows the line, and stops on a pause", async () => {
+    vi.mocked(api.getVideoPeaks).mockResolvedValue(peaksFixture({ beep_time: 25 }));
+    const playSpy = vi.spyOn(HTMLMediaElement.prototype, "play").mockResolvedValue(undefined);
+    const pauseSpy = vi.spyOn(HTMLMediaElement.prototype, "pause").mockImplementation(function (this: HTMLMediaElement) {
+      this.dispatchEvent(new Event("pause"));
+    });
+    const { rerender } = render(<Harness videoId="v1" videoBeepTime={25} />);
+    await screen.findByRole("button", { name: /Play from beep/ });
+    const video = screen.getByTestId("preview-video") as HTMLVideoElement;
+    vi.useFakeTimers();
+    try {
+      fireEvent.keyDown(window, { key: "l" });
+      expect(screen.getByRole("button", { name: /^Loop/ })).toHaveAttribute("aria-pressed", "true");
+      fireEvent.keyDown(window, { key: "b" });
+      expect(playSpy).toHaveBeenCalledTimes(1);
+      vi.advanceTimersByTime(AUDITION_WINDOW_S * 1000);
+      expect(pauseSpy).toHaveBeenCalledTimes(1);
+      // The gap, then the same window again, from the line as it is now.
+      rerender(<Harness videoId="v1" videoBeepTime={25} draftSourceTime={12} />);
+      vi.advanceTimersByTime(AUDITION_GAP_S * 1000);
+      expect(playSpy).toHaveBeenCalledTimes(2);
+      expect(video.currentTime).toBeCloseTo(12 - AUDITION_LEAD_S, 3);
+      // A pause from elsewhere ends the loop: no third pass.
+      video.dispatchEvent(new Event("pause"));
+      vi.advanceTimersByTime((AUDITION_WINDOW_S + AUDITION_GAP_S) * 1000 * 2);
       expect(playSpy).toHaveBeenCalledTimes(2);
     } finally {
       vi.useRealTimers();

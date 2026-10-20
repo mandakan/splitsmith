@@ -11,10 +11,21 @@ export const AUDITION_LEAD_S = 0.4;
 /** Seconds the audition plays before it pauses. */
 export const AUDITION_WINDOW_S = 1.5;
 
+/** Seconds of silence between passes when the audition loops: the tone's
+ *  start is then always the first sound after a gap, which is what the ear
+ *  locks onto when comparing two picks. */
+export const AUDITION_GAP_S = 0.6;
+
 /** Where an audition of a pick at ``beep`` (media seconds) starts, never
  *  before the media's own start. */
 export function auditionStart(beep: number, lead: number = AUDITION_LEAD_S): number {
   return Math.max(0, beep - lead);
+}
+
+/** Whether a key press toggles the audition loop: a plain L, as on Audit's
+ *  shot step. */
+export function isLoopKey(e: Pick<KeyboardEvent, "key" | "metaKey" | "ctrlKey" | "altKey">): boolean {
+  return (e.key === "l" || e.key === "L") && !e.metaKey && !e.ctrlKey && !e.altKey;
 }
 
 /** Whether a key press is the "Play from beep" shortcut: a plain B, no

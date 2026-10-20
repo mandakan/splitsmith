@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { AUDITION_LEAD_S, auditionStart, isAuditionKey } from "@/lib/beepAudition";
+import { AUDITION_LEAD_S, auditionStart, isAuditionKey, isLoopKey } from "@/lib/beepAudition";
 
 describe("beepAudition", () => {
   it("starts the lead before the line, never before the media's start", () => {
@@ -18,5 +18,13 @@ describe("beepAudition", () => {
     expect(k("b", { ctrlKey: true })).toBe(false);
     expect(k("b", { altKey: true })).toBe(false);
     expect(k("n")).toBe(false);
+  });
+  it("takes a plain L for the loop", () => {
+    const k = (key: string, mods: Partial<KeyboardEvent> = {}) =>
+      isLoopKey({ key, metaKey: false, ctrlKey: false, altKey: false, ...mods });
+    expect(k("l")).toBe(true);
+    expect(k("L")).toBe(true);
+    expect(k("l", { metaKey: true })).toBe(false);
+    expect(k("b")).toBe(false);
   });
 });
