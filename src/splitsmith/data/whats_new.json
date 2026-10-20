@@ -1,6 +1,12 @@
 {
   "entries": [
     {
+      "id": "renderer-installs-itself",
+      "date": "2026-10-20",
+      "title": "Overlays and cards no longer go missing",
+      "body": "In the computer app, an export could finish without its overlay and cards when the renderer was not installed. The app now installs it on first start, and Export says so with Install renderer until it is there."
+    },
+    {
       "id": "beep-audition-loop",
       "date": "2026-10-20",
       "title": "Loop the beep",

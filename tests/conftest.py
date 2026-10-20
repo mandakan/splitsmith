@@ -23,6 +23,8 @@ os.environ.setdefault("SPLITSMITH_RENDER_CACHE", "0")
 # whichever unrelated test built the app and trips the drain assertion
 # below. The one test of the hook opts back in.
 os.environ.setdefault("SPLITSMITH_NO_MODEL_PREFETCH", "1")
+# Nor the renderer install a local app starts when Chromium is missing.
+os.environ.setdefault("SPLITSMITH_NO_RENDERER_PREFETCH", "1")
 from splitsmith.match_model import Match, MatchStageDefinition
 from splitsmith.match_project import MatchProject, StageEntry, StageVideo
 

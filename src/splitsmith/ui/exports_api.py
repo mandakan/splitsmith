@@ -42,6 +42,7 @@ from ..overlay.theme import ThemeName
 from . import export_storage, match_exports
 from .context import _hosted_mode_active
 from .http_errors import source_unreachable
+from .system_api import require_renderer
 
 router = APIRouter()
 
@@ -602,6 +603,21 @@ async def export_stage(
     return JSONResponse(job.model_dump(mode="json"))
 
 
+def match_export_needs_renderer(req: MatchExportRequest) -> bool:
+    """Whether the match export draws anything through the renderer (the
+    headless Chromium): the overlay, a generated card (title page, stage
+    slate or lower third, closing card), a summary hold or the match
+    summary. A plain cut with none of them renders without it."""
+    return bool(
+        req.include_overlay
+        or req.title_page
+        or req.closing_card
+        or req.title_kind != "none"
+        or req.summary_hold_seconds > 0
+        or req.match_summary
+    )
+
+
 def check_match_export(state: Any, slug: str, req: MatchExportRequest) -> None:
     """The match export's pre-flight: stages chosen, pads within the
     project's trim buffers, each stage with a primary, a beep and a
@@ -621,6 +637,10 @@ def check_match_export(state: Any, slug: str, req: MatchExportRequest) -> None:
     project = state.shooter_project(slug)
     if not req.stage_numbers:
         raise HTTPException(status_code=400, detail="stage_numbers cannot be empty")
+    if match_export_needs_renderer(req):
+        # Before anything renders: without the renderer the export ran and
+        # left out every overlay and card (0.83.0's DMG).
+        require_renderer()
 
     # Padding cap: clamp at the project's pre/post buffer. Exceeding
     # the cap is a 400 with a precise message, not a silent clamp --

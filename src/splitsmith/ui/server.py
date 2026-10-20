@@ -8131,6 +8131,12 @@ def create_app(
         if local_journal is not None:
             run_sync(resume_journaled_jobs(state.jobs, local_journal))
         run_sync(_maybe_submit_model_download(state))
+        from .system_api import maybe_install_renderer
+
+        try:
+            run_sync(maybe_install_renderer(state.jobs))
+        except ShutdownInProgressError:
+            pass
 
     # ----------------------------------------------------------------------
     # Magic-link auth routes (hosted mode only)

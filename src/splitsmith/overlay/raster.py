@@ -52,6 +52,7 @@ import re
 import secrets
 import signal
 import subprocess
+import sys
 import tempfile
 import threading
 import time
@@ -244,8 +245,57 @@ DEVICE_SCALE_FACTOR = 1
 #: The one-time step every environment that rasterizes an overlay needs
 #: -- the browser is not vendored in the wheel. Repeated in
 #: :func:`_unavailable`'s message so a render failure tells the operator
-#: exactly what to run rather than just that something is missing.
-INSTALL_HINT = "uv run playwright install chromium --only-shell"
+#: exactly what to run rather than just that something is missing. Named
+#: with the interpreter this process runs on, so it is right for a dev
+#: checkout, a pipx/uv tool install and the desktop app's bundled Python
+#: alike (``uv run`` meant nothing to a desktop user).
+INSTALL_HINT = f"{sys.executable} -m playwright install {CHROMIUM_CHANNEL}"
+
+
+def _playwright_browsers_dir() -> Path:
+    """Where Playwright keeps its browsers, by its own rules:
+    ``PLAYWRIGHT_BROWSERS_PATH`` (``0`` is inside the package), else the
+    per-OS cache folder."""
+    env = os.environ.get("PLAYWRIGHT_BROWSERS_PATH")
+    if env == "0":
+        import playwright
+
+        return Path(playwright.__file__).parent / "driver" / "package" / ".local-browsers"
+    if env:
+        return Path(env)
+    if sys.platform == "darwin":
+        return Path.home() / "Library" / "Caches" / "ms-playwright"
+    if sys.platform.startswith("win"):
+        return Path(os.environ.get("LOCALAPPDATA", Path.home() / "AppData" / "Local")) / "ms-playwright"
+    return Path(os.environ.get("XDG_CACHE_HOME", Path.home() / ".cache")) / "ms-playwright"
+
+
+def renderer_installed() -> bool | None:
+    """Whether the headless shell this Playwright pins is installed, read
+    from disk without launching it: ``True``/``False``, or ``None`` when
+    the pin cannot be read (then nothing should act on the answer).
+
+    Playwright writes ``INSTALLATION_COMPLETE`` into the browser's folder,
+    named for the revision its ``browsers.json`` pins
+    (``chromium_headless_shell-<revision>``). The revision is read from the
+    running Playwright, never assumed: a desktop build can ship a newer
+    one than the dev venv (0.84.0's wanted 1248 where the venv pins 1223).
+    """
+    try:
+        import json
+
+        import playwright
+
+        pins = json.loads(
+            (Path(playwright.__file__).parent / "driver" / "package" / "browsers.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        revision = next(b["revision"] for b in pins["browsers"] if b["name"] == CHROMIUM_CHANNEL)
+    except Exception:  # noqa: BLE001 -- an unreadable pin is "unknown", never a crash
+        return None
+    folder = _playwright_browsers_dir() / f"{CHROMIUM_CHANNEL.replace('-', '_')}-{revision}"
+    return (folder / "INSTALLATION_COMPLETE").is_file()
 
 
 class TemplateScriptError(RuntimeError):
@@ -296,10 +346,11 @@ def _unavailable(exc: Exception) -> RasterizerUnavailableError:
             "Playwright could not launch a Chromium browser, so everything the overlay "
             "composites is omitted: the per-tile shot counters and split labels, and the "
             "stage summary's text. The running clock still draws (it is an ffmpeg drawtext "
-            "filter and needs no browser) and the rest of the render proceeds. The browser "
-            f"is not vendored in the wheel -- install it once per environment with "
-            f"'{INSTALL_HINT}' (dev host, CI, the hosted image, and the self-hosted worker "
-            f"all need this separately). Original error: {exc}"
+            "filter and needs no browser) and the rest of the render proceeds. In the "
+            "desktop app, Install renderer on the Export page installs it. Elsewhere the "
+            f"browser is installed once per environment with '{INSTALL_HINT}' (dev host, "
+            f"CI, the hosted image, and the self-hosted worker all need this separately). "
+            f"Original error: {exc}"
         ),
     )
 

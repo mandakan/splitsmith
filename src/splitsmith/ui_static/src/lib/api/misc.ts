@@ -68,6 +68,9 @@ export const miscApi = {
   getServerFeatures: () =>
     request<{ lab: boolean; mode: "local" | "hosted" }>("/api/server/features"),
 
+  /** Whether the renderer (headless Chromium) launches here; local only. */
+  getChromiumStatus: () => request<{ installed: boolean }>("/api/system/chromium"),
+
   /** Enqueue the ``chromium_install`` job (idempotent while one runs). */
   installChromium: () => request<Job>("/api/system/chromium/install", { method: "POST" }),
 
