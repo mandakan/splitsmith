@@ -57,8 +57,10 @@ def test_a_logo_is_content_named_and_sniffed(tmp_path: Path) -> None:
     name = run(store.put_logo(_png()))
     assert name.startswith("logo-") and name.endswith(".png")
     assert run(store.logo_file(name)) == tmp_path / "files" / name
-    with pytest.raises(ValueError, match="PNG, JPEG or WebP"):
-        run(store.put_logo(b"<svg xmlns='http://www.w3.org/2000/svg'/>"))
+    with pytest.raises(ValueError, match="plain image"):
+        run(store.put_logo(b"<svg xmlns='http://www.w3.org/2000/svg'><script>alert(1)</script></svg>"))
+    with pytest.raises(ValueError, match="PNG, JPEG, WebP or SVG"):
+        run(store.put_logo(b"not an image"))
 
 
 def test_a_symlinked_logo_or_book_is_never_read(tmp_path: Path) -> None:

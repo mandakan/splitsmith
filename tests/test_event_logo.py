@@ -45,7 +45,10 @@ def test_an_event_logo_name_with_a_trailing_newline_is_refused() -> None:
 def test_the_match_names_its_event_logo_by_content() -> None:
     branding = match_model.MatchBranding(event_logo="event-0123456789ab.png")
     assert branding.event_logo == "event-0123456789ab.png"
-    for bad in ("logo-0123456789ab.png", "../event.png", "event-0123456789ab.svg"):
+    assert (
+        match_model.MatchBranding(event_logo="event-0123456789ab.svg").event_logo == "event-0123456789ab.svg"
+    )
+    for bad in ("logo-0123456789ab.png", "../event.png", "event-0123456789ab.gif"):
         with pytest.raises(ValueError):
             match_model.MatchBranding(event_logo=bad)
     assert event_logo_name(b"x", "png").startswith("event-")
@@ -84,8 +87,11 @@ def test_the_event_logo_is_uploaded_served_and_removed(client) -> None:
 
 def test_a_bad_event_logo_is_a_422(client) -> None:
     http, _root, url = client
-    r = http.post(url, files={"file": ("x.png", b"<svg/>", "image/png")})
+    r = http.post(url, files={"file": ("x.png", b"not an image", "image/png")})
     assert r.status_code == 422, r.text
+    scripted = b"<svg xmlns='http://www.w3.org/2000/svg'><script>alert(1)</script></svg>"
+    r = http.post(url, files={"file": ("x.svg", scripted, "image/svg+xml")})
+    assert r.status_code == 422 and "plain image" in r.text, r.text
 
 
 # --- sync -----------------------------------------------------------------------------------
@@ -121,10 +127,11 @@ def test_a_replaced_event_logo_is_gcd(tmp_path: Path) -> None:
 
 def test_the_hosted_key_gate_takes_the_event_logo_and_nothing_else_at_match_level() -> None:
     sync_api._validate_media_key("matches/m1/identity/event-0123456789ab.png", "m1")
+    sync_api._validate_media_key("matches/m1/identity/event-0123456789ab.svg", "m1")
     assert sync_api.deletable_media_shape("matches/m1/identity/event-0123456789ab.png")
     for bad in (
         "matches/m1/identity/logo-0123456789ab.png",
-        "matches/m1/identity/event-0123456789ab.svg",
+        "matches/m1/identity/event-0123456789ab.gif",
         "matches/m1/identity/../x.png",
         "matches/m2/identity/event-0123456789ab.png",
     ):

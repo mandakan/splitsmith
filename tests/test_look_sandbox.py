@@ -395,3 +395,22 @@ def test_a_template_that_breaks_the_probe_is_a_finding_not_a_crash(
     )
     probe = raster.probe_template(template, context=_context(), width=64, height=32)
     assert any("no" in e for e in probe.errors)
+
+
+def test_a_checked_svg_logo_is_mounted_like_a_raster(tmp_path: Path) -> None:
+    """A logo value naming an ``.svg`` (one the upload checked) earns the
+    same ``/file/`` mount a PNG does, so a template draws it as an image."""
+    template = tmp_path / "look" / "card.html"
+    template.parent.mkdir()
+    template.write_text("<p>hi</p>", encoding="utf-8")
+    logo = tmp_path / "shooter" / "identity" / "logo-abc.svg"
+    logo.parent.mkdir(parents=True)
+    logo.write_bytes(b'<svg xmlns="http://www.w3.org/2000/svg"><rect width="4" height="2"/></svg>')
+    sandbox, ctx = look_sandbox.prepare(template, _context(logo=logo.as_uri()))
+    logo_url = ctx.data["logo"]
+    assert logo_url.startswith(f"{look_sandbox.ORIGIN}/file/")
+    assert sandbox.resolve(logo_url) == logo.resolve()
+    other = tmp_path / "shooter" / "identity" / "logo-abc.gif"
+    other.write_bytes(b"GIF89a")
+    _sandbox, ctx = look_sandbox.prepare(template, _context(logo=other.as_uri()))
+    assert ctx.data["logo"] == other.as_uri(), "any other suffix stays an unloadable file URL"

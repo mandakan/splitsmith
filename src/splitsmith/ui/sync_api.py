@@ -75,9 +75,9 @@ _SYNC_MEDIA_KEY_RE = re.compile(
     r"(?:trimmed/[A-Za-z0-9._-]+\.(?:mp4|json)"
     r"|audio/stage[0-9]+_cam_[A-Za-z0-9]+_audit\.wav"
     r"|beep_review/[A-Za-z0-9._-]+\.(?:m4a|json)"
-    r"|identity/logo-[0-9a-f]{12}\.(?:png|jpe?g|webp))"
+    r"|identity/logo-[0-9a-f]{12}\.(?:png|jpe?g|webp|svg))"
     # The event's logo (the branding work): the one match-level media file.
-    r"|identity/event-[0-9a-f]{12}\.(?:png|jpe?g|webp))$"
+    r"|identity/event-[0-9a-f]{12}\.(?:png|jpe?g|webp|svg))$"
 )
 
 

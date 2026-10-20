@@ -127,7 +127,7 @@ export const matchApi = {
   footageSortThumbUrl: (scanId: string, index: number) =>
     scopeRequestPath(`/api/match/footage-sort/${encodeURIComponent(scanId)}/thumbs/${index}.jpg`),
 
-  /** The event's own logo (the branding work): PNG, JPEG or WebP, 2 MB. */
+  /** The event's own logo (the branding work): PNG, JPEG, WebP or SVG, 2 MB. */
   uploadEventLogo: (file: File) => {
     const form = new FormData();
     form.append("file", file, file.name);

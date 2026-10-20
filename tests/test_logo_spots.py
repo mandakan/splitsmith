@@ -79,3 +79,19 @@ def test_a_missing_or_symlinked_logo_leaves_the_still_alone(tmp_path: Path) -> N
     broken = tmp_path / "broken.png"
     broken.write_bytes(b"not an image")
     assert paste_logo(canvas, broken) is canvas
+
+
+def test_an_svg_logo_is_drawn_too(tmp_path: Path) -> None:
+    """The summaries paste an SVG logo (spec 2026-10-20): rasterised at
+    read time, it lands in the same slot a PNG does."""
+    svg = tmp_path / "logo-abc.svg"
+    svg.write_bytes(
+        b'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">'
+        b'<rect width="100" height="100" fill="#00c800"/></svg>'
+    )
+    canvas = Image.new("RGB", (1600, 900), (0, 0, 0))
+    out = paste_logo(canvas, svg)
+    side = round(900 * 0.09)
+    margin = round(900 * 0.04)
+    assert out.getpixel((1600 - margin - side // 2, margin + side // 2)) == (0, 200, 0)
+    assert out.getpixel((800, 450)) == (0, 0, 0)

@@ -35,6 +35,8 @@ from typing import Literal, get_args
 
 from PIL import Image
 
+from . import svg_image
+
 logger = logging.getLogger(__name__)
 
 LogoSpot = Literal["wipe", "summaries", "thumbnail", "watermark"]
@@ -119,8 +121,8 @@ def _open_logo(logo: Path | None, what: str) -> Image.Image | None:
         logger.warning("logo %s is not a file; the %s has no logo", logo, what)
         return None
     try:
-        with Image.open(logo) as source:
-            return source.convert("RGBA")
+        # An SVG is rasterised here (spec 2026-10-20); a raster is opened.
+        return svg_image.open_image(logo)
     except (OSError, Image.DecompressionBombError, ValueError) as exc:
         logger.warning("could not read logo %s (%s); the %s has no logo", logo, exc, what)
         return None
@@ -214,8 +216,7 @@ def watermark_image(logo: Path, *, height: int, opacity: float = WATERMARK_OPACI
         logger.warning("watermark logo %s is not a file; no watermark", logo)
         return None
     try:
-        with Image.open(logo) as source:
-            mark = source.convert("RGBA")
+        mark = svg_image.open_image(logo)
     except (OSError, Image.DecompressionBombError, ValueError) as exc:
         logger.warning("could not read watermark logo %s (%s); no watermark", logo, exc)
         return None

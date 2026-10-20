@@ -201,7 +201,7 @@ export const miscApi = {
   putLook: (name: string, body: StoredLookBody) =>
     request<StoredLook>(`/api/looks/${encodeURIComponent(name)}`, { method: "PUT", json: body }),
   deleteLook: (name: string) => request<void>(`/api/looks/${encodeURIComponent(name)}`, { method: "DELETE" }),
-  /** Store a brand logo in the Look (local only): PNG, JPEG or WebP up to 2 MB. */
+  /** Store a brand logo in the Look (local only): PNG, JPEG, WebP or SVG up to 2 MB. */
   uploadBrandLogo: (name: string, file: File) => {
     const form = new FormData();
     form.append("file", file, file.name);

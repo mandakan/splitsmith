@@ -19,6 +19,7 @@ import numpy as np
 from PIL import Image
 from pydantic import BaseModel, ConfigDict
 
+from . import svg_image
 from .export_preview import _trim_for, grab_frame
 from .match_project import MatchProject
 
@@ -143,9 +144,8 @@ def logo_colours(logo: Path | None) -> list[Swatch]:
     if logo is None or not logo.is_file():
         return []
     try:
-        with Image.open(logo) as image:
-            return dominant_colours([image.copy()], k=5)
-    except OSError as exc:
+        return dominant_colours([svg_image.open_image(logo)], k=5)
+    except (OSError, ValueError) as exc:
         logger.warning("could not read the logo %s: %s", logo, exc)
         return []
 

@@ -82,6 +82,7 @@ from ..looks import (
 from ..overlay.raster import ChromiumRasterizer, RasterizerUnavailableError
 from ..own_fonts import MAX_FONT_BYTES, OwnFont, OwnFontError, list_fonts, own_font_path, save_font
 from ..runtime import runtime
+from .identity_media import logo_response
 
 router = APIRouter()
 
@@ -544,7 +545,7 @@ class BrandLogoInfo(BaseModel):
 
 @router.post("/api/looks/{name}/brand-logo", status_code=201, response_model=BrandLogoInfo)
 def upload_brand_logo(name: str, file: Annotated[UploadFile, File()]) -> BrandLogoInfo:
-    """Store a PNG, JPEG or WebP in the Look's ``brand/`` folder
+    """Store a PNG, JPEG, WebP or checked SVG in the Look's ``brand/`` folder
     (``look_brand``): sniffed and sized, never trusted by its name. Saving
     the Look with ``brand.logo`` naming it is what puts it on the cards."""
     look = _own_look(name)
@@ -565,12 +566,7 @@ def get_brand_logo(name: str, file: str) -> FileResponse:
     path = look.root / BRAND_DIR / file
     if path.is_symlink() or not path.is_file():
         raise HTTPException(status_code=404, detail="not found")
-    media = {".png": "image/png", ".webp": "image/webp"}.get(path.suffix, "image/jpeg")
-    return FileResponse(
-        path,
-        media_type=media,
-        headers={"Cache-Control": "private, max-age=86400", "X-Content-Type-Options": "nosniff"},
-    )
+    return logo_response(path, cache_control="private, max-age=86400")
 
 
 __all__ = ["router"]

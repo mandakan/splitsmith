@@ -1189,7 +1189,7 @@ export interface paths {
         put?: never;
         /**
          * Upload Brand Logo
-         * @description Store a PNG, JPEG or WebP in the Look's ``brand/`` folder
+         * @description Store a PNG, JPEG, WebP or checked SVG in the Look's ``brand/`` folder
          *     (``look_brand``): sniffed and sized, never trusted by its name. Saving
          *     the Look with ``brand.logo`` naming it is what puts it on the cards.
          */
@@ -1512,7 +1512,7 @@ export interface paths {
         put?: never;
         /**
          * Upload Event Logo
-         * @description Store the event's logo: a PNG, JPEG or WebP, sniffed and capped
+         * @description Store the event's logo: a PNG, JPEG, WebP or checked SVG, sniffed and capped
          *     like a shooter's (``identity.sniff_logo``), never trusted by name;
          *     the previous file is removed.
          */
@@ -4142,12 +4142,13 @@ export interface paths {
         put?: never;
         /**
          * Upload Shooter Logo
-         * @description Store the shooter's logo (#1243): a PNG, JPEG or WebP of at most
-         *     ``LOGO_MAX_BYTES``, content-named under ``<shooter>/identity/``
+         * @description Store the shooter's logo (#1243): a PNG, JPEG, WebP or SVG of at
+         *     most ``LOGO_MAX_BYTES``, content-named under ``<shooter>/identity/``
          *     (hosted: under the project's storage scope as well, which is the
          *     key the sync push writes), the previous logo file removed. The
-         *     type is sniffed, never trusted from the name: SVG can script and
-         *     a template loads the logo in Chromium.
+         *     type is sniffed by ``identity.sniff_logo``, never trusted from the
+         *     name; an SVG is admitted only as an image and nothing else, since a
+         *     template loads the logo in Chromium.
          */
         post: operations["upload_shooter_logo_api_shooters__slug__identity_logo_post"];
         /**
