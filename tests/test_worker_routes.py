@@ -501,6 +501,43 @@ def test_generator_finally_swallows_touch_seen_failure() -> None:
     assert store.touches == ["w1", "w1"]
 
 
+def test_generator_goodbye_stamp_finishes_when_the_request_is_cancelled() -> None:
+    """A reconnecting agent ends the channel request by cancelling it, and
+    Starlette's anyio cancel scope keeps cancelling every await in the
+    generator's ``finally`` (#1288). The goodbye stamp must still finish, or
+    its pooled DB connection is cut mid-checkout and left to the garbage
+    collector, one per reconnect."""
+    import anyio
+
+    from splitsmith.ui.server import _worker_channel_events
+    from splitsmith.worker_channel import WakeChannelRegistry
+
+    finished: list[str] = []
+
+    class _SlowGoodbye(_FakeStore):
+        async def touch_seen(self, worker_id: str, *, version: str | None = None) -> None:
+            await super().touch_seen(worker_id, version=version)
+            if len(self.touches) == 2:
+                await asyncio.sleep(0.05)  # the session's checkout and commit
+                finished.append(worker_id)
+
+    store = _SlowGoodbye()
+
+    async def scenario() -> None:
+        gen = _worker_channel_events(
+            store, WakeChannelRegistry(), "w1", disabled=False, boot_retrigger=None, keepalive_seconds=0.01
+        )
+        with anyio.CancelScope() as scope:
+            assert await gen.__anext__() == ": ka\n\n"
+            scope.cancel()
+            await gen.__anext__()
+        await asyncio.sleep(0.2)
+
+    asyncio.run(scenario())
+    assert store.touches == ["w1", "w1"]
+    assert finished == ["w1"], "the goodbye stamp was cancelled mid-flight"
+
+
 # ---------------------------------------------------------------------------
 # Hosted boot lifespan: railway-row seeding
 # ---------------------------------------------------------------------------
