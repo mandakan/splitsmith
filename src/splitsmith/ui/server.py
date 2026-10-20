@@ -5807,7 +5807,7 @@ async def _worker_channel_events(
             # A connect often ends an offline stretch; the (internally
             # throttled) pending-jobs re-check closes the "jobs queued while
             # the box was offline" gap without waiting for a fresh enqueue.
-            asyncio.create_task(boot_retrigger())
+            _keep_task(asyncio.create_task(boot_retrigger()))
         if disabled:
             yield "event: disabled\ndata: {}\n\n"
         while True:
@@ -5819,12 +5819,34 @@ async def _worker_channel_events(
             yield f"event: {event}\ndata: {{}}\n\n"
     finally:
         registry.disconnect(worker_id, queue)
-        try:
-            await store.touch_seen(worker_id)
-        except Exception:
-            # Best-effort goodbye stamp: the client is already gone and the
-            # DB may be too.
-            pass
+
+        async def goodbye() -> None:
+            try:
+                await store.touch_seen(worker_id)
+            except Exception:
+                # Best-effort goodbye stamp: the client is already gone and
+                # the DB may be too.
+                pass
+
+        # Its own task, shielded (#1288): a reconnecting agent ends this
+        # request by cancelling it, and Starlette's cancel scope keeps
+        # cancelling every await in this ``finally``. Awaited in place, the
+        # stamp's pooled connection was cut mid-checkout and left to the
+        # garbage collector ("non-checked-in connection ... terminated"),
+        # one per reconnect. As a task it finishes and checks the
+        # connection back in; the await below still ends with the request.
+        await asyncio.shield(_keep_task(asyncio.create_task(goodbye())))
+
+
+#: Strong references to fire-and-forget tasks: the event loop keeps only a
+#: weak one, so an unreferenced task can be collected before it runs.
+_BACKGROUND_TASKS: set[asyncio.Task[Any]] = set()
+
+
+def _keep_task(task: asyncio.Task[Any]) -> asyncio.Task[Any]:
+    _BACKGROUND_TASKS.add(task)
+    task.add_done_callback(_BACKGROUND_TASKS.discard)
+    return task
 
 
 def _derive_worker_status(record: Any, connected_ids: frozenset[str]) -> str:
