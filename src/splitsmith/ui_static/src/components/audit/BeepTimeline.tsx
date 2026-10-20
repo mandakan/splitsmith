@@ -31,7 +31,7 @@ import { WaveformTrack } from "@/components/timeline/WaveformTrack";
 import { Kbd } from "@/components/ui/Kbd";
 import { Segmented } from "@/components/ui/Segmented";
 import { api, type PeaksResult, type Spectrogram } from "@/lib/api";
-import { AUDITION_WINDOW_S, auditionStart, isAuditionKey } from "@/lib/beepAudition";
+import { AUDITION_GAP_S, AUDITION_WINDOW_S, auditionStart, isAuditionKey, isLoopKey } from "@/lib/beepAudition";
 import { TIMER_BAND, bandOf, bandParam, useBeepFilter, validBand } from "@/lib/beepFilter";
 import type { PeaksDetail } from "@/lib/timelineView";
 import { snapToLeadingEdge } from "@/lib/peak-snap";
@@ -252,41 +252,66 @@ export function BeepTimeline({
   // the whole untrimmed source, so the beep can be 25 s in; this is one
   // press instead of a wait or a scrub. It follows the line, so it plays
   // a moved pick, not the detector's.
+  //
+  // Loop (L, as on Audit's shot step) repeats that window with a short
+  // silence between passes. Each pass reads the line again, so dragging
+  // the pick while it loops moves the loop with it.
   const auditionTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  useEffect(
-    () => () => {
-      if (auditionTimer.current != null) clearTimeout(auditionTimer.current);
-    },
-    [],
-  );
-  const playFromBeep = useCallback(() => {
-    if (!media || chosenLocalNow == null) return;
-    const start = auditionStart(chosenLocalNow);
-    seekNow(media, start);
-    setLocalTime(start);
+  // Set just before the audition pauses the media itself, so the pause
+  // listener below can tell its own pause from the user's.
+  const ownPause = useRef(false);
+  const [loop, setLoop] = useState(false);
+  const loopRef = useRef(loop);
+  loopRef.current = loop;
+  const lineRef = useRef(chosenLocalNow);
+  lineRef.current = chosenLocalNow;
+  const stopAudition = useCallback(() => {
     if (auditionTimer.current != null) clearTimeout(auditionTimer.current);
-    void media.play()?.catch(() => undefined);
-    auditionTimer.current = setTimeout(() => {
-      auditionTimer.current = null;
-      media.pause();
-    }, AUDITION_WINDOW_S * 1000);
-  }, [media, chosenLocalNow]);
+    auditionTimer.current = null;
+  }, []);
+  useEffect(() => stopAudition, [stopAudition]);
+  const playFromBeep = useCallback(() => {
+    if (!media || lineRef.current == null) return;
+    stopAudition();
+    const pass = () => {
+      const line = lineRef.current;
+      if (line == null) return;
+      const start = auditionStart(line);
+      seekNow(media, start);
+      setLocalTime(start);
+      void media.play()?.catch(() => undefined);
+      auditionTimer.current = setTimeout(() => {
+        ownPause.current = true;
+        media.pause();
+        auditionTimer.current = loopRef.current ? setTimeout(pass, AUDITION_GAP_S * 1000) : null;
+      }, AUDITION_WINDOW_S * 1000);
+    };
+    pass();
+  }, [media, stopAudition]);
   // A pause from anywhere else (Space, the video's own controls) ends the
-  // audition, so its timer never pauses a later, longer listen.
+  // audition and its loop, so a timer never pauses a later, longer listen.
   useEffect(() => {
     if (!media) return undefined;
     const onPause = () => {
-      if (auditionTimer.current != null) clearTimeout(auditionTimer.current);
-      auditionTimer.current = null;
+      if (ownPause.current) {
+        ownPause.current = false;
+        return;
+      }
+      stopAudition();
     };
     media.addEventListener("pause", onPause);
     return () => media.removeEventListener("pause", onPause);
-  }, [media]);
+  }, [media, stopAudition]);
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (!isAuditionKey(e) || isTypingTextTarget(e.target)) return;
-      e.preventDefault();
-      playFromBeep();
+      if (isTypingTextTarget(e.target)) return;
+      if (isAuditionKey(e)) {
+        e.preventDefault();
+        playFromBeep();
+      } else if (isLoopKey(e)) {
+        e.preventDefault();
+        setLoop((on) => !on);
+      }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -567,6 +592,18 @@ export function BeepTimeline({
             onClick={playFromBeep}
           >
             Play from beep <Kbd size="sm">B</Kbd>
+          </button>
+          <button
+            type="button"
+            aria-pressed={loop}
+            className={cn(
+              "inline-flex min-h-8 items-center gap-1.5 rounded-md border px-2 text-sm text-ink",
+              loop ? "border-rule-strong bg-surface-3" : "border-rule text-muted",
+            )}
+            title="Repeat Play from beep, with a short silence between passes (L)"
+            onClick={() => setLoop((on) => !on)}
+          >
+            Loop <Kbd size="sm">L</Kbd>
           </button>
           <button
             type="button"

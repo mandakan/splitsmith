@@ -1,6 +1,12 @@
 {
   "entries": [
     {
+      "id": "beep-audition-loop",
+      "date": "2026-10-20",
+      "title": "Loop the beep",
+      "body": "On Audit's beep step, Loop beside Play from beep, or the L key, repeats the second around the beep line with a short silence between passes. Move the line while it loops to compare."
+    },
+    {
       "id": "phone-width-sheets",
       "date": "2026-10-20",
       "title": "Side panels fit your phone",
