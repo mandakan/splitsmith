@@ -6884,6 +6884,21 @@ def _resolve_audit_audio(
             status_code=404,
             detail=f"stage {stage_number} has no primary video",
         )
+    if primary.beep_time is None and _is_mirror():
+        # A desktop mirror has no source to cut from and the primary was
+        # never trimmed (#1496): a derive_audio job could only fail. Say why
+        # instead of queueing it, so the page shows the fix, not a spinner.
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "primary_not_ready",
+                "message": (
+                    f"Stage {stage_number}'s primary camera has no confirmed beep, so it has no clip "
+                    "to play here. Confirm its beep on the desktop, or make the camera you audited on "
+                    "the primary again."
+                ),
+            },
+        )
     published = audio_helpers.published_audit_audio(
         state.shooter_root(slug),
         stage_number,

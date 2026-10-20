@@ -1,6 +1,12 @@
 {
   "entries": [
     {
+      "id": "primary-needs-its-beep",
+      "date": "2026-10-20",
+      "title": "A primary camera needs its beep first",
+      "body": "Moving a camera with no confirmed beep in as an audited stage's primary is refused with what to do, and splitsmith.app says why such a stage has no audio instead of waiting forever."
+    },
+    {
       "id": "audit-one-clock",
       "date": "2026-10-20",
       "title": "Old audits line up with their clip",

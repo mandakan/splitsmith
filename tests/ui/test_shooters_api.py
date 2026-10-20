@@ -3188,3 +3188,67 @@ def test_a_failed_overlay_redraw_never_ships_the_stale_overlay(
     anomalies = job["result"]["anomalies"]
     assert any("stage 1: overlay left out" in a and "ffmpeg went away" in a for a in anomalies), anomalies
     assert not any("stage 1: overlay not available" in a for a in anomalies), anomalies
+
+
+def test_a_move_never_makes_a_camera_without_a_beep_the_primary_over_audit_work(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """#1496: a move that made a beep-less camera the primary of an audited
+    stage left a primary with no trim, so Audit could not load it. The move
+    is refused with the way out; a camera with a confirmed beep (the one the
+    audit was made on, put back) still moves in."""
+    monkeypatch.setenv("SPLITSMITH_AUTO_BEEP_DISABLED", "1")
+    client, src = _seed_project_with_primary(tmp_path)
+    (src.parent / "HEAD.mp4").write_bytes(b"")
+    client.post(
+        "/api/shooters/me/videos/scan",
+        json={"source_dir": str(src.parent), "auto_assign_primary": False},
+    )
+    client.post(
+        "/api/shooters/me/assignments/move",
+        json={"video_path": "raw/HEAD.mp4", "to_stage_number": 1, "role": "secondary"},
+    )
+    shooter_root = tmp_path / "match" / "shooters" / "me"
+    (shooter_root / "audit").mkdir(parents=True, exist_ok=True)
+    (shooter_root / "audit" / "stage1.json").write_text(
+        json.dumps({"beep_time": 5.0, "shots": [{"time": 6.0, "ms_after_beep": 1000}]})
+    )
+
+    refused = client.post(
+        "/api/shooters/me/assignments/move",
+        json={"video_path": "raw/HEAD.mp4", "to_stage_number": 1, "role": "primary"},
+    )
+    assert refused.status_code == 409, refused.text
+    assert refused.json()["detail"]["code"] == "primary_without_beep"
+    project = MatchProject.load(shooter_root)
+    assert str(project.stages[0].primary().path) != "raw/HEAD.mp4", "nothing moved"
+
+    project_json = shooter_root / "project.json"
+    doc = json.loads(project_json.read_text())
+    head = next(v for v in doc["stages"][0]["videos"] if v["path"] == "raw/HEAD.mp4")
+    head.update(beep_time=3.5, beep_source="manual", beep_reviewed=True)
+    project_json.write_text(json.dumps(doc))
+    allowed = client.post(
+        "/api/shooters/me/assignments/move",
+        json={"video_path": "raw/HEAD.mp4", "to_stage_number": 1, "role": "primary"},
+    )
+    assert allowed.status_code == 200, allowed.text
+    assert (shooter_root / "audit" / "stage1.json").exists(), "a move never touches the audit"
+
+
+def test_a_mirrors_primary_without_a_beep_says_so_instead_of_queueing_audio(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """#1496: on a desktop mirror a primary with no beep was never trimmed
+    and its source never leaves the desktop, so a derive_audio job could
+    only fail and the page waited on it. The audio route says why."""
+    from splitsmith.ui import server as server_mod
+
+    client, _ = _seed_project_with_primary(tmp_path)
+    monkeypatch.setattr(server_mod, "_is_mirror", lambda: True)
+    resp = client.get("/api/shooters/me/stages/1/audio")
+    assert resp.status_code == 409, resp.text
+    assert resp.json()["detail"]["code"] == "primary_not_ready"
+    assert not [j for j in client.get("/api/me/jobs").json() if j["kind"] == "derive_audio"]
+    monkeypatch.setattr(server_mod, "_is_mirror", lambda: False)
+    assert client.get("/api/shooters/me/stages/1/audio").status_code != 409, "locally the source is here"

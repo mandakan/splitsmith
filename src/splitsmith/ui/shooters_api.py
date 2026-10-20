@@ -2663,6 +2663,8 @@ async def move_assignment(
     state = request.app.state.splitsmith_state
     root = state.shooter_root(slug)
     project = await state.shooter_project_async(slug)
+    if req.role == "primary" and req.to_stage_number is not None:
+        _refuse_unready_primary(project, root, req.to_stage_number, Path(req.video_path))
     try:
         moved = project.assign_video(
             Path(req.video_path),
@@ -2688,6 +2690,44 @@ async def move_assignment(
         )
 
     return JSONResponse(project.model_dump(mode="json"))
+
+
+def _refuse_unready_primary(project: MatchProject, root: Path, stage_number: int, video_path: Path) -> None:
+    """409 ``primary_without_beep`` for a move that would make a camera with
+    no confirmed beep the primary of a stage with audit work (#1496).
+
+    Such a primary has no trim, so Audit cannot load the stage, and the
+    audit stays on the previous camera's clock with nothing to say so. A
+    camera with a confirmed beep may still be moved in as primary (that is
+    how a stage audited on it is put back); "Make primary" (swap-primary)
+    is the path that backs the audit up and detects again."""
+    try:
+        stage = project.stage(stage_number)
+    except KeyError:
+        return  # assign_video answers the unknown stage
+    current = stage.primary()
+    if current is not None and current.path == video_path:
+        return
+    located = project.find_video(video_path, stage_number=stage_number) or project.find_video(video_path)
+    if located is None:
+        return
+    video = located[1]
+    if video.beep_reviewed and video.beep_time is not None:
+        return
+    if not project.primary_swap_warns(root, stage_number=stage_number):
+        return
+    raise HTTPException(
+        status_code=409,
+        detail={
+            "code": "primary_without_beep",
+            "message": (
+                f"Stage {stage_number} has audit work, and {video_path.name} has no confirmed beep, "
+                "so it could not be trimmed as the primary. Confirm its beep first, or use Make primary, "
+                "which keeps the audit as a backup and detects the shots again."
+            ),
+            "stage_number": stage_number,
+        },
+    )
 
 
 @router.post("/api/shooters/{slug}/assignments/swap-primary")
