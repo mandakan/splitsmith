@@ -263,6 +263,7 @@ def resolve_runtime(
     ffp = _resolve_binary(ffprobe_binary, ENV_FFPROBE, "ffprobe")
     _validate_binary(ffm, "ffmpeg")
     _validate_binary(ffp, "ffprobe")
+    _put_binaries_on_path(ffm, ffp)
 
     # Point HuggingFace / Torch caches into our cleanable cache dir so
     # CLAP/PANN downloads don't pollute ``~``. ``setdefault`` so users
@@ -282,6 +283,42 @@ def resolve_runtime(
 def runtime() -> Runtime:
     """Return the cached process-wide :class:`Runtime` (resolving on first call)."""
     return resolve_runtime()
+
+
+def _put_binaries_on_path(*binaries: str) -> None:
+    """Put the folder of every resolved binary that is a real file first on
+    ``PATH``. The desktop app and the Linux CLI wrapper name the bundled
+    ffmpeg through ``SPLITSMITH_FFMPEG``, but a producer reached with the
+    bare name still asks the OS, and a Mac started from the Finder has no
+    Homebrew on its PATH (the 0.81.0 DMG could not export a trim). With the
+    bundle's folder on PATH the bare name is the bundle too."""
+    dirs: list[str] = []
+    for value in binaries:
+        candidate = Path(value)
+        if candidate.is_absolute() and candidate.is_file() and str(candidate.parent) not in dirs:
+            dirs.append(str(candidate.parent))
+    if not dirs:
+        return
+    current = os.environ.get("PATH", "")
+    parts = [p for p in current.split(os.pathsep) if p and p not in dirs]
+    os.environ["PATH"] = os.pathsep.join(dirs + parts)
+
+
+def ffmpeg_path(binary: str | None = None) -> str:
+    """The ffmpeg a producer runs: ``binary`` when the caller named one,
+    else the runtime's. The bare default ``"ffmpeg"`` counts as unnamed, so
+    a function that was never handed the runtime's binary still runs the
+    bundled one instead of whatever PATH holds."""
+    if binary and binary != "ffmpeg":
+        return binary
+    return runtime().ffmpeg_binary
+
+
+def ffprobe_path(binary: str | None = None) -> str:
+    """The ffprobe a producer runs; see :func:`ffmpeg_path`."""
+    if binary and binary != "ffprobe":
+        return binary
+    return runtime().ffprobe_binary
 
 
 def _clear_runtime_cache() -> None:

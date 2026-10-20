@@ -38,7 +38,7 @@ from typing import Literal
 
 from .config import Config, TrimResult, WebTrimConfig
 from .media_check import valid_mp4, valid_mp4_cached
-from .runtime import ENV_CONFIG_FILE
+from .runtime import ENV_CONFIG_FILE, ffmpeg_path
 
 Runner = Callable[..., subprocess.CompletedProcess]
 TrimMode = Literal["lossless", "audit"]
@@ -153,6 +153,7 @@ def select_audit_encoder(
     Returns a usable encoder name. ``libx264`` is the universal fallback because
     every realistic ffmpeg build ships it.
     """
+    ffmpeg_binary = ffmpeg_path(ffmpeg_binary)
     if requested != "auto":
         encoders = _probe_available_encoders(ffmpeg_binary)
         # If we couldn't probe (no ffmpeg on PATH for the probe call), trust
@@ -220,6 +221,7 @@ def trim_video(
     Returns the absolute-source-time window of the cut. Raises ``FFmpegError``
     if ffmpeg fails or is not installed.
     """
+    ffmpeg_binary = ffmpeg_path(ffmpeg_binary)
     pre = pre_buffer_seconds if pre_buffer_seconds is not None else buffer_seconds
     post = post_buffer_seconds if post_buffer_seconds is not None else buffer_seconds
     # A beep before 0 is a secondary camera that started during the beep
@@ -348,6 +350,7 @@ def write_web_rendition(
     partial name is per process. Raises ``FFmpegError`` when ffmpeg fails or
     its output fails the check; the partial is always removed and a previous
     good rendition is never replaced by a bad one."""
+    ffmpeg_binary = ffmpeg_path(ffmpeg_binary)
     web = web_trim_path(trimmed)
     lock_path = web.with_name(f"{web.stem}.lock")
     with lock_path.open("a") as lock:
@@ -383,6 +386,7 @@ def transcode_web_trim(
     start decoding after the first few hundred kilobytes. Raises
     :class:`FFmpegError` when ffmpeg fails or is missing.
     """
+    ffmpeg_binary = ffmpeg_path(ffmpeg_binary)
     if not input_path.exists():
         raise FFmpegError(f"input video not found: {input_path}")
     cmd = [
@@ -447,6 +451,7 @@ def backfill_web_trims(
     transcode failed (the rest still run). A missing dir is a no-op.
     ``on_progress(i, n, trim)`` fires before each transcode.
     """
+    ffmpeg_binary = ffmpeg_path(ffmpeg_binary)
     cut: list[Path] = []
     errors: list[str] = []
     if not trimmed_dir.is_dir():

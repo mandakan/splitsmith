@@ -1,6 +1,12 @@
 {
   "entries": [
     {
+      "id": "desktop-export-bundled-ffmpeg",
+      "date": "2026-10-20",
+      "title": "Exports work without a separate ffmpeg",
+      "body": "In the computer app, exporting a stage could fail with ffmpeg binary not found unless ffmpeg was installed separately. Every export now uses the ffmpeg the app ships with."
+    },
+    {
       "id": "export-history-not-written",
       "date": "2026-10-20",
       "title": "Export history says what was not written",

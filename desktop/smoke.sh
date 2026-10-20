@@ -30,6 +30,10 @@ export SPLITSMITH_CONFIG_DIR="$CFG" SPLITSMITH_PORT=0 SPLITSMITH_HOST=127.0.0.1
 export SPLITSMITH_FFMPEG="$RES/bin/ffmpeg" SPLITSMITH_FFPROBE="$RES/bin/ffprobe"
 export NUMBA_CACHE_DIR="$CFG/numba" PYTHONDONTWRITEBYTECODE=1 PYTHONNOUSERSITE=1
 unset PYTHONPATH PYTHONHOME
+# The PATH a Mac started from the Finder has: no Homebrew, no ffmpeg. Every
+# producer must reach the bundle through the runtime (the 0.81.0 DMG could
+# not export a trim because the trimmer asked PATH for a bare "ffmpeg").
+export PATH="/usr/bin:/bin:/usr/sbin:/sbin"
 
 "$PY" -m splitsmith.ui.embedded --log-dir "$CFG/logs" 2> "$CFG/stderr" &
 pid=$!
@@ -50,6 +54,20 @@ else
   grep -q drawtext <<<"$filters" || { echo "bundled ffmpeg lacks drawtext"; exit 1; }
 fi
 
+# A trim and an ffprobe through the producers' defaults, with no ffmpeg on
+# PATH: both must run the bundle. The clip is cut by the bundled ffmpeg.
+"$RES/bin/ffmpeg" -hide_banner -loglevel error -y -f lavfi -i "testsrc=size=160x90:rate=25:duration=3" \
+  -f lavfi -i "sine=frequency=440:duration=3" -c:v libx264 -pix_fmt yuv420p -c:a aac -shortest "$CFG/clip.mp4"
+"$PY" - "$CFG/clip.mp4" "$CFG/trim.mp4" <<'PYEOF'
+import sys
+from pathlib import Path
+from splitsmith import fcpxml_gen, trim
+src, out = Path(sys.argv[1]), Path(sys.argv[2])
+trim.trim_video(src, out, beep_time=1.0, stage_time=1.0, buffer_seconds=0.5, overwrite=True)
+meta = fcpxml_gen.probe_video(out)
+assert meta.width == 160, meta
+print("trim + probe through the bundle ok")
+PYEOF
 # Detection through the bundled CLI (same fixture and range as ci.yml's slim-smoke).
 "$RES/python/bin/splitsmith" detect \
   --video "$ROOT/tests/fixtures/stage-shots-tallmilan-2026-stage3-s97dcec94-pin.wav" --time 14.74 | tee "$CFG/detect.txt"
