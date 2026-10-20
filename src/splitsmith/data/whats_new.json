@@ -1,6 +1,12 @@
 {
   "entries": [
     {
+      "id": "picker-audited-count-filmed-shooters",
+      "date": "2026-10-20",
+      "title": "Match progress counts the shooters you filmed",
+      "body": "On the Matches page, stages audited now counts a stage once every shooter with footage on it is done. Adding a squadmate before their footage no longer lowers it."
+    },
+    {
       "id": "hosted-audit-audio-on-synced-stages",
       "date": "2026-10-20",
       "title": "Audit any synced stage on splitsmith.app",

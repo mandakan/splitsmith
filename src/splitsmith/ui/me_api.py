@@ -250,7 +250,6 @@ def _enrich_recent_project(rp: user_config.RecentProject) -> RecentProjectDetail
             # "Audited" comes from :func:`stage_audit_status` -- the
             # operator has to hit Save & next at least once on the
             # stage for it to count. Skipped stages don't qualify.
-            audited_total = 0
             video_total = 0
             shooter_names: list[str] = []
             per_shooter: list[tuple[str, dict[int, StageStatus]]] = []
@@ -268,14 +267,13 @@ def _enrich_recent_project(rp: user_config.RecentProject) -> RecentProjectDetail
                     shooter_names.append(shooter.name or slug)
                     continue
                 statuses = legacy.stage_statuses(audit_docs=legacy.audit_docs_from_disk(shooter_root))
-                audited_total += sum(1 for st in statuses.values() if st == StageStatus.audited)
                 per_shooter.append((slug, statuses))
                 for st_entry in legacy.stages:
                     stage_names.setdefault(st_entry.stage_number, st_entry.stage_name)
                 video_total += len(legacy.all_videos())
                 shooter_names.append(shooter.name or slug)
             detail.shooter_names = shooter_names
-            detail.stages_audited = audited_total // max(len(match.shooters), 1) if match.shooters else 0
+            detail.stages_audited = _server._stages_audited_across(per_shooter)
             detail.video_count = video_total
             detail.next_step = _server._next_step_from_statuses(per_shooter, stage_names, video_total)
             metadata_path = path / match_model.MATCH_FILE
@@ -297,7 +295,7 @@ def _enrich_recent_project(rp: user_config.RecentProject) -> RecentProjectDetail
     # "awaiting_footage" = the operator hasn't attached any footage yet
     # (drives the picker pill + footage-gated menu treatment per #425);
     # "in_progress" otherwise.
-    if detail.stage_count > 0 and detail.stages_audited >= detail.stage_count:
+    if detail.kind == "match" and _server._nothing_left_to_do(detail.next_step):
         detail.status = "exported"
     elif detail.last_modified_at is not None and (datetime.now(UTC) - detail.last_modified_at).days > 180:
         detail.status = "archived"

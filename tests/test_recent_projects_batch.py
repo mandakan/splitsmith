@@ -158,9 +158,9 @@ def test_detail_content_is_derived_from_the_batched_docs(
     assert alpha["shooter_count"] == 2
     assert alpha["stage_count"] == 2
     assert alpha["shooter_names"] == ["Alpha shooter", "Bea"]
-    # Bea's two stages are audited, the first shooter's none (no footage):
-    # 2 audited across 2 shooters -> 1.
-    assert alpha["stages_audited"] == 1
+    # Bea audited both stages; the first shooter has no footage, so has no
+    # say on either: both stages count (#1613).
+    assert alpha["stages_audited"] == 2
     assert alpha["video_count"] == 2
     assert alpha["status"] == "in_progress"
     # No stage is ready or in progress, so the Continue card points at the
