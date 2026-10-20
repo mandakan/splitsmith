@@ -57,6 +57,11 @@ on release. A pick within 5 ms of the detected time is "no override".
 `BeepWaveformPicker` keeps its own zoom for `MobileBeepReview` and
 `StageTimeSection` only, never for `BeepStep`.
 
+**Play from beep** (button beside Snap, plain B) and the phone's "Play from line" share
+one rule, `lib/beepAudition`: from `AUDITION_LEAD_S` before the line, for
+`AUDITION_WINDOW_S`, then pause; it follows a moved pick. The beep step plays
+the untrimmed source, so the beep can be far into the clip.
+
 ## Spectrum, filter and tone offset
 
 - Spectrum row: `SpectrogramTrack`, `GET .../videos/{id}/spectrum` (spec

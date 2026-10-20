@@ -28,13 +28,16 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { SpectrogramTrack } from "@/components/audit/SpectrogramTrack";
 import { Timeline, type TimelineTrack } from "@/components/timeline/Timeline";
 import { WaveformTrack } from "@/components/timeline/WaveformTrack";
+import { Kbd } from "@/components/ui/Kbd";
 import { Segmented } from "@/components/ui/Segmented";
 import { api, type PeaksResult, type Spectrogram } from "@/lib/api";
+import { AUDITION_WINDOW_S, auditionStart, isAuditionKey } from "@/lib/beepAudition";
 import { TIMER_BAND, bandOf, bandParam, useBeepFilter, validBand } from "@/lib/beepFilter";
 import type { PeaksDetail } from "@/lib/timelineView";
 import { snapToLeadingEdge } from "@/lib/peak-snap";
 import { coalescedSeek, seekNow } from "@/lib/coalescedSeek";
 import { useSpacePlayPause } from "@/lib/keyboard";
+import { isTypingTextTarget } from "@/lib/audit-input";
 import type { Zoom } from "@/lib/timelineView";
 import { cn } from "@/lib/utils";
 
@@ -244,6 +247,51 @@ export function BeepTimeline({
   const chosenSourceNow = draftSourceTime ?? videoBeepTime;
   const chosenLocalNow = chosenSourceNow != null ? chosenSourceNow - offset : (peaks?.beep_time ?? null);
 
+  // "Play from beep" (lib/beepAudition, the phone's rule too): from just
+  // before the line, for a short window, then pause. The beep step plays
+  // the whole untrimmed source, so the beep can be 25 s in; this is one
+  // press instead of a wait or a scrub. It follows the line, so it plays
+  // a moved pick, not the detector's.
+  const auditionTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(
+    () => () => {
+      if (auditionTimer.current != null) clearTimeout(auditionTimer.current);
+    },
+    [],
+  );
+  const playFromBeep = useCallback(() => {
+    if (!media || chosenLocalNow == null) return;
+    const start = auditionStart(chosenLocalNow);
+    seekNow(media, start);
+    setLocalTime(start);
+    if (auditionTimer.current != null) clearTimeout(auditionTimer.current);
+    void media.play()?.catch(() => undefined);
+    auditionTimer.current = setTimeout(() => {
+      auditionTimer.current = null;
+      media.pause();
+    }, AUDITION_WINDOW_S * 1000);
+  }, [media, chosenLocalNow]);
+  // A pause from anywhere else (Space, the video's own controls) ends the
+  // audition, so its timer never pauses a later, longer listen.
+  useEffect(() => {
+    if (!media) return undefined;
+    const onPause = () => {
+      if (auditionTimer.current != null) clearTimeout(auditionTimer.current);
+      auditionTimer.current = null;
+    };
+    media.addEventListener("pause", onPause);
+    return () => media.removeEventListener("pause", onPause);
+  }, [media]);
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!isAuditionKey(e) || isTypingTextTarget(e.target)) return;
+      e.preventDefault();
+      playFromBeep();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [playFromBeep]);
+
   // 1 ms detail for the seconds around the chosen beep: the clip's own
   // peaks are 1,200 bins over the whole source (25-50 ms bars), too
   // coarse to see where the tone starts. Fetched again only when the
@@ -364,6 +412,7 @@ export function BeepTimeline({
   // video's own confirmed/detected beep. Null when there is neither.
   const chosenSource = draftSourceTime ?? videoBeepTime;
   const chosenLocal = chosenSource != null ? chosenSource - offset : null;
+
   // Where Snap would put the beep: the rise-foot rule on the fine window,
   // looking a little wider than for a shot. Null without detail or a foot.
   const snapLocal =
@@ -510,6 +559,15 @@ export function BeepTimeline({
               {chosenLocal < snapLocal ? "before" : "after"} the tone's start
             </span>
           ) : null}
+          <button
+            type="button"
+            className="inline-flex min-h-8 items-center gap-1.5 rounded-md border border-rule px-2 text-sm text-ink disabled:opacity-50"
+            disabled={!media || chosenLocalNow == null}
+            title="Play the second around the beep line (B)"
+            onClick={playFromBeep}
+          >
+            Play from beep <Kbd size="sm">B</Kbd>
+          </button>
           <button
             type="button"
             className="min-h-8 rounded-md border border-rule px-2 text-sm text-ink disabled:opacity-50"

@@ -1,6 +1,12 @@
 {
   "entries": [
     {
+      "id": "play-from-beep",
+      "date": "2026-10-20",
+      "title": "Play from beep",
+      "body": "On Audit's beep step, Play from beep beside Snap, or the B key, plays the second around the beep line, wherever it sits in the clip. It follows the line when you move it."
+    },
+    {
       "id": "svg-logos",
       "date": "2026-10-20",
       "title": "Logos can be SVG",

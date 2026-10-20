@@ -4,6 +4,7 @@ import { StrictMode, useState } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { PeaksResult } from "@/lib/api";
+import { AUDITION_LEAD_S, AUDITION_WINDOW_S } from "@/lib/beepAudition";
 import { snapToLeadingEdge } from "@/lib/peak-snap";
 import { resetTimelinePrefsForTests } from "@/lib/timelinePrefs";
 
@@ -627,5 +628,33 @@ describe("review fixes (2026-10-17)", () => {
     expect(low.value).toBe("1500");
     await user.tab();
     await waitFor(() => expect(vi.mocked(api.getVideoPeaks).mock.calls.at(-1)?.[6]).toBe("1500-3500"));
+  });
+  it("Play from beep starts just before the line, follows a moved pick, and pauses after the window", async () => {
+    vi.mocked(api.getVideoPeaks).mockResolvedValue(peaksFixture({ beep_time: 25 }));
+    const playSpy = vi.spyOn(HTMLMediaElement.prototype, "play").mockResolvedValue(undefined);
+    const pauseSpy = vi.spyOn(HTMLMediaElement.prototype, "pause").mockImplementation(() => undefined);
+    const { rerender } = render(<Harness videoId="v1" videoBeepTime={25} />);
+    const button = await screen.findByRole("button", { name: /Play from beep/ });
+    const video = screen.getByTestId("preview-video") as HTMLVideoElement;
+    vi.useFakeTimers();
+    try {
+      fireEvent.click(button);
+      expect(video.currentTime).toBeCloseTo(25 - AUDITION_LEAD_S, 3);
+      expect(playSpy).toHaveBeenCalledTimes(1);
+      vi.advanceTimersByTime(AUDITION_WINDOW_S * 1000);
+      expect(pauseSpy).toHaveBeenCalledTimes(1);
+      // A moved pick: the line is the draft now, and B plays from there.
+      rerender(<Harness videoId="v1" videoBeepTime={25} draftSourceTime={12} />);
+      fireEvent.keyDown(window, { key: "b" });
+      expect(video.currentTime).toBeCloseTo(12 - AUDITION_LEAD_S, 3);
+      expect(playSpy).toHaveBeenCalledTimes(2);
+      // Cmd-B is the browser's.
+      fireEvent.keyDown(window, { key: "b", metaKey: true });
+      expect(playSpy).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+      playSpy.mockRestore();
+      pauseSpy.mockRestore();
+    }
   });
 });
