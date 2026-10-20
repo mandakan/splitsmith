@@ -135,7 +135,9 @@ describe("Audit reviewing a fixture", () => {
     expect(await screen.findByRole("button", { name: "Mark reviewed & next" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Re-pick beep" })).toBeNull();
     expect(apiMock.getFixtureAudit).toHaveBeenCalledWith(PATH);
-    expect(apiMock.getFixturePeaks).toHaveBeenCalledWith(PATH, expect.any(Number));
+    // The peaks load after the audit, so on a loaded runner the request can
+    // land just after the button renders (main's CI, 2026-10-20).
+    await waitFor(() => expect(apiMock.getFixturePeaks).toHaveBeenCalledWith(PATH, expect.any(Number)));
     expect(apiMock.getProject).not.toHaveBeenCalled();
     expect(apiMock.getStageAudit).not.toHaveBeenCalled();
   });
