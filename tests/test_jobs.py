@@ -1032,3 +1032,32 @@ def test_find_active_still_sees_a_job_whose_match_is_unknown() -> None:
         assert found is not None and found.id == job.id
     finally:
         release.set()
+
+
+def test_retry_rebinds_the_original_requests_match_origin() -> None:
+    """A retry runs outside any request, so the body would otherwise see no
+    origin and ``_is_mirror()`` would answer False for a desktop mirror
+    (#1612). The manager keeps the submitting request's origin with its
+    match context and pins it again for the re-run."""
+    from splitsmith.ui.context import current_match_origin
+
+    reg = _Sync(JobRegistry(max_concurrent=1))
+    seen: list[str | None] = []
+
+    def flaky(handle, **kwargs) -> None:
+        seen.append(current_match_origin.get())
+        if len(seen) == 1:
+            raise RuntimeError("boom")
+
+    reg._inner.bodies.register("flaky", flaky)
+    token = current_match_origin.set("desktop")
+    try:
+        job = reg.submit(kind="flaky", args={})
+    finally:
+        current_match_origin.reset(token)
+    assert _wait_until(lambda: reg.get(job.id).status == JobStatus.FAILED)
+    assert current_match_origin.get() is None
+    new = reg.retry(job.id)
+    assert new is not None
+    assert _wait_until(lambda: reg.get(new.id).status == JobStatus.SUCCEEDED)
+    assert seen == ["desktop", "desktop"]
