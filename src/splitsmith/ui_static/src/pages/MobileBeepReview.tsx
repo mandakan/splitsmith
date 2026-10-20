@@ -22,6 +22,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Loader2 } from "lucide-react";
 
 import { api, READ_ONLY_MIRROR_MESSAGE } from "@/lib/api";
+import { AUDITION_WINDOW_S, auditionStart } from "@/lib/beepAudition";
 import type { BeepQueueItem, BeepSnippetPeaks } from "@/lib/api";
 import { recheckOrder } from "@/lib/beepQueue";
 import { stageTone, toneEndNear, toneLength } from "@/lib/beepTone";
@@ -32,8 +33,6 @@ import { MobileConfirmSheet } from "@/components/MobileConfirmSheet";
 import { Kicker } from "@/components/ui";
 
 const NUDGE_S = 0.01; // +-10 ms fine steppers
-const PLAY_AROUND_S = 1.5;
-const PLAY_LEAD_S = 0.4; // "Play from line" starts this far before the pick
 /** A pick within 5 ms of the detected beep is the detected beep: panning
  *  away and back must not turn a plain confirm into a destructive re-run. */
 const SAME_BEEP_S = 0.005;
@@ -545,14 +544,14 @@ function SnippetPlayer({
   const playFromLine = () => {
     const el = audioRef.current;
     if (!el) return;
-    el.currentTime = Math.max(0, value - range.start - PLAY_LEAD_S);
+    el.currentTime = auditionStart(value - range.start);
     void el.play()?.then(() => {
       if (rafRef.current == null) rafRef.current = requestAnimationFrame(trackPlayhead);
     });
     if (pauseTimeoutRef.current != null) clearTimeout(pauseTimeoutRef.current);
     pauseTimeoutRef.current = setTimeout(() => {
       audioRef.current?.pause();
-    }, PLAY_AROUND_S * 1000);
+    }, AUDITION_WINDOW_S * 1000);
   };
 
   return (
