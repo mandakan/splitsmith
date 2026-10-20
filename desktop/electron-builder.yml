@@ -21,6 +21,10 @@ mac:
     - target: dmg
       arch: [arm64]
   category: public.app-category.video
+  # The splitsmith mark (site/favicon.svg) on Apple's 1024 icon grid, built
+  # by desktop/scripts/make_mac_icon.py; without it the app and the DMG
+  # showed Electron's default icon.
+  icon: build-resources/icon.icns
   hardenedRuntime: true
   gatekeeperAssess: false
   entitlements: entitlements.plist
