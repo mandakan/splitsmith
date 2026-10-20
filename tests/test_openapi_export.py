@@ -25,6 +25,14 @@ def test_the_committed_openapi_document_is_current() -> None:
     ), "src/splitsmith/ui_static/openapi.json is stale; run: uv run python scripts/export_openapi.py"
 
 
+def test_the_document_never_carries_the_package_version() -> None:
+    """A field default equal to the package version is written into the
+    document, which then goes stale on every release bump (0.82.0's CI)."""
+    from splitsmith import __version__
+
+    assert __version__ not in export_openapi.render(export_openapi.build_document())
+
+
 def test_the_document_resolves_every_body_model() -> None:
     """A request model defined inside a function cannot be resolved by the
     schema builder (``PromoteFromAnchorBody`` was one); the export would raise."""

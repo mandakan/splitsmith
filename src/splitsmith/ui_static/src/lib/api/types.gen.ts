@@ -9105,10 +9105,7 @@ export interface components {
              * @default ok
              */
             status: string;
-            /**
-             * Version
-             * @default 0.81.0
-             */
+            /** Version */
             version: string;
         };
         /**
