@@ -136,6 +136,17 @@ Deploy facts (worker env, `FORWARDED_ALLOW_IPS`, the waitlist cut-over) are in
   count (NullPool also keeps that flat). SQLite in tests keeps one NullPool
   engine on purpose: a per-loop `:memory:` engine would be a database per loop.
 
+## Jobs run outside a request
+
+- A job body may ask `_is_mirror()` or read `current_match_origin` (the audit
+  audio job's web-rendition fallback does). Only the alias middleware pins the
+  origin per request, so every place that runs a body without one pins it
+  itself: the worker's compute task reads it from the match row it resolves
+  the match through, and the local manager's `retry` keeps it in `_match_ctx`
+  with the id and root. Without it a desktop mirror's audio job looks for a
+  raw source no mirror has. `tests/test_worker_match_origin.py` and the retry
+  test in `tests/test_jobs.py` pin both.
+
 ## Request-path cost: batch, don't loop
 
 - **Existence checks** (is this source in storage? is this trim cached?) go

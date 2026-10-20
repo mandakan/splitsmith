@@ -63,7 +63,7 @@ from typing import Any, Protocol
 from pydantic import BaseModel
 
 from ..observability import PhaseTimer, emit_job_event
-from .context import current_match_id, current_match_root
+from .context import current_match_id, current_match_origin, current_match_root
 
 logger = logging.getLogger(__name__)
 
@@ -499,7 +499,7 @@ class JobRegistry:
         # ORIGINAL job's match instead of inheriting whatever match is
         # ambient on the retrying request. Entries die with their job in
         # _trim_retained_locked, same lifetime as _args.
-        self._match_ctx: dict[str, tuple[str | None, Path | None]] = {}
+        self._match_ctx: dict[str, tuple[str | None, Path | None, str | None]] = {}
         self._lock = threading.RLock()
         self._max_concurrent = max_concurrent
         self._executor = ThreadPoolExecutor(
@@ -609,7 +609,7 @@ class JobRegistry:
         body = self.bodies.get(kind)
         call_args = args or {}
 
-        match_ctx = (current_match_id.get(), current_match_root.get())
+        match_ctx = (current_match_id.get(), current_match_root.get(), current_match_origin.get())
         now = datetime.now(UTC)
         job = Job(
             id=uuid.uuid4().hex,
@@ -864,7 +864,7 @@ class JobRegistry:
             job.acknowledged = True
             job.updated_at = datetime.now(UTC)
             args = dict(self._args.get(job_id) or {})
-            match_id, match_root = self._match_ctx.get(job_id, (None, None))
+            match_id, match_root, match_origin = self._match_ctx.get(job_id, (None, None, None))
             kind = job.kind
             stage_number = job.stage_number
             shooter_slug = job.shooter_slug
@@ -872,6 +872,7 @@ class JobRegistry:
 
         id_token = current_match_id.set(match_id)
         root_token = current_match_root.set(match_root)
+        origin_token = current_match_origin.set(match_origin)
         try:
             return await self.submit(
                 kind=kind,
@@ -881,6 +882,7 @@ class JobRegistry:
                 video_id=video_id,
             )
         finally:
+            current_match_origin.reset(origin_token)
             current_match_id.reset(id_token)
             current_match_root.reset(root_token)
 

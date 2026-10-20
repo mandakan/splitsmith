@@ -387,6 +387,7 @@ def register_compute_task(app: procrastinate.App, state: Any) -> None:
     """
     from . import looks
     from .match_registry import MatchNotRegisteredError
+    from .ui.context import current_match_origin
     from .ui.server import current_match_id, current_match_root, current_tenant, tenant_looks_provider
 
     @app.task(name=RUN_COMPUTE_JOB_TASK, queue="default")
@@ -415,6 +416,17 @@ def register_compute_task(app: procrastinate.App, state: Any) -> None:
         tenant_token = current_tenant.set(tenant)
         looks_token = looks.set_user_looks_provider(tenant_looks_provider(tenant))
 
+        # The match's origin, read from its row the way the alias middleware
+        # reads it for a request. A body that asks ``_is_mirror()`` (the
+        # audit audio job's web-rendition fallback) gets the same answer on
+        # the worker as it would on the API; without this every match looked
+        # hosted-native here and a mirror's audio job went looking for a raw
+        # source no mirror has.
+        match_origin: str | None = None
+        if match_id is not None:
+            row = await state.matches_store.get(match_id)
+            match_origin = getattr(row, "origin", None)
+
         def _bind_match() -> None:
             """Re-set the match ContextVars from the queued ``match_id``.
 
@@ -439,6 +451,7 @@ def register_compute_task(app: procrastinate.App, state: Any) -> None:
                 ) from exc
             current_match_root.set(root)
             current_match_id.set(match_id)
+            current_match_origin.set(match_origin)
 
         try:
             await state.jobs.run_job(job_id=job_id, kind=kind, args=call_args, before_body=_bind_match)

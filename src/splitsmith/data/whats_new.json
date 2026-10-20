@@ -1,6 +1,12 @@
 {
   "entries": [
     {
+      "id": "hosted-audit-audio-on-synced-stages",
+      "date": "2026-10-20",
+      "title": "Audit any synced stage on splitsmith.app",
+      "body": "On splitsmith.app, Audit on a synced match could say Prepare audio failed for a stage you had not opened on the desktop yet. Its audio is now prepared from the synced clip."
+    },
+    {
       "id": "breakdown-review-keys",
       "date": "2026-10-19",
       "title": "Review proposals from the keyboard",
