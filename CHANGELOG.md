@@ -1,5 +1,60 @@
 # Changelog
 
+## [0.82.0](https://github.com/mandakan/splitsmith/compare/v0.81.0...v0.82.0) (2026-10-20)
+
+
+### Features
+
+* **api:** the project payload has a view model, and the SPA's project types come from it ([#1607](https://github.com/mandakan/splitsmith/issues/1607)) ([271079a](https://github.com/mandakan/splitsmith/commit/271079ab4a18567b938bc7c755ac1424ff0dfba0))
+* **api:** type the origin, capability, worker, link and author fields ([#1601](https://github.com/mandakan/splitsmith/issues/1601)) ([cec4116](https://github.com/mandakan/splitsmith/commit/cec41163932e6cf6c135d5b623c3d0b01e365f00))
+* **breakdown:** review proposals from the keyboard ([#1576](https://github.com/mandakan/splitsmith/issues/1576)) ([e726a4e](https://github.com/mandakan/splitsmith/commit/e726a4e4a2363728eb4c52e0d89148e99f1b045f))
+* **highlights:** the reel shows the shooter's main camera ([#1574](https://github.com/mandakan/splitsmith/issues/1574)) ([631bfae](https://github.com/mandakan/splitsmith/commit/631bfaee29874d5028de702359a83bd9ce0d913a))
+* **spa:** generate the wire types from the server's OpenAPI document ([#1595](https://github.com/mandakan/splitsmith/issues/1595)) ([7c7af98](https://github.com/mandakan/splitsmith/commit/7c7af98df2005807dfcaff8d336ef60e2376ba9a))
+* **spa:** response schemas say every field is present ([#1600](https://github.com/mandakan/splitsmith/issues/1600)) ([89b763c](https://github.com/mandakan/splitsmith/commit/89b763c7f5ae203acbc6cc37540c8913de295ca7))
+* **spa:** twenty more wire types come from the server ([#1606](https://github.com/mandakan/splitsmith/issues/1606)) ([68c35bc](https://github.com/mandakan/splitsmith/commit/68c35bcf852415bfb3d96eea9e385382c3021e8b))
+* **ui:** the storage port, both implementations and the contract suite ([#1602](https://github.com/mandakan/splitsmith/issues/1602)) ([2dd51df](https://github.com/mandakan/splitsmith/commit/2dd51df0fb3fb5e2e9a96f6d0153b284323aac01))
+
+
+### Bug Fixes
+
+* **export:** the history row says which requested format a stage run did not write ([#1617](https://github.com/mandakan/splitsmith/issues/1617)) ([6d86455](https://github.com/mandakan/splitsmith/commit/6d864550d044bc1c240a28d189d4c078bc39d979))
+* **hosted:** a job run outside a request knows whether its match is a desktop mirror ([#1615](https://github.com/mandakan/splitsmith/issues/1615)) ([931925f](https://github.com/mandakan/splitsmith/commit/931925f26c26b0b34fbb8546fd2b4e0c2c5d3974))
+* **picker:** stages audited counts the stages every filmed shooter finished ([#1616](https://github.com/mandakan/splitsmith/issues/1616)) ([2fdacf7](https://github.com/mandakan/splitsmith/commit/2fdacf735e50334d5e0d55304551127675c1ac15))
+* **youtube:** end the description with Made with splitsmith ([#1577](https://github.com/mandakan/splitsmith/issues/1577)) ([0de6765](https://github.com/mandakan/splitsmith/commit/0de676580137a3f3c322277c96bb7812aebfa494))
+
+
+### Refactors
+
+* package the beep family as splitsmith.beep ([#1594](https://github.com/mandakan/splitsmith/issues/1594)) ([192e212](https://github.com/mandakan/splitsmith/commit/192e2120fd897e5b2f1eedbd383e912348405302))
+* package the look family as splitsmith.look ([#1592](https://github.com/mandakan/splitsmith/issues/1592)) ([51ae6c3](https://github.com/mandakan/splitsmith/commit/51ae6c341360c3cfe40ec5ba8025f8e3371913b3))
+* package the overlay family as splitsmith.overlay ([#1590](https://github.com/mandakan/splitsmith/issues/1590)) ([acd6193](https://github.com/mandakan/splitsmith/commit/acd6193ebf88d6ca60f683ce4ea5266e611a9d95))
+* package the reel family as splitsmith.reel ([#1593](https://github.com/mandakan/splitsmith/issues/1593)) ([fdc8717](https://github.com/mandakan/splitsmith/commit/fdc87170edb34d5fa77855a32780c36bd5991584))
+* **spa:** split lib/api.ts by domain and drop its unused functions ([#1589](https://github.com/mandakan/splitsmith/issues/1589)) ([4c88d30](https://github.com/mandakan/splitsmith/commit/4c88d30d813e83030750d2a367e2a0eb59dfdc78))
+* **tests:** split test_ui_server.py along the router seams ([#1588](https://github.com/mandakan/splitsmith/issues/1588)) ([ecb20cf](https://github.com/mandakan/splitsmith/commit/ecb20cfe8696f5db08d5a242ff8a8b1c32e65cde))
+* **ui:** AppState's document accessors go through the storage port ([#1603](https://github.com/mandakan/splitsmith/issues/1603)) ([dc3056f](https://github.com/mandakan/splitsmith/commit/dc3056ff62cc239ffa5d11a0fab1cc63fac56fa4))
+* **ui:** audit docs are loaded on both sides, and the project model never reads one ([#1609](https://github.com/mandakan/splitsmith/issues/1609)) ([edd9eba](https://github.com/mandakan/splitsmith/commit/edd9eba95be0d5aa0896226683210fead1750fcd))
+* **ui:** bind_state takes the storage port, and the models never see the database store ([#1610](https://github.com/mandakan/splitsmith/issues/1610)) ([45ad9a6](https://github.com/mandakan/splitsmith/commit/45ad9a6c6de8f6ba4b23b89312946cbfbdf9f5fe))
+* **ui:** lift create_app's helper closures to module level ([#1583](https://github.com/mandakan/splitsmith/issues/1583)) ([1aec8c6](https://github.com/mandakan/splitsmith/commit/1aec8c6d5998ffbc0cd6b6c6c680e297736fe28f))
+* **ui:** move request context and AppState out of server.py ([#1582](https://github.com/mandakan/splitsmith/issues/1582)) ([762f31c](https://github.com/mandakan/splitsmith/commit/762f31c6c1a386587b0052a959da27ecdd070686))
+* **ui:** move the account-level routes into ui/me_api.py ([#1587](https://github.com/mandakan/splitsmith/issues/1587)) ([edcd8b9](https://github.com/mandakan/splitsmith/commit/edcd8b9f6c18a7b2451aa1e4098dfb41fa06d0b8))
+* **ui:** move the match-level routes into ui/match_api.py ([#1586](https://github.com/mandakan/splitsmith/issues/1586)) ([0d62faf](https://github.com/mandakan/splitsmith/commit/0d62faf3ba557105e8fc69aa299bae598fb7260c))
+* **ui:** move the per-stage routes into ui/stages_api.py ([#1584](https://github.com/mandakan/splitsmith/issues/1584)) ([407b2e3](https://github.com/mandakan/splitsmith/commit/407b2e34d6a22945cc8a0a781374c4e326f99bf9))
+* **ui:** move the remaining per-shooter routes into ui/shooters_api.py ([#1585](https://github.com/mandakan/splitsmith/issues/1585)) ([9c596e7](https://github.com/mandakan/splitsmith/commit/9c596e705fb10332ae33f706e9e94e9e37d932ae))
+* **ui:** no route asks whether a state store is bound, and tests never prefetch models ([#1611](https://github.com/mandakan/splitsmith/issues/1611)) ([841f87a](https://github.com/mandakan/splitsmith/commit/841f87a21f4f5a5dfbb2fd1f44c7088e29e0f3ff))
+* **ui:** the audit and export-run writers go through the port ([#1604](https://github.com/mandakan/splitsmith/issues/1604)) ([d537c56](https://github.com/mandakan/splitsmith/commit/d537c568570d54b45ef052a45f1e5395c155e655))
+* **ui:** the handlers' audit read-modify-writes are update_audit_at merges ([#1608](https://github.com/mandakan/splitsmith/issues/1608)) ([5e07902](https://github.com/mandakan/splitsmith/commit/5e079021069dd5e8391bdd2448796bba6cb05429))
+
+
+### Documentation
+
+* the storage port design ([#1581](https://github.com/mandakan/splitsmith/issues/1581)) ([#1599](https://github.com/mandakan/splitsmith/issues/1599)) ([d24940b](https://github.com/mandakan/splitsmith/commit/d24940b57d3ddceed7f7db77de4011dea356f133))
+
+
+### Build / CI
+
+* **deps:** bump mcp from 1.28.1 to 1.30.0 ([#1510](https://github.com/mandakan/splitsmith/issues/1510)) ([b5912a8](https://github.com/mandakan/splitsmith/commit/b5912a815cc0f174dff2be3a2ff58666d18e00b6))
+* **deps:** resolve the open npm Dependabot alerts ([#1578](https://github.com/mandakan/splitsmith/issues/1578)) ([1a778af](https://github.com/mandakan/splitsmith/commit/1a778afb883922bda901710579e84626726de42f))
+
 ## [0.81.0](https://github.com/mandakan/splitsmith/compare/v0.80.0...v0.81.0) (2026-10-18)
 
 
