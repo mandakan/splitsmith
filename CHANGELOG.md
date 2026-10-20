@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.82.1](https://github.com/mandakan/splitsmith/compare/v0.82.0...v0.82.1) (2026-10-20)
+
+
+### Bug Fixes
+
+* **api:** the health response's version is a factory, so a release bump no longer stales the OpenAPI export ([#1618](https://github.com/mandakan/splitsmith/issues/1618)) ([ddc4cd0](https://github.com/mandakan/splitsmith/commit/ddc4cd0975dfc45319cc880ed099f112dd4138c8))
+* **desktop:** every export runs the bundled ffmpeg, never whatever PATH holds ([#1621](https://github.com/mandakan/splitsmith/issues/1621)) ([0f5e7c0](https://github.com/mandakan/splitsmith/commit/0f5e7c0ad5ca37402750e15a60bc5612a9abf68d))
+
 ## [0.82.0](https://github.com/mandakan/splitsmith/compare/v0.81.0...v0.82.0) (2026-10-20)
 
 
