@@ -386,3 +386,56 @@ def test_user_config_disable_flag_makes_endpoints_safe(
     cleared = client.get("/api/me/scoreboard-identity")
     assert cleared.status_code == 200
     assert cleared.json() is None
+
+
+def test_recent_projects_detail_ignores_a_squadmate_without_footage(
+    tmp_path: Path, _user_config_home: Path
+) -> None:
+    """A shooter added before their footage must not sink the picker's
+    audited count (#1613): the count reads the stages every filmed shooter
+    finished, and the match stays in progress while someone still needs
+    footage."""
+    import json as _json
+
+    from splitsmith import match_model, user_config
+
+    match_root = tmp_path / "squad"
+    match = match_model.Match.init(match_root, name="Squad")
+    match.stages = [
+        match_model.MatchStageDefinition(stage_number=1, stage_name="One"),
+        match_model.MatchStageDefinition(stage_number=2, stage_name="Two"),
+    ]
+    match.save(match_root)
+    match.add_shooter(match_root, match_model.Shooter(slug="ma", name="Mathias"))
+    match.add_shooter(match_root, match_model.Shooter(slug="qt", name="Quiet"))
+    for slug, with_footage in (("ma", True), ("qt", False)):
+        shooter_root = match_model.Match.shooter_root(match_root, slug)
+        legacy = MatchProject.init(shooter_root, name="Squad")
+        legacy.stages = [
+            StageEntry(
+                stage_number=n,
+                stage_name=name,
+                time_seconds=12.0,
+                videos=[StageVideo(path=Path(f"raw/v{n}.mp4"), role="primary")] if with_footage else [],
+            )
+            for n, name in ((1, "One"), (2, "Two"))
+        ]
+        legacy.save(shooter_root)
+    audit_dir = MatchProject.load(match_model.Match.shooter_root(match_root, "ma")).audit_path(
+        match_model.Match.shooter_root(match_root, "ma")
+    )
+    audit_dir.mkdir(parents=True, exist_ok=True)
+    for n in (1, 2):
+        (audit_dir / f"stage{n}.json").write_text(
+            _json.dumps({"shots": [], "audit_events": [{"ts": "2026-09-14T10:00:00Z", "kind": "save"}]}),
+            encoding="utf-8",
+        )
+    user_config.record_project_open(match_root, match.name, kind="match")
+
+    client = _MatchClient(create_app())
+    by_kind = {p["kind"]: p for p in client.get("/api/me/recent-projects?detail=true").json()["projects"]}
+    # Before the fix: (2 + 0) // 2 == 1.
+    assert by_kind["match"]["stages_audited"] == 2
+    assert by_kind["match"]["status"] == "in_progress"
+    assert by_kind["match"]["next_step"]["kind"] == "footage"
+    assert by_kind["match"]["next_step"]["shooter_slug"] == "qt"

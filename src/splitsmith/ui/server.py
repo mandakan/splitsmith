@@ -4951,6 +4951,37 @@ def _next_step_from_statuses(
     return NextStep(kind="export", shooter_slug=per_shooter[0][0])
 
 
+def _stages_audited_across(per_shooter: list[tuple[str, dict[int, StageStatus]]]) -> int:
+    """How many of the match's stages are finished, for the picker's progress.
+
+    A stage counts when at least one shooter audited it and every shooter
+    filmed on it (any status but ``todo``) is audited or skipped. A shooter
+    with no footage on a stage is not filmed there and has no say, the same
+    rule the Overview applies; a plain average of per-shooter counts over
+    every shooter sank when a squadmate was added before their footage.
+    """
+    done = 0
+    for n in {n for _, statuses in per_shooter for n in statuses}:
+        filmed = [
+            statuses[n]
+            for _, statuses in per_shooter
+            if statuses.get(n, StageStatus.todo) != StageStatus.todo
+        ]
+        if any(st == StageStatus.audited for st in filmed) and all(
+            st in (StageStatus.audited, StageStatus.skipped) for st in filmed
+        ):
+            done += 1
+    return done
+
+
+def _nothing_left_to_do(next_step: NextStep | None) -> bool:
+    """The picker's "exported" state: the status walk found no stage to audit
+    or film for any shooter. Read from the walk, not from a count against the
+    stage total, so a squadmate still waiting for footage keeps the match in
+    progress."""
+    return next_step is not None and next_step.kind == "export"
+
+
 def _hosted_detail_from_docs(
     rp: user_config.RecentProject,
     match_doc: dict,
@@ -4994,7 +5025,6 @@ def _hosted_detail_from_docs(
 
     names: list[str] = []
     video_total = 0
-    audited_total = 0
     per_shooter: list[tuple[str, dict[int, StageStatus]]] = []
     stage_names = {
         int(s["stage_number"]): str(s.get("stage_name") or "") for s in (match_doc.get("stages") or [])
@@ -5009,7 +5039,6 @@ def _hosted_detail_from_docs(
             names.append(proj.competitor_name or slug)
             video_total += len(proj.all_videos())
             statuses = proj.stage_statuses(audit_docs=audit_by_slug.get(slug, {}))
-            audited_total += sum(1 for st in statuses.values() if st == StageStatus.audited)
             per_shooter.append((slug, statuses))
             for st_entry in proj.stages:
                 stage_names.setdefault(st_entry.stage_number, st_entry.stage_name)
@@ -5017,12 +5046,13 @@ def _hosted_detail_from_docs(
             names.append(slug)
     detail.shooter_names = names
     detail.video_count = video_total
-    detail.stages_audited = audited_total // max(len(shooters), 1) if shooters else 0
+    detail.stages_audited = _stages_audited_across(per_shooter)
     detail.next_step = _next_step_from_statuses(per_shooter, stage_names, video_total)
     # Mirror the local enricher's status derivation (minus "archived",
-    # which needs an on-disk mtime we don't have here): all stages audited
-    # -> exported; no footage -> awaiting_footage; otherwise in_progress.
-    if detail.stage_count > 0 and detail.stages_audited >= detail.stage_count:
+    # which needs an on-disk mtime we don't have here): nothing left to
+    # audit or film -> exported; no footage -> awaiting_footage; otherwise
+    # in_progress.
+    if _nothing_left_to_do(detail.next_step):
         detail.status = "exported"
     elif video_total == 0:
         detail.status = "awaiting_footage"
