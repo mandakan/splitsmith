@@ -26,6 +26,7 @@ from .. import events as events_module
 from .. import report
 from .. import waveform as waveform_helpers
 from ..access import Feature, FeatureRequiredError
+from ..audit_clock import rebase_to_clip, stamp_clip_beep
 from ..audit_data import audit_shots_to_engine_shots, is_kept_shot
 from ..audit_revision import REVISION_FIELD, AuditRevisionConflictError, audit_revision
 from ..beep import detect as beep_detect
@@ -1574,10 +1575,17 @@ def get_stage_audit(request: Request, slug: str, stage_number: int) -> JSONRespo
     payload, _ = state.load_audit(slug, stage_number)
     if payload is None:
         return JSONResponse(None)
+    # On the clip's clock (#1497): Audit draws shot times on the clip it
+    # plays, so an audit made on the source's clock, or saved with a source
+    # beep beside clip times, is served moved onto it. The revision is the
+    # stored doc's, so the next PUT, which stamps the clip beep, compares
+    # against what is stored and persists the move.
+    _stg, _project, clip_beep = _server._coach_stage(state, slug, stage_number)
+    served, _kind = rebase_to_clip(payload, clip_beep)
     # The revision rides the response only (spec 2026-09-27 s5); the
     # SPA's buildAuditJson spreads the loaded doc, so it comes back on
     # the next PUT, which pops it before anything is stored.
-    return JSONResponse({**payload, REVISION_FIELD: audit_revision(payload)})
+    return JSONResponse({**(served or payload), REVISION_FIELD: audit_revision(payload)})
 
 
 @router.put("/api/shooters/{slug}/stages/{stage_number}/audit")
@@ -1606,6 +1614,12 @@ def put_stage_audit(request: Request, slug: str, stage_number: int, payload: dic
     # #843: before anything touches disk. A non-finite float survives
     # json.loads, persists, and then makes this stage unreadable.
     _server._reject_non_finite(payload, what="audit document")
+    # #1497: the shots Audit saves are on the clip's clock, so the beep it
+    # stores is the clip's, whatever the page fell back to while the clip's
+    # audio had not loaded (a source beep beside clip times made every
+    # split read as before the beep).
+    _stg, _project, clip_beep = _server._coach_stage(state, slug, stage_number)
+    stamp_clip_beep(payload, clip_beep)
     # #775: an audited stage is fully classified. Run the auto-classifier
     # on every save so statistic_splits never sees a partial stage; shots
     # whose source is "manual" are preserved, shots with no ms_after_beep

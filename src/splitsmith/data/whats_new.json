@@ -1,6 +1,12 @@
 {
   "entries": [
     {
+      "id": "audit-one-clock",
+      "date": "2026-10-20",
+      "title": "Old audits line up with their clip",
+      "body": "A stage audited before it had a trimmed clip drew every shot seconds late on Audit, and a save could make splits read as before the beep. Both now line up with the clip you play."
+    },
+    {
       "id": "play-from-beep",
       "date": "2026-10-20",
       "title": "Play from beep",

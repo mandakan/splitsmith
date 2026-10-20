@@ -4283,3 +4283,40 @@ def test_a_secondary_beep_may_sit_before_its_clip_a_primary_never(tmp_path: Path
         client.post(f"/api/shooters/me/stages/1/videos/{sec_id}/beep", json={"beep_time": -2.5}).status_code
         == 400
     )
+
+
+def test_audit_is_served_and_saved_on_the_clips_clock(tmp_path: Path, monkeypatch) -> None:
+    """#1497: an audit made on the source's clock is served moved onto the
+    clip Audit plays, and a save stores the clip's beep whatever the page
+    fell back to, so ``ms_after_beep`` never reads as before the beep."""
+    import json
+
+    from splitsmith.ui import server as _srv
+
+    client, _ = _seed_project_with_primary(tmp_path)
+    monkeypatch.setattr(_srv, "_video_beep_in_clip", lambda *a, **k: 5.0)
+    audit_dir = tmp_path / "match" / "shooters" / "me" / "audit"
+    audit_dir.mkdir(parents=True, exist_ok=True)
+    stored = {
+        "stage_number": 1,
+        "beep_time": 19.244,
+        "shots": [{"shot_number": 1, "time": 21.0, "ms_after_beep": 1756, "source": "detected"}],
+        "_candidates_pending_audit": {"candidates": [{"candidate_number": 1, "time": 21.0}]},
+    }
+    (audit_dir / "stage1.json").write_text(json.dumps(stored), encoding="utf-8")
+
+    served = client.get("/api/shooters/me/stages/1/audit").json()
+    assert served["beep_time"] == 5.0
+    assert served["shots"][0]["time"] == 6.756
+    assert served["_candidates_pending_audit"]["candidates"][0]["time"] == 6.756
+    on_disk = json.loads((audit_dir / "stage1.json").read_text(encoding="utf-8"))
+    assert on_disk["beep_time"] == 19.244, "a read never writes"
+
+    # The page saves what it was served, but with the beep it fell back to.
+    served["beep_time"] = 19.244
+    saved = client.put("/api/shooters/me/stages/1/audit", json=served)
+    assert saved.status_code == 200, saved.text
+    on_disk = json.loads((audit_dir / "stage1.json").read_text(encoding="utf-8"))
+    assert on_disk["beep_time"] == 5.0
+    assert on_disk["shots"][0]["time"] == 6.756
+    assert on_disk["shots"][0]["ms_after_beep"] == 1756
