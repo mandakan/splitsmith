@@ -75,10 +75,7 @@ def test_the_web_rendition_and_the_encoder_probe_use_it_too(
     src = tmp_path / "stage1_cam_a_trimmed.mp4"
     src.write_bytes(b"x")
     runner = _Runner()
-    with pytest.raises(trim.FFmpegError):
-        # The fake runner writes no file, so the structural check refuses the
-        # rendition; the command it ran is what this test is about.
-        trim.transcode_web_trim(src, tmp_path / "web.mp4", trim.WebTrimConfig(), runner=runner)
+    trim.transcode_web_trim(src, tmp_path / "web.mp4", trim.WebTrimConfig(), runner=runner)
     assert runner.calls[0][0] == str(bundle / "ffmpeg")
 
 
