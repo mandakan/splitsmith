@@ -88,5 +88,16 @@ a phone a short WAV.
   a check (`valid_mp4`, `wav_problem` against the clip's `mvhd` length), a
   rename. A lock is opt-in (`produce(lock=True)`, `derived.locked`) for writers
   two local processes run at once; the queue is what coordinates.
+- A WAV cut from a trim goes through `_extract_audio`'s `aresample=async=1`
+  (`_FILL_GAPS`): two clips joined with ffmpeg leave a hole in the audio
+  timestamps, and a plain decode closes it, which made the WAV short of the
+  clip (`wav_problem` refuses it) and put every sample after the join early
+  (`tests/test_audio_gap_fill.py`). The full-source WAVs (`_run_audio_ffmpeg`)
+  do not have it yet: beep detection reads those, so changing them is a
+  detection change.
+- A trim whose source was repaired in place is re-cut by the clip sheet's
+  Advanced "Re-cut trim" (`POST .../trim?force=true`, `force` through
+  `ensure_video_audit_trim`). The cache otherwise keys on the source's mtime
+  and params only.
 - The beep preview clip stays synchronous (one clip per scrubbed `t`) but
   publishes whole.

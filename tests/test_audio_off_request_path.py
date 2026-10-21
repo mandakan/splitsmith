@@ -20,7 +20,12 @@ from splitsmith.match_project import MatchProject, StageEntry, StageVideo
 from splitsmith.storage import FilesystemStorage
 from splitsmith.ui import audio as audio_helpers
 from tests.media_bytes import tiny_mp4
-from tests.ui._helpers import _primary_cache_paths, _seed_project_with_primary, _wait_for_job
+from tests.ui._helpers import (
+    _primary_cache_paths,
+    _seed_project_with_primary,
+    _wait_for_job,
+    _wait_for_jobs_to_drain,
+)
 
 
 def _write_wav(path: Path, seconds: float = 1.0) -> None:
@@ -240,3 +245,29 @@ def test_no_derive_job_while_the_stage_is_being_trimmed(
         assert "derive_audio" not in kinds
     finally:
         release.set()
+
+
+def test_trim_route_passes_force_to_the_job(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """``?force=true`` reaches the cut: the Advanced "Re-cut trim" must not
+    be answered by the cache. Without it the flag stays off."""
+    client, _ = _trim_without_wav(tmp_path)
+    seen: list[bool] = []
+
+    def record(*args: object, **kwargs: object) -> None:
+        seen.append(bool(kwargs.get("force")))
+
+    monkeypatch.setattr(audio_helpers, "ensure_video_audit_trim", record)
+    monkeypatch.setattr(audio_helpers, "ensure_video_audit_wav", lambda *a, **k: None)
+    assert client.post("/api/shooters/me/stages/1/beep", json={"beep_time": 5.0}).status_code == 200
+    project = client.get("/api/shooters/me/project").json()
+    video_id = project["stages"][0]["videos"][0]["video_id"]
+    _wait_for_jobs_to_drain(client)  # the beep set above chains its own trim
+    seen.clear()
+    forced: dict[str, bool] = {}
+    for query in ("", "?force=true"):
+        seen.clear()
+        resp = client.post(f"/api/shooters/me/stages/1/videos/{video_id}/trim{query}")
+        assert resp.status_code == 200, resp.text
+        _wait_for_job(client, resp.json()["id"])
+        forced[query] = True in seen
+    assert forced == {"": False, "?force=true": True}

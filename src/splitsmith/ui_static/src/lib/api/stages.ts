@@ -90,6 +90,22 @@ export const stagesApi = {
       { method: "POST" },
     ),
 
+  /** Submit the audit trim job for a specific video. A trim the cache
+   *  holds as current is reused unless ``force``, which re-cuts it and its
+   *  audit audio (the Footage sheet's Advanced "Re-cut trim"). */
+  trimForVideo: (
+    slug: string,
+    stageNumber: number,
+    videoId: string,
+    force = false,
+  ) =>
+    request<Job>(
+      `/api/shooters/${encodeURIComponent(slug)}/stages/${stageNumber}/videos/${encodeURIComponent(videoId)}/trim${
+        force ? "?force=true" : ""
+      }`,
+      { method: "POST" },
+    ),
+
   /** Submit a beep-detection job for a specific video on a stage.
    *  Generic over role: each camera gets its own beep_time, its own
    *  audit-mode trim, and its own dedupe slot in the registry so

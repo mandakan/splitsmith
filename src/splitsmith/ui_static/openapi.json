@@ -21328,6 +21328,16 @@
        "title": "Stage Number",
        "type": "integer"
       }
+     },
+     {
+      "in": "query",
+      "name": "force",
+      "required": false,
+      "schema": {
+       "default": false,
+       "title": "Force",
+       "type": "boolean"
+      }
      }
     ],
     "responses": {
@@ -22411,6 +22421,16 @@
       "schema": {
        "title": "Video Id",
        "type": "string"
+      }
+     },
+     {
+      "in": "query",
+      "name": "force",
+      "required": false,
+      "schema": {
+       "default": false,
+       "title": "Force",
+       "type": "boolean"
       }
      }
     ],

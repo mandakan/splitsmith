@@ -17,6 +17,7 @@ vi.mock("@/lib/api", async (orig) => {
       suggestCoverage: vi.fn().mockResolvedValue({ covers_stages: [] }),
       setRawVideoCoverage: vi.fn().mockResolvedValue({}),
       detectBeepForVideo: vi.fn().mockResolvedValue({ id: "j1" }),
+      trimForVideo: vi.fn().mockResolvedValue({ id: "j2" }),
       shooterVideoStreamUrl: () => "/proxy.mp4",
       getScoreboardMatchDataUnbound: vi.fn().mockResolvedValue({
         competitors: [
@@ -96,6 +97,20 @@ describe("ClipSheet", () => {
     expect(props.onRemove).toHaveBeenCalledWith(VIDEO.path, 2);
     fireEvent.click(screen.getByRole("button", { name: "Re-detect" }));
     await vi.waitFor(() => expect(api.detectBeepForVideo).toHaveBeenCalledWith("me", 2, "v1"));
+  });
+
+  it("Advanced is closed until opened and Re-cut trim forces the cut", async () => {
+    renderClip();
+    expect(screen.queryByRole("button", { name: "Re-cut trim" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /Advanced/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Re-cut trim" }));
+    await vi.waitFor(() => expect(api.trimForVideo).toHaveBeenCalledWith("me", 2, "v1", true));
+    await vi.waitFor(() => expect(screen.getByRole("button", { name: "Queued" })).toBeInTheDocument());
+  });
+
+  it("a clip with no beep has no Advanced section (a trim needs the beep)", () => {
+    renderClip({ clip: { ...CLIP, video: { ...VIDEO, beep_time: null } } });
+    expect(screen.queryByRole("button", { name: /Advanced/ })).not.toBeInTheDocument();
   });
 
   it("a single take's clip says moving shooters moves every stage of it", () => {

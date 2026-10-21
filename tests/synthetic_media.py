@@ -96,3 +96,74 @@ def build_synthetic_video(destination: Path) -> Path:
     ]
     subprocess.run(cmd, check=True, capture_output=True, text=True)
     return destination
+
+
+def build_gapped_audio_video(destination: Path) -> Path:
+    """Two 2 s clips joined with the concat demuxer, each carrying only 1.4 s
+    of audio (440 Hz, then 880 Hz): the join leaves a 0.6 s hole in the audio
+    timestamps while the video runs straight through, as a Pixel stage joined
+    with ffmpeg did (22 s in, 0.59 s). 4.0 s of video; the audio is 440 Hz to
+    1.4 s, silent to 2.0 s, 880 Hz from 2.0 s to 3.4 s.
+    """
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    parts = []
+    for i, hz in enumerate((440, 880)):
+        part = destination.parent / f"{destination.stem}-part{i}.mp4"
+        subprocess.run(
+            [
+                "ffmpeg",
+                "-hide_banner",
+                "-loglevel",
+                "error",
+                "-nostdin",
+                "-y",
+                "-f",
+                "lavfi",
+                "-i",
+                "testsrc2=size=320x240:rate=30:duration=2",
+                "-f",
+                "lavfi",
+                "-i",
+                f"sine=frequency={hz}:sample_rate=48000:duration=1.4",
+                "-c:v",
+                "libx264",
+                "-preset",
+                "ultrafast",
+                "-pix_fmt",
+                "yuv420p",
+                "-c:a",
+                "aac",
+                "-b:a",
+                "128k",
+                str(part),
+            ],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        parts.append(part)
+    listing = destination.parent / f"{destination.stem}-parts.txt"
+    listing.write_text("".join(f"file '{p.name}'\n" for p in parts), encoding="utf-8")
+    subprocess.run(
+        [
+            "ffmpeg",
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-nostdin",
+            "-y",
+            "-f",
+            "concat",
+            "-safe",
+            "0",
+            "-i",
+            str(listing),
+            "-c",
+            "copy",
+            str(destination),
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    return destination
