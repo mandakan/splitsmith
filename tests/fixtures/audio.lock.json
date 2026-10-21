@@ -5,6 +5,94 @@
       "sha256": "27ba325bcd4f641160fe000b34a8580df561d4419975a5426161d1e5642df6ad",
       "bytes": 1777704
     },
+    "stage-shots-black-handgun-2023-stage1-s97dcec94.wav": {
+      "sha256": "52dba1061a5010377288f52745689534f5d03c47d67adc26b8040c65f7c49246",
+      "bytes": 2455308
+    },
+    "stage-shots-black-handgun-2023-stage1-s9c1a2e74.wav": {
+      "sha256": "77c1468e09d6b79c254d1330dc896835b0e08585742e2e25c118e6a897039057",
+      "bytes": 2178574
+    },
+    "stage-shots-black-handgun-2023-stage10-s97dcec94.wav": {
+      "sha256": "bc8e5c7056b8f74ab2b036adfb91a78d8b824dec6a694f070e5799ca55ec28d2",
+      "bytes": 2259196
+    },
+    "stage-shots-black-handgun-2023-stage10-s9c1a2e74.wav": {
+      "sha256": "3678b25dba4479a8be454ce8599a40853423faee1be691b58bb279047315fcd2",
+      "bytes": 2097912
+    },
+    "stage-shots-black-handgun-2023-stage11-s97dcec94.wav": {
+      "sha256": "745041d801f11cfc1b65755435e333adf1c30230ca1bd644ebd4adac37b269ad",
+      "bytes": 4545520
+    },
+    "stage-shots-black-handgun-2023-stage11-s9c1a2e74.wav": {
+      "sha256": "0064f06518f35cefac95c4562a66b83ca7d593594ae75a05dc98c727c5f72852",
+      "bytes": 4125390
+    },
+    "stage-shots-black-handgun-2023-stage12-s97dcec94.wav": {
+      "sha256": "dbd308ae14625fd48e42106104bead6466499d5fc0e2f4f067de52a1891be8d4",
+      "bytes": 3548048
+    },
+    "stage-shots-black-handgun-2023-stage12-s9c1a2e74.wav": {
+      "sha256": "90f9b056ed934947c264463b4ddceb5606e81727e8fffba673530d86d39d62a4",
+      "bytes": 2655034
+    },
+    "stage-shots-black-handgun-2023-stage2-s97dcec94.wav": {
+      "sha256": "173a388e1becb4cd15f017038b4ece476fb5a530e569467d20c1362b52283d5c",
+      "bytes": 3235754
+    },
+    "stage-shots-black-handgun-2023-stage2-s9c1a2e74.wav": {
+      "sha256": "3cae16a7a84035e2835537918a02cb2848ab70bf54aa127ed5104fdeed770899",
+      "bytes": 2971592
+    },
+    "stage-shots-black-handgun-2023-stage3-s97dcec94.wav": {
+      "sha256": "2bf07a11af85698b3fa0dd5209cfe84ffc8afcacd7c5ed5a59905bd3da6b8444",
+      "bytes": 3624764
+    },
+    "stage-shots-black-handgun-2023-stage3-s9c1a2e74.wav": {
+      "sha256": "817be0e26a270f3a0dd9593514ef2925a808fec449efa6f4049a1e11efca4926",
+      "bytes": 2200154
+    },
+    "stage-shots-black-handgun-2023-stage4-s9c1a2e74.wav": {
+      "sha256": "ff8b7f8bc6da29a468b203bc0902af9efd07632fdba7fc8e7213bc300984a00c",
+      "bytes": 5052494
+    },
+    "stage-shots-black-handgun-2023-stage5-s97dcec94.wav": {
+      "sha256": "f73ee1489797328fdb9c448b69423b02f0af128964340a8f3c0810d0bf75a51c",
+      "bytes": 4118056
+    },
+    "stage-shots-black-handgun-2023-stage5-s9c1a2e74.wav": {
+      "sha256": "c473d01e6a3838e88e8b53713bab69b0fb1f9f3388452212bd17ce2d992b4dd6",
+      "bytes": 4501582
+    },
+    "stage-shots-black-handgun-2023-stage6-s97dcec94.wav": {
+      "sha256": "de3b58c8f1cb3fe9e5d35fd8c51af693dbb334380ef0a320d83f33e8b71fc5cf",
+      "bytes": 3699160
+    },
+    "stage-shots-black-handgun-2023-stage6-s9c1a2e74.wav": {
+      "sha256": "584e66f9f7af3777e8e6977a5effc995c9ae4612e7e100eef2aedf1874044dfa",
+      "bytes": 3790390
+    },
+    "stage-shots-black-handgun-2023-stage7-s97dcec94.wav": {
+      "sha256": "64627393328af78ef7d09ebfcde1ddb8c7a72ba41f4f6f66784bbf6536209027",
+      "bytes": 4856570
+    },
+    "stage-shots-black-handgun-2023-stage8-s97dcec94.wav": {
+      "sha256": "90e3d30325957ec519d14b0370e616093ebc50fb8a4960cedfa4da4c4d4b0733",
+      "bytes": 5967054
+    },
+    "stage-shots-black-handgun-2023-stage8-s9c1a2e74.wav": {
+      "sha256": "493da03d6fb1b28f0330f96ef8ca934fb437ced2599b8936ed1941270216f862",
+      "bytes": 4964100
+    },
+    "stage-shots-black-handgun-2023-stage9-s97dcec94.wav": {
+      "sha256": "06ec91877ba8862355159a5054fe45b46182b665ee4848887840367091bd0057",
+      "bytes": 2766808
+    },
+    "stage-shots-black-handgun-2023-stage9-s9c1a2e74.wav": {
+      "sha256": "166faf6dac2ef1b74df5b68bbb248f26a58443b080b648f760bfdd3d913cd172",
+      "bytes": 2831008
+    },
     "stage-shots-blacksmith-2026-stage1-s97dcec94-apple-iphone17pro.wav": {
       "sha256": "8e662af7b8a7ab6ee2df12fe3879771c90811306969fd20504d0fc684cd3e290",
       "bytes": 5058318

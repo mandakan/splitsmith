@@ -19,6 +19,7 @@ amplitude floor (`amp_floor_by_camera_model`).
 | DJI Osmo Action 4 | head (chest possible) | `DJI_YYYYMMDDHHMMSS_NNNN_D.MP4` | `encoder=DJI OsmoAction4` | AAC 2 ch |
 | iPhone 17 Pro / Pro Max | hand | `IMG_NNNN.MOV` (often renamed) | `com.apple.quicktime.make=Apple`, `model`, `software` (iOS version) | AAC 2 ch real stereo, plus a 4 ch Apple APAC spatial stream ffmpeg cannot decode |
 | Samsung phone | hand | `YYYYMMDD_HHMMSS.mp4` | `com.android.version`, `com.samsung.android.utc_offset`; no model tag | AAC 2 ch, variable frame rate |
+| Google Pixel phone | hand | `PXL_YYYYMMDD_HHMMSSmmm.TS.mp4` | `com.android.capture.fps`, `location`; no make or model tag | AAC 2 ch, 48 kHz |
 
 `ffprobe -v error -show_entries format_tags:stream=codec_name,channels -of compact <file>` shows
 all of it. The fixture's `camera` block is often `unknown`; the file name in `source_video` is the
@@ -108,6 +109,16 @@ only overall.
 ## Samsung phone (hand)
 
 - Real stereo AAC, variable frame rate. Secondary angle at Höstfinalen XI; no fixtures yet.
+
+## Google Pixel phone (hand)
+
+- Added 2026-10-21 for Black Handgun 2023 (September 2023, a squadmate filming with a phone). The
+  files carry no make or model tag, so the file name decides the device (`PXL_...`), the same way the
+  GO 3S is recognised. A video joined from two Pixel clips with ffmpeg and renamed keeps none of the
+  tags: set its make on the clip (Google) in the project.
+- HEVC video, AAC 2 ch 48 kHz audio and one extra data stream ffmpeg cannot identify.
+- Treated as hand-held like the iPhone and Samsung (class `handheld`); nothing here has been
+  measured against this camera's shots beyond promoting the audited stages.
 
 ## Fixture coverage (2026-10-10)
 

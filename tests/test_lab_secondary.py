@@ -28,6 +28,16 @@ def test_files_are_recognised_by_name():
     assert camera_for("DJI_20260926101500_0012_D.MP4", None, NO_PROBE).mount == CameraMount.head
     samsung = camera_for("20260926_162418.mp4", None, NO_PROBE)
     assert (samsung.id, samsung.mount, samsung.position.value) == ("samsung", CameraMount.hand, "squadmate")
+    pixel = camera_for("PXL_20230910_060144908.TS.mp4", None, NO_PROBE)
+    assert (pixel.id, pixel.make, pixel.mount, pixel.position.value) == (
+        "google-pixel",
+        "Google",
+        CameraMount.hand,
+        "squadmate",
+    )
+    # A joined, renamed Pixel clip keeps no tags; the make recorded on the clip decides.
+    assert camera_for("janne_stage1.mp4", None, NO_PROBE, make="Google").id == "google-pixel"
+    assert camera_for("janne_stage1.mp4", None, NO_PROBE) is None
     phone = camera_for("IMG_3120.MOV", None, IPHONE)
     assert (phone.id, phone.model, phone.mount) == ("apple-iphone17pro", "iPhone 17 Pro", CameraMount.hand)
 
