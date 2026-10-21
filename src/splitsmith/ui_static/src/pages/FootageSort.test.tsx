@@ -440,3 +440,91 @@ describe("FootageSort", () => {
     expect(within(joining).getByText("secondary")).toBeInTheDocument();
   });
 });
+
+describe("FootageSort compare panel", () => {
+  beforeEach(() => {
+    vi.mocked(api.getFootageSort).mockResolvedValue(view());
+    vi.mocked(api.putFootageSortDecisions).mockImplementation(async () =>
+      view(),
+    );
+  });
+
+  it("compares a clip with a sorted shooter and uses its stage", async () => {
+    renderPage();
+    await userEvent.click(
+      await screen.findByRole("button", { name: "Choose" }),
+    );
+    const sheet = screen.getByRole("dialog", { name: "VID_1.mp4" });
+
+    await userEvent.click(
+      within(sheet).getByRole("button", { name: "Compare with a shooter" }),
+    );
+    const panel = screen.getByRole("complementary", {
+      name: "Compare with a shooter",
+    });
+    expect(
+      within(panel)
+        .getAllByRole("button", { name: /^Stage \d\d/ })
+        .map((b) => b.getAttribute("aria-label")),
+    ).toEqual(["Stage 01 Lucky Seven", "Stage 02 Long Way Round"]);
+    await userEvent.click(
+      within(panel).getByRole("button", { name: "Stage 02 Long Way Round" }),
+    );
+    await userEvent.click(
+      within(panel).getByRole("button", { name: "Use stage 02" }),
+    );
+
+    expect(
+      within(sheet).getByRole("combobox", { name: "Stage" }),
+    ).toHaveValue("2");
+    await userEvent.click(
+      within(sheet).getByRole("button", { name: "Use this" }),
+    );
+    expect(api.putFootageSortDecisions).toHaveBeenCalledWith("abc123", {
+      anchors: [{ clip_id: "head/VID_1.mp4", shooter: "mathias", stage: 2 }],
+      overrides: [],
+      checked: { "head/VID_1.mp4": true },
+    });
+  });
+
+  it("the panel survives the next clip", async () => {
+    renderPage();
+    await userEvent.click(
+      await screen.findByRole("button", { name: "Choose" }),
+    );
+    await userEvent.click(
+      screen.getByRole("button", { name: "Compare with a shooter" }),
+    );
+
+    await userEvent.keyboard("{ArrowDown}");
+
+    expect(
+      screen.getByRole("complementary", { name: "Compare with a shooter" }),
+    ).toBeInTheDocument();
+  });
+
+  it("marks the stages the assigned shooter already has", async () => {
+    renderPage();
+    await userEvent.click(
+      await screen.findByRole("button", { name: "Choose" }),
+    );
+    const sheet = screen.getByRole("dialog", { name: "VID_1.mp4" });
+    await userEvent.click(
+      within(sheet).getByRole("button", { name: "Compare with a shooter" }),
+    );
+    const panel = screen.getByRole("complementary", {
+      name: "Compare with a shooter",
+    });
+
+    // Mathias (the default shooter) has both stages in his project.
+    expect(panel).toHaveTextContent("0 still missing for Mathias Axell");
+    expect(within(panel).getAllByText("has it")).toHaveLength(2);
+    await userEvent.click(
+      within(sheet).getByRole("button", { name: "Anton Johansson" }),
+    );
+
+    // Anton's checked IMG_2 proposes stage 2, so only stage 1 is missing.
+    expect(panel).toHaveTextContent("1 still missing for Anton Johansson");
+    expect(within(panel).getAllByText("has it")).toHaveLength(1);
+  });
+});

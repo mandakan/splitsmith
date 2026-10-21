@@ -1,6 +1,12 @@
 {
   "entries": [
     {
+      "id": "sort-footage-compare",
+      "date": "2026-10-21",
+      "title": "Compare a clip with a sorted shooter",
+      "body": "On Sort footage, press Compare with a shooter in a clip's panel to see every stage as a frame from a shooter who has footage, play one beside your clip and use its stage."
+    },
+    {
       "id": "sort-footage-stage-names",
       "date": "2026-10-21",
       "title": "Stage names when sorting footage",
