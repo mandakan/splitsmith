@@ -98,6 +98,27 @@ def build_synthetic_video(destination: Path) -> Path:
     return destination
 
 
+def build_color_video(destination: Path, *, color: str, seconds: float = 4.0) -> Path:
+    """A solid ``color`` clip (an ffmpeg colour name or 0xRRGGBB) with a
+    tone, in the canonical synthetic shape: for a test that tells two
+    stages apart by colour."""
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    cmd = [
+        "ffmpeg", "-hide_banner", "-loglevel", "error", "-nostdin", "-y",
+        "-f", "lavfi", "-i",
+        (
+            f"color=c={color}:size={SYNTHETIC_WIDTH}x{SYNTHETIC_HEIGHT}"
+            f":rate={SYNTHETIC_FPS_NUM}/{SYNTHETIC_FPS_DEN}:duration={seconds:g}"
+        ),
+        "-f", "lavfi", "-i", f"sine=frequency=440:sample_rate={SYNTHETIC_SAMPLE_RATE}:duration={seconds:g}",
+        "-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p",
+        "-g", str(SYNTHETIC_GOP_FRAMES), "-keyint_min", str(SYNTHETIC_GOP_FRAMES), "-sc_threshold", "0",
+        "-c:a", "aac", "-b:a", "128k", "-shortest", str(destination),
+    ]  # fmt: skip
+    subprocess.run(cmd, check=True, capture_output=True, text=True)
+    return destination
+
+
 def build_gapped_audio_video(destination: Path) -> Path:
     """Two 2 s clips joined with the concat demuxer, each carrying only 1.4 s
     of audio (440 Hz, then 880 Hz): the join leaves a 0.6 s hole in the audio
