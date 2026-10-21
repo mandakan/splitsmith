@@ -1,0 +1,82 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<!--
+  A frames sting: a transition that draws the whole boundary, footage and
+  all, instead of riding over a crossfade. This tag is what makes it one.
+  Without it the template is an ordinary sting, drawn over the fade with
+  no pictures to draw from. It does nothing outside the "transition" slot.
+-->
+<meta name="splitsmith-frames" content="edges">
+<title>starter: frames sting</title>
+<!--
+  The pictures either side of the cut arrive as data.transition.frames:
+    { fps, count, from: [url, ...], to: [url, ...] }
+  one URL per frame of the transition for each edge: "from" is the
+  outgoing stage's last moments, "to" the incoming stage's first. Where
+  a stage's footage runs out, its list repeats the frame the cut holds.
+  The pictures are the edges as encoded, so a HUD or lower third burnt
+  into the footage is in them.
+
+  _shared/frames.js (loaded below) does the fetching and decoding:
+    splitsmithFrames.at(n)   a Promise of { from, to } for frame n, each
+                             an ImageBitmap (or null without frames).
+                             Draw the pair before you call at() again:
+                             the next call closes it.
+    splitsmithFrames.draw(g, bitmap, x, y, w, h)
+                             draws one onto a canvas context (a null
+                             bitmap draws nothing)
+    splitsmithFrames.count, .fps
+                             how many frames, at what rate
+
+  Rules:
+  - seek(t) returns the at() Promise, so the frame is captured only once
+    it is drawn.
+  - duration() and sounds() never read the frames. The renderer loads the
+    template once without them (count 0, every picture null) to learn its
+    length and its sounds, and that load must not throw.
+  - Leave nothing transparent. The clip replaces the crossfade, so what
+    is transparent shows black in the export (looks check warns). Paint
+    the canvas over the whole frame first, as below.
+  Pick it in a Look's look.json under "transition", then use it as
+  --transition sting:<name>. Guide: docs/looks/authoring.md#frames-stings
+-->
+<script>
+  document.write('<script src="' + window.splitsmith.assets.shared + '/frames.js"><\/script>');
+</script>
+<style>
+  html, body { margin: 0; padding: 0; background: #000; overflow: hidden; }
+  canvas { display: block; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+  var S = window.splitsmith, TR = S.data.transition || {};
+  var LENGTH = TR.duration_seconds || 1, W = S.size.width, H = S.size.height;
+  var accent = (S.data.shooters && S.data.shooters[0] && S.data.shooters[0].accent) || S.theme.accent;
+  // The canvas is the page's size: the renderer's frame, pixel for pixel.
+  var c = document.getElementById('c'); c.width = W; c.height = H;
+  var g = c.getContext('2d');
+  function ease(p) { return p < 0.5 ? 4 * p * p * p : 1 - Math.pow(-2 * p + 2, 3) / 2; }
+  // The transition's own length: the renderer samples exactly that long.
+  window.duration = function () { return LENGTH; };
+  window.poster = function () { return LENGTH / 2; };
+  // The push: the outgoing stage moves off to the left as the incoming one
+  // moves in from the right, with a thin accent seam between them.
+  window.seek = function (t) {
+    var F = window.splitsmithFrames;
+    var n = Math.round(t * (F.fps || S.fps));
+    return F.at(n).then(function (p) {
+      var x = Math.round(W * ease(Math.max(0, Math.min(1, t / LENGTH))));
+      // Black first, over everything: nothing left transparent.
+      g.fillStyle = '#000'; g.fillRect(0, 0, W, H);
+      F.draw(g, p.from, -x, 0, W, H);
+      F.draw(g, p.to, W - x, 0, W, H);
+      if (x > 0 && x < W) { g.fillStyle = accent; g.fillRect(W - x - Math.round(H * 0.004), 0, Math.round(H * 0.008), H); }
+    });
+  };
+</script>
+</body>
+</html>

@@ -7,10 +7,14 @@ from pathlib import Path
 import pytest
 from PIL import Image
 
+from splitsmith import looks
 from splitsmith.look import frames as look_frames
+from splitsmith.look import sting as look_sting
 from splitsmith.look.sandbox import ORIGIN
+from splitsmith.look.sting import sting_context
 from splitsmith.look.template import TemplateContext, engine_block, shared_url
 from splitsmith.overlay.raster import ChromiumRasterizer, RasterizerUnavailableError, TemplateScriptError
+from splitsmith.overlay.theme import theme_for
 
 pytestmark = pytest.mark.integration
 
@@ -179,3 +183,121 @@ def test_frames_js_rejects_when_a_frame_is_missing(raster: ChromiumRasterizer, t
             list(got.frames)
         finally:
             got.close()
+
+
+# --- the shipped pushes ------------------------------------------------------------
+
+
+_PUSH_W, _PUSH_H, _PUSH_FPS, _PUSH_COUNT = 640, 360, 30.0, 30
+
+
+def _push_frames(raster: ChromiumRasterizer, look_name: str, tmp_path: Path) -> list[bytes]:
+    """The Look's ``push`` sting drawn over a solid red outgoing edge and a
+    solid blue incoming one, one second at 30 fps, 640x360. It is planned as
+    the renderer plans it (``sting_plan``: the tag decides, and the load
+    without frames must succeed); only a :class:`FramesSting` is handed the
+    edges, as only it is in an export."""
+    look = looks.load_look(look_name)
+    template = looks.sting_template_for(look, "push")
+    assert template is not None and template.parent.name == look_name
+    root = tmp_path / "frames"
+    for side, rgb in (("from", (255, 0, 0)), ("to", (0, 0, 255))):
+        (root / "k" / side).mkdir(parents=True)
+        for n in range(_PUSH_COUNT):
+            Image.new("RGB", (_PUSH_W, _PUSH_H), rgb).save(root / "k" / side / f"{n:04d}.jpg", quality=95)
+    plan = look_sting.sting_plan(
+        look, "sting:push", seconds=1.0, from_label="Stage 3", to_label="Stage 4",
+        width=_PUSH_W, height=_PUSH_H, fps=_PUSH_FPS, rasterizer=raster,
+    )  # fmt: skip
+    assert plan is not None, "the load without frames failed"
+    if isinstance(plan, look_sting.FramesSting):
+        url = f"{ORIGIN}/{look_frames.FRAMES_MOUNT}/k/{{}}/{{:04d}}.jpg"
+        ctx = look_frames.with_frames(
+            plan.context, fps=_PUSH_FPS, count=_PUSH_COUNT,
+            from_urls=[url.format("from", n) for n in range(_PUSH_COUNT)],
+            to_urls=[url.format("to", n) for n in range(_PUSH_COUNT)],
+        )  # fmt: skip
+    else:  # an overlay sting: drawn as it is, with no pictures
+        plan.close()
+        ctx = sting_context(
+            kind="sting:push", seconds=1.0, from_label="Stage 3", to_label="Stage 4",
+            width=_PUSH_W, height=_PUSH_H, fps=_PUSH_FPS, theme=theme_for(look),
+        )  # fmt: skip
+    got = raster.render_template_frames(
+        template, context=ctx, width=_PUSH_W, height=_PUSH_H, fps=_PUSH_FPS, max_seconds=1.0, frames_dir=root
+    )
+    try:
+        return list(got.frames)
+    finally:
+        got.close()
+
+
+def _share(buf: bytes, test) -> float:  # type: ignore[no-untyped-def]
+    """The share of pixels of an RGBA frame for which ``test(r, g, b)`` holds
+    (every 7th pixel: enough for a share)."""
+    hits = total = 0
+    for i in range(0, len(buf), 4 * 7):
+        total += 1
+        hits += bool(test(buf[i], buf[i + 1], buf[i + 2]))
+    return hits / total
+
+
+def _red(r: int, g: int, b: int) -> bool:
+    return r > 200 and g < 60 and b < 60
+
+
+def _blue(r: int, g: int, b: int) -> bool:
+    return b > 200 and r < 60 and g < 60
+
+
+def _column(buf: bytes, x: int) -> tuple[int, int, int]:
+    i = 4 * ((_PUSH_H // 2) * _PUSH_W + x)
+    return buf[i], buf[i + 1], buf[i + 2]
+
+
+def _assert_opaque(frames: list[bytes]) -> None:
+    for n, buf in enumerate(frames):
+        assert bytes(buf[3::4]).count(255) == len(buf) // 4, f"frame {n} is not opaque everywhere"
+
+
+@pytest.mark.parametrize("look_name", ["splitsmith", "broadcast"])
+def test_a_shipped_push_starts_on_the_outgoing_and_ends_on_the_incoming(
+    raster: ChromiumRasterizer, look_name: str, tmp_path: Path
+) -> None:
+    """The push moves the footage: the outgoing picture fills the first
+    frame, the incoming one the last, and nothing is ever transparent (a
+    frames sting's clip replaces the boundary's crossfade)."""
+    frames = _push_frames(raster, look_name, tmp_path)
+    assert len(frames) == _PUSH_COUNT
+    assert _share(frames[0], _red) > 0.95
+    assert _share(frames[-1], _blue) > 0.95
+    _assert_opaque(frames)
+
+
+def test_the_splitsmith_push_shows_both_stages_either_side_of_a_seam(
+    raster: ChromiumRasterizer, tmp_path: Path
+) -> None:
+    """Halfway through, the outgoing stage is on the left and the incoming
+    one on the right, the seam somewhere in the middle 80 %."""
+    mid = _push_frames(raster, "splitsmith", tmp_path)[15]
+    assert _share(mid, _red) > 0.2 and _share(mid, _blue) > 0.2
+    lo, hi = _PUSH_W // 10, _PUSH_W - _PUSH_W // 10
+    assert _red(*_column(mid, lo)) and _blue(*_column(mid, hi))
+    seam = next(x for x in range(lo, hi) if _blue(*_column(mid, x)))
+    assert lo < seam < hi
+    assert all(_blue(*_column(mid, x)) for x in range(seam, hi))
+
+
+def test_the_broadcast_panel_pushes_the_stages(raster: ChromiumRasterizer, tmp_path: Path) -> None:
+    """A fifth of the way in, the panel covers the left half and the
+    outgoing stage has moved right ahead of it, not off to the left with
+    black behind; a fifth from the end the incoming stage follows the panel
+    out on the left."""
+    frames = _push_frames(raster, "broadcast", tmp_path)
+    lo, hi = _PUSH_W // 10, _PUSH_W - _PUSH_W // 10
+    going = frames[6]  # p = 0.2: the panel halfway in
+    assert not _red(*_column(going, lo)) and _red(*_column(going, hi))
+    assert 0.4 < _share(going, _red) < 0.6
+    coming = frames[24]  # p = 0.8: the panel halfway out
+    assert _blue(*_column(coming, lo)) and not _blue(*_column(coming, hi))
+    assert 0.4 < _share(coming, _blue) < 0.6

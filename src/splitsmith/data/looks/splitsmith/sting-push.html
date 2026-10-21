@@ -1,0 +1,46 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="splitsmith-frames" content="edges">
+<title>sting push</title>
+<!--
+  A frames sting (#1535): the outgoing stage moves off to the left as the
+  incoming one moves in from the right, eased, with a thin accent seam.
+  It draws the whole picture from data.transition.frames through
+  _shared/frames.js; duration() and sounds() never read the frames.
+  Guide: docs/looks/authoring.md#frames-stings
+-->
+<script>
+  document.write('<script src="' + window.splitsmith.assets.shared + '/frames.js"><\/script>');
+</script>
+<style>
+  html, body { margin: 0; padding: 0; background: #000; overflow: hidden; }
+  canvas { display: block; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+  var S = window.splitsmith, TR = S.data.transition || {};
+  var LENGTH = TR.duration_seconds || 1, W = S.size.width, H = S.size.height;
+  var accent = (S.data.shooters && S.data.shooters[0] && S.data.shooters[0].accent) || S.theme.accent;
+  var c = document.getElementById('c'); c.width = W; c.height = H;
+  var g = c.getContext('2d');
+  function ease(p) { return p < 0.5 ? 4 * p * p * p : 1 - Math.pow(-2 * p + 2, 3) / 2; }
+  window.duration = function () { return LENGTH; };
+  window.poster = function () { return LENGTH / 2; };
+  window.seek = function (t) {
+    var F = window.splitsmithFrames;
+    var n = Math.round(t * (F.fps || S.fps));
+    return F.at(n).then(function (p) {
+      var x = Math.round(W * ease(Math.max(0, Math.min(1, t / LENGTH))));
+      g.fillStyle = '#000'; g.fillRect(0, 0, W, H);
+      F.draw(g, p.from, -x, 0, W, H);
+      F.draw(g, p.to, W - x, 0, W, H);
+      if (x > 0 && x < W) { g.fillStyle = accent; g.fillRect(W - x - Math.round(H * 0.004), 0, Math.round(H * 0.008), H); }
+    });
+  };
+</script>
+</body>
+</html>

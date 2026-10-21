@@ -290,11 +290,13 @@ def test_an_accent_series_entry_must_be_a_hex_colour(user_dir: Path) -> None:
 # --- stings (slice 5, #1245) --------------------------------------------------------
 
 
-def test_the_shipped_look_declares_the_wipe_sting() -> None:
+def test_the_shipped_look_declares_the_push_and_wipe_stings() -> None:
     look = looks.load_look("splitsmith")
     path = looks.sting_template_for(look, "wipe")
     assert path is not None and path.name == "sting-wipe.html" and path.is_file()
-    assert look.variants("transition") == ("wipe",)
+    push = looks.sting_template_for(look, "push")
+    assert push is not None and push.name == "sting-push.html" and push.is_file()
+    assert look.variants("transition") == ("push", "wipe")
 
 
 def test_a_missing_sting_is_none_not_a_fallback(user_dir: Path) -> None:
@@ -326,11 +328,12 @@ def test_the_catalog_lists_every_slot_with_default_first_and_previews(user_dir: 
     assert splitsmith.label == "Splitsmith" and splitsmith.source == "shipped"
     assert set(splitsmith.slots) == set(looks.SLOT_NAMES)
     assert [v.name for v in splitsmith.slots["slate"]] == ["default", "rise"]
-    assert [v.name for v in splitsmith.slots["transition"]] == ["wipe"]
+    assert [v.name for v in splitsmith.slots["transition"]] == ["push", "wipe"]
     assert splitsmith.slots["summary"] == []
     assert splitsmith.preview == "/api/looks/splitsmith/preview/look.png"
     assert splitsmith.slots["slate"][1].preview == "/api/looks/splitsmith/preview/slate-rise.png"
-    assert splitsmith.slots["transition"][0].preview == "/api/looks/splitsmith/preview/transition-wipe.webp"
+    assert splitsmith.slots["transition"][0].preview == "/api/looks/splitsmith/preview/transition-push.webp"
+    assert splitsmith.slots["transition"][1].preview == "/api/looks/splitsmith/preview/transition-wipe.webp"
     assert splitsmith.accent_series[0] == "#ff2d2d"
 
 

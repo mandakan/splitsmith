@@ -76,18 +76,20 @@ STARTERS: dict[str, str] = {
     "animated": "animated.html",
     "lower-third": "lower-third.html",
     "sting": "sting.html",
+    "sting-frames": "sting-frames.html",
     "hud": "hud.html",
     "summary": "summary.html",
     "broadcast": "broadcast-hud.html",
 }
 #: The starters the template editor offers as replacement text: the card and
 #: sting templates it edits. An overlay style or a summary is not edited there.
-EDITOR_STARTERS: tuple[str, ...] = ("animated", "lower-third", "still", "sting")
+EDITOR_STARTERS: tuple[str, ...] = ("animated", "lower-third", "still", "sting", "sting-frames")
 _STARTER_SLOTS: dict[str, dict[str, object]] = {
     "still": {"title_page": "still.html", "slate": "still.html", "closing": "still.html"},
     "animated": {"title_page": "animated.html", "slate": "animated.html", "closing": "animated.html"},
     "lower-third": {"lower_third": "lower-third.html"},
     "sting": {STING_SLOT: {"sting": "sting.html"}},
+    "sting-frames": {STING_SLOT: {"sting": "sting-frames.html"}},
     "hud": {OVERLAY_SLOT: {"hud": "hud.html"}},
     "summary": {"summary": {"summary": "summary.html"}},
     # The reference Look: every slot a template can draw, each using all of

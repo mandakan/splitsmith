@@ -133,6 +133,7 @@ def test_the_history_holds_every_current_shipped_template() -> None:
         ("animated", {"title_page", "slate", "closing"}),
         ("lower-third", {"lower_third"}),
         ("sting", {"transition"}),
+        ("sting-frames", {"transition"}),
         ("hud", {"overlay"}),
     ],
 )
@@ -269,6 +270,7 @@ class _Prober:
         self.calls: list[tuple[str, dict]] = []
         self.probed_at: list[tuple[str, float | None]] = []
         self.timelines: list[tuple[str, list[float]]] = []
+        self.frames_drawn: list[str] = []
 
     def probe_template(
         self, template: Path, *, context, width: int, height: int, at: float | None = None
@@ -294,6 +296,18 @@ class _Prober:
             frames[-1] = bytes([9]) * 4
         return TemplateFrames(duration=0.5, frame_count=len(times), width=1, height=1, frames=iter(frames))
 
+    def render_template_frames(
+        self, template: Path, *, context, width: int, height: int, fps: float, max_seconds: float, frames_dir
+    ):  # noqa: ANN001
+        """A frames sting (the shipped push) over the sample edges: one
+        fully opaque frame."""
+        from splitsmith.overlay.raster import TemplateFrames
+
+        self.frames_drawn.append(template.name)
+        return TemplateFrames(
+            duration=max_seconds, frame_count=1, width=1, height=1, frames=iter([bytes((9, 9, 9, 255))])
+        )
+
 
 def _levels(report: look_tools.CheckReport) -> list[tuple[str, str]]:
     return [(item.subject, item.level) for item in report.items]
@@ -309,6 +323,7 @@ def test_a_clean_look_checks_ok_and_probes_every_own_template_with_every_sample(
         "card.html",
         "card-rise.html",
         "card-end-screen.html",
+        "sting-push.html",
         "sting-wipe.html",
         "hud-minimal.html",
         "hud-pips.html",
@@ -325,6 +340,7 @@ def test_a_clean_look_checks_ok_and_probes_every_own_template_with_every_sample(
     assert any(len(t) > 40 for t in texts), "a long stage name is among the samples"
     shooters = [len(data["shooters"]) for _, data in prober.calls if "shooters" in data]
     assert 2 in shooters and 1 in shooters
+    assert prober.frames_drawn == ["sting-push.html"], "the frames sting is drawn over sample edges"
 
 
 def test_an_overlay_style_is_probed_on_three_stages_mid_stage_and_landed(user_dir: Path) -> None:
@@ -561,6 +577,7 @@ def test_preview_renders_every_card_variant_and_sting_and_a_contact_sheet(
             "closing-default.png",
             "closing-end-screen.png",
             "closing-rise.png",
+            "transition-push.png",
             "transition-wipe.png",
             "contact-sheet.png",
         ]

@@ -114,6 +114,7 @@
       "rise": "card-rise.html"
     },
     "transition": {
+      "push": "sting-push.html",
       "wipe": "sting-wipe.html"
     }
   },
