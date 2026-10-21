@@ -15,7 +15,7 @@ from PIL import Image
 
 from splitsmith import looks
 from splitsmith.look import tools as look_tools
-from splitsmith.overlay.raster import TemplateProbe
+from splitsmith.overlay.raster import TemplateFrames, TemplateProbe
 
 
 @pytest.fixture
@@ -531,8 +531,6 @@ class _Raster:
         return "fake"
 
     def render_template_frames(self, template, *, context, width, height, fps, max_seconds):
-        from splitsmith.overlay.raster import TemplateFrames
-
         self.templates.append(template.name)
         return TemplateFrames(
             duration=0.0, frame_count=1, width=width, height=height, frames=iter([bytes(width * height * 4)])
@@ -615,3 +613,77 @@ def test_new_from_a_look_copies_its_other_files_but_not_its_previews(user_dir: P
     assert (copy / "style.css").is_file() and (copy / "still.html").is_file()
     assert not (copy / "preview").exists()
     assert json.loads((copy / "look.json").read_text(encoding="utf-8"))["name"] == "copy"
+
+
+# --- frames stings (#1535) -----------------------------------------------------------
+
+
+class _FramesProber(_Prober):
+    """A prober whose frames sting is ``opaque_share`` opaque from the left:
+    the right of the frame is fully transparent."""
+
+    def __init__(self, opaque_share: float) -> None:
+        super().__init__()
+        self.opaque_share = opaque_share
+        self.urls: list[str] = []
+
+    def render_template_frames(
+        self, template: Path, *, context, width: int, height: int, fps: float, max_seconds: float, frames_dir
+    ) -> TemplateFrames:  # noqa: ANN001
+        frames = context.data["transition"]["frames"]
+        self.urls.extend(frames["from"] + frames["to"])
+        assert (frames_dir / frames["from"][0].split("/frames/", 1)[1]).is_file()
+        row = bytearray()
+        cut = int(width * self.opaque_share)
+        for x in range(width):
+            row += bytes((9, 9, 9, 255 if x < cut else 0))
+        raw = bytes(row) * height
+        count = frames["count"]
+        return TemplateFrames(
+            duration=max_seconds, frame_count=count, width=width, height=height, frames=iter([raw] * count)
+        )
+
+
+def _transparency(report: look_tools.CheckReport) -> list[look_tools.CheckItem]:
+    return [i for i in report.items if "transparent" in i.message]
+
+
+def test_a_frames_sting_that_leaves_half_the_frame_transparent_warns(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from tests.look_fixtures import install_frames_look
+
+    install_frames_look(tmp_path, monkeypatch)
+    prober = _FramesProber(opaque_share=0.5)
+    report = look_tools.check_look("framesy", prober=prober)
+    (item,) = _transparency(report)
+    assert item.level == "warn" and item.subject.startswith("transition push")
+    assert "50 %" in item.message
+    assert prober.urls and all(u.startswith("https://look.invalid/frames/k/") for u in prober.urls)
+
+
+def test_a_frames_sting_that_draws_every_pixel_has_no_transparency_item(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from tests.look_fixtures import install_frames_look
+
+    install_frames_look(tmp_path, monkeypatch)
+    report = look_tools.check_look("framesy", prober=_FramesProber(opaque_share=1.0))
+    assert _transparency(report) == []
+    assert report.errors == 0
+
+
+def test_a_frames_tag_outside_the_transition_slot_is_a_warning(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from tests.look_fixtures import FRAMES_STING_HTML, install_frames_look
+
+    root = install_frames_look(tmp_path, monkeypatch).root
+    manifest = json.loads((root / "look.json").read_text(encoding="utf-8"))
+    manifest["slots"]["title_page"] = {"default": "title.html"}
+    (root / "look.json").write_text(json.dumps(manifest), encoding="utf-8")
+    (root / "title.html").write_text(FRAMES_STING_HTML, encoding="utf-8")
+    report = look_tools.check_look("framesy", prober=_FramesProber(opaque_share=1.0))
+    misplaced = [i for i in report.items if "does nothing outside the transition slot" in i.message]
+    assert [(i.subject, i.level) for i in misplaced] == [("title_page default title.html", "warn")]
+    assert "splitsmith-frames" in misplaced[0].message
