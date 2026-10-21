@@ -135,6 +135,34 @@ class _Counter(http.server.BaseHTTPRequestHandler):
         return None
 
 
+def test_the_frames_mount_exists_only_when_the_renderer_passes_it(tmp_path: Path) -> None:
+    template = tmp_path / "look" / "sting.html"
+    template.parent.mkdir()
+    template.write_text("<!doctype html>", encoding="utf-8")
+    frames = tmp_path / "frames"
+    (frames / "k" / "from").mkdir(parents=True)
+    (frames / "k" / "from" / "0000.jpg").write_bytes(b"\xff\xd8\xff")
+    url = f"{look_sandbox.ORIGIN}/frames/k/from/0000.jpg"
+    without, _ = look_sandbox.prepare(template, _context())
+    assert without.resolve(url) is None
+    with_mount, _ = look_sandbox.prepare(template, _context(), frames_dir=frames)
+    assert with_mount.resolve(url) == (frames / "k" / "from" / "0000.jpg").resolve()
+
+
+def test_user_text_naming_the_frames_folder_is_never_rewritten(tmp_path: Path) -> None:
+    template = tmp_path / "look" / "sting.html"
+    template.parent.mkdir()
+    template.write_text("<!doctype html>", encoding="utf-8")
+    frames = tmp_path / "frames"
+    (frames / "k" / "from").mkdir(parents=True)
+    jpg = frames / "k" / "from" / "0000.jpg"
+    jpg.write_bytes(b"\xff\xd8\xff")
+    sneaky = jpg.resolve().as_uri()
+    ctx = _context(transition={"to": sneaky}, shooters=[])
+    _, out = look_sandbox.prepare(template, ctx, frames_dir=frames)
+    assert out.data["transition"]["to"] == sneaky
+
+
 @pytest.fixture
 def listener() -> Iterator[int]:
     """A local HTTP server counting every request that reaches it."""
