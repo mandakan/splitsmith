@@ -324,13 +324,20 @@ def _project_references(state: Any) -> list[reference.ProjectReference]:
     return out
 
 
-def _references(state: Any, clips: list[ClipView]) -> list[SortReference]:
+def _references(state: Any, clips: list[ClipView]) -> tuple[list[SortReference], int]:
     """Project footage first; else the checked, not yet imported clip this
-    sort proposes for the stage (the run's primary before a secondary)."""
+    sort proposes for the stage (the run's primary before a secondary).
+    Also how many project frames are still to build: missing ones, minus
+    those marked failed (they would otherwise queue a job on every poll)."""
     out: list[SortReference] = []
     taken: set[tuple[str, int]] = set()
+    cache = _reference_dir(state)
+    pending = 0
     for ref in _project_references(state):
         taken.add((ref.shooter, ref.stage))
+        frame = reference.cached_frame(cache, ref) is not None
+        if not frame and not reference.frame_failed(cache, ref):
+            pending += 1
         out.append(
             SortReference(
                 shooter=ref.shooter,
@@ -340,7 +347,7 @@ def _references(state: Any, clips: list[ClipView]) -> list[SortReference]:
                 video_id=ref.video_id,
                 clip_id=None,
                 stream_kind=ref.stream_kind,
-                frame=reference.cached_frame(_reference_dir(state), ref) is not None,
+                frame=frame,
             )
         )
     candidates = sorted(
@@ -364,7 +371,7 @@ def _references(state: Any, clips: list[ClipView]) -> list[SortReference]:
                 frame=c.thumbnail,
             )
         )
-    return out
+    return out, pending
 
 
 def _view(state: Any, record: ScanRecord) -> SortView:
@@ -421,7 +428,7 @@ def _view(state: Any, record: ScanRecord) -> SortView:
                 proposal=p,
             )
         )
-    references = _references(state, clips) if record.status == "ready" else []
+    references, frames_pending = _references(state, clips) if record.status == "ready" else ([], 0)
     return SortView(
         scan_id=record.scan_id,
         status=record.status,
@@ -439,7 +446,7 @@ def _view(state: Any, record: ScanRecord) -> SortView:
             sum(1 for c in clips if not c.strip and (c.duration or 0) > 0) if record.status == "ready" else 0
         ),
         references=references,
-        frames_pending=sum(1 for r in references if r.source == "project" and not r.frame),
+        frames_pending=frames_pending,
         anchors=record.anchors,
         overrides=record.overrides,
         user_checked=record.checked,
@@ -719,17 +726,23 @@ def _build_frames(state: Any, handle: Any) -> None:
     """Extract the missing reference frame of every project reference.
     A frame that fails is logged and skipped; the tile stays blank."""
     cache = _reference_dir(state)
-    for ref in _project_references(state):
+    try:
+        refs = _project_references(state)
+    except Exception:  # noqa: BLE001 -- a project that will not load is not this job's failure
+        logger.warning("footage sort: reference footage could not be listed", exc_info=True)
+        return
+    for ref in refs:
         handle.check_cancel()
-        if reference.cached_frame(cache, ref) is not None:
+        if reference.cached_frame(cache, ref) is not None or reference.frame_failed(cache, ref):
             continue
         handle.update(message=f"Frame for {ref.shooter} stage {ref.stage}")
         try:
             reference.ensure_frame(cache, ref)
         except Exception:  # noqa: BLE001 -- a frame never fails the job
-            logger.debug(
+            logger.warning(
                 "footage sort: no reference frame for %s stage %s", ref.shooter, ref.stage, exc_info=True
             )
+            reference.mark_failed(cache, ref)
 
 
 def run_footage_sort_frames(handle: Any, *, state: Any, scan_id: str) -> None:
@@ -878,8 +891,13 @@ async def get_scan(scan_id: str, request: Request) -> SortView:
     state = request.app.state.splitsmith_state
     view = await run_in_threadpool(_view, state, _load(state, scan_id))
     # A project reference without a frame: queue the one job that builds
-    # them (never extract on a request), unless one is already at it.
-    if view.frames_pending > 0 and await state.jobs.find_active(kind=FRAMES_JOB_KIND) is None:
+    # them (never extract on a request), unless one is already at it; a
+    # running scan builds them in its own pass.
+    if (
+        view.frames_pending > 0
+        and await state.jobs.find_active(kind=FRAMES_JOB_KIND) is None
+        and await state.jobs.find_active(kind=JOB_KIND) is None
+    ):
         await state.jobs.submit(kind=FRAMES_JOB_KIND, args={"scan_id": scan_id})
     return view
 

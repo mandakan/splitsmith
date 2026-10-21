@@ -144,7 +144,11 @@ Local only, in `ui/footage_sort_api.py`:
   builds the missing frames for this scan (deduplicated per scan, the
   `_audio_pending` shape) and returns at once. That covers a scan
   reopened later, an import mid-review and a re-trim, none of which
-  re-run the scan pass. A request never extracts a frame itself.
+  re-run the scan pass. A request never extracts a frame itself. No
+  frames job is queued while a scan job is active (its own pass builds
+  them). A frame that cannot be made (an unreadable file) is marked with
+  a `.failed` sidecar keyed like the frame, so it is never pending again
+  until the source changes; its tile shows the stage without a frame.
 - Cache: `<sort dir>/reference/<slug>-stage<N>-<video_id>.jpg`, with the
   trimmed file's mtime in the name or beside it so a re-trim refreshes
   it. Pending count: `_view` computes `frames_pending` from the on-disk

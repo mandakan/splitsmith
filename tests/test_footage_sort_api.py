@@ -840,6 +840,20 @@ def test_a_trimmed_stage_streams_the_trim(tmp_path: Path, source_clip: Path) -> 
     assert ("alice", 1, "project", "trim") in _references(after)
 
 
+def _wait_for_scan_job(client) -> None:  # type: ignore[no-untyped-def]
+    """The scan job outlives ``ready`` (it builds strips after); a frames
+    job is never queued beside it, so wait it out first."""
+    deadline = time.monotonic() + 30
+    while time.monotonic() < deadline:
+        jobs = client.get("/api/me/jobs").json()
+        if not any(
+            j["kind"] == footage_sort_api.JOB_KIND and j["status"] in ("pending", "running") for j in jobs
+        ):
+            return
+        time.sleep(0.1)
+    raise AssertionError("scan job did not finish")
+
+
 def test_a_poll_queues_one_frames_job(tmp_path: Path, source_clip: Path) -> None:
     """A project reference without a frame queues the build from the
     view, once, so a reopened or re-trimmed scan gets its frames without
@@ -847,6 +861,7 @@ def test_a_poll_queues_one_frames_job(tmp_path: Path, source_clip: Path) -> None
     _, client, _, base = _match_app(tmp_path)
     view = _scan(client, base, _shared_folder(tmp_path, source_clip))
     scan_id = view["scan_id"]
+    _wait_for_scan_job(client)
     client.post(f"{base}/match/footage-sort/{scan_id}/import", json={"shooters": ["alice"]})
 
     client.get(f"{base}/match/footage-sort/{scan_id}")
@@ -855,3 +870,34 @@ def test_a_poll_queues_one_frames_job(tmp_path: Path, source_clip: Path) -> None
     jobs = [j for j in client.get("/api/me/jobs").json() if j["kind"] == footage_sort_api.FRAMES_JOB_KIND]
     assert len(jobs) == 1
     _wait_for_frames(client, base, scan_id)
+
+
+def test_a_frame_that_cannot_be_built_stops_the_polling(tmp_path: Path, source_clip: Path) -> None:
+    """Carol's stage 1 primary is not a video. Its frame fails once, is
+    marked, and the view neither counts it as pending nor queues a frames
+    job for it on every poll."""
+    from splitsmith.match_project import StageVideo
+
+    _, client, root, base = _match_app(tmp_path, {**SCORECARDS, "carol": {}})
+    garbage = tmp_path / "garbage.mp4"
+    garbage.write_bytes(b"not a video")
+    croot = match_model.Match.shooter_root(root, "carol")
+    carol = MatchProject.load(croot)
+    carol.stages = [
+        StageEntry(
+            stage_number=1,
+            stage_name="S1",
+            time_seconds=20.0,
+            videos=[StageVideo(path=garbage, role="primary")],
+        )
+    ]
+    carol.save(croot)
+
+    view = _scan(client, base, _shared_folder(tmp_path, source_clip))
+    built = _wait_for_frames(client, base, view["scan_id"])
+
+    assert ("carol", 1, "project", "auto") in _references(built)
+    assert next(r for r in built["references"] if r["shooter"] == "carol")["frame"] is False
+    client.get(f"{base}/match/footage-sort/{view['scan_id']}")
+    jobs = [j for j in client.get("/api/me/jobs").json() if j["kind"] == footage_sort_api.FRAMES_JOB_KIND]
+    assert jobs == []

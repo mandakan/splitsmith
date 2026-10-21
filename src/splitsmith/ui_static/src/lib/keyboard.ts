@@ -66,12 +66,19 @@ export function useSpacePlayPause(
       );
     }
 
+    // A surface that owns Space itself (Sort footage's compare panel: a
+    // second player and its tiles beside the clip) keeps the browser's
+    // own behaviour; the page's player is not what is focused there.
+    function ownsSpace(t: EventTarget | null): boolean {
+      return t instanceof HTMLElement && t.closest("[data-own-space]") !== null;
+    }
+
     // Capture phase: fires before the native media controls see the
     // key, so we own Space whenever the player (any sub-control) has
     // focus. stopImmediatePropagation keeps the browser from also
     // toggling or scrolling; preventDefault covers the default action.
     function onCapture(e: KeyboardEvent) {
-      if (!isSpace(e) || !isMediaTarget(e.target)) return;
+      if (!isSpace(e) || !isMediaTarget(e.target) || ownsSpace(e.target)) return;
       e.preventDefault();
       e.stopImmediatePropagation();
       toggle();
@@ -80,7 +87,12 @@ export function useSpacePlayPause(
     // Bubble phase: focus lives elsewhere (a sidebar row, a chip), so
     // Space would otherwise scroll or activate that affordance.
     function onBubble(e: KeyboardEvent) {
-      if (!isSpace(e) || isTextTarget(e.target) || isMediaTarget(e.target)) {
+      if (
+        !isSpace(e) ||
+        isTextTarget(e.target) ||
+        isMediaTarget(e.target) ||
+        ownsSpace(e.target)
+      ) {
         return;
       }
       e.preventDefault();

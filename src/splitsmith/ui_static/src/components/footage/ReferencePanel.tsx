@@ -5,12 +5,13 @@
  * stage beside the clip being assigned; "Use stage" hands the stage to the
  * clip panel's picker, which is the only thing this panel ever decides.
  * Desktop only: two players side by side need the width.
+ *
+ * It renders inside the Sheet's dialog, laid out to its left, never through
+ * a portal of its own: the sheet remounts per clip, and a second portal
+ * mounted in the same commit landed under the sheet's backdrop.
  */
-import { useState } from "react";
-
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/Label";
-import { Portal } from "@/components/ui/Portal";
 import { api, type SortReference, type SortView } from "@/lib/api";
 import {
   missingCount,
@@ -47,6 +48,8 @@ export function ReferencePanel({
   view,
   referenceShooter,
   onReferenceShooter,
+  stage,
+  onStage,
   assigning,
   clipId,
   onUseStage,
@@ -55,23 +58,25 @@ export function ReferencePanel({
   view: SortView;
   referenceShooter: string;
   onReferenceShooter: (key: string) => void;
+  /** The stage playing in the panel; the page keeps it across clips. */
+  stage: number | null;
+  onStage: (stage: number | null) => void;
   /** The shooter chosen in the clip panel: their stages are the "has it". */
   assigning: string;
   clipId: string;
   onUseStage: (stage: number) => void;
   onClose: () => void;
 }) {
-  const [stage, setStage] = useState<number | null>(null);
   const tiles = referenceTiles(view, referenceShooter, assigning, clipId);
   const current = tiles.find((t) => t.stage === stage && t.reference) ?? null;
   const src = current?.reference ? videoUrl(view, current.reference) : null;
   const missing = missingCount(tiles);
   return (
-    <Portal>
-      <aside
-        aria-label="Compare with a shooter"
-        className="fixed inset-y-0 right-[440px] z-chrome hidden w-[480px] flex-col border-l border-rule-strong bg-surface shadow-lg md:flex"
-      >
+    <aside
+      aria-label="Compare with a shooter"
+      data-own-space
+      className="absolute inset-y-0 right-full hidden w-[480px] flex-col border-r border-rule-strong bg-surface shadow-lg lg:flex"
+    >
         <div className="flex items-center gap-3 border-b border-rule px-4 py-3">
           <Label>Compare with</Label>
           <select
@@ -80,7 +85,7 @@ export function ReferencePanel({
             value={referenceShooter}
             onChange={(e) => {
               onReferenceShooter(e.target.value);
-              setStage(null);
+              onStage(null);
             }}
           >
             {referenceShooters(view).map((s) => (
@@ -141,13 +146,12 @@ export function ReferencePanel({
                 tile={t}
                 frame={t.reference ? frameUrl(view, t.reference) : null}
                 current={t.stage === stage}
-                onPick={() => setStage(t.stage)}
+                onPick={() => onStage(t.stage)}
               />
             ))}
           </div>
         </div>
-      </aside>
-    </Portal>
+    </aside>
   );
 }
 

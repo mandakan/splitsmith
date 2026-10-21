@@ -61,12 +61,16 @@ def project_reference(
         return None
     trim, beep = audio.stage_trim_for_read(project, root, stage_number)
     if trim is not None:
+        # The frame may come from the lossless export trim, but the stream
+        # route's ``trim`` serves only the audit trim (it never substitutes),
+        # so a stage with the export trim alone plays as ``auto``.
+        audit = audio.resolve_trim_for_read(root, stage_number, primary, project=project)
         return ProjectReference(
             shooter=slug,
             stage=stage_number,
             video_path=str(primary.path),
             video_id=primary.video_id,
-            stream_kind="trim",
+            stream_kind="trim" if audit is not None else "auto",
             source_file=trim,
             frame_at=beep + FRAME_AFTER_BEEP_S,
         )
@@ -97,6 +101,26 @@ def cached_frame(cache_dir: Path, ref: ProjectReference) -> Path | None:
     except OSError:
         return None
     return candidate if candidate.exists() else None
+
+
+def failed_path(cache_dir: Path, ref: ProjectReference) -> Path:
+    """The marker for a frame that could not be made (a corrupt or
+    unreadable file): keyed like the frame, so a re-trim tries again and
+    the view stops counting it as pending."""
+    return frame_path(cache_dir, ref).with_suffix(".failed")
+
+
+def mark_failed(cache_dir: Path, ref: ProjectReference) -> None:
+    dest = failed_path(cache_dir, ref)
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    dest.touch()
+
+
+def frame_failed(cache_dir: Path, ref: ProjectReference) -> bool:
+    try:
+        return failed_path(cache_dir, ref).exists()
+    except OSError:
+        return False
 
 
 def extract_frame(source: Path, dest: Path, *, at_seconds: float, ffmpeg_binary: str = "ffmpeg") -> None:

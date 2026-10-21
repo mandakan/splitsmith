@@ -163,3 +163,31 @@ def test_ensure_frame_builds_once(tmp_path: Path, source_clip: Path) -> None:
 
     assert made == again == reference.cached_frame(cache, ref)
     assert made.stat().st_size > 0
+
+
+def test_an_export_trim_frames_but_streams_auto(tmp_path: Path) -> None:
+    """The stream route's ``trim`` serves the audit trim only, so a stage
+    with just the lossless export trim takes its frame from it and plays
+    the source."""
+    project, root = _project(tmp_path)
+    export = project.exports_path(root) / f"{stage_file_base(1, 'Lucky Seven')}_trimmed.mp4"
+    export.parent.mkdir(parents=True, exist_ok=True)
+    export.write_bytes(b"x")
+
+    ref = reference.project_reference(project, root, "alice", 1)
+
+    assert ref is not None
+    assert (ref.stream_kind, ref.source_file, ref.frame_at) == ("auto", export, 7.0)
+
+
+def test_a_failed_frame_is_marked_until_the_source_changes(tmp_path: Path) -> None:
+    project, root = _project(tmp_path)
+    ref = reference.project_reference(project, root, "alice", 1)
+    assert ref is not None
+    cache = tmp_path / "reference"
+
+    assert reference.frame_failed(cache, ref) is False
+    reference.mark_failed(cache, ref)
+    assert reference.frame_failed(cache, ref) is True
+    os.utime(ref.source_file, (1_700_000_000, 1_700_000_000))
+    assert reference.frame_failed(cache, ref) is False

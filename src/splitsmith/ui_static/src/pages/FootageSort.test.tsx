@@ -487,7 +487,7 @@ describe("FootageSort compare panel", () => {
     });
   });
 
-  it("the panel survives the next clip", async () => {
+  it("the panel survives the next clip, inside the new sheet, on the same stage", async () => {
     renderPage();
     await userEvent.click(
       await screen.findByRole("button", { name: "Choose" }),
@@ -495,12 +495,22 @@ describe("FootageSort compare panel", () => {
     await userEvent.click(
       screen.getByRole("button", { name: "Compare with a shooter" }),
     );
+    await userEvent.click(
+      screen.getByRole("button", { name: "Stage 02 Long Way Round" }),
+    );
 
     await userEvent.keyboard("{ArrowDown}");
 
+    // Inside the sheet's dialog, never a portal of its own: the backdrop
+    // of a remounted sheet painted over a separately mounted panel.
+    const sheet = screen.getByRole("dialog");
+    expect(sheet).not.toHaveAccessibleName("VID_1.mp4");
+    const panel = within(sheet).getByRole("complementary", {
+      name: "Compare with a shooter",
+    });
     expect(
-      screen.getByRole("complementary", { name: "Compare with a shooter" }),
-    ).toBeInTheDocument();
+      within(panel).getByRole("button", { name: "Use stage 02" }),
+    ).toBeEnabled();
   });
 
   it("marks the stages the assigned shooter already has", async () => {

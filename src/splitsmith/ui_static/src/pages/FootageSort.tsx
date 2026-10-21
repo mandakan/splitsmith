@@ -81,6 +81,7 @@ export function FootageSort() {
   // The compare panel: open across clips, with the shooter chosen in it.
   const [compare, setCompare] = useState(false);
   const [referenceShooter, setReferenceShooter] = useState<string | null>(null);
+  const [referenceStage, setReferenceStage] = useState<number | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -249,6 +250,8 @@ export function FootageSort() {
           onCompare={setCompare}
           referenceShooter={referenceShooter}
           onReferenceShooter={setReferenceShooter}
+          referenceStage={referenceStage}
+          onReferenceStage={setReferenceStage}
         />
       ) : null}
     </div>
@@ -520,6 +523,8 @@ function AssignSheet({
   onCompare,
   referenceShooter,
   onReferenceShooter,
+  referenceStage,
+  onReferenceStage,
 }: {
   view: SortView;
   clip: SortClipView;
@@ -533,6 +538,8 @@ function AssignSheet({
   onCompare: (open: boolean) => void;
   referenceShooter: string | null;
   onReferenceShooter: (key: string) => void;
+  referenceStage: number | null;
+  onReferenceStage: (stage: number | null) => void;
 }) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const order = reviewOrder(view);
@@ -596,6 +603,8 @@ function AssignSheet({
           view={view}
           referenceShooter={referenceKey}
           onReferenceShooter={onReferenceShooter}
+          stage={referenceStage}
+          onStage={onReferenceStage}
           assigning={shooter}
           clipId={clip.clip_id}
           onUseStage={setStage}
@@ -705,7 +714,7 @@ function AssignSheet({
             This also sets the clock for every clip from this camera.
           </p>
         ) : null}
-        <div className="hidden md:block">
+        <div className="hidden lg:block">
           <Button
             size="sm"
             onClick={() => onCompare(!compare)}
