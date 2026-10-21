@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import logging
 import math
+import shutil
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -200,7 +201,14 @@ def sting_plan(
     loads it, a :class:`FramesSting` when the template declares
     ``splitsmith-frames``, or ``None`` (the caller falls back to a fade)."""
     template = sting_template_for(look, sting_name(kind))
-    if template is None or not wants_frames(template):
+    try:
+        tagged = template is not None and wants_frames(template)
+    except OSError as exc:
+        logger.warning(
+            "could not read the sting %r at %s (%s); the transition is a fade", kind, template, exc
+        )
+        return None
+    if not tagged:
         return sting_motion(
             look, kind, seconds=seconds, from_label=from_label, to_label=to_label, width=width,
             height=height, fps=fps, rasterizer=rasterizer, shooters=shooters, brand=brand,
@@ -246,15 +254,17 @@ def render_frames_sting(
 ) -> None:
     """Extract both edges under ``frames_root/key/{from,to}``, draw the
     sting with them and write its alpha clip to ``clip_path``. ``run``
-    executes an ffmpeg argv and raises on failure (the driver's own
-    runner). Raises :class:`MotionClipError` when an edge yields no frames
-    or the template fails; the driver makes that a cut."""
+    executes an ffmpeg argv; it raises the driver's own error, which the
+    driver catches with MotionClipError, so it passes through here
+    unwrapped. Raises :class:`MotionClipError` when an edge yields no
+    frames or the template fails; the driver makes that a cut."""
     count = max(1, math.ceil(sting.seconds * sting.fps - 1e-9))
     lists: dict[str, list[str]] = {}
     for end, edge, pad in (("tail", tail_edge, tail_pad_seconds), ("head", head_edge, head_pad_seconds)):
         side = "from" if end == "tail" else "to"
         out_dir = frames_root / key / side
-        out_dir.mkdir(parents=True, exist_ok=True)
+        shutil.rmtree(out_dir, ignore_errors=True)  # stale frames are never footage
+        out_dir.mkdir(parents=True)
         run(extraction_command(edge, out_dir, rate=rate, ffmpeg_binary=ffmpeg_binary))
         try:
             lists[side] = edge_frame_urls(
@@ -272,7 +282,10 @@ def render_frames_sting(
         )  # fmt: skip
     except Exception as exc:  # noqa: BLE001 -- the template's failure is the clip's
         raise MotionClipError(f"{clip_path.name}: {exc}") from exc
-    write_motion_clip(frames, out=clip_path, fps=sting.fps, ffmpeg_binary=ffmpeg_binary)
+    try:
+        write_motion_clip(frames, out=clip_path, fps=sting.fps, ffmpeg_binary=ffmpeg_binary)
+    finally:
+        frames.close()
 
 
 def frames_sting_filters(
