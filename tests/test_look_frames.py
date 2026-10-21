@@ -27,6 +27,25 @@ def test_the_tag_opts_in_and_only_with_content_edges(tmp_path: Path) -> None:
     assert not look_frames.wants_frames(_template(tmp_path, ""))
 
 
+@pytest.mark.parametrize(
+    "head",
+    [
+        '<meta data-name="splitsmith-frames" content="edges">',
+        '<meta name="splitsmith-frames" data-content="edges">',
+        '<!-- <meta name="splitsmith-frames" content="edges"> -->',
+        '<meta name="splitsmith-frames" content="EDGES">',
+    ],
+)
+def test_a_tag_that_is_not_an_edges_opt_in_is_not_wanted(tmp_path: Path, head: str) -> None:
+    assert not look_frames.wants_frames(_template(tmp_path, head))
+
+
+def test_a_commented_out_tag_is_not_misplaced_either(tmp_path: Path) -> None:
+    assert not look_frames.misplaced_frames_tag(
+        _template(tmp_path, '<!-- <meta name="splitsmith-frames" content="cards"> -->')
+    )
+
+
 def test_a_tag_with_another_content_is_misplaced_not_wanted(tmp_path: Path) -> None:
     other = _template(tmp_path, '<meta name="splitsmith-frames" content="cards">')
     assert look_frames.misplaced_frames_tag(other)
@@ -73,6 +92,31 @@ def test_a_head_pad_repeats_the_first_frame_before_the_footage(tmp_path: Path) -
     assert urls[:16] == [f"{ORIGIN}/frames/k/to/0000.jpg"] * 16
     assert urls[16] == f"{ORIGIN}/frames/k/to/0001.jpg"
     assert urls[29] == f"{ORIGIN}/frames/k/to/0014.jpg"
+
+
+def test_a_tail_with_more_footage_than_the_boundary_is_not_capped_by_its_pad(tmp_path: Path) -> None:
+    # 20 files at count 30 with a 0.5 s pad: the pad is the footage running
+    # out, not a cap. Boundary frames 0..19 are footage, 20..29 hold frame 19.
+    urls = look_frames.edge_frame_urls(
+        _files(tmp_path, 20), count=30, fps=30.0, pad_seconds=0.5, end="tail", key="k"
+    )
+    assert urls[:20] == [f"{ORIGIN}/frames/k/from/{i:04d}.jpg" for i in range(20)]
+    assert urls[20:] == [f"{ORIGIN}/frames/k/from/0019.jpg"] * 10
+
+
+def test_a_head_pad_rounds_half_up_to_whole_frames(tmp_path: Path) -> None:
+    # 30000/1001 fps: 0.5 s is 14.985 frames, which is 15 held.
+    urls = look_frames.edge_frame_urls(
+        _files(tmp_path, 15), count=30, fps=30000 / 1001, pad_seconds=0.5, end="head", key="k"
+    )
+    assert urls[:16] == [f"{ORIGIN}/frames/k/to/0000.jpg"] * 16
+    assert urls[16] == f"{ORIGIN}/frames/k/to/0001.jpg"
+    # 25 fps: 0.5 s is exactly 12.5 frames; half-up gives 13 (round() gives 12).
+    urls = look_frames.edge_frame_urls(
+        _files(tmp_path, 15), count=30, fps=25.0, pad_seconds=0.5, end="head", key="k"
+    )
+    assert urls[:14] == [f"{ORIGIN}/frames/k/to/0000.jpg"] * 14
+    assert urls[14] == f"{ORIGIN}/frames/k/to/0001.jpg"
 
 
 def test_an_edge_with_more_frames_than_the_boundary_is_cut_to_count(tmp_path: Path) -> None:

@@ -29,8 +29,12 @@ from .template import TemplateContext
 
 FRAMES_MOUNT = "frames"
 
-_META = re.compile(rb"<meta\b[^>]*\bname\s*=\s*[\"']splitsmith-frames[\"'][^>]*>", re.IGNORECASE)
-_EDGES = re.compile(rb"\bcontent\s*=\s*[\"']edges[\"']", re.IGNORECASE)
+_COMMENT = re.compile(rb"<!--.*?-->", re.DOTALL)
+# ``name``/``content`` must start an attribute: a preceding word character or
+# hyphen (``data-name``) is not a match. Attribute names are case-insensitive;
+# the ``edges`` value is case-sensitive.
+_META = re.compile(rb"<meta\b[^>]*(?<![\w-])name\s*=\s*[\"']splitsmith-frames[\"'][^>]*>", re.IGNORECASE)
+_EDGES = re.compile(rb"(?<![\w-])(?i:content)\s*=\s*[\"']edges[\"']")
 
 #: What a frames sting is drawn from: JPEG at ffmpeg's ``-q:v 2``, near
 #: lossless for a picture that is on screen for a second.
@@ -38,7 +42,7 @@ JPEG_QUALITY = "2"
 
 
 def _tags(template: Path) -> list[bytes]:
-    return _META.findall(template.read_bytes())
+    return _META.findall(_COMMENT.sub(b"", template.read_bytes()))
 
 
 def wants_frames(template: Path) -> bool:
@@ -74,6 +78,8 @@ def extraction_command(edge: Path, out_dir: Path, *, rate: str, ffmpeg_binary: s
 
 
 def written_frames(out_dir: Path) -> list[Path]:
+    """The ``*.jpg`` files ffmpeg wrote, in frame order. ``extraction_command``
+    names them ``%04d.jpg`` (zero-padded), so the lexical sort is the frame order."""
     return sorted(out_dir.glob("*.jpg"))
 
 
@@ -87,14 +93,19 @@ def edge_frame_urls(
     key: str,
 ) -> list[str]:
     """``count`` URLs, one per boundary frame, for the files ffmpeg wrote.
-    A tail edge shows its footage first and holds its last frame for
-    ``pad_seconds``; a head edge holds its first frame for ``pad_seconds``
-    and then shows its footage. Raises :class:`ValueError` on no frames."""
+
+    A tail edge's pad is implied by its footage running out: the boundary
+    reads the tail from its first frame, so boundary frame n is footage frame
+    n while the footage lasts and the last footage frame after that. The
+    tail's ``pad_seconds`` is accepted for symmetry with the head and is not
+    used. A head edge holds its first frame for ``pad_seconds`` (half-up
+    rounded to frames) and then shows its footage. Raises :class:`ValueError`
+    on no frames."""
     if not written:
         raise ValueError(f"the {end} edge yielded no frames")
     side = "from" if end == "tail" else "to"
     names = [path.name for path in written]
-    held = round(pad_seconds * fps)
+    held = int(pad_seconds * fps + 0.5)
     indices: list[int] = []
     for n in range(count):
         if end == "tail":
