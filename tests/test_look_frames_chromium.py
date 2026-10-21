@@ -191,12 +191,57 @@ def test_frames_js_rejects_when_a_frame_is_missing(raster: ChromiumRasterizer, t
 _PUSH_W, _PUSH_H, _PUSH_FPS, _PUSH_COUNT = 640, 360, 30.0, 30
 
 
+def _draw_sting(
+    raster: ChromiumRasterizer,
+    look: looks.Look,
+    variant: str,
+    root: Path,
+    *,
+    width: int,
+    height: int,
+    fps: float,
+    count: int,
+) -> list[bytes]:
+    """The Look's ``variant`` sting drawn over the edges written under
+    ``root/k/{from,to}/%04d.jpg``, ``count`` frames at ``fps`` (one second
+    when ``count == fps``). It is planned as the renderer plans it
+    (``sting_plan``: the tag decides, and the load without frames must
+    succeed); only a :class:`FramesSting` is handed the edges, as only it is
+    in an export."""
+    template = looks.sting_template_for(look, variant)
+    assert template is not None
+    seconds = count / fps
+    kind = f"sting:{variant}"
+    plan = look_sting.sting_plan(
+        look, kind, seconds=seconds, from_label="Stage 3", to_label="Stage 4",
+        width=width, height=height, fps=fps, rasterizer=raster,
+    )  # fmt: skip
+    assert plan is not None, "the load without frames failed"
+    if isinstance(plan, look_sting.FramesSting):
+        url = f"{ORIGIN}/{look_frames.FRAMES_MOUNT}/k/{{}}/{{:04d}}.jpg"
+        ctx = look_frames.with_frames(
+            plan.context, fps=fps, count=count,
+            from_urls=[url.format("from", n) for n in range(count)],
+            to_urls=[url.format("to", n) for n in range(count)],
+        )  # fmt: skip
+    else:  # an overlay sting: drawn as it is, with no pictures
+        plan.close()
+        ctx = sting_context(
+            kind=kind, seconds=seconds, from_label="Stage 3", to_label="Stage 4",
+            width=width, height=height, fps=fps, theme=theme_for(look),
+        )  # fmt: skip
+    got = raster.render_template_frames(
+        template, context=ctx, width=width, height=height, fps=fps, max_seconds=seconds, frames_dir=root
+    )
+    try:
+        return list(got.frames)
+    finally:
+        got.close()
+
+
 def _push_frames(raster: ChromiumRasterizer, look_name: str, tmp_path: Path) -> list[bytes]:
     """The Look's ``push`` sting drawn over a solid red outgoing edge and a
-    solid blue incoming one, one second at 30 fps, 640x360. It is planned as
-    the renderer plans it (``sting_plan``: the tag decides, and the load
-    without frames must succeed); only a :class:`FramesSting` is handed the
-    edges, as only it is in an export."""
+    solid blue incoming one, one second at 30 fps, 640x360."""
     look = looks.load_look(look_name)
     template = looks.sting_template_for(look, "push")
     assert template is not None and template.parent.name == look_name
@@ -205,31 +250,9 @@ def _push_frames(raster: ChromiumRasterizer, look_name: str, tmp_path: Path) -> 
         (root / "k" / side).mkdir(parents=True)
         for n in range(_PUSH_COUNT):
             Image.new("RGB", (_PUSH_W, _PUSH_H), rgb).save(root / "k" / side / f"{n:04d}.jpg", quality=95)
-    plan = look_sting.sting_plan(
-        look, "sting:push", seconds=1.0, from_label="Stage 3", to_label="Stage 4",
-        width=_PUSH_W, height=_PUSH_H, fps=_PUSH_FPS, rasterizer=raster,
-    )  # fmt: skip
-    assert plan is not None, "the load without frames failed"
-    if isinstance(plan, look_sting.FramesSting):
-        url = f"{ORIGIN}/{look_frames.FRAMES_MOUNT}/k/{{}}/{{:04d}}.jpg"
-        ctx = look_frames.with_frames(
-            plan.context, fps=_PUSH_FPS, count=_PUSH_COUNT,
-            from_urls=[url.format("from", n) for n in range(_PUSH_COUNT)],
-            to_urls=[url.format("to", n) for n in range(_PUSH_COUNT)],
-        )  # fmt: skip
-    else:  # an overlay sting: drawn as it is, with no pictures
-        plan.close()
-        ctx = sting_context(
-            kind="sting:push", seconds=1.0, from_label="Stage 3", to_label="Stage 4",
-            width=_PUSH_W, height=_PUSH_H, fps=_PUSH_FPS, theme=theme_for(look),
-        )  # fmt: skip
-    got = raster.render_template_frames(
-        template, context=ctx, width=_PUSH_W, height=_PUSH_H, fps=_PUSH_FPS, max_seconds=1.0, frames_dir=root
+    return _draw_sting(
+        raster, look, "push", root, width=_PUSH_W, height=_PUSH_H, fps=_PUSH_FPS, count=_PUSH_COUNT
     )
-    try:
-        return list(got.frames)
-    finally:
-        got.close()
 
 
 def _share(buf: bytes, test) -> float:  # type: ignore[no-untyped-def]
@@ -301,3 +324,70 @@ def test_the_broadcast_panel_pushes_the_stages(raster: ChromiumRasterizer, tmp_p
     coming = frames[24]  # p = 0.8: the panel halfway out
     assert _blue(*_column(coming, lo)) and not _blue(*_column(coming, hi))
     assert 0.4 < _share(coming, _blue) < 0.6
+
+
+#: Edges big enough that decoding one takes longer than a page frame: a
+#: seek that does not return its at() Promise is captured before it draws.
+_LAG_EDGE_W, _LAG_EDGE_H = 3000, 1687
+_LAG_W, _LAG_H, _LAG_COUNT = 320, 180, 10
+
+
+def _ease(p: float) -> float:
+    return 4 * p**3 if p < 0.5 else 1 - (-2 * p + 2) ** 3 / 2
+
+
+def _outgoing_column(case: str, n: int) -> int | None:
+    """A column at which frame ``n`` shows the outgoing picture, or None
+    where it shows none (the templates' own motion, at one second over
+    :data:`_LAG_COUNT` frames)."""
+    p = n / _LAG_COUNT
+    if case == "broadcast":
+        if p >= 0.4:  # the hold and the way out: no outgoing picture
+            return None
+        left = round((_ease(p / 0.4) * 100) * _LAG_W / 100)  # the panel's leading edge
+        return _LAG_W - 3 if left < _LAG_W - 12 else None
+    x = round(_LAG_W * _ease(p))
+    return 2 if _LAG_W - x > 12 else None
+
+
+@pytest.mark.parametrize("case", ["splitsmith", "broadcast", "starter"])
+def test_a_frames_sting_draws_frame_n_on_frame_n(
+    raster: ChromiumRasterizer, case: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``seek(t)`` returns the ``at()`` Promise, so a frame is captured once
+    it is drawn: frame n shows outgoing picture n, not the one before it or
+    the poster's. Large edges make the decode slower than a page frame,
+    which is when a seek that drops the Promise falls behind."""
+    from splitsmith.look import tools as look_tools
+
+    if case == "starter":
+        monkeypatch.setenv("SPLITSMITH_HOME", str(tmp_path / "home"))
+        look_tools.new_look("mine", starter="sting-frames")
+        look, variant = looks.load_look("mine"), "sting"
+    else:
+        look, variant = looks.load_look(case), "push"
+    root = tmp_path / "frames"
+    (root / "k" / "from").mkdir(parents=True)
+    (root / "k" / "to").mkdir(parents=True)
+    for n in range(_LAG_COUNT):
+        grey = 20 + 20 * n
+        Image.new("RGB", (_LAG_EDGE_W, _LAG_EDGE_H), (grey, grey, grey)).save(
+            root / "k" / "from" / f"{n:04d}.jpg", quality=95
+        )
+        Image.new("RGB", (_LAG_EDGE_W, _LAG_EDGE_H), (0, 0, 255)).save(
+            root / "k" / "to" / f"{n:04d}.jpg", quality=95
+        )
+    frames = _draw_sting(
+        raster, look, variant, root, width=_LAG_W, height=_LAG_H, fps=float(_LAG_COUNT), count=_LAG_COUNT
+    )
+    checked = []
+    for n, buf in enumerate(frames):
+        column = _outgoing_column("broadcast" if case == "broadcast" else "push", n)
+        if column is None:
+            continue
+        i = 4 * ((_LAG_H // 2) * _LAG_W + column)
+        got = tuple(buf[i : i + 3])
+        grey = 20 + 20 * n
+        assert all(abs(c - grey) <= 8 for c in got), (n, got, grey)
+        checked.append(n)
+    assert len(checked) >= 3, checked

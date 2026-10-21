@@ -22,7 +22,7 @@
     brand      { logo, line } when the export puts your brand on the wipe
   duration() must return transition.duration_seconds: the renderer
   samples exactly that long.
-  Guide: docs/looks/authoring.md#stings
+  Guide: docs/looks/authoring.md#frames-stings
 -->
 <script>
   document.write('<style>' + window.splitsmith.engine.css + '</style>');
@@ -106,8 +106,8 @@
   window.poster = function () { return LENGTH / 2; };
   // The footage behind the panel: on the way in the outgoing stage moves
   // right ahead of the panel's leading edge; while it holds the panel
-  // covers everything; on the way out the incoming stage follows its
-  // trailing edge in. Black wherever neither is.
+  // covers everything, so no picture is decoded; on the way out the
+  // incoming stage follows its trailing edge in. Black wherever neither is.
   function footageAt(t, pair) {
     var p = t / LENGTH, x = offset(t);
     g.fillStyle = '#000';
@@ -118,7 +118,8 @@
   window.seek = function (t) {
     now = t;
     paint(t);
-    var F = window.splitsmithFrames;
+    var F = window.splitsmithFrames, p = t / LENGTH;
+    if (p >= 0.4 && p <= 0.6) return Promise.resolve(footageAt(t, { from: null, to: null }));
     return F.at(Math.round(t * (F.fps || S.fps))).then(function (pair) { footageAt(t, pair); });
   };
   window.__splitsmithFit = function () {

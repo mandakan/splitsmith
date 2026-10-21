@@ -259,7 +259,15 @@ class _LazyProber:
         )
 
     def render_template_frames(  # type: ignore[no-untyped-def]
-        self, template: Path, *, context, width: int, height: int, fps: float, max_seconds: float, frames_dir
+        self,
+        template: Path,
+        *,
+        context,
+        width: int,
+        height: int,
+        fps: float,
+        max_seconds: float,
+        frames_dir: Path | None = None,
     ):
         """A frames sting drawn over ``looks check``'s sample edges (#1535)."""
         return self._browser().render_template_frames(
