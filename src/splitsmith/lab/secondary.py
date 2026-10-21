@@ -77,6 +77,7 @@ _VANGUARD = re.compile(r"^video-\d+_singular_display.*\.mov$", re.IGNORECASE)
 _DJI = re.compile(r"^DJI_\d{14}_\d{4}_D.*\.mp4$", re.IGNORECASE)
 _SAMSUNG = re.compile(r"^\d{8}_\d{6}.*\.mp4$", re.IGNORECASE)
 _IPHONE = re.compile(r"^IMG_\d{4}.*\.mov$", re.IGNORECASE)
+_PIXEL = re.compile(r"^PXL_\d{8}_\d{9}.*\.mp4$", re.IGNORECASE)
 
 
 def camera_for(
@@ -104,6 +105,8 @@ def camera_for(
         cid, make, model, mount = "dji-osmoaction4", "DJI", "Osmo Action 4", CameraMount.head
     elif known.startswith("samsung") or _SAMSUNG.match(name):
         cid, make, model, mount = "samsung", "Samsung", None, CameraMount.hand
+    elif known.startswith("google") or _PIXEL.match(name):
+        cid, make, model, mount = "google-pixel", "Google", None, CameraMount.hand
     elif _IPHONE.match(name) or "apple" in ((probe.make or "").lower(), known.split(" ")[0]):
         cid = probe.suggested_id or "apple-iphone"
         make, model, mount = probe.make or "Apple", probe.model, CameraMount.hand
