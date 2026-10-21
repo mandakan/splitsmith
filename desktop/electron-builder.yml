@@ -20,6 +20,7 @@ mac:
   target:
     - target: dmg
       arch: [arm64]
+  icon: build-resources/icon.icns
   category: public.app-category.video
   hardenedRuntime: true
   gatekeeperAssess: false
@@ -33,6 +34,7 @@ mac:
     # readlink -f in the CLI shim needs 12.3; round up to a supported major.
     LSMinimumSystemVersion: "13.0"
 dmg:
+  icon: build-resources/icon.icns
   artifactName: ${productName}-${version}-${arch}.${ext}
   contents:
     - x: 130
