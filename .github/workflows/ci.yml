@@ -33,7 +33,9 @@ jobs:
     # touches the SPA the whole job is skipped (``changes.outputs.python``);
     # every push to main runs it.
     name: python tests ${{ matrix.shard }}/4
-    runs-on: ubuntu-latest
+    # Pinned: ubuntu-latest moved to 26.04, which Playwright's
+    # chromium-headless-shell install does not support yet.
+    runs-on: ubuntu-24.04
     needs: [changes]
     # ``changes`` runs on pull requests only; ``always()`` keeps this job
     # alive when it is skipped (push, dispatch), and a failed detection
