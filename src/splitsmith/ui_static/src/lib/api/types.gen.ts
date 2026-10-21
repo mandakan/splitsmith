@@ -19739,7 +19739,9 @@ export interface operations {
     };
     trim_stage_api_shooters__slug__stages__stage_number__trim_post: {
         parameters: {
-            query?: never;
+            query?: {
+                force?: boolean;
+            };
             header?: never;
             path: {
                 slug: string;
@@ -20310,7 +20312,9 @@ export interface operations {
     };
     trim_for_video_api_shooters__slug__stages__stage_number__videos__video_id__trim_post: {
         parameters: {
-            query?: never;
+            query?: {
+                force?: boolean;
+            };
             header?: never;
             path: {
                 slug: string;

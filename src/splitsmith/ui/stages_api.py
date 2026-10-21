@@ -272,8 +272,11 @@ async def _submit_trim(
     stage: StageEntry,
     video: StageVideo,
     project: MatchProject,
+    *,
+    force: bool = False,
 ) -> JSONResponse:
-    """Validate + dedupe + queue a trim job for ``video``.
+    """Validate + dedupe + queue a trim job for ``video``. ``force``
+    re-cuts a trim the cache would reuse.
 
     Pre-flight checks (reachability, beep present, stage_time set)
     apply equally to primary and secondary -- both need a beep_time
@@ -308,7 +311,12 @@ async def _submit_trim(
         stage_number=stage_number,
         shooter_slug=slug,
         video_id=video.video_id,
-        args={"slug": slug, "stage_number": stage_number, "video_id": video.video_id},
+        args={
+            "slug": slug,
+            "stage_number": stage_number,
+            "video_id": video.video_id,
+            **({"force": True} if force else {}),
+        },
     )
     return JSONResponse(job.model_dump(mode="json"))
 
@@ -788,7 +796,7 @@ async def detect_beep(request: Request, slug: str, stage_number: int, force: boo
 
 
 @router.post("/api/shooters/{slug}/stages/{stage_number}/trim")
-async def trim_stage(request: Request, slug: str, stage_number: int) -> JSONResponse:
+async def trim_stage(request: Request, slug: str, stage_number: int, force: bool = False) -> JSONResponse:
     """Submit an audit-mode short-GOP trim job for the stage's primary.
 
     Backward-compat shim: forwards to the per-video pipeline. Returns
@@ -808,15 +816,17 @@ async def trim_stage(request: Request, slug: str, stage_number: int) -> JSONResp
             status_code=400,
             detail=f"stage {stage_number} has no primary video",
         )
-    return await _submit_trim(state, slug, stage_number, stage, primary, project)
+    return await _submit_trim(state, slug, stage_number, stage, primary, project, force=force)
 
 
 @router.post("/api/shooters/{slug}/stages/{stage_number}/videos/{video_id}/trim")
-async def trim_for_video(request: Request, slug: str, stage_number: int, video_id: str) -> JSONResponse:
+async def trim_for_video(
+    request: Request, slug: str, stage_number: int, video_id: str, force: bool = False
+) -> JSONResponse:
     """Submit an audit-mode trim job for ``video_id`` on ``stage_number``."""
     state = request.app.state.splitsmith_state
     project, stage, video = _server._resolve_stage_video(state, slug, stage_number, video_id)
-    return await _submit_trim(state, slug, stage_number, stage, video, project)
+    return await _submit_trim(state, slug, stage_number, stage, video, project, force=force)
 
 
 @router.post("/api/shooters/{slug}/stages/shot-detect")

@@ -1,6 +1,18 @@
 {
   "entries": [
     {
+      "id": "recut-trim",
+      "date": "2026-10-21",
+      "title": "Re-cut a trim from the clip sheet",
+      "body": "Open a clip on the Footage page, expand Advanced and press Re-cut trim to cut its clip and audio again, for a source file you repaired in place."
+    },
+    {
+      "id": "joined-clips-audio-gaps",
+      "date": "2026-10-21",
+      "title": "Joined clips keep their audio in step",
+      "body": "A stage filmed as two clips joined into one file no longer fails with a short audio error, and shots after the join stay in place on the video."
+    },
+    {
       "id": "renderer-installs-itself",
       "date": "2026-10-20",
       "title": "Overlays and cards no longer go missing",

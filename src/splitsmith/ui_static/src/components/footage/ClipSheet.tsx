@@ -4,7 +4,8 @@
  * take's stage coverage when the recording spans stages, the shooter
  * it belongs to, and Remove. The shipped ClipDetail's writes, in a
  * sheet so the coverage matrix stays in view. In "assign" mode with no
- * clip the body is the unassigned list to pick from.
+ * clip the body is the unassigned list to pick from. Advanced, closed by
+ * default, holds the repairs that are rarely needed (Re-cut trim).
  */
 import { useEffect, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
@@ -83,6 +84,10 @@ export function ClipSheet(props: ClipSheetProps) {
   const { matchId } = useParams<{ matchId?: string }>();
   const [rowBusy, setRowBusy] = useState(false);
   const [detecting, setDetecting] = useState(false);
+  const [advancedOpen, setAdvancedOpen] = useState(false);
+  // The clip a trim was queued for, so a different clip starts unqueued.
+  const [recutFor, setRecutFor] = useState<string | null>(null);
+  const [recutting, setRecutting] = useState(false);
   // Coverage: `saved` is what the server has, `draft` the chip selection;
   // the server suggestion pre-fills the draft only when nothing is saved,
   // so Apply never silently replaces a persisted coverage.
@@ -168,6 +173,7 @@ export function ClipSheet(props: ClipSheetProps) {
   const cameraDetail = [clip.camera?.label, clip.camera?.model, clip.camera?.mount].filter(Boolean).join(" · ");
   const coverageDirty = JSON.stringify(coverageDraft) !== JSON.stringify(coverageSaved);
   const canDetect = video.role !== "ignored" && currentStage != null && !editDenied;
+  const canRecut = canDetect && video.beep_time != null;
 
   async function changeStage(next: string) {
     setRowBusy(true);
@@ -199,6 +205,19 @@ export function ClipSheet(props: ClipSheetProps) {
       onError(apiErrorText(e, "Could not start beep detection."));
     } finally {
       setDetecting(false);
+    }
+  }
+  async function recutTrim() {
+    if (currentStage == null) return;
+    setRecutting(true);
+    onError(null);
+    try {
+      await api.trimForVideo(slug, currentStage, video.video_id, true);
+      setRecutFor(video.video_id);
+    } catch (e) {
+      onError(apiErrorText(e, "Could not start the trim."));
+    } finally {
+      setRecutting(false);
     }
   }
   async function applyCoverage() {
@@ -336,6 +355,29 @@ export function ClipSheet(props: ClipSheetProps) {
               {takeStageCount > 1 ? `moves all ${takeStageCount} stages of this take` : "moves the file"}
             </span>
           </Row>
+        ) : null}
+        {canRecut ? (
+          <div className="flex flex-col gap-3 border-t border-rule pt-3">
+            <button
+              type="button"
+              aria-expanded={advancedOpen}
+              onClick={() => setAdvancedOpen((o) => !o)}
+              className="flex items-center justify-between gap-2 text-left"
+            >
+              <Label>Advanced</Label>
+              <span className="text-sm text-muted">{advancedOpen ? "Hide" : "Show"}</span>
+            </button>
+            {advancedOpen ? (
+              <Row label="Trim">
+                <Button size="sm" onClick={() => void recutTrim()} disabled={busy || recutting}>
+                  {recutting ? "Queuing…" : recutFor === video.video_id ? "Queued" : "Re-cut trim"}
+                </Button>
+                <span className="text-sm text-muted">
+                  Cuts the clip and its audio again from the source file, for a source you repaired in place.
+                </span>
+              </Row>
+            ) : null}
+          </div>
         ) : null}
       </div>
       <div className="mt-auto flex items-center gap-2 border-t border-rule px-4 py-3">

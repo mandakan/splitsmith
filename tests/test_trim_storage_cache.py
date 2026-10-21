@@ -98,7 +98,7 @@ def _project_with_stage_video(root: Path, video_path: Path) -> tuple[MatchProjec
     return project, video
 
 
-def _cut(root: Path, project: MatchProject, video: StageVideo, source: Path) -> Path:
+def _cut(root: Path, project: MatchProject, video: StageVideo, source: Path, *, force: bool = False) -> Path:
     return ensure_video_audit_trim(
         root,
         STAGE,
@@ -107,6 +107,7 @@ def _cut(root: Path, project: MatchProject, video: StageVideo, source: Path) -> 
         BEEP_TIME,
         STAGE_TIME,
         project=project,
+        force=force,
     )
 
 
@@ -212,6 +213,22 @@ def test_local_cache_hit_skips_storage_and_trim(tmp_path: Path, fake_trim: list[
     second = _cut(root, project, video, source)
     assert second == first
     assert len(_trim_calls(fake_trim)) == 1  # unchanged
+
+
+def test_force_recuts_a_current_trim(tmp_path: Path, fake_trim: list[dict[str, object]]) -> None:
+    """The Advanced "Re-cut trim": a trim the cache would reuse (newer than
+    its source, params matching) is cut again, e.g. for a source repaired in
+    place whose mtime a copy or restore did not advance."""
+    root = tmp_path / "p"
+    source = _make_source(tmp_path)
+    project, video = _project_with_stage_video(root, source)
+
+    _cut(root, project, video, source)
+    _cut(root, project, video, source)
+    assert len(_trim_calls(fake_trim)) == 1  # the cache holds without force
+
+    _cut(root, project, video, source, force=True)
+    assert len(_trim_calls(fake_trim)) == 2
 
 
 def test_storage_params_mismatch_recuts(tmp_path: Path, fake_trim: list[dict[str, object]]) -> None:

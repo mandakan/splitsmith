@@ -2643,6 +2643,7 @@ def register_job_bodies(state: AppState) -> None:
         stage_number: int,
         video_id: str,
         chain_shot_detect: bool = True,
+        force: bool = False,
     ) -> None:
         """Worker for the audit-mode trim of a specific video.
 
@@ -2656,6 +2657,7 @@ def register_job_bodies(state: AppState) -> None:
         do not need their own shot-detection run. The bulk maintenance
         pass passes ``chain_shot_detect=False`` -- it regenerates derived
         trim caches without re-running detection over the whole match.
+        ``force`` re-cuts even when the cached trim looks current.
         """
         handle.update(progress=0.1, message="Preparing trim...")
         with handle.timer.phase("load_project"):
@@ -2681,6 +2683,7 @@ def register_job_bodies(state: AppState) -> None:
                 project=proj,
                 runner=_cancellable_runner(handle),
                 ffmpeg_binary=process_runtime().ffmpeg_binary,
+                force=force,
             )
         # The audit WAV is the trim's second product (spec 2026-10-14): the
         # audit screen reads it and never cuts it. Best-effort: a failure

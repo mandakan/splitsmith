@@ -502,6 +502,13 @@ def ensure_audit_audio(
     )
 
 
+#: Pads a hole in the audio timestamps with silence. Two clips joined with
+#: ffmpeg leave one (a 0.59 s hole 22 s into a Pixel stage); without this the
+#: decode closes it, the WAV comes out short of the clip, and every sample
+#: after the join sits early against the video.
+_FILL_GAPS = "aresample=async=1:first_pts=0"
+
+
 def _extract_audio(
     source: Path,
     dest: Path,
@@ -523,6 +530,8 @@ def _extract_audio(
         "1",
         "-ar",
         str(sample_rate),
+        "-af",
+        _FILL_GAPS,
         "-vn",
         str(dest),
     ]
@@ -1288,6 +1297,7 @@ def ensure_video_audit_trim(
     project: MatchProject,
     ffmpeg_binary: str = "ffmpeg",
     runner: object | None = None,
+    force: bool = False,
 ) -> Path:
     """Produce the audit-mode short-GOP trim for ``video`` if not cached.
 
@@ -1295,7 +1305,9 @@ def ensure_video_audit_trim(
     post_buffer]``. Cache key is the source mtime *and* a sidecar params
     JSON; when the beep, stage time, or buffer settings change, the next
     call sees a params mismatch and re-trims even though the source file
-    is untouched.
+    is untouched. ``force`` skips the cache check and re-cuts: the Footage
+    sheet's Advanced "Re-cut trim", for a source repaired in place whose
+    mtime a copy or restore did not advance.
     """
     from .. import trim as trim_module
 
@@ -1325,7 +1337,8 @@ def ensure_video_audit_trim(
             _try_pull_trim_from_storage(project, output)
 
         cache_hit = (
-            output.exists()
+            not force
+            and output.exists()
             and output.stat().st_mtime >= src_resolved.stat().st_mtime
             and params_file.exists()
             and valid_mp4_cached(output).ok
