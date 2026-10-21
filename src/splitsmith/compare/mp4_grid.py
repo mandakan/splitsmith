@@ -47,8 +47,15 @@ from ..composition import (
 from ..export_naming import stage_display_name
 from ..identity import ResolvedIdentity
 from ..look.brand import brand_mark_json
+from ..look.frames import frames_key
 from ..look.motion import MotionClipError, motion_overlay_filters, write_motion_clip
-from ..look.sting import sting_motion, sting_overlay_filters
+from ..look.sting import (
+    FramesSting,
+    frames_sting_filters,
+    render_frames_sting,
+    sting_overlay_filters,
+    sting_plan,
+)
 from ..looks import CardSlot, Look, load_look, sting_template_for
 from ..overlay.card import (
     CardMotion,
@@ -1675,6 +1682,7 @@ def build_boundary_segment_command(
     tail_pad_seconds: float = 0.0,
     head_pad_seconds: float = 0.0,
     sting_clip: Path | None = None,
+    sting_replaces: bool = False,
 ) -> tuple[str, ...]:
     """The boundary segment (issue #1244): ``tail_edge`` crossfaded into
     ``head_edge`` over ``seconds`` with ``xfade``, and every one of the
@@ -1688,21 +1696,36 @@ def build_boundary_segment_command(
 
     ``sting_clip`` (issue #1245) is the sting's alpha clip, a third input
     laid over the crossfaded video for the whole boundary before the
-    final pixel format; without it the argv is exactly what it was."""
+    final pixel format; without it the argv is exactly what it was.
+
+    ``sting_replaces`` (#1535) makes ``sting_clip`` a frames sting's: the
+    clip over opaque black is the whole picture, with no crossfade and no
+    video pads (an unconnected pad fails the graph); every track's audio
+    is the same padded crossfade."""
     rate = canvas.rate_string
     tracks = len(shooter_labels) + 1
     parts: list[str] = []
     tail_v, head_v = "0:v", "1:v"
-    if tail_pad_seconds > 0.0:
+    # A frames sting reads neither edge's video, so it takes no video pad;
+    # the audio pads below are emitted either way.
+    replacing = sting_clip is not None and sting_replaces
+    if tail_pad_seconds > 0.0 and not replacing:
         parts.append(f"[0:v]tpad=stop_mode=clone:stop_duration={tail_pad_seconds:g}[tv]")
         tail_v = "tv"
-    if head_pad_seconds > 0.0:
+    if head_pad_seconds > 0.0 and not replacing:
         parts.append(f"[1:v]tpad=start_mode=clone:start_duration={head_pad_seconds:g}[hv]")
         head_v = "hv"
     xfade = f"[{tail_v}][{head_v}]xfade=transition={xfade_name(kind)}:duration={seconds:g}:offset=0"
     inputs = ["-i", str(tail_edge), "-i", str(head_edge)]
     if sting_clip is None:
         parts.append(f"{xfade},format=yuv420p[final]")
+    elif replacing:
+        # A frames sting (#1535) draws the whole picture: no crossfade.
+        sting_parts, stung = frames_sting_filters(
+            2, rate=rate, seconds=seconds, width=canvas.width, height=canvas.height
+        )
+        parts += [*sting_parts, f"[{stung}]format=yuv420p[final]"]
+        inputs += ["-i", str(sting_clip)]
     else:
         sting_parts, stung = sting_overlay_filters(2, rate=rate, seconds=seconds, source_label="xf")
         parts += [f"{xfade}[xf]", *sting_parts, f"[{stung}]format=yuv420p[final]"]
@@ -3040,9 +3063,15 @@ class _GridEncoder:
         extra_inputs: Sequence[Path] = (),
         virtual_inputs: Mapping[str, str] | None = None,
         report: Callable[[Literal["encoding", "reused"]], None] | None = None,
+        prepare: Callable[[], object] | None = None,
     ) -> tuple[Path | None, str]:
-        """The segment's path, or ``None`` and ffmpeg's complaint."""
+        """The segment's path, or ``None`` and ffmpeg's complaint.
+        ``prepare`` writes an input the command reads (a sting's clip,
+        #1535) and runs only when the command will: never on a cache hit.
+        What it raises reaches the caller."""
         if self.cache is None:
+            if prepare is not None:
+                prepare()
             if report is not None:
                 report("encoding")
             completed = _run_ffmpeg(cmd, runner=runner)
@@ -3061,6 +3090,8 @@ class _GridEncoder:
                 report("reused")
             self.keys_by_path[hit] = key
             return hit, ""
+        if prepare is not None:
+            prepare()
         if report is not None:
             report("encoding")
         partial = self.cache.partial_path(key, suffix=out.suffix)
@@ -3181,6 +3212,65 @@ def _grid_item_label(item: GridItem, stage_names: Sequence[str]) -> str:
 class _EdgeFailedError(Exception):
     """A boundary's edge or the boundary itself could not be rendered; the
     transition becomes a cut."""
+
+
+def _frames_sting_writer(
+    sting: FramesSting,
+    *,
+    tail_edge: Path,
+    head_edge: Path,
+    tail_pad_seconds: float,
+    head_pad_seconds: float,
+    rate: str,
+    key: str,
+    frames_root: Path,
+    clip_path: Path,
+    rasterizer: Rasterizer,
+    ffmpeg_binary: str,
+    runner: Runner,
+) -> Callable[[], None]:
+    """A grid boundary encode's ``prepare`` for a frames sting (#1535):
+    extract both edges and draw the clip. Every value is a parameter, bound
+    when the boundary is decided, so no loop variable reaches the closure.
+    The extractions go through ``runner`` (the boundary runner); a non-zero
+    exit raises :class:`_EdgeFailedError`, which the boundary turns into a
+    cut like any other failed encode."""
+
+    def run(argv: tuple[str, ...]) -> None:
+        done = _run_ffmpeg(argv, runner=runner)
+        if done.returncode != 0:
+            raise _EdgeFailedError(_stderr_text(done))
+
+    def write() -> None:
+        render_frames_sting(
+            sting,
+            tail_edge=tail_edge,
+            head_edge=head_edge,
+            tail_pad_seconds=tail_pad_seconds,
+            head_pad_seconds=head_pad_seconds,
+            rate=rate,
+            key=key,
+            frames_root=frames_root,
+            clip_path=clip_path,
+            rasterizer=rasterizer,
+            ffmpeg_binary=ffmpeg_binary,
+            run=run,
+        )
+
+    return write
+
+
+def _motion_clip_writer(
+    sting: CardMotion, *, clip_path: Path, fps: float, ffmpeg_binary: str
+) -> Callable[[], None]:
+    """A grid boundary encode's ``prepare`` for an overlay sting (#1535):
+    write its alpha clip, so a cache hit draws no frame. Bound like
+    :func:`_frames_sting_writer`."""
+
+    def write() -> None:
+        write_motion_clip(sting.frames, out=clip_path, fps=fps, ffmpeg_binary=ffmpeg_binary)
+
+    return write
 
 
 @dataclass
@@ -3562,9 +3652,11 @@ def render_grid_mp4(
 
     def sting_for_boundary(
         kind: str, before: GridItem, after: GridItem, *, seconds: float
-    ) -> tuple[CardMotion | None, str]:
-        """The sting ``kind`` names, loaded for this boundary, or ``None``
-        and the reason (no browser, not in the Look, failed to load)."""
+    ) -> tuple[CardMotion | FramesSting | None, str]:
+        """The sting ``kind`` names, loaded for this boundary (a
+        :class:`FramesSting` when its template draws from the edges, #1535),
+        or ``None`` and the reason (no browser, not in the Look, failed to
+        load)."""
         name = sting_name(kind)
         if card_look is None or active_rasterizer is None:
             return None, f"sting {name}: no browser to draw it"
@@ -3574,7 +3666,7 @@ def render_grid_mp4(
         shooters_seen = (
             tuple(identities[label] for label in labels_tuple if label in identities) if identities else ()
         )
-        motion = sting_motion(
+        motion = sting_plan(
             card_look,
             kind,
             seconds=seconds,
@@ -3953,7 +4045,7 @@ def render_grid_mp4(
                     prepared[i + 1] = prepare(nxt)
                 half = boundary.duration_seconds / 2.0
                 kind = boundary.kind
-                sting: CardMotion | None = None
+                sting: CardMotion | FramesSting | None = None
                 sting_clip: Path | None = None
                 if is_sting(kind):
                     # Issue #1245: the sting's template, or the fade it
@@ -3969,9 +4061,9 @@ def render_grid_mp4(
                 try:
                     tail_edge = encode_edge(item, prep, half=half, end="tail")
                     head_edge = encode_edge(nxt, prepared[i + 1], half=half, end="head")
-                    if sting is not None and sting_clip is not None:
-                        write_motion_clip(sting.frames, out=sting_clip, fps=canvas.fps, ffmpeg_binary=binary)
                     boundary_out = work / f"{boundary.name}{SEGMENT_SUFFIX}"
+                    tail_pad = _grid_missing_handle(item, half=half, end="tail")
+                    head_pad = _grid_missing_handle(nxt, half=half, end="head")
                     cmd = build_boundary_segment_command(
                         tail_edge,
                         head_edge,
@@ -3981,9 +4073,10 @@ def render_grid_mp4(
                         shooter_labels=labels_tuple,
                         output_path=boundary_out,
                         ffmpeg_binary=binary,
-                        tail_pad_seconds=_grid_missing_handle(item, half=half, end="tail"),
-                        head_pad_seconds=_grid_missing_handle(nxt, half=half, end="head"),
+                        tail_pad_seconds=tail_pad,
+                        head_pad_seconds=head_pad,
                         sting_clip=sting_clip,
+                        sting_replaces=isinstance(sting, FramesSting),
                     )
                     edge_keys = (
                         {
@@ -3993,8 +4086,45 @@ def render_grid_mp4(
                         if segment_cache is not None
                         else None
                     )
+                    # #1535: the sting's clip is written in the encode's
+                    # prepare and keyed by what draws it, so a cache hit
+                    # draws (and for a frames sting extracts) nothing.
+                    prepare_clip: Callable[[], object] | None = None
+                    if isinstance(sting, FramesSting) and sting_clip is not None:
+                        key = frames_key(
+                            sting.digest,
+                            encoder.keys_by_path.get(tail_edge, str(tail_edge)),
+                            encoder.keys_by_path.get(head_edge, str(head_edge)),
+                        )
+                        if edge_keys is not None:
+                            edge_keys[str(sting_clip)] = key
+                        assert active_rasterizer is not None  # sting_for_boundary needs one
+                        prepare_clip = _frames_sting_writer(
+                            sting,
+                            tail_edge=tail_edge,
+                            head_edge=head_edge,
+                            tail_pad_seconds=tail_pad,
+                            head_pad_seconds=head_pad,
+                            rate=canvas.rate_string,
+                            key=key,
+                            frames_root=work / f"{boundary.name}_frames",
+                            clip_path=sting_clip,
+                            rasterizer=active_rasterizer,
+                            ffmpeg_binary=binary,
+                            runner=boundary_runner,
+                        )
+                    elif isinstance(sting, CardMotion) and sting_clip is not None:
+                        if edge_keys is not None:
+                            edge_keys[str(sting_clip)] = sting.digest
+                        prepare_clip = _motion_clip_writer(
+                            sting, clip_path=sting_clip, fps=canvas.fps, ffmpeg_binary=binary
+                        )
                     boundary_segment, error = encoder.encode(
-                        cmd, boundary_out, runner=boundary_runner, virtual_inputs=edge_keys
+                        cmd,
+                        boundary_out,
+                        runner=boundary_runner,
+                        virtual_inputs=edge_keys,
+                        prepare=prepare_clip,
                     )
                     if boundary_segment is None:
                         raise _EdgeFailedError(error)

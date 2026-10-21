@@ -52,7 +52,8 @@ from pathlib import Path
 logger = logging.getLogger(__name__)
 
 #: Bump when the key's recipe changes, so no entry keyed the old way hits.
-KEY_VERSION = 4
+# 5: the grid keys a sting boundary by the sting's digest (#1535)
+KEY_VERSION = 5
 _SMALL_FILE_BYTES = 1 << 20
 _SUFFIX = ".mp4"
 #: Every suffix an entry may carry: the grid's segments are ``.mov``.

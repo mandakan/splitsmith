@@ -1767,6 +1767,74 @@ def test_a_sting_whose_frames_fail_is_a_cut_on_the_grid(tmp_path: Path, monkeypa
     assert all(stage.ok for stage in result.stages)
 
 
+def _frames_grid(tmp_path: Path, monkeypatch, *, boundary_inner=_ok, stage_count: int = 3):
+    """A grid with a ``sting:push`` (a frames sting, #1535) at every boundary."""
+    from tests.look_fixtures import PushRasterizer, install_frames_look
+
+    install_frames_look(tmp_path, monkeypatch)
+    edges, boundary_runner = _recorder(boundary_inner)
+    work = tmp_path / "work"
+    numbers = range(1, stage_count + 1)
+    stages = {label: {n: _bundle(n) for n in numbers} for label in ("Mathias", "Anders")}
+    result = mp4_grid.render_grid_mp4(
+        _shooters(stages),
+        audio_label="Mathias",
+        output_path=tmp_path / "grid.mp4",
+        canvas=CANVAS,
+        runner=_recorder()[1],
+        boundary_runner=boundary_runner,
+        rasterizer=PushRasterizer(),
+        overlay_theme="framesy",
+        work_dir=work,
+        ffmpeg_binary="/bin/ffmpeg",
+        transitions=tuple(
+            composition.Transition(
+                from_stage_index=i, to_stage_index=i + 1, kind="sting:push", duration_seconds=1.0
+            )
+            for i in range(stage_count - 1)
+        ),
+    )
+    return result, edges, work
+
+
+def test_each_grid_frames_boundary_draws_from_its_own_edges_into_its_own_folder(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """#1535: the frames sting's ``prepare`` is bound when its boundary is
+    decided, so two boundaries never share a frames folder or read each
+    other's edges; the clip it writes is the boundary's third input and
+    replaces the crossfade."""
+    drawn: list[dict] = []
+    monkeypatch.setattr(mp4_grid, "render_frames_sting", lambda sting, **kwargs: drawn.append(kwargs))
+    result, edges, work = _frames_grid(tmp_path, monkeypatch)
+    assert result.degradations == ()
+    boundaries = [next(c for c in edges if c[-1].endswith(f"boundary-00{n}.mov")) for n in (0, 1)]
+    assert [d["frames_root"] for d in drawn] == [work / "boundary-000_frames", work / "boundary-001_frames"]
+    for argv, d in zip(boundaries, drawn, strict=True):
+        inputs = [argv[i + 1] for i, token in enumerate(argv) if token == "-i"]
+        assert inputs == [str(d["tail_edge"]), str(d["head_edge"]), str(d["clip_path"])]
+        assert "xfade" not in argv[argv.index("-filter_complex") + 1]
+        assert d["rate"] == CANVAS.rate_string
+    assert drawn[0]["head_edge"] != drawn[1]["head_edge"] and drawn[0]["key"] != drawn[1]["key"]
+
+
+def test_a_failed_grid_edge_extraction_makes_the_frames_boundary_a_cut(tmp_path: Path, monkeypatch) -> None:
+    """#1535: the extraction runs on the boundary runner; a non-zero exit is
+    the grid's edge failure, so the boundary is cut with ffmpeg's complaint."""
+
+    def fails_extraction(cmd, **kwargs) -> subprocess.CompletedProcess:
+        if str(cmd[-1]).endswith("%04d.jpg"):
+            return subprocess.CompletedProcess(cmd, 1, b"", b"no edge")
+        return _ok(cmd, **kwargs)
+
+    result, edges, _work = _frames_grid(tmp_path, monkeypatch, boundary_inner=fails_extraction, stage_count=2)
+    assert any(c[-1].endswith("%04d.jpg") for c in edges), "the extraction went through the boundary runner"
+    (note,) = result.degradations
+    assert "rendered as a cut" in note.summary and "no edge" in note.summary, note.summary
+    assert not any(c[-1].endswith("boundary-000.mov") for c in edges)
+    assert all(stage.ok for stage in result.stages)
+
+
 def test_a_sting_is_told_the_stage_names_either_side_of_a_slate() -> None:
     """The slate's card is built later by the driver, so the item carries
     none; the sting's ``to`` label is the stage the slate opens, never the

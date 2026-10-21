@@ -15,10 +15,13 @@ from splitsmith import composition
 from splitsmith.compare import mp4_grid
 from splitsmith.compare.project_loader import CompareShooterBundle, CompareStageBundle
 from splitsmith.fcpxml_gen import probe_video
+from splitsmith.segment_cache import SegmentCache
 from tests.compare_fixture import cut_clip, probe_seconds, write_audit
+from tests.look_fixtures import PUSH_GAP, PushRasterizer, install_frames_look
 from tests.synthetic_media import (
     SYNTHETIC_FPS_DEN,
     SYNTHETIC_FPS_NUM,
+    build_color_video,
     build_synthetic_video,
     ffmpeg_available,
 )
@@ -203,8 +206,11 @@ class _RedStingRasterizer:
         )
 
 
-def _mean_rgb(path: Path, *, at: float, ffmpeg: str) -> tuple[float, float, float]:
-    """The mean colour of the frame ``at`` seconds into ``path``."""
+def _mean_rgb(
+    path: Path, *, at: float, ffmpeg: str, box: tuple[float, float, float, float] | None = None
+) -> tuple[float, float, float]:
+    """The mean colour of the frame ``at`` seconds into ``path``, over
+    ``box`` (left, top, right, bottom as fractions of the frame) when given."""
     import io
     import subprocess
 
@@ -232,7 +238,13 @@ def _mean_rgb(path: Path, *, at: float, ffmpeg: str) -> tuple[float, float, floa
     )
     assert done.returncode == 0, done.stderr[-2000:].decode("utf-8", "replace")
     with Image.open(io.BytesIO(done.stdout)) as image:
-        r, g, b = ImageStat.Stat(image.convert("RGB")).mean
+        rgb = image.convert("RGB")
+        if box is not None:
+            width, height = rgb.size
+            rgb = rgb.crop(
+                (int(width * box[0]), int(height * box[1]), int(width * box[2]), int(height * box[3]))
+            )
+        r, g, b = ImageStat.Stat(rgb).mean
     return r, g, b
 
 
@@ -307,3 +319,194 @@ def test_a_grid_sting_is_visible_on_the_boundary_and_keeps_every_track(tmp_path:
         ("audio", "Anders"),
         ("audio", "Mathias"),
     ]
+
+
+@pytest.mark.skipif(not ffmpeg_available(), reason="needs ffmpeg and ffprobe on PATH")
+def test_a_cached_grid_sting_draws_no_frame(tmp_path: Path) -> None:
+    """#1535: the grid writes its sting clip in the boundary encode's
+    ``prepare``, so a second render through the same cache reuses the
+    boundary without drawing a frame of the sting."""
+    ffmpeg = shutil.which("ffmpeg")
+    assert ffmpeg
+    shooters = _two_shooters(tmp_path, ffmpeg=ffmpeg)
+    cache = SegmentCache(root=tmp_path / "cache", max_bytes=1 << 30)
+    sting = composition.Transition(
+        from_stage_index=0, to_stage_index=1, kind="sting:wipe", duration_seconds=1.0
+    )
+
+    def render(name: str) -> _RedStingRasterizer:
+        raster = _RedStingRasterizer()
+        result = mp4_grid.render_grid_mp4(
+            shooters,
+            audio_label="Anders",
+            output_path=tmp_path / f"{name}.mp4",
+            canvas=mp4_grid.GridCanvas(640, 360, SYNTHETIC_FPS_NUM, SYNTHETIC_FPS_DEN),
+            head_pad_seconds=0.5,
+            tail_pad_seconds=1.0,
+            ffmpeg_binary=ffmpeg,
+            work_dir=tmp_path / name,
+            rasterizer=raster,
+            transitions=(sting,),
+            segment_cache=cache,
+        )
+        assert result.degradations == () and all(stage.ok for stage in result.stages)
+        return raster
+
+    assert render("first").frames_rendered == 30
+    assert render("second").frames_rendered == 0, "a cached boundary draws no sting frame"
+    assert not (tmp_path / "second" / "boundary-000_sting.mov").exists()
+
+
+# --- frames stings (#1535): the clip replaces the crossfade -------------------------
+
+
+def _colour_shooters(tmp_path: Path) -> list[CompareShooterBundle]:
+    """Two shooters, each with a red stage 1 and a blue stage 2 (4 s, the
+    beep at 1 s), so a boundary pixel says which edge it shows."""
+    shooters: list[CompareShooterBundle] = []
+    for label in ("Anders", "Mathias"):
+        stages: dict[int, CompareStageBundle] = {}
+        for number, colour in ((1, "red"), (2, "blue")):
+            trim = build_color_video(tmp_path / f"{label}-{number}.mp4", color=colour)
+            audit = tmp_path / f"{label}-{number}.json"
+            write_audit(audit, (1100, 1320))
+            meta = probe_video(trim)
+            stages[number] = CompareStageBundle(
+                stage_number=number,
+                stage_name=f"Stage {number}",
+                trim_path=trim,
+                audit_path=audit,
+                beep_offset_in_clip=1.0,
+                duration_seconds=meta.duration_seconds,
+                width=meta.width,
+                height=meta.height,
+                frame_rate_num=meta.frame_rate_num,
+                frame_rate_den=meta.frame_rate_den,
+            )
+        shooters.append(
+            CompareShooterBundle(label=label, project_root=tmp_path / label, stages_by_number=stages)
+        )
+    return shooters
+
+
+_PUSH = composition.Transition(from_stage_index=0, to_stage_index=1, kind="sting:push", duration_seconds=1.0)
+
+
+def _render_framesy(
+    shooters: list[CompareShooterBundle],
+    tmp_path: Path,
+    name: str,
+    *,
+    ffmpeg: str,
+    raster: PushRasterizer,
+    head_pad_seconds: float = 0.5,
+    tail_pad_seconds: float = 1.0,
+    segment_cache: SegmentCache | None = None,
+    argvs: list[list[str]] | None = None,
+) -> mp4_grid.GridRenderResult:
+    def run(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess:
+        if argvs is not None:
+            argvs.append([str(token) for token in cmd])
+        return subprocess.run(cmd, **kwargs)  # type: ignore[call-overload]
+
+    return mp4_grid.render_grid_mp4(
+        shooters,
+        audio_label="Anders",
+        output_path=tmp_path / f"{name}.mp4",
+        canvas=mp4_grid.GridCanvas(640, 360, SYNTHETIC_FPS_NUM, SYNTHETIC_FPS_DEN),
+        head_pad_seconds=head_pad_seconds,
+        tail_pad_seconds=tail_pad_seconds,
+        ffmpeg_binary=ffmpeg,
+        work_dir=tmp_path / name,
+        rasterizer=raster,
+        overlay_theme="framesy",  # type: ignore[arg-type]
+        transitions=(_PUSH,),
+        segment_cache=segment_cache,
+        boundary_runner=run,
+    )
+
+
+#: Both tiles' rows of the 640x360 grid (each 16:9 tile is 320x180, centred).
+_TILE_ROWS = (0.3, 0.7)
+
+
+@pytest.mark.skipif(not ffmpeg_available(), reason="needs ffmpeg and ffprobe on PATH")
+@pytest.mark.parametrize(
+    ("head_pad", "tail_pad", "head_padded"),
+    [(0.5, 1.0, False), (0.9, 2.5, True)],
+    ids=["head-handle", "padded"],
+)
+def test_a_grid_frames_sting_replaces_the_crossfade_with_its_edges(
+    tmp_path: Path, monkeypatch, head_pad: float, tail_pad: float, head_padded: bool
+) -> None:
+    """#1535 on the grid: across the boundary the left half is the incoming
+    (blue) stage, the right half the outgoing edge, the column the sting
+    leaves transparent is black, and the N+1 tracks survive.
+
+    The grid's tail pad runs past every clip (``grid_boundary_fit`` needs it
+    to hold half the transition), so a grid's tail edge is always padded and
+    its tiles are black there: the right half is black, not red. With no
+    head handle (``padded``) the head edge is padded too and its first
+    frame held, so the left half is blue from the first frame."""
+    ffmpeg = shutil.which("ffmpeg")
+    ffprobe = shutil.which("ffprobe")
+    assert ffmpeg and ffprobe
+    install_frames_look(tmp_path, monkeypatch)
+    raster = PushRasterizer()
+    argvs: list[list[str]] = []
+    result = _render_framesy(
+        _colour_shooters(tmp_path), tmp_path, "out", ffmpeg=ffmpeg, raster=raster,
+        head_pad_seconds=head_pad, tail_pad_seconds=tail_pad, argvs=argvs,
+    )  # fmt: skip
+    assert result.degradations == () and all(stage.ok for stage in result.stages)
+    assert raster.frames_drawn == 30, "one second at the grid's rate, drawn once"
+    boundary = tmp_path / "out" / "boundary-000.mov"
+    (argv,) = [a for a in argvs if a[-1] == str(boundary)]
+    graph = argv[argv.index("-filter_complex") + 1]
+    assert "apad=" in graph and ("adelay=" in graph) is head_padded, graph
+    assert probe_seconds(boundary, ffprobe=ffprobe) == pytest.approx(1.0, abs=FRAME)
+    assert _streams(boundary, ffprobe=ffprobe) == [
+        ("video", "VideoHandler"),
+        ("audio", "Mix"),
+        ("audio", "Anders"),
+        ("audio", "Mathias"),
+    ]
+    top, bottom = _TILE_ROWS
+    for at in (0.05, 0.5, 0.95):
+        left = _mean_rgb(boundary, at=at, ffmpeg=ffmpeg, box=(0.05, top, 0.4, bottom))
+        right = _mean_rgb(boundary, at=at, ffmpeg=ffmpeg, box=(0.6, top, 0.95, bottom))
+        assert left[2] > 180 and left[0] < 60, (at, left)
+        assert max(right) < 30, (at, right)  # the outgoing edge, past the clips' end
+        # What the sting leaves transparent is black, not the crossfade under it.
+        gap = _mean_rgb(
+            boundary, at=at, ffmpeg=ffmpeg, box=(PUSH_GAP[0] + 0.02, top, PUSH_GAP[1] - 0.02, bottom)
+        )
+        assert max(gap) < 30, (at, gap)
+
+
+@pytest.mark.skipif(not ffmpeg_available(), reason="needs ffmpeg and ffprobe on PATH")
+def test_a_cached_grid_frames_sting_extracts_and_draws_nothing(tmp_path: Path, monkeypatch) -> None:
+    """#1535: a cached grid boundary is reused without extracting an edge or
+    drawing a frame; an edit to the template misses and draws it again."""
+    ffmpeg = shutil.which("ffmpeg")
+    assert ffmpeg
+    look = install_frames_look(tmp_path, monkeypatch)
+    shooters = _colour_shooters(tmp_path)
+    cache = SegmentCache(root=tmp_path / "cache", max_bytes=1 << 30)
+
+    def render(name: str) -> PushRasterizer:
+        raster = PushRasterizer()
+        result = _render_framesy(shooters, tmp_path, name, ffmpeg=ffmpeg, raster=raster, segment_cache=cache)
+        assert result.degradations == () and all(stage.ok for stage in result.stages)
+        return raster
+
+    first = render("a")
+    assert first.frames_drawn == 30 and first.loads == 2
+    assert (tmp_path / "a" / "boundary-000_frames").is_dir()
+    second = render("b")
+    assert second.frames_drawn == 0 and second.loads == 1, "the decision-time load only"
+    assert not (tmp_path / "b" / "boundary-000_frames").exists(), "a hit extracts nothing"
+    template = look.root / "push.html"
+    template.write_text(template.read_text(encoding="utf-8") + "<!-- edited -->\n", encoding="utf-8")
+    assert render("c").frames_drawn == 30, "a template edit misses and redraws"
+    assert (tmp_path / "c" / "boundary-000_frames").is_dir()
