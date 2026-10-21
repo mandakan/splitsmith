@@ -70,3 +70,59 @@ def test_a_page_draws_a_mounted_frame(raster: ChromiumRasterizer, tmp_path: Path
     offset = 4 * (18 * 64 + 32)
     r, g, b, a = pixel[offset : offset + 4]
     assert a == 255 and b > 200 and r < 40, (r, g, b, a)
+
+
+_PAGE = """<!doctype html><html><head><meta charset='utf-8'>
+<script>document.write('<script src="' + window.splitsmith.assets.shared + '/frames.js"><\\/script>');</script>
+<style>html,body{margin:0;background:transparent}</style></head><body>
+<canvas id='c' width='64' height='36'></canvas><script>
+var g = document.getElementById('c').getContext('2d');
+window.duration = function () { return 2 / 30; };
+window.seek = function (t) {
+  var n = Math.min(window.splitsmithFrames.count - 1, Math.round(t * 30));
+  return window.splitsmithFrames.at(n).then(function (p) {
+    g.clearRect(0, 0, 64, 36);
+    window.splitsmithFrames.draw(g, p.from, 0, 0, 32, 36);
+    window.splitsmithFrames.draw(g, p.to, 32, 0, 32, 36);
+  });
+};
+</script></body></html>"""
+
+
+def test_frames_js_hands_each_frame_pair_and_draws_it(raster: ChromiumRasterizer, tmp_path: Path) -> None:
+    root = tmp_path / "frames"
+    for side, colours in (("from", [(255, 0, 0), (0, 255, 0)]), ("to", [(0, 0, 255), (255, 255, 0)])):
+        (root / "k" / side).mkdir(parents=True)
+        for i, rgb in enumerate(colours):
+            Image.new("RGB", (64, 36), rgb).save(root / "k" / side / f"{i:04d}.jpg", quality=95)
+    page = tmp_path / "look" / "sting.html"
+    page.parent.mkdir()
+    page.write_text(_PAGE, encoding="utf-8")
+    url = "https://look.invalid/frames/k/{}/{:04d}.jpg"
+    ctx = look_frames.with_frames(
+        _context(), fps=30.0, count=2,
+        from_urls=[url.format("from", 0), url.format("from", 1)],
+        to_urls=[url.format("to", 0), url.format("to", 1)],
+    )  # fmt: skip
+    got = raster.render_template_frames(
+        page, context=ctx, width=64, height=36, fps=30.0, max_seconds=1.0, frames_dir=root
+    )
+    try:
+        shots = list(got.frames)
+    finally:
+        got.close()
+
+    def px(buf: bytes, x: int) -> tuple[int, ...]:
+        i = 4 * (18 * 64 + x)
+        return tuple(buf[i : i + 4])
+
+    assert px(shots[0], 8)[0] > 200 and px(shots[0], 56)[2] > 200  # red | blue
+    assert px(shots[-1], 8)[1] > 200 and px(shots[-1], 56)[0] > 200  # green | yellow
+
+
+def test_frames_js_answers_null_pictures_without_frames(raster: ChromiumRasterizer, tmp_path: Path) -> None:
+    page = tmp_path / "look" / "sting.html"
+    page.parent.mkdir()
+    page.write_text(_PAGE, encoding="utf-8")
+    probe = raster.probe_template(page, context=_context(), width=64, height=36)
+    assert probe.errors == ()
