@@ -126,6 +126,10 @@ def test_scan_proposes_each_clip_and_import_assigns_it(tmp_path: Path, source_cl
 
     assert view["status"] == "ready"
     assert view["skipped_files"] == 1
+    assert view["stages"] == [
+        {"stage_number": 1, "stage_name": "S1"},
+        {"stage_number": 2, "stage_name": "S2"},
+    ]
     proposed = {
         c["filename"]: (c["proposal"]["shooter"], c["proposal"]["stage"], c["checked"]) for c in view["clips"]
     }

@@ -1,6 +1,12 @@
 {
   "entries": [
     {
+      "id": "sort-footage-stage-names",
+      "date": "2026-10-21",
+      "title": "Stage names when sorting footage",
+      "body": "On Sort footage, the stage list in a clip's panel and each clip's proposal show the stage name next to its number."
+    },
+    {
       "id": "recut-trim",
       "date": "2026-10-21",
       "title": "Re-cut a trim from the clip sheet",

@@ -115,6 +115,12 @@ class ShooterRef(BaseModel):
     stages: list[int]
 
 
+class SortStage(BaseModel):
+    stage_number: int
+    # Empty for a placeholder stage, whose name is generic.
+    stage_name: str
+
+
 class ClipView(BaseModel):
     clip_id: str
     index: int
@@ -142,6 +148,8 @@ class SortView(BaseModel):
     source_dir: str
     skipped_files: int
     shooters: list[ShooterRef]
+    # The match's stage table, so the page names a stage rather than numbering it.
+    stages: list[SortStage]
     cameras: list[SortCamera]
     clips: list[ClipView]
     # Scrub strips still being built; the page polls while this is > 0.
@@ -324,6 +332,10 @@ def _view(state: Any, record: ScanRecord) -> SortView:
         source_dir=record.source_dir,
         skipped_files=record.skipped_files,
         shooters=refs,
+        stages=[
+            SortStage(stage_number=s.stage_number, stage_name="" if s.placeholder else s.stage_name)
+            for s in match_model.Match.load(state.match_root).stages
+        ],
         cameras=proposal.cameras,
         clips=clips,
         strips_pending=(

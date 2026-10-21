@@ -19,6 +19,7 @@ import {
   setCheckedMany,
   skipClip,
   sortSections,
+  stageLabel,
 } from "./footageSort";
 
 const PHONE: SortCamera = {
@@ -99,6 +100,10 @@ function view(): SortView {
     shooters: [
       { key: "mathias", name: "Mathias Axell", stages: [1, 2] },
       { key: "anton", name: "Anton Johansson", stages: [1, 2] },
+    ],
+    stages: [
+      { stage_number: 1, stage_name: "Lucky Seven" },
+      { stage_number: 2, stage_name: "" },
     ],
     cameras: [PHONE, HEAD],
     clips: [
@@ -371,5 +376,17 @@ describe("import summary", () => {
     expect(importedText(v, imported, 8)).toBe(
       "Imported 3 clips: Mathias Axell 1, Anton Johansson 2. 8 still need you",
     );
+  });
+});
+
+describe("stageLabel", () => {
+  it("names the stage when the match does", () => {
+    expect(stageLabel(1, view())).toBe("Stage 01 · Lucky Seven");
+  });
+
+  it("falls back to the number for a placeholder or an unknown stage", () => {
+    expect(stageLabel(2, view())).toBe("Stage 02");
+    expect(stageLabel(9, view())).toBe("Stage 09");
+    expect(stageLabel(1)).toBe("Stage 01");
   });
 });

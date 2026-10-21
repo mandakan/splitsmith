@@ -81,6 +81,10 @@ function view(): SortView {
       { key: "mathias", name: "Mathias Axell", stages: [1, 2] },
       { key: "anton", name: "Anton Johansson", stages: [1, 2] },
     ],
+    stages: [
+      { stage_number: 1, stage_name: "Lucky Seven" },
+      { stage_number: 2, stage_name: "Long Way Round" },
+    ],
     cameras: [
       {
         key: PHONE,
@@ -187,6 +191,15 @@ describe("FootageSort", () => {
       await screen.findByRole("button", { name: "Choose" }),
     );
     const sheet = screen.getByRole("dialog", { name: "VID_1.mp4" });
+    expect(
+      within(sheet)
+        .getAllByRole("option")
+        .map((o) => o.textContent),
+    ).toEqual([
+      "Choose a stage",
+      "Stage 01 · Lucky Seven",
+      "Stage 02 · Long Way Round",
+    ]);
     await userEvent.selectOptions(
       within(sheet).getByRole("combobox", { name: "Stage" }),
       "2",

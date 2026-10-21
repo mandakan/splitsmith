@@ -10852,6 +10852,13 @@ export interface components {
             /** Scheme */
             scheme: string;
         };
+        /** SortStage */
+        SortStage: {
+            /** Stage Name */
+            stage_name: string;
+            /** Stage Number */
+            stage_number: number;
+        };
         /**
          * SortSummary
          * @description One unfinished sort, as Footage offers it to continue.
@@ -10896,6 +10903,8 @@ export interface components {
             skipped_files: number;
             /** Source Dir */
             source_dir: string;
+            /** Stages */
+            stages: components["schemas"]["SortStage"][];
             /**
              * Status
              * @enum {string}

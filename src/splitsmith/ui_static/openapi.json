@@ -8492,6 +8492,24 @@
     "title": "SortCamera",
     "type": "object"
    },
+   "SortStage": {
+    "properties": {
+     "stage_name": {
+      "title": "Stage Name",
+      "type": "string"
+     },
+     "stage_number": {
+      "title": "Stage Number",
+      "type": "integer"
+     }
+    },
+    "required": [
+     "stage_name",
+     "stage_number"
+    ],
+    "title": "SortStage",
+    "type": "object"
+   },
    "SortSummary": {
     "description": "One unfinished sort, as Footage offers it to continue.",
     "properties": {
@@ -8599,6 +8617,13 @@
       "title": "Source Dir",
       "type": "string"
      },
+     "stages": {
+      "items": {
+       "$ref": "#/components/schemas/SortStage"
+      },
+      "title": "Stages",
+      "type": "array"
+     },
      "status": {
       "enum": [
        "scanning",
@@ -8632,6 +8657,7 @@
      "shooters",
      "skipped_files",
      "source_dir",
+     "stages",
      "status",
      "strips_pending",
      "user_checked"

@@ -244,8 +244,11 @@ export function setChecked(
 
 // --- wording -------------------------------------------------------------
 
-export function stageLabel(stage: number): string {
-  return `Stage ${String(stage).padStart(2, "0")}`;
+/** ``Stage 03``, or ``Stage 03 · Lucky Seven`` when the view names it. */
+export function stageLabel(stage: number, view?: SortView): string {
+  const label = `Stage ${String(stage).padStart(2, "0")}`;
+  const name = view?.stages.find((s) => s.stage_number === stage)?.stage_name;
+  return name ? `${label} · ${name}` : label;
 }
 
 /** ``42 s``, ``1:42``, ``2 h 05 min``, ``76 days``. */

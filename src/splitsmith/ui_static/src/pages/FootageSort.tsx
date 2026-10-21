@@ -422,7 +422,7 @@ function ClipTable({
               <Td kind="name">
                 {clip.proposal.stage !== null &&
                 clip.proposal.confidence !== "skipped"
-                  ? `${checkable ? "" : `${shooterName(view, clip.proposal.shooter)} · `}${stageLabel(clip.proposal.stage)}`
+                  ? `${checkable ? "" : `${shooterName(view, clip.proposal.shooter)} · `}${stageLabel(clip.proposal.stage, view)}`
                   : "None"}
               </Td>
               <Td>
@@ -657,7 +657,7 @@ function AssignSheet({
             <option value="">Choose a stage</option>
             {stages.map((n) => (
               <option key={n} value={n}>
-                {stageLabel(n)}
+                {stageLabel(n, view)}
               </option>
             ))}
           </select>
