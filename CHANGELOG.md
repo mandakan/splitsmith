@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.85.1](https://github.com/mandakan/splitsmith/compare/v0.85.0...v0.85.1) (2026-10-21)
+
+
+### Bug Fixes
+
+* **deps:** bump certifi to 2026.10.19 for the emSign CA removal ([#1637](https://github.com/mandakan/splitsmith/issues/1637)) ([f4ea3ea](https://github.com/mandakan/splitsmith/commit/f4ea3ea478d4f2a0e5a874ae101a2a917d3b41f6))
+
+
+### Documentation
+
+* sharper README tagline, add PyPI classifiers for the python badge ([#1635](https://github.com/mandakan/splitsmith/issues/1635)) ([d2e23ba](https://github.com/mandakan/splitsmith/commit/d2e23bade080d2d7f6549328a61b7a45d6c4b17b))
+
 ## [0.85.0](https://github.com/mandakan/splitsmith/compare/v0.84.0...v0.85.0) (2026-10-20)
 
 
