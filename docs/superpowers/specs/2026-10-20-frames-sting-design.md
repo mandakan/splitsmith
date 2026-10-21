@@ -43,7 +43,8 @@ today's context, digest, argv and pixels byte for byte.
   first), so the list is what the boundary shows and a template does no
   index arithmetic.
 - **Helper.** `_shared/frames.js` exposes `window.splitsmithFrames.at(n)`,
-  a Promise of `{from, to}` as decoded `ImageBitmap`s, closing the
+  a Promise of `{from, to}` as decoded `ImageBitmap`s (each `null` when
+  the context carries no `frames`), closing the
   previous pair so at most two frames are held. A template's `seek(t)`
   awaits it (`seek` may already return a Promise) and draws onto a
   `<canvas>`. Preloading every frame is about 1.2 GB decoded at 1080p, so
@@ -87,8 +88,15 @@ today's context, digest, argv and pixels byte for byte.
   nothing.
 - **When the sting is decided.** `sting_for_boundary` keeps deciding the
   sting before the edges are encoded (template present, browser present).
-  For a frames sting it returns the template, the frames-free context and
-  the digest without starting a page; drawing waits for `prepare`.
+  For a frames sting it loads the template once with the frames-free
+  context, exactly as an overlay sting is loaded today, to read
+  `sounds()`: the boundary's timeline entry carries those cues on a cache
+  hit too, and on a hit there is no second load. No frame is pulled from
+  that load. Drawing waits for `prepare`, which loads it again with
+  `frames`. So **`duration()` and `sounds()` must not depend on the
+  frames** (they get the transition's length, as today), and a template
+  loaded without `frames` must not throw; `frames.js` answers `null`
+  pictures then, and `looks check`'s ordinary probe is that load.
 - **Digest.** `template_digest` over the context without `frames`, plus
   the fps and both edges' segment cache keys. With the cache off there are
   no edge keys and nothing is cached, as today. The boundary's virtual
