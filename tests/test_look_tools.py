@@ -535,12 +535,18 @@ def test_an_unknown_look_is_an_error(user_dir: Path) -> None:
 class _Raster:
     def __init__(self) -> None:
         self.templates: list[str] = []
+        self.frames_dirs: dict[str, Path | None] = {}
+        self.contexts: dict[str, object] = {}
 
     def png(self, html: str, *, width: int, height: int) -> bytes:
         return self._blank(width, height)
 
-    def render_template(self, template: Path, *, context, width: int, height: int) -> bytes:
+    def render_template(
+        self, template: Path, *, context, width: int, height: int, frames_dir: Path | None = None
+    ) -> bytes:
         self.templates.append(template.name)
+        self.frames_dirs[template.name] = frames_dir
+        self.contexts[template.name] = context
         return self._blank(width, height)
 
     def engine_version(self) -> str:
@@ -596,8 +602,34 @@ def test_preview_refuses_a_broken_user_look_instead_of_drawing_the_shipped_one(u
         look_tools.preview_look("clean", rasterizer=_Raster(), out=user_dir / "out")
 
 
+def test_preview_draws_a_frames_sting_over_sample_edges(user_dir: Path, tmp_path: Path) -> None:
+    look_tools.new_look("club", from_look="splitsmith", templates=True)
+    raster = _Raster()
+    seen: dict[str, bool] = {}
+    original = raster.render_template
+
+    def spy(template, *, context, width, height, frames_dir=None):  # noqa: ANN001
+        if frames_dir is not None:
+            urls = context.data["transition"]["frames"]
+            seen["files"] = all(
+                (frames_dir / u.removeprefix("https://look.invalid/frames/")).is_file()
+                for u in (*urls["from"], *urls["to"])
+            )
+        return original(template, context=context, width=width, height=height, frames_dir=frames_dir)
+
+    raster.render_template = spy  # type: ignore[method-assign]
+    look_tools.preview_look("club", rasterizer=raster, out=tmp_path / "out")
+    assert raster.frames_dirs["sting-push.html"] is not None, "the frames sting is given its frames"
+    assert raster.frames_dirs["sting-wipe.html"] is None, "an ordinary sting is not"
+    assert seen == {"files": True}, "the frames still exist while the sting draws"
+    frames = raster.contexts["sting-push.html"].data["transition"]["frames"]
+    assert frames["count"] == len(frames["from"]) == len(frames["to"]) >= 1
+
+
 class _ThrowingRaster(_Raster):
-    def render_template(self, template: Path, *, context, width: int, height: int) -> bytes:
+    def render_template(
+        self, template: Path, *, context, width: int, height: int, frames_dir: Path | None = None
+    ) -> bytes:
         from splitsmith.overlay.raster import TemplateScriptError
 
         raise TemplateScriptError(f"{template.name}: boom")

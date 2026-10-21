@@ -23,6 +23,7 @@ import hashlib
 import io
 import json
 import logging
+import math
 import subprocess
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
@@ -41,6 +42,8 @@ from .hud_extras import hud_extras_from
 from .identity import ResolvedIdentity
 from .logo_placeholder import PLACEHOLDER_REVISION
 from .look.brand import brand_mark_json
+from .look.frames import FRAMES_MOUNT, wants_frames, with_frames
+from .look.sandbox import ORIGIN
 from .look.sting import sting_context
 from .look.template import shared_digest
 from .looks import Look, overlay_template_for, sting_template_for
@@ -212,7 +215,7 @@ def _confirmed_regions(audit_doc: dict | None, *, breakdown: bool = True) -> lis
 #: clear of the pasted shooter logo (#1432); every upright card keeps its
 #: text out of the platform safe area, its info lines at one size, and the
 #: end screen never breaks a word.
-PREVIEW_REVISION = 9
+PREVIEW_REVISION = 10
 
 
 def preview_key(
@@ -540,17 +543,56 @@ def render_preview(
             shooters=size["shooters"],  # type: ignore[arg-type]
             brand=brand_mark_json(look, brand) if "wipe" in spec.logo_spots else None,
         )
+        frames_dir: Path | None = None
+        if wants_frames(template):
+            # A frames sting draws the whole boundary itself (#1535): the
+            # stage's tail leaves, its head arrives. Without the pictures it
+            # is black.
+            frames_dir = work_dir / "sting-frames"
+            tail = frame
+            if spec.backdrop != "demo" and trim is not None and ffmpeg_binary:
+                tail = grab_frame(
+                    trim,
+                    seconds=beep + last_shot + spec.tail_pad_seconds,
+                    at="tail",
+                    ffmpeg_binary=ffmpeg_binary,
+                    out=work_dir / "frame-tail.png",
+                )
+                if tail is not None and grade is not None:
+                    with Image.open(tail) as still:
+                        graded = apply_lut(still, blend(read_cube(grade.source), grade.strength))
+                    tail = work_dir / "frame-tail-graded.png"
+                    graded.save(tail)
+                tail = tail or frame
+            count = max(1, math.ceil(STING_PREVIEW_SECONDS * MOTION_FPS - 1e-9))
+            urls = {
+                side: _write_sting_frame(frames_dir, side, still, spec, theme)
+                for side, still in (("from", tail), ("to", frame))
+            }
+            context = with_frames(
+                context,
+                fps=float(MOTION_FPS),
+                count=count,
+                from_urls=[urls["from"]] * count,
+                to_urls=[urls["to"]] * count,
+            )
         if moving:
-            webp = _sting_motion(template, context, spec, rasterizer, frame, theme)
+            webp = _sting_motion(template, context, spec, rasterizer, frame, theme, frames_dir)
             if webp is not None:
                 return webp
         try:
-            layer = rasterizer.render_template(
-                template, context=context, width=spec.width, height=spec.height
-            )
+            if frames_dir is None:
+                layer = rasterizer.render_template(
+                    template, context=context, width=spec.width, height=spec.height
+                )
+            else:
+                layer = rasterizer.render_template(
+                    template, context=context, width=spec.width, height=spec.height, frames_dir=frames_dir
+                )
         except Exception as exc:  # noqa: BLE001 -- the preview says why, never a traceback
             raise PreviewError(503, f"the sting could not be drawn: {exc}") from exc
-        image = _compose_over(frame, layer, spec, theme)
+        # A frames sting is the whole picture: over black, never the head frame.
+        image = _compose_over(frame, layer, spec, theme) if frames_dir is None else _black_under(layer, spec)
     elif spec.card in ("title", "closing"):
         card = composition.MatchTitle(
             text=name,
@@ -891,8 +933,12 @@ def _sting_motion(  # type: ignore[no-untyped-def]
     rasterizer: Rasterizer,
     frame: Path | None,
     theme: OverlayTheme,
+    frames_dir: Path | None = None,
 ) -> bytes | None:
-    """The sting's frames over the stage's frame, as a looping WebP."""
+    """The sting's frames over the stage's frame, as a looping WebP. A
+    frames sting (``frames_dir`` set) draws the whole picture, so it goes
+    over black."""
+    extra = {} if frames_dir is None else {"frames_dir": frames_dir}
     frames = rasterizer.render_template_frames(
         template,
         context=context,
@@ -900,6 +946,7 @@ def _sting_motion(  # type: ignore[no-untyped-def]
         height=spec.height,
         fps=MOTION_FPS,
         max_seconds=STING_PREVIEW_SECONDS,
+        **extra,
     )
     try:
         if frames.duration <= 0:
@@ -907,8 +954,29 @@ def _sting_motion(  # type: ignore[no-untyped-def]
         layers = _layers(frames.frames, spec.width, spec.height)
     finally:
         frames.close()
-    base = _compose_over(frame, None, spec, theme).convert("RGBA")
+    if frames_dir is not None:
+        base = Image.new("RGBA", (spec.width, spec.height), (0, 0, 0, 255))
+    else:
+        base = _compose_over(frame, None, spec, theme).convert("RGBA")
     return _webp([Image.alpha_composite(base, layer).convert("RGB") for layer in layers])
+
+
+def _write_sting_frame(
+    frames_dir: Path, side: str, still: Path | None, spec: PreviewSpec, theme: OverlayTheme
+) -> str:
+    """``still`` (the surface when there is none) as the ``side`` edge's one
+    JPEG under ``frames_dir``, at the preview's size; its sandbox URL."""
+    target = frames_dir / "k" / side
+    target.mkdir(parents=True, exist_ok=True)
+    _compose_over(still, None, spec, theme).save(target / "0000.jpg", quality=92)
+    return f"{ORIGIN}/{FRAMES_MOUNT}/k/{side}/0000.jpg"
+
+
+def _black_under(layer: bytes, spec: PreviewSpec) -> Image.Image:
+    out = Image.new("RGBA", (spec.width, spec.height), (0, 0, 0, 255))
+    with Image.open(io.BytesIO(layer)) as top:
+        out.alpha_composite(top.convert("RGBA"))
+    return out.convert("RGB")
 
 
 class _AtTime:
@@ -922,9 +990,12 @@ class _AtTime:
     def png(self, html: str, *, width: int, height: int) -> bytes:
         return self._inner.png(html, width=width, height=height)
 
-    def render_template(self, template: Path, *, context, width: int, height: int) -> bytes:  # type: ignore[no-untyped-def]
+    def render_template(  # type: ignore[no-untyped-def]
+        self, template: Path, *, context, width: int, height: int, frames_dir: Path | None = None
+    ) -> bytes:
+        extra = {} if frames_dir is None else {"frames_dir": frames_dir}
         return self._inner.render_template(  # type: ignore[call-arg]
-            template, context=context, width=width, height=height, at=self._at
+            template, context=context, width=width, height=height, at=self._at, **extra
         )
 
     def __getattr__(self, name: str):  # type: ignore[no-untyped-def]

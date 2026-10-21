@@ -1229,10 +1229,33 @@ def preview_look(
                 theme=theme_for(look),
                 shooters=shooters,
             )
-            try:
-                png = rasterizer.render_template(
-                    template, context=context, width=PREVIEW_WIDTH, height=PREVIEW_HEIGHT
+            frames_dir: Path | None = None
+            if wants_frames(template):
+                # A frames sting draws the whole boundary: hand it the sample
+                # edges ``looks check`` uses, or the push shows black.
+                frames_dir = Path(tmp) / f"sting-frames-{variant}"
+                count = max(1, math.ceil(1.0 * CHECK_FPS - 1e-9))
+                froms, tos = sample_edges(frames_dir, width=PREVIEW_WIDTH, height=PREVIEW_HEIGHT, count=count)
+                context = with_frames(
+                    context,
+                    fps=CHECK_FPS,
+                    count=count,
+                    from_urls=[f"{ORIGIN}/frames/k/from/{p.name}" for p in froms],
+                    to_urls=[f"{ORIGIN}/frames/k/to/{p.name}" for p in tos],
                 )
+            try:
+                if frames_dir is None:
+                    png = rasterizer.render_template(
+                        template, context=context, width=PREVIEW_WIDTH, height=PREVIEW_HEIGHT
+                    )
+                else:
+                    png = rasterizer.render_template(
+                        template,
+                        context=context,
+                        width=PREVIEW_WIDTH,
+                        height=PREVIEW_HEIGHT,
+                        frames_dir=frames_dir,
+                    )
             except TemplateScriptError:
                 skipped.append(f"sting / {variant}")
                 continue

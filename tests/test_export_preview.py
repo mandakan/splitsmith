@@ -27,6 +27,8 @@ class _StubRasterizer:
         self.motion_seconds = motion_seconds
         self.frame_requests: list[tuple] = []
         self.frames_rendered = 0
+        self.frames_dirs: list[Path | None] = []
+        self.contexts: list = []
 
     def png(self, html: str, *, width: int, height: int) -> bytes:
         self.htmls.append(html)
@@ -34,9 +36,13 @@ class _StubRasterizer:
         Image.new("RGBA", (width, height), (0, 0, 0, 0)).save(buf, format="PNG")
         return buf.getvalue()
 
-    def render_template(self, template: Path, *, context, width: int, height: int) -> bytes:
+    def render_template(
+        self, template: Path, *, context, width: int, height: int, frames_dir: Path | None = None
+    ) -> bytes:
         import json
 
+        self.frames_dirs.append(frames_dir)
+        self.contexts.append(context)
         self.htmls.append(json.dumps(context.data, ensure_ascii=False))
         buf = io.BytesIO()
         Image.new("RGBA", (width, height), (0, 0, 0, 0)).save(buf, format="PNG")
@@ -46,7 +52,15 @@ class _StubRasterizer:
         return "fake"
 
     def render_template_frames(
-        self, template, *, context, width: int, height: int, fps: float, max_seconds: float
+        self,
+        template,
+        *,
+        context,
+        width: int,
+        height: int,
+        fps: float,
+        max_seconds: float,
+        frames_dir: Path | None = None,
     ):
         """A still unless ``motion_seconds`` is set; frames are blank and
         counted in ``frames_rendered`` as they are pulled."""
@@ -56,6 +70,8 @@ class _StubRasterizer:
         from splitsmith.overlay.raster import TemplateFrames
 
         self.htmls.append(json.dumps(context.data, ensure_ascii=False))
+        self.frames_dirs.append(frames_dir)
+        self.contexts.append(context)
         self.frame_requests.append((template, context.model_dump(), width, height, fps, max_seconds))
         duration = self.motion_seconds
         count = 1 if duration <= 0 else max(1, math.ceil(min(duration, max_seconds) * fps - 1e-9))
@@ -394,7 +410,7 @@ def test_the_variant_reaches_the_cards_template(tmp_path: Path) -> None:
     seen: list[str] = []
 
     class _Recording(_StubRasterizer):
-        def render_template(self, template, *, context, width, height):
+        def render_template(self, template, *, context, width, height, frames_dir=None):
             seen.append(template.name)
             return super().render_template(template, context=context, width=width, height=height)
 
@@ -614,3 +630,108 @@ def test_the_previews_match_summary_shows_the_timer_draw(tmp_path: Path) -> None
     summary = ep.match_summary_for(project, {3: doc}, title="T", label="M", work_dir=tmp_path / "work")
     assert summary.rows[0].draw == pytest.approx(1.42)
     assert summary.best_draw == pytest.approx(1.42)
+
+
+# --- frames stings (#1535) -----------------------------------------------------
+
+
+def _frames_urls(raster: _StubRasterizer) -> tuple[dict, Path | None]:
+    (context,) = raster.contexts
+    return context.data["transition"]["frames"], raster.frames_dirs[-1]
+
+
+def _spec_for_push(**kw) -> ep.PreviewSpec:  # noqa: ANN003
+    return ep.PreviewSpec(card="sting", stage_number=3, width=480, variant="push", backdrop="demo", **kw)
+
+
+def test_a_frames_sting_motion_preview_is_handed_the_stage_frames(tmp_path: Path) -> None:
+    import math
+
+    raster = _StubRasterizer(motion_seconds=1.0)
+    data = _render(tmp_path, _spec_for_push(motion=True), audit=AUDIT, raster=raster)
+    with Image.open(io.BytesIO(data)) as image:
+        assert image.format == "WEBP"
+    frames, frames_dir = _frames_urls(raster)
+    assert frames_dir == tmp_path / "work" / "sting-frames"
+    count = math.ceil(ep.STING_PREVIEW_SECONDS * ep.MOTION_FPS)
+    assert frames["count"] == count == len(frames["from"]) == len(frames["to"])
+    assert len(set(frames["from"])) == 1 and len(set(frames["to"])) == 1
+    assert frames["from"][0] != frames["to"][0]
+    for url in (frames["from"][0], frames["to"][0]):
+        relative = url.removeprefix("https://look.invalid/frames/")
+        assert (frames_dir / relative).is_file(), url
+
+
+def test_a_frames_sting_still_preview_mounts_the_frames_too(tmp_path: Path) -> None:
+    raster = _StubRasterizer()
+    png = _render(tmp_path, _spec_for_push(), audit=AUDIT, raster=raster)
+    assert _png_size(png) == (480, 270)
+    _frames, frames_dir = _frames_urls(raster)
+    assert frames_dir == tmp_path / "work" / "sting-frames"
+
+
+def test_a_frames_sting_grabs_the_stage_tail_for_the_outgoing_side(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    project, root = _project(tmp_path)
+    trim = root / "trim.mp4"
+    trim.write_bytes(b"x")
+    calls: list[dict] = []
+
+    def fake_grab(video, *, seconds, at, ffmpeg_binary, out):  # noqa: ANN001
+        calls.append({"seconds": seconds, "at": at})
+        Image.new("RGB", (64, 36), (200, 0, 0) if at == "tail" else (0, 0, 200)).save(out)
+        return out
+
+    monkeypatch.setattr(ep, "grab_frame", fake_grab)
+    monkeypatch.setattr(ep, "_trim_for", lambda *_a, **_k: (trim, 5.0))
+    raster = _StubRasterizer()
+    ep.render_preview(
+        ep.PreviewSpec(card="sting", stage_number=3, width=480, variant="push"),
+        project=project,
+        root=root,
+        audit_doc=AUDIT,
+        look=load_look("splitsmith"),
+        rasterizer=raster,
+        ffmpeg_binary="ffmpeg",
+        work_dir=tmp_path / "work",
+    )
+    assert [c["at"] for c in calls] == ["head", "tail"]
+    frames, frames_dir = _frames_urls(raster)
+    out = Image.open(frames_dir / frames["from"][0].removeprefix("https://look.invalid/frames/"))
+    arriving = Image.open(frames_dir / frames["to"][0].removeprefix("https://look.invalid/frames/"))
+    assert out.convert("RGB").getpixel((240, 135))[0] > 150, "from is the tail frame"
+    assert arriving.convert("RGB").getpixel((240, 135))[2] > 150, "to is the head frame"
+
+
+def test_a_sting_without_frames_is_drawn_as_before(tmp_path: Path) -> None:
+    raster = _StubRasterizer()
+    _render(
+        tmp_path,
+        ep.PreviewSpec(card="sting", stage_number=3, width=480, variant="wipe", backdrop="demo"),
+        audit=AUDIT,
+        raster=raster,
+    )
+    assert raster.frames_dirs == [None]
+    assert "frames" not in raster.contexts[0].data["transition"]
+
+
+def test_the_preview_revision_moved_for_frames_stings() -> None:
+    assert ep.PREVIEW_REVISION == 10
+
+
+def test_at_time_passes_frames_dir_through(tmp_path: Path) -> None:
+    raster = _StubRasterizer()
+    at = ep._AtTime(raster, 0.4)
+    seen: dict = {}
+
+    class _Inner(_StubRasterizer):
+        def render_template(self, template, *, context, width, height, at=None, frames_dir=None):
+            seen.update(at=at, frames_dir=frames_dir)
+            return b""
+
+    ep._AtTime(_Inner(), 0.4).render_template(
+        Path("t.html"), context=None, width=1, height=1, frames_dir=tmp_path
+    )
+    assert seen == {"at": 0.4, "frames_dir": tmp_path}
+    assert at is not None

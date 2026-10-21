@@ -181,11 +181,20 @@ class Rasterizer(Protocol):
 
     def png(self, html: str, *, width: int, height: int) -> bytes: ...
 
-    def render_template(self, template: Path, *, context: TemplateContext, width: int, height: int) -> bytes:
+    def render_template(
+        self,
+        template: Path,
+        *,
+        context: TemplateContext,
+        width: int,
+        height: int,
+        frames_dir: Path | None = None,
+    ) -> bytes:
         """A Look template (``splitsmith.look.template``) to an alpha PNG:
         ``context`` is installed as ``window.splitsmith`` before the
         document's scripts run, the template is rendered at its poster
-        (``poster()``, else the midpoint of ``duration()``, else 0)."""
+        (``poster()``, else the midpoint of ``duration()``, else 0).
+        ``frames_dir`` mounts a frames sting's pictures (#1535)."""
         ...
 
     def engine_version(self) -> str:
@@ -1003,6 +1012,7 @@ class ChromiumRasterizer:
         width: int,
         height: int,
         at: float | None = None,
+        frames_dir: Path | None = None,
     ) -> bytes:
         """Render a Look template to a ``width`` x ``height`` alpha PNG at
         its poster frame (``poster()``, else the midpoint of
@@ -1021,7 +1031,9 @@ class ChromiumRasterizer:
                 "ChromiumRasterizer.render_template() called outside its own 'with' block -- the browser is "
                 "only live between __enter__ and __exit__"
             )
-        view = self._open_template(template, context=context, width=width, height=height)
+        view = self._open_template(
+            template, context=context, width=width, height=height, frames_dir=frames_dir
+        )
         try:
             seconds = at if at is not None else float(view.call("poster") or 0)
             view.call("seek", seconds)
