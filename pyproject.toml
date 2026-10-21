@@ -59,7 +59,7 @@ dependencies = [
     # import it directly, so we pin it as a first-class runtime dep
     # now that the torch trio moved to [dev]. Caught by the clean-venv
     # smoke test 2026-05-23.
-    "pillow>=10.0.0",
+    "pillow>=13.0.0",
     # Model Context Protocol server (issue #211). Wraps the existing
     # HTTP / library APIs as tools any MCP-aware client can drive.
     # Stdio transport is the default; SSE comes for free.
