@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.86.0](https://github.com/mandakan/splitsmith/compare/v0.85.1...v0.86.0) (2026-10-21)
+
+
+### Features
+
+* **desktop:** macOS app and DMG icon ([#1642](https://github.com/mandakan/splitsmith/issues/1642)) ([24941bc](https://github.com/mandakan/splitsmith/commit/24941bc94dcab342fd5b19d217548f5080d70e7d))
+* **lab:** recognise Google Pixel phones, promote Black Handgun 2023 to the corpus ([#1641](https://github.com/mandakan/splitsmith/issues/1641)) ([9722871](https://github.com/mandakan/splitsmith/commit/972287186d7e403ae1a42c439766f0bb573fca3c))
+* **ui:** Re-cut trim under Advanced, and keep joined clips' audio in step ([#1640](https://github.com/mandakan/splitsmith/issues/1640)) ([1cf5332](https://github.com/mandakan/splitsmith/commit/1cf53320b54e6ae307cd399691cee35914cb32f7))
+
 ## [0.85.1](https://github.com/mandakan/splitsmith/compare/v0.85.0...v0.85.1) (2026-10-21)
 
 
