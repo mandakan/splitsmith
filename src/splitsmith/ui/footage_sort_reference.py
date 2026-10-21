@@ -70,7 +70,8 @@ def project_reference(
             source_file=trim,
             frame_at=beep + FRAME_AFTER_BEEP_S,
         )
-    if not primary.path.is_file():
+    raw = project.resolve_video_path(root, primary.path)
+    if not raw.is_file():
         return None
     return ProjectReference(
         shooter=slug,
@@ -78,7 +79,7 @@ def project_reference(
         video_path=str(primary.path),
         video_id=primary.video_id,
         stream_kind="auto",
-        source_file=primary.path,
+        source_file=raw,
         frame_at=FRAME_RAW_S,
     )
 

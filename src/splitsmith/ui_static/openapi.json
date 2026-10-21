@@ -8351,12 +8351,20 @@
       },
       "title": "Stages",
       "type": "array"
+     },
+     "stages_with_footage": {
+      "items": {
+       "type": "integer"
+      },
+      "title": "Stages With Footage",
+      "type": "array"
      }
     },
     "required": [
      "key",
      "name",
-     "stages"
+     "stages",
+     "stages_with_footage"
     ],
     "title": "ShooterRef",
     "type": "object"
@@ -8492,6 +8500,84 @@
     "title": "SortCamera",
     "type": "object"
    },
+   "SortReference": {
+    "description": "A shooter's stage as the compare panel can show it: the primary in\ntheir project, else this sort's checked clip for it.",
+    "properties": {
+     "clip_id": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Clip Id"
+     },
+     "frame": {
+      "title": "Frame",
+      "type": "boolean"
+     },
+     "shooter": {
+      "title": "Shooter",
+      "type": "string"
+     },
+     "source": {
+      "enum": [
+       "project",
+       "sort"
+      ],
+      "title": "Source",
+      "type": "string"
+     },
+     "stage": {
+      "title": "Stage",
+      "type": "integer"
+     },
+     "stream_kind": {
+      "enum": [
+       "trim",
+       "auto"
+      ],
+      "title": "Stream Kind",
+      "type": "string"
+     },
+     "video_id": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Video Id"
+     },
+     "video_path": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Video Path"
+     }
+    },
+    "required": [
+     "clip_id",
+     "frame",
+     "shooter",
+     "source",
+     "stage",
+     "stream_kind",
+     "video_id",
+     "video_path"
+    ],
+    "title": "SortReference",
+    "type": "object"
+   },
    "SortStage": {
     "properties": {
      "stage_name": {
@@ -8591,11 +8677,22 @@
       ],
       "title": "Error"
      },
+     "frames_pending": {
+      "title": "Frames Pending",
+      "type": "integer"
+     },
      "overrides": {
       "items": {
        "$ref": "#/components/schemas/Override"
       },
       "title": "Overrides",
+      "type": "array"
+     },
+     "references": {
+      "items": {
+       "$ref": "#/components/schemas/SortReference"
+      },
+      "title": "References",
       "type": "array"
      },
      "scan_id": {
@@ -8652,7 +8749,9 @@
      "cameras",
      "clips",
      "error",
+     "frames_pending",
      "overrides",
+     "references",
      "scan_id",
      "shooters",
      "skipped_files",
@@ -15011,6 +15110,62 @@
      }
     },
     "summary": "Import Scan"
+   }
+  },
+  "/api/match/footage-sort/{scan_id}/reference-frames/{slug}/{stage}.jpg": {
+   "get": {
+    "description": "The compare panel's frame for a shooter's stage; 404 until built.",
+    "operationId": "get_reference_frame_api_match_footage_sort__scan_id__reference_frames__slug___stage__jpg_get",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "scan_id",
+      "required": true,
+      "schema": {
+       "title": "Scan Id",
+       "type": "string"
+      }
+     },
+     {
+      "in": "path",
+      "name": "slug",
+      "required": true,
+      "schema": {
+       "title": "Slug",
+       "type": "string"
+      }
+     },
+     {
+      "in": "path",
+      "name": "stage",
+      "required": true,
+      "schema": {
+       "title": "Stage",
+       "type": "integer"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Get Reference Frame"
    }
   },
   "/api/match/footage-sort/{scan_id}/thumbs/{index}.jpg": {

@@ -759,3 +759,99 @@ def test_the_fingerprint_backfill_runs_off_the_event_loop(
     on_loop.clear()
     client.post(f"{base}/shooters/bob/videos/scan", json={"source_paths": [str(copy)]})
     assert on_loop and not any(on_loop), "scan_videos backfilled on the event loop"
+
+
+# --- reference footage for the compare panel (spec 2026-10-21) ----------------
+
+
+def _references(view: dict) -> set[tuple[str, int, str, str]]:
+    return {(r["shooter"], r["stage"], r["source"], r["stream_kind"]) for r in view["references"]}
+
+
+def _wait_for_frames(client, base: str, scan_id: str) -> dict:  # type: ignore[no-untyped-def]
+    deadline = time.monotonic() + 30
+    while time.monotonic() < deadline:
+        view = client.get(f"{base}/match/footage-sort/{scan_id}").json()
+        if view["frames_pending"] == 0:
+            return view
+        time.sleep(0.1)
+    raise AssertionError("reference frames were not built")
+
+
+def test_view_lists_sort_references_for_checked_clips(tmp_path: Path, source_clip: Path) -> None:
+    """Before anyone is imported the sort's own confident clips stand in
+    for a shooter's stage, and unchecking one withdraws it."""
+    _, client, _, base = _match_app(tmp_path)
+    view = _scan(client, base, _shared_folder(tmp_path, source_clip))
+
+    assert _references(view) == {("alice", 1, "sort", "auto"), ("bob", 1, "sort", "auto")}
+    by_shooter = {r["shooter"]: r for r in view["references"]}
+    assert by_shooter["alice"]["clip_id"] == "from-carol/IMG_0001.MOV"
+    assert by_shooter["alice"]["frame"] is True
+    assert {s["key"]: s["stages_with_footage"] for s in view["shooters"]} == {"alice": [], "bob": []}
+
+    after = client.put(
+        f"{base}/match/footage-sort/{view['scan_id']}/decisions",
+        json={"anchors": [], "overrides": [], "checked": {"from-carol/IMG_0001.MOV": False}},
+    ).json()
+
+    assert _references(after) == {("bob", 1, "sort", "auto")}
+
+
+def test_an_import_turns_the_reference_into_a_project_one(tmp_path: Path, source_clip: Path) -> None:
+    _, client, _, base = _match_app(tmp_path)
+    view = _scan(client, base, _shared_folder(tmp_path, source_clip))
+    scan_id = view["scan_id"]
+
+    client.post(f"{base}/match/footage-sort/{scan_id}/import", json={"shooters": ["alice"]})
+    after = client.get(f"{base}/match/footage-sort/{scan_id}").json()
+
+    assert _references(after) == {("alice", 1, "project", "auto"), ("bob", 1, "sort", "auto")}
+    alice = next(r for r in after["references"] if r["shooter"] == "alice")
+    assert alice["video_id"] and alice["video_path"].endswith("IMG_0001.MOV")
+    assert next(s for s in after["shooters"] if s["key"] == "alice")["stages_with_footage"] == [1]
+
+    built = _wait_for_frames(client, base, scan_id)
+
+    assert next(r for r in built["references"] if r["shooter"] == "alice")["frame"] is True
+    frame = client.get(f"{base}/match/footage-sort/{scan_id}/reference-frames/alice/1.jpg")
+    assert frame.status_code == 200 and frame.headers["content-type"] == "image/jpeg"
+    assert client.get(f"{base}/match/footage-sort/{scan_id}/reference-frames/bob/1.jpg").status_code == 404
+
+
+def test_a_trimmed_stage_streams_the_trim(tmp_path: Path, source_clip: Path) -> None:
+    from splitsmith.ui.audio import trimmed_video_path
+
+    _, client, root, base = _match_app(tmp_path)
+    view = _scan(client, base, _shared_folder(tmp_path, source_clip))
+    client.post(f"{base}/match/footage-sort/{view['scan_id']}/import", json={"shooters": ["alice"]})
+    sroot = match_model.Match.shooter_root(root, "alice")
+    alice = MatchProject.load(sroot)
+    primary = alice.stage(1).primary()
+    assert primary is not None
+    primary.beep_time = 1.0
+    alice.save(sroot)
+    trim = trimmed_video_path(sroot, 1, primary, project=alice)
+    trim.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy(source_clip, trim)
+
+    after = client.get(f"{base}/match/footage-sort/{view['scan_id']}").json()
+
+    assert ("alice", 1, "project", "trim") in _references(after)
+
+
+def test_a_poll_queues_one_frames_job(tmp_path: Path, source_clip: Path) -> None:
+    """A project reference without a frame queues the build from the
+    view, once, so a reopened or re-trimmed scan gets its frames without
+    a request ever extracting one."""
+    _, client, _, base = _match_app(tmp_path)
+    view = _scan(client, base, _shared_folder(tmp_path, source_clip))
+    scan_id = view["scan_id"]
+    client.post(f"{base}/match/footage-sort/{scan_id}/import", json={"shooters": ["alice"]})
+
+    client.get(f"{base}/match/footage-sort/{scan_id}")
+    client.get(f"{base}/match/footage-sort/{scan_id}")
+
+    jobs = [j for j in client.get("/api/me/jobs").json() if j["kind"] == footage_sort_api.FRAMES_JOB_KIND]
+    assert len(jobs) == 1
+    _wait_for_frames(client, base, scan_id)

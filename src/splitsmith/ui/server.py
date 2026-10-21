@@ -3931,6 +3931,10 @@ def register_job_bodies(state: AppState) -> None:
     state.jobs.bodies.register(
         footage_sort_api.JOB_KIND, functools.partial(footage_sort_api.run_footage_sort_scan, state=state)
     )
+    state.jobs.bodies.register(
+        footage_sort_api.FRAMES_JOB_KIND,
+        functools.partial(footage_sort_api.run_footage_sort_frames, state=state),
+    )
     state.jobs.bodies.register("sync_match", _run_sync_match)
     state.jobs.bodies.register("auto_sync", functools.partial(_run_sync_match, auto=True))
     if not _hosted_mode_active():

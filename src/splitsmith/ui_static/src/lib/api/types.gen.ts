@@ -1868,6 +1868,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/match/footage-sort/{scan_id}/reference-frames/{slug}/{stage}.jpg": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Reference Frame
+         * @description The compare panel's frame for a shooter's stage; 404 until built.
+         */
+        get: operations["get_reference_frame_api_match_footage_sort__scan_id__reference_frames__slug___stage__jpg_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/match/footage-sort/{scan_id}/thumbs/{index}.jpg": {
         parameters: {
             query?: never;
@@ -10759,6 +10779,8 @@ export interface components {
             name: string;
             /** Stages */
             stages: number[];
+            /** Stages With Footage */
+            stages_with_footage: number[];
         };
         /**
          * ShooterStageEditResult
@@ -10852,6 +10874,35 @@ export interface components {
             /** Scheme */
             scheme: string;
         };
+        /**
+         * SortReference
+         * @description A shooter's stage as the compare panel can show it: the primary in
+         *     their project, else this sort's checked clip for it.
+         */
+        SortReference: {
+            /** Clip Id */
+            clip_id: string | null;
+            /** Frame */
+            frame: boolean;
+            /** Shooter */
+            shooter: string;
+            /**
+             * Source
+             * @enum {string}
+             */
+            source: "project" | "sort";
+            /** Stage */
+            stage: number;
+            /**
+             * Stream Kind
+             * @enum {string}
+             */
+            stream_kind: "trim" | "auto";
+            /** Video Id */
+            video_id: string | null;
+            /** Video Path */
+            video_path: string | null;
+        };
         /** SortStage */
         SortStage: {
             /** Stage Name */
@@ -10893,8 +10944,12 @@ export interface components {
             clips: components["schemas"]["ClipView"][];
             /** Error */
             error: string | null;
+            /** Frames Pending */
+            frames_pending: number;
             /** Overrides */
             overrides: components["schemas"]["Override"][];
+            /** References */
+            references: components["schemas"]["SortReference"][];
             /** Scan Id */
             scan_id: string;
             /** Shooters */
@@ -14889,6 +14944,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ImportResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_reference_frame_api_match_footage_sort__scan_id__reference_frames__slug___stage__jpg_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                scan_id: string;
+                slug: string;
+                stage: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
                 };
             };
             /** @description Validation Error */
