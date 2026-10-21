@@ -129,8 +129,8 @@ today's context, digest, argv and pixels byte for byte.
   outside the transition slot.
 - **`looks preview`.** Draws a frames sting over the sample edges.
 - **Rail preview** (`export_preview`). `from` is the stage's tail frame,
-  `to` its head frame: the stills the preview already grabs, so a request
-  runs no new ffmpeg. `PREVIEW_REVISION` bumps. The motion WebP plays the
+  `to` its head frame: the preview grabs the stage's tail frame as one extra
+  single-frame `grab_frame`, bounded and cached like the head grab. `PREVIEW_REVISION` bumps. The motion WebP plays the
   frames sting over black, not over the frame.
 - **Shipped stings.**
   - `data/looks/splitsmith/sting-push.html` (`sting:push`): the outgoing

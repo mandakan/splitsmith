@@ -717,7 +717,9 @@ def test_a_frames_sting_that_draws_every_pixel_has_no_transparency_item(
     from tests.look_fixtures import install_frames_look
 
     install_frames_look(tmp_path, monkeypatch)
-    report = look_tools.check_look("framesy", prober=_FramesProber(opaque_share=1.0))
+    prober = _FramesProber(opaque_share=1.0)
+    report = look_tools.check_look("framesy", prober=prober)
+    assert prober.urls, "the frames check drew the sting over sample edges"
     assert _transparency(report) == []
     assert report.errors == 0
 

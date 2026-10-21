@@ -502,11 +502,15 @@ def test_a_cached_grid_frames_sting_extracts_and_draws_nothing(tmp_path: Path, m
 
     first = render("a")
     assert first.frames_drawn == 30 and first.loads == 2
-    assert (tmp_path / "a" / "boundary-000_frames").is_dir()
+    assert not list(
+        (tmp_path / "a" / "boundary-000_frames").rglob("*.jpg")
+    ), "the edge frames are removed after the render"
     second = render("b")
     assert second.frames_drawn == 0 and second.loads == 1, "the decision-time load only"
-    assert not (tmp_path / "b" / "boundary-000_frames").exists(), "a hit extracts nothing"
+    assert not list(
+        (tmp_path / "b" / "boundary-000_frames").rglob("*.jpg")
+    ), "a hit leaves no frames folder either"
     template = look.root / "push.html"
     template.write_text(template.read_text(encoding="utf-8") + "<!-- edited -->\n", encoding="utf-8")
     assert render("c").frames_drawn == 30, "a template edit misses and redraws"
-    assert (tmp_path / "c" / "boundary-000_frames").is_dir()
+    assert not list((tmp_path / "c" / "boundary-000_frames").rglob("*.jpg"))

@@ -382,7 +382,7 @@ class CheckRequest(BaseModel):
 
 
 #: Bump when the same files would check differently.
-CHECK_CACHE_VERSION = 1
+CHECK_CACHE_VERSION = 2
 
 
 def _folder_digest(root: Path) -> str:

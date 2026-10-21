@@ -333,3 +333,26 @@ def test_a_head_pad_holds_the_first_head_frame_and_lists_match_the_count(monkeyp
     assert len(frames["from"]) == len(frames["to"]) == frames["count"] == count
     assert all(url.endswith("/0000.jpg") for url in frames["to"][:16])
     assert frames["to"][16].endswith("/0001.jpg")
+
+
+def test_the_edge_frames_are_removed_after_a_render(monkeypatch, tmp_path: Path) -> None:
+    look = install_frames_look(tmp_path, monkeypatch)
+    raster = _RecordingRasterizer()
+    plan = look_sting.sting_plan(look, "sting:push", rasterizer=raster, **_plan_args(width=4, height=2))
+    monkeypatch.setattr(look_sting, "write_motion_clip", lambda *a, **k: None)
+    _render(plan, raster, tmp_path)
+    assert not (tmp_path / "fr" / "k").exists()
+
+
+def test_the_edge_frames_are_removed_when_the_draw_fails(monkeypatch, tmp_path: Path) -> None:
+    look = install_frames_look(tmp_path, monkeypatch)
+    raster = _RecordingRasterizer()
+    plan = look_sting.sting_plan(look, "sting:push", rasterizer=raster, **_plan_args(width=4, height=2))
+
+    def boom(*a: Any, **k: Any) -> Any:
+        raise RuntimeError("draw")
+
+    monkeypatch.setattr(raster, "render_template_frames", boom)
+    with pytest.raises(look_sting.MotionClipError):
+        _render(plan, raster, tmp_path)
+    assert not (tmp_path / "fr" / "k").exists()

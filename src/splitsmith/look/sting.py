@@ -258,34 +258,39 @@ def render_frames_sting(
     driver catches with MotionClipError, so it passes through here
     unwrapped. Raises :class:`MotionClipError` when an edge yields no
     frames or the template fails; the driver makes that a cut."""
-    count = max(1, math.ceil(sting.seconds * sting.fps - 1e-9))
-    lists: dict[str, list[str]] = {}
-    for end, edge, pad in (("tail", tail_edge, tail_pad_seconds), ("head", head_edge, head_pad_seconds)):
-        side = "from" if end == "tail" else "to"
-        out_dir = frames_root / key / side
-        shutil.rmtree(out_dir, ignore_errors=True)  # stale frames are never footage
-        out_dir.mkdir(parents=True)
-        run(extraction_command(edge, out_dir, rate=rate, ffmpeg_binary=ffmpeg_binary))
+    try:
+        count = max(1, math.ceil(sting.seconds * sting.fps - 1e-9))
+        lists: dict[str, list[str]] = {}
+        for end, edge, pad in (("tail", tail_edge, tail_pad_seconds), ("head", head_edge, head_pad_seconds)):
+            side = "from" if end == "tail" else "to"
+            out_dir = frames_root / key / side
+            shutil.rmtree(out_dir, ignore_errors=True)  # stale frames are never footage
+            out_dir.mkdir(parents=True)
+            run(extraction_command(edge, out_dir, rate=rate, ffmpeg_binary=ffmpeg_binary))
+            try:
+                lists[side] = edge_frame_urls(
+                    written_frames(out_dir), count=count, fps=sting.fps, pad_seconds=pad, end=end, key=key  # type: ignore[arg-type]
+                )
+            except ValueError as exc:
+                raise MotionClipError(f"{clip_path.name}: {exc}") from exc
+        context = with_frames(
+            sting.context, fps=sting.fps, count=count, from_urls=lists["from"], to_urls=lists["to"]
+        )
         try:
-            lists[side] = edge_frame_urls(
-                written_frames(out_dir), count=count, fps=sting.fps, pad_seconds=pad, end=end, key=key  # type: ignore[arg-type]
-            )
-        except ValueError as exc:
+            frames = rasterizer.render_template_frames(
+                sting.template, context=context, width=sting.width, height=sting.height, fps=sting.fps,
+                max_seconds=sting.seconds, frames_dir=frames_root,
+            )  # fmt: skip
+        except Exception as exc:  # noqa: BLE001 -- the template's failure is the clip's
             raise MotionClipError(f"{clip_path.name}: {exc}") from exc
-    context = with_frames(
-        sting.context, fps=sting.fps, count=count, from_urls=lists["from"], to_urls=lists["to"]
-    )
-    try:
-        frames = rasterizer.render_template_frames(
-            sting.template, context=context, width=sting.width, height=sting.height, fps=sting.fps,
-            max_seconds=sting.seconds, frames_dir=frames_root,
-        )  # fmt: skip
-    except Exception as exc:  # noqa: BLE001 -- the template's failure is the clip's
-        raise MotionClipError(f"{clip_path.name}: {exc}") from exc
-    try:
-        write_motion_clip(frames, out=clip_path, fps=sting.fps, ffmpeg_binary=ffmpeg_binary)
+        try:
+            write_motion_clip(frames, out=clip_path, fps=sting.fps, ffmpeg_binary=ffmpeg_binary)
+        finally:
+            frames.close()
     finally:
-        frames.close()
+        # the clip is what gets cached; the frames are never reused, and the
+        # default work dir is often RAM-backed
+        shutil.rmtree(frames_root / key, ignore_errors=True)
 
 
 def frames_sting_filters(
