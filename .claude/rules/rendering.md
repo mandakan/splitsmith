@@ -76,7 +76,8 @@ argv test proves nothing about pixels.
 - Template-drawn clips (animated cards, stings) are keyed by
   `look_template.template_digest` through `SegmentCache.key(virtual_inputs=...)`
   and their frames are rendered in the encode's `prepare` step, so a cache hit
-  renders no frame.
+  renders no frame. The grid does the same: its sting clips are written in
+  `prepare` and keyed by digest, never eagerly at plan time.
 - The grid shares the cache (`render_grid_mp4(segment_cache=)`; `.mov` segments
   keep their suffix). It renders in a fresh temp dir, so the key writes the work
   dir as `<work>` in tokens and in small work files (the sprite concat list).
@@ -244,10 +245,18 @@ argv test proves nothing about pixels.
   `Transition.__post_init__` run it, so no unchecked text reaches
   `xfade=transition=`. Each driver decides a sting while deciding the boundary
   (`sting_for_boundary`); `look_sting.sting_motion` renders the template with
-  `data.transition` and `data.shooters`, and the clip is laid over the
+  `data.transition` and `data.shooters`. A plain sting's clip is laid over the
   boundary's fade (`sting_overlay_filters`) for the whole segment from its first
-  frame, whatever handle the edges had. The template's `window.duration()`
-  returns the transition's length, so the renderer samples exactly the
+  frame, whatever handle the edges had. A template with `splitsmith-frames` is a
+  `FramesSting` (`sting_plan`): it is loaded once without frames for its cues,
+  then drawn in the boundary's `prepare` (`render_frames_sting`, in both
+  renderers) from both edges extracted to JPEG (the URL lists repeat the held
+  frame, like `tpad`), keyed by `frames_key` (digest plus both edge keys), and
+  its clip replaces the `xfade` over black (`sting_replaces`,
+  `frames_sting_filters`). A tag-less sting's argv is unchanged
+  (`test_a_tagless_sting_plans_as_before`). The
+  template's `window.duration()` returns the transition's length, so the
+  renderer samples exactly the
   boundary. A missing sting or no browser is a fade plus a degradation; frames
   that fail are a cut like any failed boundary. Without a sting every argv is
   unchanged. The shipped wipe carries a logo only when the shooters have

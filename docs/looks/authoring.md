@@ -58,7 +58,7 @@ Pick a Look on the Export page, or
 with `--theme <name>` on `match export` and `--overlay-theme <name>` on
 `compare export`.
 
-Seven starters ship. Six are each a short commented template for one slot:
+Eight starters ship. Seven are each a short commented template for one slot:
 
 | Starter | What it is |
 |---|---|
@@ -66,10 +66,11 @@ Seven starters ship. Six are each a short commented template for one slot:
 | `animated` | The same card, its lines rising into place |
 | `lower-third` | A band over the first seconds of a stage |
 | `sting` | A band swept across the cut between stages |
+| `sting-frames` | A frames sting: a push that moves both stages' footage (see [Frames stings](#frames-stings)) |
 | `hud` | An overlay style: the clock, the count and the last split in a corner |
 | `summary` | A stage summary: the stage's name and its time, hit factor, draw and average split |
 
-The seventh, `broadcast`, is a whole Look and the reference for the data. It
+The eighth, `broadcast`, is a whole Look and the reference for the data. It
 fills every slot a template can draw:
 
 - **Cards:** one animated card for the title page, slates, lower third and
@@ -238,6 +239,62 @@ that long. When the export puts your brand on the wipe (the Logos row's
 same `{ logo, line }` the cards get; the shipped wipe carries that logo in
 place of the shooter's. Name the sting under `transition` in `look.json`, then choose it on
 the Export page or with `--transition sting:<name>`.
+
+## Frames stings
+
+A sting normally rides over the crossfade, so it can only cover the footage.
+A frames sting draws the boundary itself, footage included, so it can move the
+stages: a push, a slide, a zoom. Opt in with one tag in the template's head:
+
+```html
+<meta name="splitsmith-frames" content="edges">
+```
+
+The value is case-sensitive, a tag inside an HTML comment does not count, and
+`data-name` is not the tag. The tag only does something in the `transition`
+slot; `looks check` warns when it sits anywhere else. Start from
+`splitsmith looks new <name> --starter sting-frames`.
+
+The pictures arrive as `data.transition.frames`:
+
+```js
+{ fps: 30, count: 30, from: [url, ...], to: [url, ...] }
+```
+
+One URL per frame of the transition for each edge: `from` is the outgoing
+stage's last moments, `to` the incoming stage's first. Held frames repeat: a
+stage's head pad repeats its first frame, and a tail repeats its last frame
+once the footage runs out. Load `_shared/frames.js` and use `splitsmithFrames`:
+
+| | |
+|---|---|
+| `at(n)` | A Promise of `{ from, to }`, ImageBitmaps for frame `n` (null without frames) |
+| `draw(g, bitmap, x, y, w, h)` | Draws one onto a canvas context; a null bitmap draws nothing |
+| `count`, `fps` | How many frames, at what rate |
+
+Calls are serialised and one pair is decoded at a time: the pair stays valid
+until the next `at()`, so draw it first.
+
+- `seek(t)` must return the `at()` Promise. If it does not, the frame is
+  captured before it is drawn.
+- Index frames with `splitsmithFrames.fps`, never the context's fps: the
+  preview and `looks check` run frames at a different rate.
+- `duration()` and `sounds()` never read the frames. The renderer loads the
+  template once without frames (count 0, every picture null) to read them,
+  and that load must not throw.
+- The output replaces the crossfade and is drawn over black, so anything
+  transparent shows black. Paint the whole frame.
+- The edges are the footage as encoded: the HUD and the lower third are
+  burnt in.
+
+`looks check` and `looks preview` use generated sample edges, and the export
+preview hands one still per side: the stage's tail frame, then its head frame.
+`looks check` warns when a frames sting leaves more than 0.5 % of a frame
+transparent. The splitsmith Look ships `sting:push`, and Broadcast's `push`
+moves the stages behind its panel.
+
+Cost: a frames sting is drawn once per boundary and cached. It is drawn again
+only when its template, `_shared/` or either edge changes.
 
 ## Overlay styles
 

@@ -39,7 +39,11 @@ fonts, brand, one HTML template per card slot) plus its templates.
 - **Never widen the sandbox** (`look_sandbox`). Every template page, local and
   hosted, is navigated from `https://look.invalid/look/<file>`, never
   `file://`, and every request is answered by `Sandbox.handle`: `/look/` (the
-  template's folder, symlinks out refused), `/shared/`, `/fonts/`, and
+  template's folder, symlinks out refused), `/shared/`, `/fonts/`, `/frames/`
+  (a frames sting's edge JPEGs; the renderer adds it with
+  `sandbox.prepare(frames_dir=)`, a page never gets one otherwise, and it is
+  never a target of `file://` rewriting:
+  `test_user_text_naming_the_frames_folder_is_never_rewritten`), and
   `/file/<digest>/<name>` for each `logo` value naming a real PNG/JPEG/WebP/SVG
   (one that passed `svg_image.check_svg` on upload) that is not a symlink. The
   stylesheet and `assets` may name files inside the mounted folders only. `data` carries user text (a stage named
@@ -107,6 +111,16 @@ fonts, brand, one HTML template per card slot) plus its templates.
   text with a Range, not an element's box. `tests/test_look_template.py` forbids
   the digits of the legibility floor anywhere in that file, issue numbers
   included.
+- A transition template with `<meta name="splitsmith-frames" content="edges">`
+  (`look/frames.py`; parsed with comments stripped, value case-sensitive,
+  `data-name` does not count) gets `data.transition.frames` and draws the
+  boundary itself through `_shared/frames.js`. Its `seek(t)` must return the
+  `at()` Promise (frames are otherwise captured before they are drawn:
+  `test_a_frames_sting_draws_frame_n_on_frame_n` pins it), it indexes by
+  `splitsmithFrames.fps` not the context fps, and `duration()`/`sounds()` never
+  read frames (the renderer loads once without them). Output is drawn over
+  black. `looks check` warns past `TRANSPARENT_SHARE` and on a tag that does
+  nothing. Guide: `docs/looks/authoring.md#frames-stings`.
 - HUD templates: data comes from `overlay_hud`, never derived in a template;
   shared HUD helpers live in `_shared/hud.js` (`window.splitsmithHud`).
   `looks check` runs them on `look_tools.hud_samples`.

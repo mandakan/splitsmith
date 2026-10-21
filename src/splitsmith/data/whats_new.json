@@ -1,6 +1,12 @@
 {
   "entries": [
     {
+      "id": "push-transition",
+      "date": "2026-10-21",
+      "title": "A push that moves the footage",
+      "body": "The new Push transition slides one stage off as the next slides in. Broadcast's Push now moves the footage too, behind its panel."
+    },
+    {
       "id": "sort-footage-compare",
       "date": "2026-10-21",
       "title": "Compare a clip with a sorted shooter",
