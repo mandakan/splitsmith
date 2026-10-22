@@ -89,7 +89,7 @@ function makeShooter(slug: string, name: string): ShooterListEntry {
 }
 
 function makeProject(): MatchProject {
-  return { capabilities: [], competitor_division: null, identity: { accent: null, club: null, logo: null }, trim_audit_encoder: "auto",
+  return { capabilities: [], competitor_division: null, power_factor: null, identity: { accent: null, club: null, logo: null }, trim_audit_encoder: "auto",
     schema_version: 1,
     name: "bromma-2026",
     created_at: "2026-01-01T00:00:00Z",
@@ -102,7 +102,7 @@ function makeProject(): MatchProject {
     shooter_token: null,
     match_date: null,
     stages: [
-      { figures: null, start: "standard", status: null,
+      { figures: null, start: "standard", shot_order: null, status: null,
         stage_number: 1,
         stage_name: "Stage One",
         time_seconds: 20,

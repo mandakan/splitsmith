@@ -6843,6 +6843,21 @@
       "title": "Origin",
       "type": "string"
      },
+     "power_factor": {
+      "anyOf": [
+       {
+        "enum": [
+         "minor",
+         "major"
+        ],
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Power Factor"
+     },
      "probes_dir": {
       "anyOf": [
        {
@@ -7005,6 +7020,7 @@
      "name",
      "nudges_dismissed_stages",
      "origin",
+     "power_factor",
      "probes_dir",
      "raw_dir",
      "raw_videos",
@@ -8790,6 +8806,364 @@
     "title": "StageAttentionBody",
     "type": "object"
    },
+   "StageDetailsOther": {
+    "description": "Another shooter of the match whose order can be copied.",
+    "properties": {
+     "from_scorecards": {
+      "title": "From Scorecards",
+      "type": "boolean"
+     },
+     "name": {
+      "title": "Name",
+      "type": "string"
+     },
+     "order": {
+      "items": {
+       "type": "integer"
+      },
+      "title": "Order",
+      "type": "array"
+     },
+     "slug": {
+      "title": "Slug",
+      "type": "string"
+     }
+    },
+    "required": [
+     "from_scorecards",
+     "name",
+     "order",
+     "slug"
+    ],
+    "title": "StageDetailsOther",
+    "type": "object"
+   },
+   "StageDetailsRequest": {
+    "properties": {
+     "power_factor": {
+      "anyOf": [
+       {
+        "enum": [
+         "minor",
+         "major"
+        ],
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Power Factor"
+     },
+     "rows": {
+      "items": {
+       "$ref": "#/components/schemas/StageDetailsRow"
+      },
+      "title": "Rows",
+      "type": "array"
+     }
+    },
+    "required": [
+     "rows"
+    ],
+    "title": "StageDetailsRequest",
+    "type": "object"
+   },
+   "StageDetailsRow": {
+    "properties": {
+     "alphas": {
+      "anyOf": [
+       {
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Alphas"
+     },
+     "charlies": {
+      "anyOf": [
+       {
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Charlies"
+     },
+     "deltas": {
+      "anyOf": [
+       {
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Deltas"
+     },
+     "dq": {
+      "anyOf": [
+       {
+        "type": "boolean"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Dq"
+     },
+     "hit_factor": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Hit Factor"
+     },
+     "manual": {
+      "items": {
+       "type": "string"
+      },
+      "title": "Manual",
+      "type": "array"
+     },
+     "misses": {
+      "anyOf": [
+       {
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Misses"
+     },
+     "no_shoots": {
+      "anyOf": [
+       {
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "No Shoots"
+     },
+     "procedurals": {
+      "anyOf": [
+       {
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Procedurals"
+     },
+     "shot_order": {
+      "anyOf": [
+       {
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Shot Order"
+     },
+     "stage_number": {
+      "title": "Stage Number",
+      "type": "integer"
+     },
+     "stage_pct": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Stage Pct"
+     },
+     "stage_points": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Stage Points"
+     },
+     "time_seconds": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Time Seconds"
+     }
+    },
+    "required": [
+     "stage_number"
+    ],
+    "title": "StageDetailsRow",
+    "type": "object"
+   },
+   "StageDetailsStage": {
+    "properties": {
+     "scorecard": {
+      "anyOf": [
+       {
+        "$ref": "#/components/schemas/StageScorecard"
+       },
+       {
+        "type": "null"
+       }
+      ]
+     },
+     "shot_order": {
+      "anyOf": [
+       {
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Shot Order"
+     },
+     "skipped": {
+      "title": "Skipped",
+      "type": "boolean"
+     },
+     "stage_name": {
+      "title": "Stage Name",
+      "type": "string"
+     },
+     "stage_number": {
+      "title": "Stage Number",
+      "type": "integer"
+     },
+     "time_manual": {
+      "title": "Time Manual",
+      "type": "boolean"
+     },
+     "time_seconds": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Time Seconds"
+     }
+    },
+    "required": [
+     "scorecard",
+     "shot_order",
+     "skipped",
+     "stage_name",
+     "stage_number",
+     "time_manual",
+     "time_seconds"
+    ],
+    "title": "StageDetailsStage",
+    "type": "object"
+   },
+   "StageDetailsView": {
+    "properties": {
+     "division": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Division"
+     },
+     "name": {
+      "title": "Name",
+      "type": "string"
+     },
+     "others": {
+      "items": {
+       "$ref": "#/components/schemas/StageDetailsOther"
+      },
+      "title": "Others",
+      "type": "array"
+     },
+     "power_factor": {
+      "enum": [
+       "minor",
+       "major"
+      ],
+      "title": "Power Factor",
+      "type": "string"
+     },
+     "power_factor_set": {
+      "title": "Power Factor Set",
+      "type": "boolean"
+     },
+     "scorecard_order": {
+      "items": {
+       "type": "integer"
+      },
+      "title": "Scorecard Order",
+      "type": "array"
+     },
+     "slug": {
+      "title": "Slug",
+      "type": "string"
+     },
+     "ssi_url": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Ssi Url"
+     },
+     "stages": {
+      "items": {
+       "$ref": "#/components/schemas/StageDetailsStage"
+      },
+      "title": "Stages",
+      "type": "array"
+     }
+    },
+    "required": [
+     "division",
+     "name",
+     "others",
+     "power_factor",
+     "power_factor_set",
+     "scorecard_order",
+     "slug",
+     "ssi_url",
+     "stages"
+    ],
+    "title": "StageDetailsView",
+    "type": "object"
+   },
    "StageEditRequest": {
     "description": "Body for ``PUT /api/match/stages`` (#521).\n\nThe full desired stage list, not a patch. The server diffs it against\nthe match's current list, so the SPA does not have to track which rows\nit changed. ``stage_number: null`` marks a newly added row.",
     "properties": {
@@ -8901,6 +9275,17 @@
       ],
       "title": "Scorecard Updated At"
      },
+     "shot_order": {
+      "anyOf": [
+       {
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Shot Order"
+     },
      "skipped": {
       "default": false,
       "title": "Skipped",
@@ -8961,6 +9346,7 @@
      "placeholder",
      "scorecard",
      "scorecard_updated_at",
+     "shot_order",
      "skipped",
      "stage_name",
      "stage_number",
@@ -9317,6 +9703,13 @@
       ],
       "title": "Deltas"
      },
+     "derived": {
+      "items": {
+       "type": "string"
+      },
+      "title": "Derived",
+      "type": "array"
+     },
      "dq": {
       "anyOf": [
        {
@@ -9338,6 +9731,13 @@
        }
       ],
       "title": "Hit Factor"
+     },
+     "manual": {
+      "items": {
+       "type": "string"
+      },
+      "title": "Manual",
+      "type": "array"
      },
      "misses": {
       "anyOf": [
@@ -9399,8 +9799,10 @@
      "alphas",
      "charlies",
      "deltas",
+     "derived",
      "dq",
      "hit_factor",
+     "manual",
      "misses",
      "no_shoots",
      "procedurals",
@@ -20014,6 +20416,92 @@
      }
     },
     "summary": "Scoreboard Upload"
+   }
+  },
+  "/api/shooters/{slug}/stage-details": {
+   "get": {
+    "operationId": "get_stage_details_api_shooters__slug__stage_details_get",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "slug",
+      "required": true,
+      "schema": {
+       "title": "Slug",
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/StageDetailsView"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Get Stage Details"
+   },
+   "put": {
+    "operationId": "put_stage_details_api_shooters__slug__stage_details_put",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "slug",
+      "required": true,
+      "schema": {
+       "title": "Slug",
+       "type": "string"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/StageDetailsRequest"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/StageDetailsView"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Put Stage Details"
    }
   },
   "/api/shooters/{slug}/stages/camera/bulk-set": {

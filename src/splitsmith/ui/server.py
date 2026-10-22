@@ -11052,6 +11052,10 @@ def create_app(
 
     app.include_router(stages_router)
 
+    from .stage_details_api import router as stage_details_router
+
+    app.include_router(stage_details_router)
+
     from .shooters_api import router as shooters_api_router
 
     app.include_router(shooters_api_router)

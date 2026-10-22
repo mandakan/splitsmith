@@ -31,7 +31,7 @@ interface StageSpec {
   videos?: number;
 }
 
-const SCORECARD: StageScorecard = {
+const SCORECARD: StageScorecard = { manual: [], derived: [],
   hit_factor: 2.12,
   stage_points: 103,
   stage_pct: 71.5,

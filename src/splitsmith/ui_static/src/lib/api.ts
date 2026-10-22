@@ -524,6 +524,11 @@ export interface SortDecisions {
 export type SortView = Schema["SortView"];
 export type SortShooterRef = Schema["ShooterRef"];
 export type SortReference = Schema["SortReference"];
+/** GET/PUT /api/shooters/{slug}/stage-details (spec 2026-10-22). */
+export type StageDetailsView = Schema["StageDetailsView"];
+export type StageDetailsStage = Schema["StageDetailsStage"];
+export type StageDetailsRow = Schema["StageDetailsRow"];
+export type StageDetailsRequest = Schema["StageDetailsRequest"];
 
 /** An unfinished sort, offered on Footage to continue. */
 export type SortSummary = Schema["SortSummary"];
