@@ -18,6 +18,7 @@ describe("matchNavItems shape", () => {
     expect(items.map((i) => [i.key, i.group ?? null, i.label])).toEqual([
       ["overview", null, "Overview"],
       ["videos", "prepare", "Footage"],
+      ["stage-details", "prepare", "Stage details"],
       ["audit", "review", "Audit"],
       ["results", "analyse", "Splits"],
       ["breakdown", "analyse", "Breakdown"],
@@ -31,7 +32,7 @@ describe("matchNavItems compare entry", () => {
   it("shows Compare only on a multi-shooter match, landing on the first audited stage", () => {
     expect(matchNavItems(base).find((i) => i.key === "compare")).toBeUndefined();
     const items = matchNavItems({ ...base, multiShooter: true, compareStage: 3 });
-    expect(items.map((i) => i.key)).toEqual(["overview", "videos", "audit", "results", "breakdown", "coach", "compare", "export"]);
+    expect(items.map((i) => i.key)).toEqual(["overview", "videos", "stage-details", "audit", "results", "breakdown", "coach", "compare", "export"]);
     expect(items.find((i) => i.key === "compare")).toMatchObject({ group: "analyse", to: "/match/m1/compare/3", label: "Compare" });
   });
 });

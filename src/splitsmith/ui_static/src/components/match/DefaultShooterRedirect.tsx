@@ -26,7 +26,7 @@ import { pickDefaultShooterSlug } from "@/lib/defaultShooter";
 import { matchHref } from "@/lib/matchHref";
 
 interface Props {
-  base: "audit" | "coach" | "breakdown" | "export" | "ingest";
+  base: "audit" | "coach" | "breakdown" | "export" | "ingest" | "stage-details";
 }
 
 export function DefaultShooterRedirect({ base }: Props) {

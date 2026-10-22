@@ -5,6 +5,7 @@
  */
 import type { ReactNode } from "react";
 import {
+  ClipboardList,
   ArrowDownToLine,
   ChartGantt,
   ClipboardCheck,
@@ -83,6 +84,13 @@ export function matchNavItems(args: {
       to: shooterSlug ? `${base}/ingest/${shooterSlug}` : `${base}/ingest`,
       icon: <Film className="size-[15px]" />,
       label: "Footage",
+    },
+    {
+      key: "stage-details",
+      group: "prepare",
+      to: shooterSlug ? `${base}/stage-details/${shooterSlug}` : `${base}/stage-details`,
+      icon: <ClipboardList className="size-[15px]" />,
+      label: "Stage details",
     },
     {
       // Beep confirmation is step 1 of Audit (UX PR 5); the pending

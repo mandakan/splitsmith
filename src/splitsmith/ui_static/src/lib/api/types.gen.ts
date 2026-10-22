@@ -10766,6 +10766,11 @@ export interface components {
             stages_missing_trim: number;
             /** Stages Total */
             stages_total: number;
+            /**
+             * Stages Without Time
+             * @default 0
+             */
+            stages_without_time: number;
             /** Video Count */
             video_count: number;
         };

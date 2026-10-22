@@ -4190,6 +4190,9 @@ class ShooterListEntry(BaseModel):
     # (primary + beep + stage_time + reachable source); stages missing those
     # prerequisites are excluded from the count.
     stages_missing_trim: int = 0
+    # Stages, not skipped, still without a time (no scoreboard data and
+    # none typed): drives the Overview's Stage details notice.
+    stages_without_time: int = 0
     # The shooter's identity (#1243): accent, logo file name, club line.
     identity: ShooterIdentity = Field(default_factory=ShooterIdentity)
     # Per-stage status for this shooter, one entry per stage in the
@@ -7572,6 +7575,7 @@ def _classify_shooter(
         video_count=total_videos,
         cameras=cameras,
         stages_missing_trim=stages_missing_trim,
+        stages_without_time=sum(1 for s in legacy.stages if s.time_seconds <= 0 and not s.skipped),
         identity=effective_identity(legacy, book),
         stage_statuses=[
             StageStatusEntry(stage_number=n, status=st) for n, st in sorted(stage_status_map.items())

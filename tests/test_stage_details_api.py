@@ -139,3 +139,13 @@ def test_ssi_links(tmp_path: Path) -> None:
     assert ssi_url(project) == "https://shootnscoreit.com/event/participant/23/512019/"
     project.scoreboard_content_type = 24
     assert ssi_url(project) == "https://shootnscoreit.com/event/24/17169/"
+
+
+def test_the_shooter_list_counts_stages_without_a_time(tmp_path: Path) -> None:
+    client, _, base = _app(tmp_path)
+    match_base = base.removesuffix("/shooters")
+
+    rows = {r["slug"]: r for r in client.get(f"{match_base}/match/shooters").json()["shooters"]}
+
+    assert rows["janne"]["stages_without_time"] == 3
+    assert rows["mathias"]["stages_without_time"] == 0

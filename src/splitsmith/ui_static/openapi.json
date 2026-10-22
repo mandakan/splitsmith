@@ -8276,6 +8276,11 @@
       "title": "Stages Total",
       "type": "integer"
      },
+     "stages_without_time": {
+      "default": 0,
+      "title": "Stages Without Time",
+      "type": "integer"
+     },
      "video_count": {
       "title": "Video Count",
       "type": "integer"
@@ -8292,6 +8297,7 @@
      "stages_audited",
      "stages_missing_trim",
      "stages_total",
+     "stages_without_time",
      "video_count"
     ],
     "title": "ShooterListEntry",

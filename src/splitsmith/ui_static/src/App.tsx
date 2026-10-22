@@ -72,6 +72,7 @@ const AdminAccess = lazyPage(() => import("@/pages/AdminAccess"), "AdminAccess")
 const Account = lazyPage(() => import("@/pages/Account"), "Account");
 const You = lazyPage(() => import("@/pages/You"), "You");
 const Shooters = lazyPage(() => import("@/pages/Shooters"), "Shooters");
+const StageDetails = lazyPage(() => import("@/pages/StageDetails"), "StageDetails");
 const Results = lazyPage(() => import("@/pages/Results"), "Results");
 const ResultsStage = lazyPage(() => import("@/pages/ResultsStage"), "ResultsStage");
 const ShareHighlights = lazyPage(() => import("@/pages/share/ShareHighlights"), "ShareHighlights");
@@ -379,6 +380,11 @@ export function App() {
               <Route path="ingest" element={<Ingest />} />
               <Route path="shooters" element={<Ingest />} />
               <Route path="footage-sort/:scanId" element={<FootageSort />} />
+              <Route
+                path="stage-details/:slug"
+                element={<ShooterScopedRoute element={<StageDetails />} />}
+              />
+              <Route path="stage-details" element={<DefaultShooterRedirect base="stage-details" />} />
               <Route
                 path="audit/:slug"
                 element={<ShooterScopedRoute element={<AuditRoute />} />}

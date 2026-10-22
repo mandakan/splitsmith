@@ -97,7 +97,7 @@ function shooterFixture(): ShooterListEntry {
     stages_total: 1,
     video_count: 0,
     cameras: [],
-    stages_missing_trim: 0,
+    stages_missing_trim: 0, stages_without_time: 0,
     stage_statuses: [],
   };
 }
@@ -181,5 +181,18 @@ describe("Home capability gating", () => {
     });
     expect(await screen.findByRole("button", { name: "Edit stages" })).toBeInTheDocument();
     expect(await screen.findByRole("button", { name: /accept/i })).toBeInTheDocument();
+  });
+
+  it("points a shooter without stage times at Stage details, only with edit", async () => {
+    const untimed = { ...shooterFixture(), stages_without_time: 3 };
+    const { unmount } = renderHome({ shooters: [untimed], capabilities: ["edit", "review"] });
+    const link = await screen.findByRole("link", { name: "Fill in for Mathias" });
+    expect(link).toHaveAttribute("href", "/match/m1/stage-details/mathias");
+    expect(screen.getByText("Mathias has stages without a time")).toBeInTheDocument();
+    unmount();
+
+    renderHome({ shooters: [untimed], capabilities: ["review", "share_manage"] });
+    await screen.findByRole("link", { name: /^audit$/i });
+    expect(screen.queryByRole("link", { name: "Fill in for Mathias" })).toBeNull();
   });
 });
