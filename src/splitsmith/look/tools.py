@@ -345,70 +345,92 @@ def _named_files(look: Look) -> set[str]:
     return {file for variants in look.manifest.slots.values() for file in variants.values()}
 
 
-def _shipped_copies(look: Look) -> dict[str, bool]:
-    """The template files ``look`` names that are byte-identical to some
-    version of the shipped default Look's file of the same name, each with
-    whether that version is still the current one. Anything else is the
-    Look's own.
+def _shipped_owners() -> dict[str, Path]:
+    """Each shipped template's file name to its current file: the default
+    Look's, else the one other shipped Look drawing a file of that name (the
+    ``broadcast`` starter's files ship as the Broadcast Look's). A name two
+    other Looks share has no single owner and is left out."""
+    owners = {p.name: p for p in (shipped_looks_dir() / DEFAULT_LOOK).glob("*.html")}
+    others: dict[str, list[Path]] = {}
+    for p in shipped_looks_dir().glob("*/*.html"):
+        if p.parent.name != DEFAULT_LOOK and not p.parent.name.startswith("_"):
+            others.setdefault(p.name, []).append(p)
+    for name, paths in others.items():
+        if name not in owners and len(paths) == 1:
+            owners[name] = paths[0]
+    return owners
 
-    A file another shipped Look draws (the ``broadcast`` starter's, which
-    ships as the Broadcast Look) is the Look's own too: dropping it would
-    fall back to the default Look's card, a different template, not to the
-    same one."""
+
+def _shipped_copies(look: Look) -> dict[str, Path]:
+    """The template files ``look`` names that are byte-identical to some
+    version of the shipped file of the same name, each with that shipped
+    file as it is now (see :func:`_shipped_owners`). Anything else is the
+    Look's own."""
     history = shipped_template_history()
-    current_dir = shipped_looks_dir() / DEFAULT_LOOK
-    others = {
-        p.name
-        for p in shipped_looks_dir().glob("*/*.html")
-        if p.parent.name != DEFAULT_LOOK and not p.parent.name.startswith("_")
-    }
-    out: dict[str, bool] = {}
+    owners = _shipped_owners()
+    out: dict[str, Path] = {}
     for file in sorted(_named_files(look)):
         path = look.root / file
         if path.is_symlink() or not path.is_file():
             continue
         name = Path(file).name
-        current = current_dir / name
-        if not current.is_file() and name in others:
+        if name not in owners:
             continue
         digest = hashlib.sha256(path.read_bytes()).hexdigest()
-        if history.get(digest) != name:
-            continue
-        out[file] = current.is_file() and hashlib.sha256(current.read_bytes()).hexdigest() == digest
+        if history.get(digest) == name:
+            out[file] = owners[name]
     return out
 
 
+def _is_current(look: Look, file: str, shipped: Path) -> bool:
+    return (look.root / file).read_bytes() == shipped.read_bytes()
+
+
 def outdated_copies(look: Look) -> tuple[str, ...]:
-    """The template files ``look`` holds that are unedited copies of an
-    older shipped version: the cards they draw miss what shipped since.
+    """The template files ``look`` holds that are unedited copies of an older
+    shipped version: the cards they draw miss what shipped since.
     Only a user Look has any."""
     if look.source != "user":
         return ()
-    return tuple(file for file, current in _shipped_copies(look).items() if not current)
+    return tuple(
+        file for file, shipped in _shipped_copies(look).items() if not _is_current(look, file, shipped)
+    )
 
 
 def refresh_templates(name: str) -> tuple[str, ...]:
-    """Stop ``name`` from holding unedited copies of shipped templates, old
-    or current: drop every slot entry naming one and delete the file, so
-    those cards draw the shipped template from now on. A file the Look
-    edited is never touched. Returns the files removed."""
+    """Stop ``name`` from holding unedited copies of shipped templates. A
+    copy of a default Look template, old or current, is dropped from every
+    slot and deleted, so those cards draw the shipped template from now on.
+    A copy of another shipped Look's template (Broadcast's) cannot be
+    dropped, which would fall back to the default Look's, a different
+    template: an old one is overwritten with the current version and a
+    current one is left. A file the Look edited is never touched. Returns
+    the files removed or brought up to date."""
     look = strict_look(name)
     if look.source != "user":
         raise LookToolError(f"{name!r} is a shipped Look; there is nothing to refresh")
-    copies = set(_shipped_copies(look))
-    if not copies:
-        return ()
-    manifest_path = look.root / MANIFEST_FILE
-    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    slots = {
-        slot: {variant: file for variant, file in variants.items() if file not in copies}
-        for slot, variants in manifest.get("slots", {}).items()
+    default_dir = shipped_looks_dir() / DEFAULT_LOOK
+    copies = _shipped_copies(look)
+    dropped = {file for file, shipped in copies.items() if shipped.parent == default_dir}
+    updated = {
+        file
+        for file, shipped in copies.items()
+        if file not in dropped and not _is_current(look, file, shipped)
     }
-    manifest["slots"] = {slot: variants for slot, variants in slots.items() if variants}
-    manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-    for file in sorted(copies):
-        (look.root / file).unlink(missing_ok=True)
-    return tuple(sorted(copies))
+    for file in sorted(updated):
+        shutil.copyfile(copies[file], look.root / file)
+    if dropped:
+        manifest_path = look.root / MANIFEST_FILE
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        slots = {
+            slot: {variant: file for variant, file in variants.items() if file not in dropped}
+            for slot, variants in manifest.get("slots", {}).items()
+        }
+        manifest["slots"] = {slot: variants for slot, variants in slots.items() if variants}
+        manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        for file in sorted(dropped):
+            (look.root / file).unlink(missing_ok=True)
+    return tuple(sorted(dropped | updated))
 
 
 # --- check ---------------------------------------------------------------------------

@@ -168,7 +168,9 @@ def check_command(name: str = typer.Argument(..., help="The Look to check.")) ->
 
 @looks_app.command("refresh")
 def refresh_command(name: str = typer.Argument(..., help="Your Look to refresh.")) -> None:
-    """Remove the Look's unedited copies of shipped templates, so its cards draw the current ones."""
+    """Remove the Look's unedited copies of shipped templates, so its cards draw the current ones.
+
+    An old copy of a Broadcast template is brought up to date in place instead."""
     try:
         removed = look_tools.refresh_templates(name)
     except (LookToolError, LookError) as exc:
@@ -177,7 +179,7 @@ def refresh_command(name: str = typer.Argument(..., help="Your Look to refresh."
     if not removed:
         console.print(f"{name} holds no unedited copy of a shipped template; nothing to do.")
         return
-    console.print(f"Removed {', '.join(removed)}: those cards now draw the current shipped templates.")
+    console.print(f"Refreshed {', '.join(removed)}: those cards now draw the current shipped templates.")
 
 
 @looks_app.command("preview")

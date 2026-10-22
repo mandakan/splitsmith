@@ -49,7 +49,9 @@ them with `--templates` only when you mean to edit them; a copy you never
 edit freezes the cards at the day you made it. `splitsmith looks check`
 warns about such a copy once the shipped template has moved on, and
 `splitsmith looks refresh <name>` removes every unedited copy (an edited
-file is never touched). A copy of your own Look carries every file. Every
+file is never touched). A copy of a Broadcast template is brought up to
+date in place instead, since removing it would draw the default Look's
+template. A copy of your own Look carries every file. Every
 copy carries the source's [sound](#sound) (its `sounds` block and the files
 in its `sounds/` folder) and its [grade](#colour-grade)'s LUT file, even a
 copy that follows the shipped templates, since these are files the Look
