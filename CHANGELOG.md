@@ -1,5 +1,29 @@
 # Changelog
 
+## [0.87.0](https://github.com/mandakan/splitsmith/compare/v0.86.0...v0.87.0) (2026-10-22)
+
+
+### Features
+
+* **hosted:** deploy to Google Cloud Run, with the worker as a job and bucket wakes ([#1654](https://github.com/mandakan/splitsmith/issues/1654)) ([d170ba7](https://github.com/mandakan/splitsmith/commit/d170ba7ec174c46570b45d6d0e409a6ea7f1b322))
+* **looks:** a sting can draw with the frames either side of the cut ([#1535](https://github.com/mandakan/splitsmith/issues/1535)) ([#1645](https://github.com/mandakan/splitsmith/issues/1645)) ([9e9629c](https://github.com/mandakan/splitsmith/commit/9e9629c58b3861a2e0f423785ecd42456d2b37f5))
+* stage details, typed stage data and shooting order for the sort ([#1652](https://github.com/mandakan/splitsmith/issues/1652)) ([20eae47](https://github.com/mandakan/splitsmith/commit/20eae474643b54ea8cbaf56851c1765684767edf))
+* **ui:** compare a clip with a sorted shooter on Sort footage ([#1644](https://github.com/mandakan/splitsmith/issues/1644)) ([7f8ee9a](https://github.com/mandakan/splitsmith/commit/7f8ee9a45852ef6d81f6c423ba82efc3b45c254c))
+
+
+### Bug Fixes
+
+* **compare:** a grid with no summary hold holds each tile's last frame ([#1647](https://github.com/mandakan/splitsmith/issues/1647)) ([#1650](https://github.com/mandakan/splitsmith/issues/1650)) ([0df45a9](https://github.com/mandakan/splitsmith/commit/0df45a915cf9ca66ae0be97c88189e12deb8ed6b))
+* **hosted:** run the runtime as least-privilege roles so RLS applies on Neon ([#1651](https://github.com/mandakan/splitsmith/issues/1651)) ([b1ae690](https://github.com/mandakan/splitsmith/commit/b1ae690d82b6fdd3988c8c345835bc94f530cf0b))
+* **looks:** flag and refresh old copies of Broadcast templates ([#1648](https://github.com/mandakan/splitsmith/issues/1648)) ([#1649](https://github.com/mandakan/splitsmith/issues/1649)) ([afe298f](https://github.com/mandakan/splitsmith/commit/afe298fef501057f56c890d1834dcafbffd9876b))
+
+
+### Build / CI
+
+* **deps-dev:** bump vite from 6.4.3 to 6.4.4 in /src/splitsmith/ui_static ([#1639](https://github.com/mandakan/splitsmith/issues/1639)) ([4fb47e7](https://github.com/mandakan/splitsmith/commit/4fb47e749113f6dc36d75591a6ba786776b1008f))
+* **deps-dev:** bump vitest to 4.1.12 and the desktop's vite to 8.3.5 ([#1653](https://github.com/mandakan/splitsmith/issues/1653)) ([54e458d](https://github.com/mandakan/splitsmith/commit/54e458d9a557d016933e164cede1d142a8992215))
+* **deps:** bump pillow from 12.3.0 to 13.0.0 ([#1638](https://github.com/mandakan/splitsmith/issues/1638)) ([a89f8d2](https://github.com/mandakan/splitsmith/commit/a89f8d2c7ed7386ea1efca778ea175ee946260d3))
+
 ## [0.86.0](https://github.com/mandakan/splitsmith/compare/v0.85.1...v0.86.0) (2026-10-21)
 
 
