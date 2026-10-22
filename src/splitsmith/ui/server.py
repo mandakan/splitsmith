@@ -87,7 +87,7 @@ import sys
 import tempfile
 import threading
 import time
-from collections.abc import AsyncIterator, Awaitable, Callable, Iterable
+from collections.abc import AsyncIterator, Awaitable, Callable, Iterable, Sequence
 from contextlib import AbstractContextManager, asynccontextmanager, nullcontext
 from contextvars import ContextVar
 from dataclasses import replace
@@ -4028,7 +4028,7 @@ class NextStep(BaseModel):
     status walk that produces ``stages_audited``.
     """
 
-    kind: Literal["footage", "audit", "export"]
+    kind: Literal["details", "footage", "audit", "export"]
     shooter_slug: str | None = None
     stage_number: int | None = None
     stage_name: str | None = None
@@ -4926,15 +4926,21 @@ def _next_step_from_statuses(
     per_shooter: list[tuple[str, dict[int, StageStatus]]],
     stage_names: dict[int, str],
     video_total: int,
+    untimed: Sequence[str] = (),
 ) -> NextStep | None:
     """The Continue card's target from each shooter's stage statuses.
 
     ``per_shooter`` is in match shooter order, so the first shooter with an
     open stage wins; within a shooter the lowest stage number does.
+    ``untimed`` names the shooters with a stage still lacking a time (no
+    scoreboard data): before any footage, their stage details come first,
+    since the shooting order is what lets Add footage place clips.
     """
     if not per_shooter:
         return None
     if video_total == 0:
+        if untimed:
+            return NextStep(kind="details", shooter_slug=untimed[0])
         return NextStep(kind="footage")
     # A stage that can be audited now (footage and a time, not saved yet)
     # beats one that first needs footage or scores: the card names work
@@ -4952,7 +4958,8 @@ def _next_step_from_statuses(
         for n in sorted(statuses):
             if statuses[n] in (StageStatus.todo, StageStatus.partial):
                 return NextStep(
-                    kind="footage",
+                    # Footage without a time: the stage details are missing.
+                    kind="details" if statuses[n] == StageStatus.partial else "footage",
                     shooter_slug=slug,
                     stage_number=n,
                     stage_name=stage_names.get(n, f"Stage {n}"),
@@ -5035,6 +5042,7 @@ def _hosted_detail_from_docs(
     names: list[str] = []
     video_total = 0
     per_shooter: list[tuple[str, dict[int, StageStatus]]] = []
+    untimed: list[str] = []
     stage_names = {
         int(s["stage_number"]): str(s.get("stage_name") or "") for s in (match_doc.get("stages") or [])
     }
@@ -5049,6 +5057,8 @@ def _hosted_detail_from_docs(
             video_total += len(proj.all_videos())
             statuses = proj.stage_statuses(audit_docs=audit_by_slug.get(slug, {}))
             per_shooter.append((slug, statuses))
+            if any(s.time_seconds <= 0 and not s.skipped for s in proj.stages):
+                untimed.append(slug)
             for st_entry in proj.stages:
                 stage_names.setdefault(st_entry.stage_number, st_entry.stage_name)
         except Exception:  # noqa: BLE001 -- never break the listing on one bad doc
@@ -5056,7 +5066,7 @@ def _hosted_detail_from_docs(
     detail.shooter_names = names
     detail.video_count = video_total
     detail.stages_audited = _stages_audited_across(per_shooter)
-    detail.next_step = _next_step_from_statuses(per_shooter, stage_names, video_total)
+    detail.next_step = _next_step_from_statuses(per_shooter, stage_names, video_total, untimed)
     # Mirror the local enricher's status derivation (minus "archived",
     # which needs an on-disk mtime we don't have here): nothing left to
     # audit or film -> exported; no footage -> awaiting_footage; otherwise

@@ -2091,7 +2091,7 @@ export function capabilityDenied(
 /** The picker's Continue card target (UX PR 8): the first open stage in
  *  shooter then stage order, or the phase the match is in. */
 export interface NextStep {
-  kind: "footage" | "audit" | "export";
+  kind: "details" | "footage" | "audit" | "export";
   shooter_slug: string | null;
   stage_number: number | null;
   stage_name: string | null;
