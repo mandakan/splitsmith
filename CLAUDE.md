@@ -220,7 +220,7 @@ failure. Merge it when main's CI passed on the commit it releases and the
 PR touches only the manifest, ``CHANGELOG.md``, ``pyproject.toml``,
 ``src/splitsmith/__init__.py`` and ``uv.lock``. The ``Release`` workflow
 then tags, publishes to PyPI, pushes both GHCR images, deploys
-production on Railway, and builds and attaches the Linux AppImage and .deb
+production on Cloud Run (after the image publish), and builds and attaches the Linux AppImage and .deb
 (``desktop-linux``, after ``publish-pypi``). The DMG is a separate local
 step, ``desktop/release.sh`` (signing never leaves the Mac; notarization
 can take close to an hour). The update feed announces per platform: macOS

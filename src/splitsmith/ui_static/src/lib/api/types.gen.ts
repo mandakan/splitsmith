@@ -12243,7 +12243,7 @@ export interface components {
              * Kind
              * @enum {string}
              */
-            kind: "self_hosted" | "railway";
+            kind: "self_hosted" | "railway" | "cloud_run";
             /** Last Seen At */
             last_seen_at: string | null;
             /** Last Wake At */

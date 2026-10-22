@@ -160,6 +160,7 @@ def test_register_happy_path_returns_token_and_credentials(
         "public_url": PUBLIC_URL,
         "s3": None,
         "youtube": None,
+        "wake": None,
     }
     # The info dict landed on the row.
     record = _with_store(hosted_env, lambda s: s.get(worker_id))

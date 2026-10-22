@@ -75,19 +75,22 @@ jobs:
       contents: write
 
   deploy-prod:
-    # And the production Railway deploy. Chained rather than left to the
+    # And the production Cloud Run deploy. Chained rather than left to the
     # `release: published` event (GITHUB_TOKEN release does not trigger it).
-    # Depends only on release-please, NOT publish-image: the Railway deploy
-    # builds from source (`railway up`) and neither needs nor uses the GHCR
-    # image. Coupling it to publish-image previously meant a cancelled or
-    # failed image build silently skipped the prod deploy (the v0.10.2
-    # incident) and, even when green, delayed prod by the ~10 min multi-arch
-    # build for no benefit. Prod now deploys in parallel with the image.
-    needs: release-please
+    # It depends on publish-image because Cloud Run runs the published GHCR
+    # image (pinned by digest) instead of building from source. That
+    # coupling once let a cancelled image build silently skip the prod
+    # deploy (the v0.10.2 incident, under the old build-from-source deploy);
+    # now a failed or cancelled publish-image shows as a skipped deploy-prod
+    # in a red Release run. Redo it with deploy-app.yml's workflow_dispatch
+    # (environment production, image_tag X.Y.Z) once the image exists.
+    needs: [release-please, publish-image]
     if: needs.release-please.outputs.release_created == 'true'
     uses: ./.github/workflows/deploy-app.yml
     with:
       environment: production
+      image_tag: ${{ needs.release-please.outputs.tag_name }}
     permissions:
       contents: read
+      id-token: write
     secrets: inherit

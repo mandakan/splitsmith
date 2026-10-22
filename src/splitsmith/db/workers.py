@@ -45,6 +45,10 @@ from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from .models import WorkerRow
 
+#: Worker kinds that are the hosting platform's own one-shot worker: seeded
+#: by serve at boot, never registered, never deletable from the admin view.
+PLATFORM_KINDS: tuple[str, ...] = ("railway", "cloud_run")
+
 
 def _aware(value: datetime) -> datetime:
     """Coerce a possibly-naive timestamp (SQLite drops tzinfo) to UTC-aware
@@ -182,14 +186,14 @@ class WorkersStore:
             return _to_record(row)
 
     async def delete(self, worker_id: str) -> bool:
-        """Delete a worker row. Returns False (without deleting) for kind='railway'."""
+        """Delete a worker row. Returns False (without deleting) for a platform row."""
         async with self._session_factory() as session:
             row = (
                 await session.execute(select(WorkerRow).where(WorkerRow.id == worker_id))
             ).scalar_one_or_none()
             if row is None:
                 return False
-            if row.kind == "railway":
+            if row.kind in PLATFORM_KINDS:
                 return False
             await session.delete(row)
             await session.commit()
@@ -285,20 +289,26 @@ class WorkersStore:
             await session.commit()
 
     async def ensure_railway_row(self, *, version: str | None = None) -> None:
-        """Idempotent upsert of the single kind='railway' row.
+        """Idempotent upsert of the single kind='railway' row (see ensure_platform_row)."""
+        await self.ensure_platform_row("railway", version=version)
 
-        Creates name='railway', kind='railway', priority=100, enabled=True,
-        registered_at=now if no kind='railway' row exists. If one already
-        exists, the operator's enabled/priority settings are preserved - but
-        ``version`` is always refreshed to the running deploy (web and worker
+    async def ensure_platform_row(self, kind: str, *, version: str | None = None) -> None:
+        """Idempotent upsert of the hosting platform's single worker row.
+
+        ``kind`` is ``railway`` or ``cloud_run``. Creates name=kind, priority=100,
+        enabled=True, registered_at=now if no row of that kind exists. If one
+        already exists, the operator's enabled/priority settings are preserved -
+        but ``version`` is always refreshed to the running deploy (web and worker
         ship from the same image, so serve boot knows the worker's version).
 
         The row is seeded as registered (registered_at stamped) so
         ``list_enabled()`` includes it without requiring a registration flow.
         """
+        if kind not in PLATFORM_KINDS:
+            raise ValueError(f"not a platform worker kind: {kind!r}")
         async with self._session_factory() as session:
             existing = (
-                await session.execute(select(WorkerRow).where(WorkerRow.kind == "railway"))
+                await session.execute(select(WorkerRow).where(WorkerRow.kind == kind))
             ).scalar_one_or_none()
             if existing is not None:
                 if version is not None and existing.version != version:
@@ -306,11 +316,12 @@ class WorkersStore:
                     await session.commit()
                 return
             row = WorkerRow(
-                name="railway",
-                kind="railway",
+                name=kind,
+                kind=kind,
                 # Fallback priority: below the self-hosted default (1000), so a
-                # registered home worker is preferred and Railway only wakes
-                # when no home worker takes the job. Higher number = preferred.
+                # registered home worker is preferred and the platform worker
+                # only wakes when no home worker takes the job. Higher number =
+                # preferred.
                 priority=100,
                 enabled=True,
                 registered_at=datetime.now(UTC),
@@ -320,7 +331,7 @@ class WorkersStore:
             await session.commit()
 
     async def list_enabled(self) -> list[WorkerRecord]:
-        """Workers that are enabled AND either registered or railway-kind.
+        """Workers that are enabled AND either registered or a platform row.
 
         Ordered by priority desc: the dispatcher walks tiers from this order
         and wakes the first reachable one, so higher priority is preferred.
@@ -331,7 +342,7 @@ class WorkersStore:
                     select(WorkerRow)
                     .where(
                         WorkerRow.enabled.is_(True),
-                        (WorkerRow.registered_at.is_not(None)) | (WorkerRow.kind == "railway"),
+                        (WorkerRow.registered_at.is_not(None)) | (WorkerRow.kind.in_(PLATFORM_KINDS)),
                     )
                     .order_by(WorkerRow.priority.desc())
                 )

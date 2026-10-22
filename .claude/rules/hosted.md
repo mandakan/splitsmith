@@ -6,6 +6,9 @@ paths:
   - "scripts/db_roles.py"
   - "alembic/env.py"
   - ".github/workflows/deploy-app.yml"
+  - "deploy/cloudrun/**"
+  - "src/splitsmith/worker_trigger.py"
+  - "src/splitsmith/agent.py"
   - "src/splitsmith/ui/access_gate.py"
   - "src/splitsmith/ui/context.py"
   - "src/splitsmith/ui/docstore/**"
@@ -141,6 +144,29 @@ Deploy facts (worker env, `FORWARDED_ALLOW_IPS`, the waitlist cut-over) are in
   version working: add in one release, remove in a later one.
 - The local compose stack keeps one non-superuser owner (`splitsmith_app`)
   for everything; it has no `BYPASSRLS`, so the same policies apply.
+
+## Hosting (Cloud Run)
+
+- Hosted mode runs on Google Cloud Run, project `splitsmith-hosting`, region
+  `europe-west1`: per environment a service `splitsmith-serve-<env>` and a job
+  `splitsmith-worker-<env>` (`worker --one-shot`). `deploy-app.yml` deploys the
+  GHCR image by digest through the Artifact Registry mirror `ghcr`; staging
+  after each main image publish, production from the release. CI signs in by
+  Workload Identity Federation as `splitsmith-deploy`; no Google key is stored.
+- Each service's plain env and its Secret Manager mounts are the files in
+  `deploy/cloudrun/`; a new variable goes there, a secret value only into
+  Secret Manager (`<env>-<name>`, a new version, then a deploy).
+- serve starts the job on enqueue (`SPLITSMITH_WORKER_LAUNCHER=cloud_run`,
+  `SPLITSMITH_WORKER_JOB`, the platform row `kind='cloud_run'`), with the
+  service account's token from the metadata server, not a key.
+- **Self-hosted boxes are woken through the bucket, not SSE**
+  (`SPLITSMITH_WAKE_CHANNEL=r2`): serve writes `WAKE_MARKER_KEY` and each box
+  polls its ETag every 30 s. An open SSE channel counts as an active request,
+  so it would keep serve (and its billing) awake around the clock. The marker
+  cannot see whether a box is there, so the dispatcher counts it as a wake of
+  every enabled self-hosted worker and relies on the grace escalation to the
+  job; the admin view cannot show a box online in this mode.
+  `tests/test_worker_cloud_run.py` pins the launcher, the marker and the poll.
 
 ## Database connections
 

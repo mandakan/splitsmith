@@ -1,5 +1,11 @@
 # 11 -- Environment strategy
 
+> **2026-10-22: hosting moved from Railway to Google Cloud Run** (project
+> `splitsmith-hosting`, region `europe-west1`) after Railway's environment
+> variable incident. The Railway-specific steps below are history; the live
+> configuration is `deploy/cloudrun/` and `.github/workflows/deploy-app.yml`,
+> and the rules are in `.claude/rules/hosted.md` (Hosting).
+
 How the hosted deployment is split into **staging** and **production**
 across every service provider, and how the brand domain is carved up
 between the marketing site and the application. Decided 2026-05-31;
