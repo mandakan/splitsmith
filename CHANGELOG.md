@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.87.1](https://github.com/mandakan/splitsmith/compare/v0.87.0...v0.87.1) (2026-10-22)
+
+
+### Bug Fixes
+
+* **hosted:** keep uploads under Cloud Run's 32 MiB and remove what was left of Railway ([#1655](https://github.com/mandakan/splitsmith/issues/1655)) ([836f422](https://github.com/mandakan/splitsmith/commit/836f422ebbe9c52d742c2a5799e928dce8ffa8f9))
+
 ## [0.87.0](https://github.com/mandakan/splitsmith/compare/v0.86.0...v0.87.0) (2026-10-22)
 
 
