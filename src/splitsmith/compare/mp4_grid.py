@@ -213,6 +213,10 @@ MIX_TRACK_LABEL = "Mix"
 #: consistently conservative. A predictable 3 dB is the better trade.
 MIX_NORMALIZE = 1
 
+#: How much of a trim's end a frozen tile reads (``-sseof``) to find its
+#: last frame: well over one frame at any rate, and little to decode.
+FROZEN_TAIL_READ_SECONDS = 1.0
+
 #: Face the ``drawtext`` clock falls back to when a theme resolves to no
 #: real font file. It is bundled, so it exists on every host.
 #:
@@ -505,6 +509,15 @@ class GridStagePlan:
     has been encoded. Stream *lengths* within a segment are a different
     and quieter problem; see :attr:`total_seconds`.
     """
+
+    freeze_tile_ends: bool = False
+    """Hold each tile's last frame from where its footage ends instead of
+    black. :func:`build_stage_plans` sets it when there is no summary hold:
+    with a hold the early per-tile summary covers that black, without one a
+    finished tile sat on black and the stage's transition ran over black.
+    It reaches an edge plan through :func:`narrow_grid_plan`, where a tile
+    whose window lies past its footage shows that last frame rather than
+    filler. Off, every argument is the black render's."""
 
     def __post_init__(self) -> None:
         if self.hold_seconds < 0:
@@ -831,6 +844,8 @@ def narrow_grid_plan(plan: GridStagePlan, *, head_cut: float, tail_cut: float) -
     # A tile whose footage ended before the window would seek past its own
     # end and hand ffmpeg no frames; in the stage it was black from its end
     # on, so here it is filler: black, silent, the same inputs and track.
+    # A stage that freezes its tiles keeps the tile: the command reads its
+    # last frame instead (see :func:`tile_is_past_its_footage`).
     tiles = [
         (
             replace(
@@ -844,14 +859,31 @@ def narrow_grid_plan(plan: GridStagePlan, *, head_cut: float, tail_cut: float) -
                 inset_seek_seconds=0.0,
                 inset_lead_pad_seconds=0.0,
             )
-            if tile.trim_path is not None and tile.seek_seconds >= tile.source_duration_seconds
-            else tile
+            if not plan.freeze_tile_ends and tile_is_past_its_footage(tile)
+            # Frozen, the tile drops its inset: the inset's own footage end
+            # is not known here, so there is no frame to hold it on.
+            else (
+                replace(tile, inset_path=None, inset_seek_seconds=0.0, inset_lead_pad_seconds=0.0)
+                if tile_is_past_its_footage(tile)
+                else tile
+            )
         )
         for tile in tiles
     ]
     return replace(
         plan, tiles=tuple(tiles), duration_seconds=duration, hold_seconds=plan.hold_seconds - hold_cut
     )
+
+
+def tile_is_past_its_footage(tile: GridTile) -> bool:
+    """A real tile whose window starts after its trim ends: seeking there
+    hands ffmpeg no frames."""
+    return tile.trim_path is not None and tile.seek_seconds >= tile.source_duration_seconds
+
+
+def _tile_end(plan: GridStagePlan) -> str:
+    """How a tile chain's ``tpad`` fills past the tile's footage."""
+    return "stop_mode=clone" if plan.freeze_tile_ends else "stop_mode=add:color=black"
 
 
 def overlay_plan_for(variant: GridStagePlan, *, source: GridStagePlan) -> GridStagePlan:
@@ -1045,6 +1077,7 @@ def build_stage_plans(
                 rows=rows,
                 cols=cols,
                 hold_seconds=hold_seconds,
+                freeze_tile_ends=hold_seconds == 0.0,
             )
         )
     return tuple(plans)
@@ -1112,8 +1145,8 @@ def tile_footage_end_seconds(tile: GridTile) -> float:
 
     Not the end of the action. The stage runs ``head_pad + the longest
     tile's post-beep span + tail_pad`` and every tile chain is
-    ``tpad``-ed with black across the remainder, so this is exactly
-    where that black starts.
+    ``tpad``-ed across the remainder (black, or its last frame held when the
+    plan freezes its tiles), so this is exactly where that padding starts.
 
     Both spellings of a tile's front collapse to the same answer. A tile
     that could seek reads ``source - seek`` of picture with no lead pad;
@@ -1857,7 +1890,24 @@ def build_stage_command(
     next_index = 0
 
     for tile in plan.tiles:
-        if tile.trim_path is not None:
+        if plan.freeze_tile_ends and tile_is_past_its_footage(tile):
+            # The window lies past the footage of a tile the stage holds on
+            # its last frame: read the trim's last second, and the chain
+            # keeps only its final frame. Silent, as the stage is there.
+            args += ["-sseof", f"-{FROZEN_TAIL_READ_SECONDS:g}", "-i", str(tile.trim_path)]
+            video_index.append(next_index)
+            next_index += 1
+            args += [
+                "-f",
+                "lavfi",
+                "-t",
+                f"{plan.duration_seconds:g}",
+                "-i",
+                "anullsrc=channel_layout=stereo:sample_rate=48000",
+            ]
+            audio_index.append(next_index)
+            next_index += 1
+        elif tile.trim_path is not None:
             # Seek before -i so ffmpeg fast-seeks; the trim's head buffer
             # absorbs any imprecision, same trade-off as trim.py.
             # A lead-padded tile reads that much less from its source: the
@@ -2243,12 +2293,18 @@ def _build_filter_graph(
         # shortfall without measuring each source; ``trim`` cuts the
         # excess back off, and dropped frames are cheap because nothing
         # downstream encodes them.
+        # A tile the stage freezes holds its last frame instead of black;
+        # one whose window lies past its footage is that frame alone, the
+        # last of the second ``-sseof`` read (see ``build_stage_command``).
+        frozen = (
+            "reverse,trim=end_frame=1," if plan.freeze_tile_ends and tile_is_past_its_footage(tile) else ""
+        )
         parts.append(
-            f"[{video_index[slot]}:v]{lead}setpts=PTS-STARTPTS,"
+            f"[{video_index[slot]}:v]{frozen}{lead}setpts=PTS-STARTPTS,"
             f"scale={cell_w}:{cell_h}:force_original_aspect_ratio=decrease,"
             f"pad={cell_w}:{cell_h}:(ow-iw)/2:(oh-ih)/2,"
             f"setsar=1,fps={rate},"
-            f"tpad=stop_duration={plan.duration_seconds:g}:stop_mode=add:color=black,"
+            f"tpad=stop_duration={plan.duration_seconds:g}:{_tile_end(plan)},"
             f"trim=0:{plan.duration_seconds:g}[t{slot}]"
         )
 
@@ -2275,7 +2331,7 @@ def _build_filter_graph(
         parts.append(
             f"[{source}:v]{lead}setpts=PTS-STARTPTS,"
             f"scale={inset_w}:-2,setsar=1,fps={rate},"
-            f"tpad=stop_duration={plan.duration_seconds:g}:stop_mode=add:color=black,"
+            f"tpad=stop_duration={plan.duration_seconds:g}:{_tile_end(plan)},"
             f"trim=0:{plan.duration_seconds:g}[n{slot}]"
         )
         parts.append(f"[t{slot}][n{slot}]overlay=x={x}:y={y}[u{slot}]")
@@ -2404,7 +2460,7 @@ def _build_filter_graph(
         lead = f"adelay={delay_ms}:all=1," if delay_ms > 0 else ""
         cut = (
             f"atrim=start={tile.seek_seconds:g}:duration={plan.duration_seconds - tile.lead_pad_seconds:g},"
-            if tile.trim_path is not None
+            if tile.trim_path is not None and not (plan.freeze_tile_ends and tile_is_past_its_footage(tile))
             else ""
         )
         parts.append(

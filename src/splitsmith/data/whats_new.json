@@ -1,6 +1,12 @@
 {
   "entries": [
     {
+      "id": "grid-tiles-hold-last-frame",
+      "date": "2026-10-22",
+      "title": "Grid shooters stay on screen when done",
+      "body": "In a compare grid with no summary hold, a shooter who finishes keeps their last frame instead of going black, so transitions between stages move real footage."
+    },
+    {
       "id": "push-transition",
       "date": "2026-10-21",
       "title": "A push that moves the footage",

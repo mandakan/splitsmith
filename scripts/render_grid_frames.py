@@ -173,7 +173,7 @@ def _moments(
             + (
                 " -- with a hold, that tile is already showing its own summary"
                 if hold_frames > 0
-                else " -- with no hold, that tile is black"
+                else " -- with no hold, that tile holds its last frame"
             ),
         ),
         # ``- 2``, not ``- 1``. The full clips' nominal footage end is
@@ -202,7 +202,7 @@ def _moments(
             + (
                 ", so every tile is already showing its summary"
                 if hold_frames > 0
-                else ", so black on every tile"
+                else ", so every tile holds its last frame"
             ),
         ),
     ]

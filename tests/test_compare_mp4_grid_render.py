@@ -15,6 +15,7 @@ import array
 import re
 import shutil
 import subprocess
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -104,6 +105,7 @@ def _render(
     rows: int | None = None,
     cols: int | None = None,
     canvas: mp4_grid.GridCanvas = CANVAS,
+    freeze: bool = False,
 ) -> Path:
     plan = mp4_grid.GridStagePlan(
         stage_number=1,
@@ -113,6 +115,7 @@ def _render(
         audio_label=tiles[-1].label,
         rows=rows if rows is not None else 1,
         cols=cols if cols is not None else len(tiles),
+        freeze_tile_ends=freeze,
     )
     out = tmp_path / name
     cmd = mp4_grid.build_stage_command(plan, canvas=canvas, output_path=out, ffmpeg_binary=FFMPEG)
@@ -192,6 +195,59 @@ def test_the_tail_pad_is_black_and_does_not_disturb_the_head_pad(tmp_path: Path)
     assert _patch_colour(out, at=3.5, x=centre_x, y=centre_y) == (0, 0, 0)
     assert _patch_colour(out, at=3.5, x=cell_w + centre_x, y=centre_y) == (0, 0, 0)
 
+    assert _stream_seconds(out, "0:v:0") == pytest.approx(STAGE_SECONDS, abs=2 * FRAME_SECONDS)
+
+
+def _red_then_green(path: Path) -> Path:
+    """1.5 s of red, then 0.5 s of green: its last frame is green, its
+    first red, so a held frame says which one it held."""
+    cmd = [
+        FFMPEG, "-hide_banner", "-y",
+        "-f", "lavfi", "-i", "color=c=red:s=320x240:r=30:d=1.5",
+        "-f", "lavfi", "-i", "color=c=green:s=320x240:r=30:d=0.5",
+        "-f", "lavfi", "-t", "2", "-i", "sine=frequency=440:sample_rate=48000",
+        "-filter_complex", "[0:v][1:v]concat=n=2:v=1:a=0[v]", "-map", "[v]", "-map", "2:a",
+        "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", str(path),
+    ]  # fmt: skip
+    done = subprocess.run(cmd, capture_output=True, text=True)
+    assert done.returncode == 0, done.stderr[-2000:]
+    return path
+
+
+@integration
+@needs_ffmpeg
+def test_a_frozen_stage_holds_each_tile_on_its_last_frame_through_the_tail(tmp_path: Path):
+    """#1647: with no summary hold a finished tile used to sit on black, and
+    the stage's transition ran over black. Frozen, both cells keep their
+    last frame (green, not the first frame's red) to the end."""
+    trim = _red_then_green(tmp_path / "a.mp4")
+    tiles = (
+        replace(_tile("Ann", trim, col=0), source_duration_seconds=2.0),
+        replace(_tile("Bo", trim, col=1), source_duration_seconds=2.0),
+    )
+    out = _render(tmp_path, tiles, "frozen.mp4", freeze=True)
+    cell_w, cell_h = CANVAS.width // 2, CANVAS.height // 2
+    for x in (cell_w // 2, cell_w + cell_w // 2):
+        assert _patch_colour(out, at=1.0, x=x, y=cell_h // 2)[0] > 200  # red, still playing
+        held = _patch_colour(out, at=3.5, x=x, y=cell_h // 2)
+        assert held[1] > 100 and held[0] < 60, held  # green: the last frame, held
+    assert _stream_seconds(out, "0:v:0") == pytest.approx(STAGE_SECONDS, abs=2 * FRAME_SECONDS)
+
+
+@integration
+@needs_ffmpeg
+def test_a_frozen_tile_whose_window_is_past_its_footage_shows_its_last_frame(tmp_path: Path):
+    """A tail edge's window can start after a tile's trim ends; frozen, the
+    cell is that trim's last frame for the whole window, and silent."""
+    trim = _red_then_green(tmp_path / "a.mp4")
+    past = replace(_tile("Ann", trim, col=0), seek_seconds=3.0, source_duration_seconds=2.0)
+    live = _tile("Bo", _source(tmp_path / "b.mp4", seconds=6.0, color="blue"), col=1)
+    out = _render(tmp_path, (past, live), "past.mp4", freeze=True)
+    cell_w, cell_h = CANVAS.width // 2, CANVAS.height // 2
+    for at in (0.1, 2.0, 3.8):
+        held = _patch_colour(out, at=at, x=cell_w // 2, y=cell_h // 2)
+        assert held[1] > 100 and held[0] < 60, (at, held)
+        assert _patch_colour(out, at=at, x=cell_w + cell_w // 2, y=cell_h // 2)[2] > 200
     assert _stream_seconds(out, "0:v:0") == pytest.approx(STAGE_SECONDS, abs=2 * FRAME_SECONDS)
 
 
