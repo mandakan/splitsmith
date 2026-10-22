@@ -235,9 +235,20 @@ argv test proves nothing about pixels.
   `narrow_grid_plan` (rebuilds every tile's seek and lead pad from the cut head
   pad, the beep staying on it; the overlay plan is built from the narrowed plan
   so clocks and sprites move with it; a tail cut comes from the hold first),
-  `grid_edge_plan` (a tile with no footage in the window becomes filler; a tail
-  edge inside the hold is a still of it), `build_boundary_segment_command`
-  (crossfades video and each of the N+1 tracks by stream index).
+  `grid_edge_plan` (a tile with no footage in the window becomes filler, or
+  its last frame when the stage freezes; a tail edge inside the hold is a
+  still of it), `build_boundary_segment_command` (crossfades video and each
+  of the N+1 tracks by stream index).
+- **A grid stage with no summary hold freezes its tiles**
+  (`GridStagePlan.freeze_tile_ends`, set by `build_stage_plans`): each tile
+  holds its last frame (`tpad stop_mode=clone`) instead of black, and a tile
+  whose window lies past its footage reads its trim's last frame (`-sseof`,
+  `reverse,trim=end_frame=1`), silent. The stage runs a tail pad past its
+  longest clip and `grid_boundary_fit` puts half the transition in that pad,
+  so without it every no-hold transition ran over black. With a hold the
+  early per-tile summary covers a finished tile and the argv is the black
+  render's. Pinned by the frozen tests in `test_compare_mp4_grid_hold.py`
+  and `test_compare_mp4_grid_render.py`.
 - **Stings** (`sting:<name>`, a variant of the Look's `transition` slot,
   resolved by `looks.sting_template_for` with no fallback to another variant).
   `TransitionKind` is an open `str`, so `composition.validate_transition_kind`

@@ -1431,16 +1431,17 @@ def test_states_never_start_before_the_segment_when_the_head_pad_is_negative(tmp
 
 def test_a_tail_edge_keeps_the_tiles_overlay_and_clocks(tmp_path):
     """Review of #1244: a tail edge's window lies past every tile's footage,
-    so its tiles are filler for ffmpeg; the overlay must still know the
-    tiles are there (their counters, splits and held clocks), built from
-    the source plan's presence and the edge's own, negative, head pad."""
+    so ffmpeg holds each tile's last frame (filler, without the freeze);
+    the overlay must still know the tiles are there (their counters, splits
+    and held clocks), built from the source plan's presence and the edge's
+    own, negative, head pad."""
     shooters = _shooters(tmp_path)
     (plan,) = mp4_grid.build_stage_plans(
         shooters, audio_label="Anders", head_pad_seconds=1.0, tail_pad_seconds=0.5
     )
     data = mp4_grid.load_overlay_data(shooters)
     edge = mp4_grid.grid_edge_plan(plan, half=0.5, end="tail")
-    assert all(tile.trim_path is None for tile in edge.tiles), "past every tile's footage"
+    assert all(mp4_grid.tile_is_past_its_footage(tile) for tile in edge.tiles), "past every tile's footage"
     variant = mp4_grid.overlay_plan_for(edge, source=plan)
     assert [tile.trim_path is not None for tile in variant.tiles] == [True, True]
     head_pad = mp4_grid.head_pad_of(plan) - (plan.duration_seconds - 0.5)

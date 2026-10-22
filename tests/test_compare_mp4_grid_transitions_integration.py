@@ -445,7 +445,8 @@ def test_a_grid_frames_sting_replaces_the_crossfade_with_its_edges(
 
     The grid's tail pad runs past every clip (``grid_boundary_fit`` needs it
     to hold half the transition), so a grid's tail edge is always padded and
-    its tiles are black there: the right half is black, not red. With no
+    its tiles hold their last frame there (#1647): the right half is the
+    outgoing red, not black. With no
     head handle (``padded``) the head edge is padded too and its first
     frame held, so the left half is blue from the first frame."""
     ffmpeg = shutil.which("ffmpeg")
@@ -476,7 +477,8 @@ def test_a_grid_frames_sting_replaces_the_crossfade_with_its_edges(
         left = _mean_rgb(boundary, at=at, ffmpeg=ffmpeg, box=(0.05, top, 0.4, bottom))
         right = _mean_rgb(boundary, at=at, ffmpeg=ffmpeg, box=(0.6, top, 0.95, bottom))
         assert left[2] > 180 and left[0] < 60, (at, left)
-        assert max(right) < 30, (at, right)  # the outgoing edge, past the clips' end
+        # The outgoing edge, past the clips' end: their last frame, held.
+        assert right[0] > 180 and right[2] < 60, (at, right)
         # What the sting leaves transparent is black, not the crossfade under it.
         gap = _mean_rgb(
             boundary, at=at, ffmpeg=ffmpeg, box=(PUSH_GAP[0] + 0.02, top, PUSH_GAP[1] - 0.02, bottom)

@@ -1788,3 +1788,51 @@ def test_a_tile_with_no_footage_in_the_window_becomes_filler() -> None:
     graph = _graph_of(cmd)
     assert "color=c=black" in " ".join(cmd)
     assert len(_chains(graph, r"\[a\d\]\[m\d\]$")) == 2, "both tracks still there"
+
+
+# --- #1647: no hold freezes each tile on its last frame -------------------------------
+
+
+def test_only_a_stage_with_no_hold_freezes_its_tiles():
+    """With a hold the early per-tile summary covers a finished tile; with
+    none it sat on black and the stage's transition ran over black."""
+    anders = _bundle("Anders", {1: _stage(1, trim=Path("/a1.mp4"), beep=2.0, duration=12.0)})
+    common = dict(audio_label="Anders", head_pad_seconds=1.0, tail_pad_seconds=0.5)
+    (no_hold,) = mp4_grid.build_stage_plans([anders], **common)
+    (held,) = mp4_grid.build_stage_plans([anders], **common, hold_seconds=HOLD)
+    assert no_hold.freeze_tile_ends and not held.freeze_tile_ends
+
+
+def test_a_frozen_stage_holds_every_tile_on_its_last_frame_instead_of_black():
+    plan = replace(_long_plan(), freeze_tile_ends=True)
+    graph = _graph_of(_command(plan, hold_still_path=None))
+    tile_chains = [chain for chain in graph.split(";") if re.search(r"\[t\d\]$", chain)]
+    assert tile_chains and all(
+        "stop_mode=clone" in chain and "stop_mode=add" not in chain for chain in tile_chains
+    )
+
+
+def test_a_frozen_tail_edge_reads_each_finished_tiles_last_frame_not_filler():
+    """The tail edge's window lies past a tile that ended early: with the
+    freeze it shows that tile's last frame (``-sseof``, the final frame of
+    a reversed read) and stays silent, where the black render made it
+    filler."""
+    short = replace(
+        _long_plan(tiles=(_long_tile("Ann"), _long_tile("Bo", source=6.0))), freeze_tile_ends=True
+    )
+    tail = mp4_grid.grid_edge_plan(short, half=0.5, end="tail")
+    ann, bo = tail.tiles
+    assert not mp4_grid.tile_is_past_its_footage(ann)
+    assert bo.trim_path is not None and mp4_grid.tile_is_past_its_footage(bo)
+    cmd = _command(tail, hold_still_path=None)
+    assert "-sseof" in cmd and cmd[cmd.index("-sseof") + 2 : cmd.index("-sseof") + 4] == (
+        "-i",
+        str(bo.trim_path),
+    )
+    graph = _graph_of(cmd)
+    (bo_video,) = [chain for chain in graph.split(";") if chain.endswith("[t1]")]
+    assert bo_video.split("]", 1)[1].startswith("reverse,trim=end_frame=1,") and "stop_mode=clone" in bo_video
+    (bo_audio,) = [chain for chain in graph.split(";") if re.search(r"\[a1\]\[m1\]$", chain)]
+    assert "atrim=start" not in bo_audio, "silent: the anullsrc is not cut"
+    bo_audio_input = cmd[cmd.index("-sseof") + 4 :][:6]
+    assert bo_audio_input[-1].startswith("anullsrc="), bo_audio_input
