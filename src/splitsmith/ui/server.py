@@ -1050,7 +1050,7 @@ class WorkerView(BaseModel):
 
     id: str
     name: str
-    kind: Literal["self_hosted", "railway"]
+    kind: Literal["self_hosted", "railway", "cloud_run"]
     enabled: bool
     priority: int
     status: Literal["online", "offline", "pending", "disabled"]
@@ -5349,10 +5349,15 @@ def _apply_hosted_mode_wiring(
     from ..queue import make_deferrer
     from ..worker_channel import WakeChannelRegistry
     from ..worker_trigger import (
+        ENV_WAKE_CHANNEL,
+        WAKE_MARKER_KEY,
+        WAKE_POLL_SECONDS,
+        WakeMarker,
         build_worker_dispatcher,
         make_boot_retrigger,
         make_pending_jobs_counter,
         make_worker_active_checker,
+        wake_channel,
         wrap_deferrer,
     )
 
@@ -5554,6 +5559,16 @@ def _apply_hosted_mode_wiring(
     # acquire launcher capabilities - redeploying itself would be circular and
     # today is only prevented by the env vars being absent on the worker service.
     # The guard below makes that invariant explicit in code.
+    s3_client, s3_bucket = _build_hosted_s3_client()
+    # SPLITSMITH_WAKE_CHANNEL=r2: self-hosted boxes poll a marker in the
+    # bucket instead of holding an SSE channel to serve, so a scale-to-zero
+    # host (Cloud Run) is not kept awake by them (WakeMarker).
+    wake_marker: WakeMarker | None = None
+    wake_kind = wake_channel()
+    if wake_kind == "r2" and not worker:
+        if s3_client is None or s3_bucket is None:
+            raise RuntimeError(f"{ENV_WAKE_CHANNEL}=r2 needs the storage bucket ({SPLITSMITH_S3_BUCKET_ENV})")
+        wake_marker = WakeMarker(s3_client, s3_bucket)
     if not worker:
         # Wakes a worker through the priority dispatcher after each defer,
         # gated on the procrastinate_workers heartbeat so a live drain is
@@ -5567,11 +5582,11 @@ def _apply_hosted_mode_wiring(
             state.wake_channels,
             worker_active=make_worker_active_checker(session_factory),
             pending_jobs=make_pending_jobs_counter(session_factory),
+            wake_marker=wake_marker,
         )
         if worker_launcher is not None:
             deferrer = wrap_deferrer(deferrer, worker_launcher)
             state.boot_retrigger = make_boot_retrigger(session_factory, worker_launcher)
-    s3_client, s3_bucket = _build_hosted_s3_client()
     if not worker:
         # Connection material handed to a self-hosted worker by the register
         # endpoint. The S3 sub-dict mirrors _build_hosted_s3_client's env
@@ -5597,6 +5612,13 @@ def _apply_hosted_mode_wiring(
             # until all three are set on the API; the agent then leaves
             # the variables alone and an upload job fails naming them.
             "youtube": _youtube_worker_credentials(),
+            # How the box is woken. Absent (an older server) or None means
+            # the SSE channel.
+            "wake": (
+                {"kind": "r2", "key": WAKE_MARKER_KEY, "interval_seconds": WAKE_POLL_SECONDS}
+                if wake_marker is not None
+                else None
+            ),
         }
 
     def _build_tenant(user_id: str) -> TenantContext:
@@ -5892,6 +5914,10 @@ def _derive_worker_status(record: Any, connected_ids: frozenset[str]) -> str:
         from ..worker_trigger import load_railway_config
 
         return "online" if load_railway_config() is not None else "offline"
+    if record.kind == "cloud_run":
+        from ..worker_trigger import load_cloud_run_config
+
+        return "online" if load_cloud_run_config() is not None else "offline"
     if record.id in connected_ids:
         return "online"
     if not record.registered:
@@ -5924,8 +5950,8 @@ def _hosted_boot_lifespan(state: Any) -> Any | None:
     - adopt the app's event loop in :attr:`AppState.db_engines` so it gets
       its own pooled engine (#1178), disposed when the lifespan exits (the
       process ``DbRunner`` is shared and is not stopped here);
-    - seed the singleton ``kind='railway'`` worker row when the Railway env
-      config is present - a fresh deploy otherwise has an empty ``workers``
+    - seed the platform's singleton worker row (``kind='railway'`` or
+      ``'cloud_run'``) when that launcher is configured - a fresh deploy otherwise has an empty ``workers``
       table and the wake path is silently dead (idempotent; an existing
       row's operator-set enabled/priority is preserved);
     - fire the boot pending-jobs re-check (see ``make_boot_retrigger``).
@@ -5933,9 +5959,10 @@ def _hosted_boot_lifespan(state: Any) -> Any | None:
     Returns None only when none of them applies, so callers can pass the
     result directly to FastAPI(lifespan=...) without branching.
     """
-    from ..worker_trigger import load_railway_config
+    from ..worker_trigger import platform_worker_kind
 
-    workers_store = state.workers_store if load_railway_config() is not None else None
+    platform_kind = platform_worker_kind()
+    workers_store = state.workers_store if platform_kind is not None else None
     retrigger = state.boot_retrigger
     engines = state.db_engines
     if workers_store is None and retrigger is None and engines is None:
@@ -5954,8 +5981,8 @@ def _hosted_boot_lifespan(state: Any) -> Any | None:
                 from ..db.roles import assert_runtime_role
 
                 await assert_runtime_role(app_engine)
-            if workers_store is not None:
-                await workers_store.ensure_railway_row(version=splitsmith_version)
+            if workers_store is not None and platform_kind is not None:
+                await workers_store.ensure_platform_row(platform_kind, version=splitsmith_version)
             if retrigger is not None:
                 # Cold starts include every wake from Railway app sleeping, so a
                 # stranded queue job recovers on the next visit instead of

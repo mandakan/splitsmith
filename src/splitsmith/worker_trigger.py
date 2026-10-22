@@ -56,11 +56,31 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 RAILWAY_API_URL = "https://backboard.railway.com/graphql/v2"
+CLOUD_RUN_API_URL = "https://run.googleapis.com/v2"
+# The metadata server hands a Cloud Run instance its service account's
+# access token; no key file, no google-auth dependency.
+GCP_METADATA_TOKEN_URL = (
+    "http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token"
+)
 
 # Selects the dispatcher mode in build_worker_dispatcher(): unset or
-# "railway" builds the dispatcher (its railway leg needs the env vars
-# below); "none" disables the wake machinery entirely.
+# "railway" builds the dispatcher with a railway leg (needs the env vars
+# below); "cloud_run" with a Cloud Run Job leg (SPLITSMITH_WORKER_JOB);
+# "none" disables the wake machinery entirely.
 ENV_WORKER_LAUNCHER = "SPLITSMITH_WORKER_LAUNCHER"
+# Full resource name of the worker job:
+# ``projects/<project>/locations/<region>/jobs/<job>``.
+ENV_WORKER_JOB = "SPLITSMITH_WORKER_JOB"
+# How self-hosted workers are woken: "sse" (default; the box holds an SSE
+# channel to serve) or "r2" (serve writes a marker object to the storage
+# bucket and the box polls it, so nothing holds a connection to serve and
+# a scale-to-zero host can sleep; see WakeMarker).
+ENV_WAKE_CHANNEL = "SPLITSMITH_WAKE_CHANNEL"
+#: Bucket key of the self-hosted wake marker. Outside ``users/`` so no
+#: tenant key can collide with it.
+WAKE_MARKER_KEY = "_splitsmith/wake/self-hosted"
+#: How often a box polls the marker in "r2" mode.
+WAKE_POLL_SECONDS = 30.0
 ENV_TRIGGER_TOKEN = "SPLITSMITH_WORKER_TRIGGER_TOKEN"
 ENV_WORKER_SERVICE_ID = "SPLITSMITH_WORKER_SERVICE_ID"
 ENV_WORKER_ENVIRONMENT_ID = "SPLITSMITH_WORKER_ENVIRONMENT_ID"
@@ -90,6 +110,70 @@ def load_railway_config() -> RailwayLauncherConfig | None:
     if not (token and service_id and environment_id):
         return None
     return RailwayLauncherConfig(token=token, service_id=service_id, environment_id=environment_id)
+
+
+class CloudRunJobConfig(BaseModel):
+    """The Cloud Run Job that runs ``splitsmith worker --one-shot``."""
+
+    job: str
+    api_url: str = CLOUD_RUN_API_URL
+    token_url: str = GCP_METADATA_TOKEN_URL
+
+
+def load_cloud_run_config() -> CloudRunJobConfig | None:
+    """Read the Cloud Run leg's config; ``None`` when no job is named."""
+    job = os.environ.get(ENV_WORKER_JOB, "").strip()
+    if not job:
+        return None
+    if not job.startswith("projects/") or "/jobs/" not in job:
+        raise ValueError(f"{ENV_WORKER_JOB}={job!r}: expected projects/<p>/locations/<r>/jobs/<j>")
+    return CloudRunJobConfig(job=job)
+
+
+def platform_worker_kind() -> str | None:
+    """The ``workers.kind`` of this deployment's platform worker, if any.
+
+    serve seeds that row at boot so the dispatcher has a fallback below
+    the self-hosted boxes.
+    """
+    if load_cloud_run_config() is not None:
+        return "cloud_run"
+    if load_railway_config() is not None:
+        return "railway"
+    return None
+
+
+def wake_channel() -> str:
+    """``"sse"`` or ``"r2"`` (``SPLITSMITH_WAKE_CHANNEL``)."""
+    value = os.environ.get(ENV_WAKE_CHANNEL, "").strip().lower() or "sse"
+    if value not in ("sse", "r2"):
+        raise ValueError(f"{ENV_WAKE_CHANNEL}={value!r}: expected 'sse' or 'r2'")
+    return value
+
+
+class WakeMarker:
+    """The "r2" wake channel's server half: one object in the storage bucket.
+
+    Waking the self-hosted boxes is a PUT of a fresh body, which changes the
+    object's ETag; each box HEADs the key every ``WAKE_POLL_SECONDS`` and
+    drains when the ETag moves (``agent._marker_poll_loop``). No connection
+    to serve and no database read, so serve and Neon stay asleep between
+    jobs. The cost is pickup latency up to the poll interval, and a box
+    cannot be checked for liveness: the dispatcher counts the marker as a
+    wake of every enabled self-hosted worker and relies on the grace
+    escalation if none drains.
+    """
+
+    def __init__(self, client: Any, bucket: str, key: str = WAKE_MARKER_KEY) -> None:
+        self._client = client
+        self._bucket = bucket
+        self._key = key
+
+    async def touch(self) -> None:
+        body = f"{time.time():.6f}".encode()
+        await asyncio.to_thread(
+            self._client.put_object, Bucket=self._bucket, Key=self._key, Body=body, ContentType="text/plain"
+        )
 
 
 class WorkerLauncher(Protocol):
@@ -143,10 +227,21 @@ class WorkerDispatcher:
         cooldown_seconds: float = 30.0,
         grace_seconds: float = 90.0,
         transport: httpx.AsyncBaseTransport | None = None,
+        cloud_run: CloudRunJobConfig | None = None,
+        wake_marker: WakeMarker | None = None,
     ) -> None:
         self._store = store
         self._registry = registry
         self._railway = railway
+        self._cloud_run = cloud_run
+        self._wake_marker = wake_marker
+        # Google API calls get their own client: the railway client carries
+        # the Railway token as a default header.
+        self._gcp_client: httpx.AsyncClient | None = (
+            httpx.AsyncClient(timeout=10.0, transport=transport) if cloud_run is not None else None
+        )
+        self._gcp_token: str | None = None
+        self._gcp_token_expires = 0.0
         self._worker_active = worker_active
         self._pending_jobs = pending_jobs
         self._cooldown_seconds = cooldown_seconds
@@ -223,6 +318,7 @@ class WorkerDispatcher:
         for priority, tier in itertools.groupby(workers, key=lambda w: w.priority):
             woken_ids: list[str] = []
             woke_self_hosted = False
+            marker: bool | None = None  # touched once per tier, on first need
             for worker in tier:
                 if worker.kind == "railway":
                     if self._railway is None:
@@ -234,6 +330,31 @@ class WorkerDispatcher:
                         continue
                     logger.info("worker dispatcher: railway redeploy fired")
                     woken_ids.append(worker.id)
+                elif worker.kind == "cloud_run":
+                    if self._cloud_run is None:
+                        continue
+                    try:
+                        await self._run_job()
+                    except Exception:
+                        logger.warning("worker dispatcher: cloud run job start failed", exc_info=True)
+                        continue
+                    logger.info("worker dispatcher: cloud run job started")
+                    woken_ids.append(worker.id)
+                elif self._wake_marker is not None:
+                    # "r2" channel: one marker write wakes every box polling
+                    # it. Unlike an SSE push it cannot tell whether a box is
+                    # there, so the grace escalation below is the net.
+                    if marker is None:
+                        try:
+                            await self._wake_marker.touch()
+                            marker = True
+                            logger.info("worker dispatcher: wake marker written")
+                        except Exception:
+                            marker = False
+                            logger.warning("worker dispatcher: wake marker write failed", exc_info=True)
+                    if marker:
+                        woken_ids.append(worker.id)
+                        woke_self_hosted = True
                 elif self._registry.push(worker.id, "wake"):
                     # The push IS the availability check: a disconnected
                     # box has no channel and simply is not woken.
@@ -314,6 +435,36 @@ class WorkerDispatcher:
         payload = response.json()
         if payload.get("errors"):
             raise RuntimeError(f"Railway GraphQL error: {payload['errors']}")
+
+    async def _gcp_access_token(self) -> str:
+        """The service account's access token, cached until a minute before expiry."""
+        assert self._cloud_run is not None and self._gcp_client is not None
+        if self._gcp_token is not None and time.monotonic() < self._gcp_token_expires:
+            return self._gcp_token
+        response = await self._gcp_client.get(
+            self._cloud_run.token_url, headers={"Metadata-Flavor": "Google"}
+        )
+        response.raise_for_status()
+        payload = response.json()
+        self._gcp_token = str(payload["access_token"])
+        self._gcp_token_expires = time.monotonic() + max(0.0, float(payload.get("expires_in", 0)) - 60.0)
+        return self._gcp_token
+
+    async def _run_job(self) -> None:
+        """Start one execution of the worker job (``jobs.run``).
+
+        A second execution while one runs is harmless: both drain the same
+        Postgres queue and Procrastinate hands each job to one of them. The
+        heartbeat gate in :meth:`trigger` keeps that rare.
+        """
+        assert self._cloud_run is not None and self._gcp_client is not None
+        token = await self._gcp_access_token()
+        response = await self._gcp_client.post(
+            f"{self._cloud_run.api_url}/{self._cloud_run.job}:run",
+            headers={"Authorization": f"Bearer {token}"},
+            json={},
+        )
+        response.raise_for_status()
 
 
 def make_worker_active_checker(
@@ -434,25 +585,45 @@ def build_worker_dispatcher(
     worker_active: WorkerActiveCheck | None,
     pending_jobs: PendingJobsCount,
     transport: httpx.AsyncBaseTransport | None = None,
+    wake_marker: WakeMarker | None = None,
 ) -> WorkerDispatcher | None:
     """Build the dispatcher from ``SPLITSMITH_WORKER_LAUNCHER``.
 
     Unset or ``railway`` (the historical default) builds a dispatcher whose
     railway leg is :func:`load_railway_config` (absent env vars just drop
-    that leg - self-hosted workers can still be woken). ``none`` disables
-    the wake machinery (returns None) for deployments with an always-on
-    worker. Unknown names raise so a misconfigured hosted boot fails loudly
-    instead of stranding jobs.
+    that leg - self-hosted workers can still be woken). ``cloud_run`` builds
+    one whose platform leg starts the job named by ``SPLITSMITH_WORKER_JOB``,
+    which must then be set. ``none`` disables the wake machinery (returns
+    None) for deployments with an always-on worker. Unknown names raise so a
+    misconfigured hosted boot fails loudly instead of stranding jobs.
+
+    ``wake_marker`` switches self-hosted wakes from SSE pushes to the
+    storage-bucket marker (``SPLITSMITH_WAKE_CHANNEL=r2``).
     """
     kind = os.environ.get(ENV_WORKER_LAUNCHER, "").strip().lower() or "railway"
     if kind == "none":
         return None
+    if kind == "cloud_run":
+        cloud_run = load_cloud_run_config()
+        if cloud_run is None:
+            raise ValueError(f"{ENV_WORKER_LAUNCHER}=cloud_run needs {ENV_WORKER_JOB}")
+        return WorkerDispatcher(
+            store,
+            registry,
+            railway=None,
+            cloud_run=cloud_run,
+            wake_marker=wake_marker,
+            worker_active=worker_active,
+            pending_jobs=pending_jobs,
+            transport=transport,
+        )
     if kind != "railway":
         raise ValueError(f"{ENV_WORKER_LAUNCHER}={kind!r}: unknown worker launcher")
     return WorkerDispatcher(
         store,
         registry,
         railway=load_railway_config(),
+        wake_marker=wake_marker,
         worker_active=worker_active,
         pending_jobs=pending_jobs,
         transport=transport,

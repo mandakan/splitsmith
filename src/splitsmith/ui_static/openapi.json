@@ -11896,7 +11896,8 @@
      "kind": {
       "enum": [
        "self_hosted",
-       "railway"
+       "railway",
+       "cloud_run"
       ],
       "title": "Kind",
       "type": "string"

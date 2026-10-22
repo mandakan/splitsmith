@@ -1,45 +1,37 @@
-name: Deploy app (Railway)
+name: Deploy app (Cloud Run)
 
-# CI-controlled deploys to Railway (not Railway's auto-deploy-on-push) so
-# the timing is ours. `railway up` uploads the repo and Railway builds the
-# Dockerfile; the env-scoped project token (a per-GitHub-Environment
-# RAILWAY_TOKEN secret) decides which Railway environment it lands in.
+# Deploys the published image to Google Cloud Run (project splitsmith-hosting,
+# region europe-west1):
 #
-#   push to main           -> staging
-#   release (workflow_call) -> production   (chained from release-please.yml)
-#   workflow_dispatch      -> the chosen environment (manual button)
+#   image published from main  -> staging      (workflow_run on "Publish image (GHCR)")
+#   release (workflow_call)     -> production   (chained from release-please.yml,
+#                                                after publish-image)
+#   workflow_dispatch           -> the chosen environment and image tag
 #
-# The production path is a `workflow_call` from release-please.yml gated on
-# release_created, not the `release: published` event: a release cut by
-# release-please via GITHUB_TOKEN does not trigger `on: release` workflows, so
-# chaining it into the release run is what makes prod deploy fire automatically.
-# The `release: published` trigger stays as a net for human-published releases.
+# Per environment there is one service, splitsmith-serve-<env>, and one job,
+# splitsmith-worker-<env> (`splitsmith worker --one-shot`, started by serve
+# when it queues work). Their plain environment and their Secret Manager
+# mounts live in deploy/cloudrun/<env>-{serve,worker}.{env.yaml,secrets}.
 #
-# Both services build from the same image (ENTRYPOINT `splitsmith`); the
-# `serve` and `worker` Railway services differ only by start command, set
-# on the service itself.
+# Images are not built here: Cloud Run pulls the GHCR image through the
+# Artifact Registry remote repository `ghcr` (a pull-through mirror), pinned
+# by digest so a later push to the same tag cannot change what was deployed.
 #
-# Migrations run here, as the schema owner, before `railway up`: the
-# runtime connects as a least-privilege role that cannot run DDL
-# (`splitsmith.db.roles`), and the owner's URL is this GitHub Environment's
-# SPLITSMITH_MIGRATION_DATABASE_URL secret, never a Railway variable.
-# `serve` still runs `alembic upgrade head` on boot; at head that is a
-# read-only no-op the runtime role is allowed.
+# Auth is Workload Identity Federation: GitHub's OIDC token is exchanged for
+# the splitsmith-deploy service account, which only workflows from
+# mandakan/splitsmith may impersonate. No Google key is stored in GitHub.
+#
+# Migrations run first, as the schema owner, from this GitHub Environment's
+# SPLITSMITH_MIGRATION_DATABASE_URL secret: the runtime connects as a
+# least-privilege role that cannot run DDL (`splitsmith.db.roles`). serve
+# still runs `alembic upgrade head` on boot; at head that is a read-only
+# no-op the runtime role is allowed.
 
 on:
-  push:
+  workflow_run:
+    workflows: ["Publish image (GHCR)"]
+    types: [completed]
     branches: [main]
-    # Docs and marketing-site changes build nothing these jobs ship.
-    # functions/ (the update feed, tested in desktop-unit) and the root
-    # package.json (CI's pnpm version) are deliberately not listed.
-    paths-ignore:
-      - "site/**"
-      - "docs/**"
-      - "**/*.md"
-      - "wrangler.toml"
-      - ".github/workflows/deploy-marketing.yml"
-  release:
-    types: [published]
   workflow_dispatch:
     inputs:
       environment:
@@ -47,54 +39,78 @@ on:
         type: choice
         options: [staging, production]
         default: staging
+      image_tag:
+        description: GHCR image tag (edge = latest main; X.Y.Z = a release)
+        type: string
+        default: edge
   workflow_call:
     inputs:
       environment:
         description: Target environment (production on the release path)
         type: string
-        required: false
-        default: ''
+        required: true
+      image_tag:
+        description: GHCR image tag to deploy (the release version, X.Y.Z)
+        type: string
+        required: true
 
 permissions:
   contents: read
+  id-token: write
+
+env:
+  GCP_PROJECT: splitsmith-hosting
+  GCP_REGION: europe-west1
+  GCP_WIF_PROVIDER: projects/860162349528/locations/global/workloadIdentityPools/github/providers/github-oidc
+  GCP_DEPLOY_SA: splitsmith-deploy@splitsmith-hosting.iam.gserviceaccount.com
+  GHCR_IMAGE: ghcr.io/mandakan/splitsmith
+  MIRROR_IMAGE: europe-west1-docker.pkg.dev/splitsmith-hosting/ghcr/mandakan/splitsmith
 
 jobs:
   target:
-    name: resolve target environment
+    name: resolve target
     runs-on: ubuntu-latest
+    # A failed image publish deploys nothing.
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
     outputs:
       env: ${{ steps.pick.outputs.env }}
+      tag: ${{ steps.pick.outputs.tag }}
     steps:
-      # workflow_dispatch and workflow_call both supply inputs.environment;
-      # prefer it when set, else fall back to the event (release -> production,
-      # everything else -> staging).
       - id: pick
         run: |
           if [ -n "${{ inputs.environment }}" ]; then
+            tag="${{ inputs.image_tag }}"
             echo "env=${{ inputs.environment }}" >> "$GITHUB_OUTPUT"
-          elif [ "${{ github.event_name }}" = "release" ]; then
-            echo "env=production" >> "$GITHUB_OUTPUT"
+            # A release tag is vX.Y.Z; the image is published as X.Y.Z.
+            echo "tag=${tag#v}" >> "$GITHUB_OUTPUT"
           else
             echo "env=staging" >> "$GITHUB_OUTPUT"
+            echo "tag=edge" >> "$GITHUB_OUTPUT"
           fi
 
   deploy:
-    name: railway up (${{ needs.target.outputs.env }})
+    name: cloud run (${{ needs.target.outputs.env }})
     needs: target
     runs-on: ubuntu-latest
-    # Pulls this GitHub Environment's RAILWAY_TOKEN (the env-scoped Railway
-    # project token), so the same workflow targets staging or production
-    # purely by which environment it runs under.
     environment: ${{ needs.target.outputs.env }}
-    # One in-flight deploy per Railway environment; let a running deploy
-    # finish rather than cancelling it mid-build.
     concurrency:
       group: deploy-app-${{ needs.target.outputs.env }}
       cancel-in-progress: false
     env:
-      RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+      DEPLOY_ENV: ${{ needs.target.outputs.env }}
+      IMAGE_TAG: ${{ needs.target.outputs.tag }}
     steps:
       - uses: actions/checkout@v5
+
+      # Pin the deploy to the digest the tag points at right now, and use
+      # the same digest for serve and the worker job.
+      - name: Resolve the image digest
+        id: image
+        run: |
+          digest="$(docker buildx imagetools inspect "$GHCR_IMAGE:$IMAGE_TAG" --format '{{json .Manifest.Digest}}' | tr -d '"')"
+          test -n "$digest"
+          echo "ref=$MIRROR_IMAGE@$digest" >> "$GITHUB_OUTPUT"
+          echo "Deploying $GHCR_IMAGE:$IMAGE_TAG ($digest)"
 
       - name: Install uv
         uses: astral-sh/setup-uv@v4
@@ -106,28 +122,69 @@ jobs:
 
       # Before the deploy, so the new code never boots against an old
       # schema. A migration must therefore keep the running version working
-      # (add first, remove in a later release), which boot-time migration
-      # already required. A missing secret fails here, before anything ships.
+      # (add first, remove in a later release). A missing secret fails here,
+      # before anything ships.
       - name: Migrate the database (schema owner)
         env:
           SPLITSMITH_MIGRATION_DATABASE_URL: ${{ secrets.SPLITSMITH_MIGRATION_DATABASE_URL }}
         run: |
           if [ -z "$SPLITSMITH_MIGRATION_DATABASE_URL" ]; then
-            echo "::error::SPLITSMITH_MIGRATION_DATABASE_URL is not set on the ${{ needs.target.outputs.env }} environment"
+            echo "::error::SPLITSMITH_MIGRATION_DATABASE_URL is not set on the $DEPLOY_ENV environment"
             exit 1
           fi
           uv sync --frozen --no-dev --extra hosted
           uv run --frozen --no-dev --extra hosted alembic upgrade head
 
-      - name: Install Railway CLI
-        run: npm i -g @railway/cli
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ env.GCP_WIF_PROVIDER }}
+          service_account: ${{ env.GCP_DEPLOY_SA }}
 
-      # `--ci` streams the build log, but its exit code is unreliable: the
-      # CLI exits 1 when it loses the log stream even though the deploy
-      # succeeds server-side (#863). The wrapper script treats the deployment
-      # status as the success signal, so only a real deploy failure goes red.
-      - name: Deploy API (serve)
-        run: ./scripts/railway_up_verified.sh serve
+      - name: Install gcloud
+        uses: google-github-actions/setup-gcloud@v2
 
-      - name: Deploy worker
-        run: ./scripts/railway_up_verified.sh worker
+      # Comment lines in the .secrets files are documentation; the rest
+      # join into one --set-secrets value (VAR=secret:latest,...).
+      - name: Read the secret maps
+        id: secrets
+        run: |
+          join() { grep -vE '^\s*(#|$)' "$1" | sed 's/$/:latest/' | paste -sd, -; }
+          echo "serve=$(join deploy/cloudrun/$DEPLOY_ENV-serve.secrets)" >> "$GITHUB_OUTPUT"
+          echo "worker=$(join deploy/cloudrun/$DEPLOY_ENV-worker.secrets)" >> "$GITHUB_OUTPUT"
+
+      # The job first: serve names it in SPLITSMITH_WORKER_JOB and starts it
+      # on the next enqueue. Model load at the start of each run is why the
+      # job gets more memory than serve. No retries: a failed drain leaves
+      # its jobs queued for the next run.
+      - name: Deploy the worker job
+        run: |
+          gcloud run jobs deploy "splitsmith-worker-$DEPLOY_ENV" \
+            --project "$GCP_PROJECT" --region "$GCP_REGION" \
+            --image "${{ steps.image.outputs.ref }}" \
+            --args=worker,--one-shot \
+            --service-account "splitsmith-worker@$GCP_PROJECT.iam.gserviceaccount.com" \
+            --cpu 2 --memory 4Gi --task-timeout 3600 --max-retries 0 \
+            --env-vars-file "deploy/cloudrun/$DEPLOY_ENV-worker.env.yaml" \
+            --set-secrets "${{ steps.secrets.outputs.worker }}"
+
+      # Scale to zero (min-instances 0). The request timeout is Cloud Run's
+      # maximum, for the long uploads and the older agents' SSE channel; the
+      # "r2" wake channel means no agent holds one open by design.
+      - name: Deploy serve
+        run: |
+          gcloud run deploy "splitsmith-serve-$DEPLOY_ENV" \
+            --project "$GCP_PROJECT" --region "$GCP_REGION" \
+            --image "${{ steps.image.outputs.ref }}" \
+            --port 5174 \
+            --service-account "splitsmith-serve@$GCP_PROJECT.iam.gserviceaccount.com" \
+            --cpu 1 --memory 2Gi --min-instances 0 --max-instances 3 --concurrency 40 \
+            --timeout 3600 --cpu-boost --allow-unauthenticated \
+            --env-vars-file "deploy/cloudrun/$DEPLOY_ENV-serve.env.yaml" \
+            --set-secrets "${{ steps.secrets.outputs.serve }}"
+
+      - name: Smoke test
+        run: |
+          url="$(gcloud run services describe "splitsmith-serve-$DEPLOY_ENV" --project "$GCP_PROJECT" --region "$GCP_REGION" --format='value(status.url)')"
+          curl -sf -m 120 --retry 3 "$url/api/health"
+          echo

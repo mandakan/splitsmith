@@ -359,6 +359,74 @@ async def _reader_loop(
         backoff = min(backoff * 2, _BACKOFF_MAX)
 
 
+_MARKER_MISSING = object()
+
+
+async def _marker_poll_loop(
+    head: Callable[[], Awaitable[str | None]],
+    coordinator: _WakeCoordinator,
+    stop_event: asyncio.Event,
+    *,
+    interval: float,
+    max_polls: int | None = None,
+) -> None:
+    """The "r2" wake channel's box half: poll the bucket marker, wake on change.
+
+    ``head`` returns the marker's ETag, or None while it does not exist. The
+    first poll always wakes (a catch-up drain for jobs queued while the box
+    was offline, as connecting the SSE channel does); after that a drain runs
+    whenever the ETag differs from the last one seen. A failed poll is logged
+    and leaves the last ETag in place, so the next good poll still sees a
+    change made in between. ``max_polls`` caps the loop for tests.
+    """
+    last: object = _MARKER_MISSING
+    polls = 0
+    logger.info("polling the wake marker every %.0fs", interval)
+    while not stop_event.is_set():
+        if max_polls is not None and polls >= max_polls:
+            return
+        polls += 1
+        try:
+            etag: object = await head()
+        except Exception as exc:  # noqa: BLE001 - storage hiccups must not kill the agent
+            logger.warning("wake marker poll failed (%s); retrying", exc)
+        else:
+            if etag != last:
+                last = etag
+                coordinator.dispatch("wake")
+        try:
+            await asyncio.wait_for(stop_event.wait(), timeout=interval)
+        except TimeoutError:
+            pass
+
+
+def _marker_head(s3: dict, key: str) -> Callable[[], Awaitable[str | None]]:
+    """An async HEAD of ``key`` in the bundle's bucket, returning its ETag."""
+    import boto3
+    from botocore.exceptions import ClientError
+
+    client = boto3.client(
+        "s3",
+        endpoint_url=s3.get("endpoint_url") or None,
+        region_name=s3.get("region") or "auto",
+        aws_access_key_id=s3["access_key_id"],
+        aws_secret_access_key=s3["secret_access_key"],
+    )
+
+    def _head() -> str | None:
+        try:
+            return str(client.head_object(Bucket=s3["bucket"], Key=key)["ETag"])
+        except ClientError as exc:
+            if exc.response.get("Error", {}).get("Code") in ("404", "NoSuchKey", "NotFound"):
+                return None
+            raise
+
+    async def _async_head() -> str | None:
+        return await asyncio.to_thread(_head)
+
+    return _async_head
+
+
 def _feed_and_dispatch(parser: _SSEParser, chunk: bytes, coordinator: _WakeCoordinator) -> bool:
     """Feed one chunk through the parser; return True if a reconnect was signalled."""
     for name in parser.feed(chunk):
@@ -533,10 +601,22 @@ async def run_agent(
     loop = asyncio.get_running_loop()
     loop.add_signal_handler(signal.SIGTERM, _request_stop)
 
+    # The bundle says how this box is woken: a storage-bucket marker it polls
+    # ("r2", for a scale-to-zero server) or, by default, the SSE channel.
+    wake = state.credentials.get("wake") or {}
+    use_marker = wake.get("kind") == "r2" and bool(state.credentials.get("s3"))
+
     async with httpx.AsyncClient(transport=transport) as client:
-        reader_task = asyncio.create_task(
-            _reader_loop(client, server_url, state.worker_token, coordinator, stop_event)
-        )
+        if use_marker:
+            reader = _marker_poll_loop(
+                _marker_head(state.credentials["s3"], str(wake["key"])),
+                coordinator,
+                stop_event,
+                interval=float(wake.get("interval_seconds", 30.0)),
+            )
+        else:
+            reader = _reader_loop(client, server_url, state.worker_token, coordinator, stop_event)
+        reader_task = asyncio.create_task(reader)
         drainer_task = asyncio.create_task(
             _drain_loop(
                 coordinator.wake_event,
