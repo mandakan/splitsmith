@@ -2,47 +2,18 @@
 # Staging magic-link login helper.
 #
 # Staging runs SPLITSMITH_EMAIL_BACKEND=console, so it sends no real email --
-# the magic link is written to the serve logs instead. This script requests a
-# link, pulls it back out of the Railway staging serve logs, and opens it
-# (which sets your session cookie). Production sends real email via Lettermint,
-# so this is staging-only.
+# the magic link is written to the serve logs instead. This mints a link with
+# scripts/staging_login_link.py (which reads it back from Cloud Logging) and
+# opens it, which sets your session cookie. Production sends real email via
+# Lettermint, so this is staging-only.
 #
 # Usage:  scripts/staging-login.sh [email]
 #   Defaults to m@thias.se (the allowlisted account). Signups on staging are
-#   closed, so only allowlisted addresses get a link; anything else logs
-#   nothing and the script reports no link found.
+#   closed, so only allowlisted addresses get a link.
 #
-# Requires the Railway CLI logged in (`railway login`) and the project linked
-# once: `railway link --project e77bded4-ddb2-430c-816f-156f2b6fe36a`.
+# Requires an authenticated gcloud CLI (`gcloud auth login`).
 set -euo pipefail
 
-EMAIL="${1:-m@thias.se}"
-HOST="https://my.staging.splitsmith.app"
-
-echo "Requesting magic link for $EMAIL on staging ..."
-curl -fsS -X POST "$HOST/api/v1/auth/begin" \
-  -H "Content-Type: application/json" \
-  -d "{\"email\":\"$EMAIL\"}" >/dev/null
-
-# Give Railway's log pipeline a moment to flush the line.
-sleep 3
-
-echo "Fetching the link from the staging serve logs ..."
-# The @logger filter is load-bearing: unfiltered tails serve records
-# pre-normalization, where the structured line's message is empty (#711).
-LINK="$(railway logs -d --lines 200 --since 15m -s serve -e staging \
-    --filter '@logger:splitsmith.db.email' 2>/dev/null \
-  | grep "MAGIC_LINK $EMAIL " \
-  | tail -1 \
-  | grep -oE 'https://[^ ]+/auth/callback\?token=[^ ]+' || true)"
-
-if [ -z "$LINK" ]; then
-  echo "No link found in the logs yet. Re-run in a few seconds, or check:"
-  echo "  railway logs -d --lines 200 -s serve -e staging --filter '@logger:splitsmith.db.email'"
-  exit 1
-fi
-
-echo "Link: $LINK"
-# Open in the default browser (macOS 'open'; falls back to xdg-open on Linux).
-if command -v open >/dev/null 2>&1; then open "$LINK";
-elif command -v xdg-open >/dev/null 2>&1; then xdg-open "$LINK"; fi
+LINK="$(python3 "$(dirname "$0")/staging_login_link.py" "${1:-m@thias.se}")"
+echo "Opening $LINK"
+open "$LINK" 2>/dev/null || xdg-open "$LINK" 2>/dev/null || echo "Open it in a browser: $LINK"

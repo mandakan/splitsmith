@@ -139,9 +139,10 @@ export async function request<T>(
 
 /** Files at or above this size use the presigned multipart path (direct
  *  browser -> R2); smaller files take the single-shot serve-proxied
- *  upload. The serve proxy 502s on Railway past a few hundred MB, so the
- *  threshold sits well below that. */
-export const MULTIPART_THRESHOLD_BYTES = 64 * 1024 * 1024;
+ *  upload. Cloud Run refuses an HTTP/1 request body over 32 MiB before it
+ *  reaches serve, so the threshold sits well below that (and equals the
+ *  16 MiB part size, so a multipart upload is never smaller than a part). */
+export const MULTIPART_THRESHOLD_BYTES = 16 * 1024 * 1024;
 
 /** PUT one part's bytes straight to R2 via its presigned URL. Resolves
  *  with the part's ETag (which the complete call needs). The ETag header

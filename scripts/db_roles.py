@@ -14,20 +14,22 @@ roles are plain SQL roles rather than Neon-managed ones.
     # directly (it LISTENs), so splitsmith_app gets both, same password.
     uv run --extra hosted python scripts/db_roles.py rotate splitsmith_app \
         --out ~/.claude-tmp/app.url --direct-out ~/.claude-tmp/app-direct.url
-    railway variables -s serve -e production --set "SPLITSMITH_DATABASE_URL=$(cat ~/.claude-tmp/app.url)"
-    railway variables -s worker -e production \
-        --set "SPLITSMITH_DATABASE_URL=$(cat ~/.claude-tmp/app-direct.url)"
+    gcloud secrets versions add production-database-url --data-file ~/.claude-tmp/app.url
+    gcloud secrets versions add production-worker-database-url --data-file ~/.claude-tmp/app-direct.url
     rm ~/.claude-tmp/app.url ~/.claude-tmp/app-direct.url
 
-    # Agents drain the queue too, so theirs is the direct URL; it is set on
-    # serve, which hands it out at registration.
+    # Agents drain the queue too, so theirs is the direct URL
+    # (production-agent-database-url); serve hands it out at registration,
+    # so re-register each box after rotating it.
     uv run --extra hosted python scripts/db_roles.py rotate splitsmith_agent --direct \
         --out ~/.claude-tmp/agent.url
 
 ``rotate`` takes the host from the owner URL and, unless ``--direct`` is
 given, points ``--out`` at Neon's pooler (``-pooler`` after the endpoint id).
 The owner's own password is Neon's to reset (console or API); this script
-never changes it.
+never changes it. Secret Manager mounts are read when an instance starts, so
+roll serve after a rotation (any ``gcloud run services update``) and the job
+picks the new version up on its next run (``.claude/rules/hosted.md``).
 """
 
 from __future__ import annotations
@@ -151,7 +153,7 @@ def main(argv: list[str] | None = None) -> None:
     rotate.add_argument(
         "--direct-out",
         type=Path,
-        help="also write the direct-host URL, same password, here (the Railway worker's)",
+        help="also write the direct-host URL, same password, here (the worker job's)",
     )
     args = parser.parse_args(argv)
 

@@ -1,8 +1,8 @@
 # Self-hosted workers: operator guide
 
 This guide explains how to run a home Docker box as a compute worker for splitsmith.
-The home worker runs detection and processing jobs, reducing Railway compute costs.
-The server prefers the home worker over Railway when it is online.
+The home worker runs detection and processing jobs, so the Cloud Run worker job
+rarely has to start. The server prefers the home worker over the job.
 
 ## Prerequisites
 
@@ -499,13 +499,14 @@ each with its own `agent.json` volume and registration token.
    beep detection on a stage in the UI).
 2. Watch `docker logs -f splitsmith-agent` - you should see a drain log within a few
    seconds of enqueuing.
-3. In the Railway dashboard, confirm the Railway worker service did not redeploy.
-4. In **Admin > Workers**, the home worker row shows "online" status and an updated
-   "last seen" timestamp.
+3. Confirm the Cloud Run worker job did not start:
+   `gcloud run jobs executions list --job splitsmith-worker-production --region europe-west1 --project splitsmith-hosting --limit 3`.
+4. In **Admin > Workers**, the home worker row shows an updated "last wake" time. On the
+   bucket-marker wake channel the server cannot see the box, so it does not show "online".
 
-To test Railway fallback:
+To test the Cloud Run fallback:
 
 1. Disable the home worker in **Admin > Workers** (toggle the enabled switch).
 2. Enqueue another detection job.
-3. The Railway worker boots and processes the job; the home agent stays idle.
+3. A new execution of the worker job processes the job; the home agent stays idle.
 4. Re-enable the home worker to restore the preferred dispatch path.

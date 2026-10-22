@@ -557,17 +557,17 @@ def test_generator_goodbye_stamp_finishes_when_the_request_is_cancelled() -> Non
 
 
 # ---------------------------------------------------------------------------
-# Hosted boot lifespan: railway-row seeding
+# Hosted boot lifespan: platform-row seeding
 # ---------------------------------------------------------------------------
 
 
-def test_hosted_boot_seeds_railway_row_when_env_configured(
+def test_hosted_boot_seeds_the_cloud_run_row_when_a_job_is_named(
     monkeypatch: pytest.MonkeyPatch,
     hosted_env: str,
 ) -> None:
-    monkeypatch.setenv("SPLITSMITH_WORKER_TRIGGER_TOKEN", "t")
-    monkeypatch.setenv("SPLITSMITH_WORKER_SERVICE_ID", "s")
-    monkeypatch.setenv("SPLITSMITH_WORKER_ENVIRONMENT_ID", "e")
+    monkeypatch.setenv(
+        "SPLITSMITH_WORKER_JOB", "projects/p/locations/europe-west1/jobs/splitsmith-worker-test"
+    )
 
     from splitsmith.ui.server import create_app
 
@@ -575,11 +575,11 @@ def test_hosted_boot_seeds_railway_row_when_env_configured(
         pass  # lifespan runs the seeding
 
     rows = _with_store(hosted_env, lambda s: s.list())
-    assert [w.kind for w in rows] == ["railway"]
+    assert [w.kind for w in rows] == ["cloud_run"]
     assert rows[0].enabled is True
 
 
-def test_hosted_boot_does_not_seed_railway_row_without_env(
+def test_hosted_boot_does_not_seed_a_platform_row_without_a_job(
     hosted_env: str,
     hosted_app: tuple[TestClient, _CapturingSender],
 ) -> None:

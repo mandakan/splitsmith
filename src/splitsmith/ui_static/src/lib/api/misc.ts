@@ -127,8 +127,8 @@ export const miscApi = {
       json: patch,
     }),
 
-  /** Delete a worker. 204 on success, 404 for unknown, 400 for Railway
-   *  workers (which cannot be deleted via the API). */
+  /** Delete a worker. 204 on success, 404 for unknown, 400 for the
+   *  platform (Cloud Run) worker, which cannot be deleted via the API. */
   adminDeleteWorker: (id: string) =>
     request<void>(`/api/admin/workers/${encodeURIComponent(id)}`, {
       method: "DELETE",

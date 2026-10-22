@@ -124,11 +124,11 @@ def test_structured_json_formatter_plain_record_is_valid_json() -> None:
         exc_info=None,
     )
     parsed = json.loads(formatter.format(record))
-    # "message" is the key Railway's parsed format documents; note the raw
-    # stream/tail surfaces swallow it anyway - only attribute-filtered
-    # queries return parsed-JSON message text (#711).
+    # Cloud Logging takes the text from "message" and the level from
+    # "severity" (without it every line is DEFAULT).
     assert parsed["message"] == "just a line here"
     assert parsed["level"] == "INFO"
+    assert parsed["severity"] == "INFO"
     assert "event" not in parsed
     # ts is tz-aware UTC, not a naive local-time string.
     ts = datetime.fromisoformat(parsed["ts"])

@@ -1046,11 +1046,11 @@ class WorkerView(BaseModel):
     """One worker as returned by admin routes (Task 7).
 
     ``status`` is derived at query time - not stored - so it reflects live
-    channel state and the Railway config presence without a separate field."""
+    channel state and the platform job's config presence without a separate field."""
 
     id: str
     name: str
-    kind: Literal["self_hosted", "railway", "cloud_run"]
+    kind: Literal["self_hosted", "cloud_run"]
     enabled: bool
     priority: int
     status: Literal["online", "offline", "pending", "disabled"]
@@ -5903,17 +5903,13 @@ def _derive_worker_status(record: Any, connected_ids: frozenset[str]) -> str:
     have a live channel still shows as 'disabled' so the admin cannot
     accidentally treat it as active. Order:
     1. disabled (not enabled)
-    2. railway: online iff load_railway_config() is present
+    2. cloud_run: online iff load_cloud_run_config() names the job
     3. self_hosted: online if id in connected_ids
     4. self_hosted: pending if not yet registered
     5. offline
     """
     if not record.enabled:
         return "disabled"
-    if record.kind == "railway":
-        from ..worker_trigger import load_railway_config
-
-        return "online" if load_railway_config() is not None else "offline"
     if record.kind == "cloud_run":
         from ..worker_trigger import load_cloud_run_config
 
@@ -5950,8 +5946,8 @@ def _hosted_boot_lifespan(state: Any) -> Any | None:
     - adopt the app's event loop in :attr:`AppState.db_engines` so it gets
       its own pooled engine (#1178), disposed when the lifespan exits (the
       process ``DbRunner`` is shared and is not stopped here);
-    - seed the platform's singleton worker row (``kind='railway'`` or
-      ``'cloud_run'``) when that launcher is configured - a fresh deploy otherwise has an empty ``workers``
+    - seed the platform's singleton worker row (``kind='cloud_run'``) when
+      the worker job is configured - a fresh deploy otherwise has an empty ``workers``
       table and the wake path is silently dead (idempotent; an existing
       row's operator-set enabled/priority is preserved);
     - fire the boot pending-jobs re-check (see ``make_boot_retrigger``).
@@ -5984,7 +5980,7 @@ def _hosted_boot_lifespan(state: Any) -> Any | None:
             if workers_store is not None and platform_kind is not None:
                 await workers_store.ensure_platform_row(platform_kind, version=splitsmith_version)
             if retrigger is not None:
-                # Cold starts include every wake from Railway app sleeping, so a
+                # serve scales to zero, so every cold start re-checks and a
                 # stranded queue job recovers on the next visit instead of
                 # waiting for the 6-hourly safety cron.
                 await retrigger()
@@ -9011,7 +9007,7 @@ def create_app(
     # ------------------------------------------------------------------
     # Presigned multipart upload (#467): direct browser -> R2 for large
     # files. The single-shot endpoint above proxies bytes through this
-    # process, which 502s past a few hundred MB on Railway. Here the
+    # process, which Cloud Run caps at 32 MiB per request. Here the
     # client PUTs parts straight to R2 via presigned URLs; serve only
     # mints the upload, signs parts, and finalizes. No bytes (and so no
     # server-side sha256) pass through serve -- attach treats sha256 as
@@ -9185,7 +9181,7 @@ def create_app(
 
         Pushes ``"disabled"`` to a connected channel first (best-effort) so
         the daemon parks before the row vanishes. Returns 400 for the
-        singleton railway row (cannot be deleted), 404 for an unknown id.
+        platform worker row (cannot be deleted), 404 for an unknown id.
         """
         store = state.workers_store
         assert store is not None
@@ -9197,8 +9193,8 @@ def create_app(
             registry.push(worker_id, "disabled")  # best-effort
         deleted = await store.delete(worker_id)
         if not deleted:
-            # store.delete returns False only for railway rows
-            raise HTTPException(status_code=400, detail="cannot delete the railway worker")
+            # store.delete returns False only for the platform row
+            raise HTTPException(status_code=400, detail="cannot delete the platform worker")
         return Response(status_code=204)
 
     # --- the event's logo (the branding work) -------------------------------

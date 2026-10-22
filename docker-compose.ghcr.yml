@@ -13,7 +13,7 @@
 #
 # It reuses everything else from the base (bundled Postgres + MinIO, the same
 # env), so this is "run the release image locally", not a production deployment.
-# Real production is Railway + Neon + R2; see docs/. For self-hosting the server
+# Real production is Cloud Run + Neon + R2; see deploy/cloudrun/. For self-hosting the server
 # on your own box you would externalise Postgres/object storage/secrets, which
 # this overlay deliberately does not do.
 #

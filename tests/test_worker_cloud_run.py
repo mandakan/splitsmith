@@ -18,12 +18,9 @@ from fastapi.testclient import TestClient
 from splitsmith.agent import _marker_poll_loop, _WakeCoordinator
 from splitsmith.worker_channel import WakeChannelRegistry
 from splitsmith.worker_trigger import (
-    ENV_TRIGGER_TOKEN,
     ENV_WAKE_CHANNEL,
-    ENV_WORKER_ENVIRONMENT_ID,
     ENV_WORKER_JOB,
     ENV_WORKER_LAUNCHER,
-    ENV_WORKER_SERVICE_ID,
     GCP_METADATA_TOKEN_URL,
     WAKE_MARKER_KEY,
     CloudRunJobConfig,
@@ -60,7 +57,6 @@ class _FakeMarker:
 
 
 def _dispatcher(store: Any, registry: WakeChannelRegistry, **kwargs: Any) -> WorkerDispatcher:
-    kwargs.setdefault("railway", None)
     kwargs.setdefault("worker_active", None)
     kwargs.setdefault("pending_jobs", _pending(0))
     kwargs.setdefault("grace_seconds", 0.01)
@@ -242,10 +238,6 @@ def _clear(monkeypatch: pytest.MonkeyPatch) -> None:
     for var in (
         ENV_WORKER_LAUNCHER,
         ENV_WORKER_JOB,
-        ENV_TRIGGER_TOKEN,
-        ENV_WORKER_SERVICE_ID,
-        ENV_WORKER_ENVIRONMENT_ID,
-        "RAILWAY_ENVIRONMENT_ID",
         ENV_WAKE_CHANNEL,
     ):
         monkeypatch.delenv(var, raising=False)
@@ -262,7 +254,6 @@ def test_cloud_run_launcher_requires_the_job(monkeypatch: pytest.MonkeyPatch) ->
         store, WakeChannelRegistry(), worker_active=None, pending_jobs=_pending(0)
     )
     assert dispatcher is not None and dispatcher._cloud_run == CloudRunJobConfig(job=JOB)
-    assert dispatcher._railway is None
 
 
 def test_job_name_is_validated(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -275,10 +266,6 @@ def test_job_name_is_validated(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_platform_worker_kind(monkeypatch: pytest.MonkeyPatch) -> None:
     _clear(monkeypatch)
     assert platform_worker_kind() is None
-    monkeypatch.setenv(ENV_TRIGGER_TOKEN, "t")
-    monkeypatch.setenv(ENV_WORKER_SERVICE_ID, "s")
-    monkeypatch.setenv(ENV_WORKER_ENVIRONMENT_ID, "e")
-    assert platform_worker_kind() == "railway"
     monkeypatch.setenv(ENV_WORKER_JOB, JOB)
     assert platform_worker_kind() == "cloud_run"
 

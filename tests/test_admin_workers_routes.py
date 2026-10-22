@@ -230,14 +230,14 @@ def test_admin_delete_unknown_404(admin_client) -> None:
     assert resp.status_code == 404
 
 
-def test_admin_delete_railway_400(admin_client, hosted_env: str) -> None:
-    """Deleting the singleton railway row is refused with 400."""
-    railway_id = _with_store(
+def test_admin_delete_platform_400(admin_client, hosted_env: str) -> None:
+    """Deleting the singleton platform row is refused with 400."""
+    platform_id = _with_store(
         hosted_env,
-        lambda s: _ensure_railway_id(s),
+        lambda s: _ensure_platform_id(s),
     )
     client, _ = admin_client
-    resp = client.delete(f"/api/admin/workers/{railway_id}")
+    resp = client.delete(f"/api/admin/workers/{platform_id}")
     assert resp.status_code == 400
 
 
@@ -425,7 +425,7 @@ def test_status_offline_when_registered_and_not_connected(admin_client, hosted_e
 # ---------------------------------------------------------------------------
 
 
-async def _ensure_railway_id(store: WorkersStore) -> str:
-    await store.ensure_railway_row()
+async def _ensure_platform_id(store: WorkersStore) -> str:
+    await store.ensure_platform_row("cloud_run")
     rows = await store.list()
-    return next(r for r in rows if r.kind == "railway").id
+    return next(r for r in rows if r.kind == "cloud_run").id

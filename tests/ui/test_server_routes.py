@@ -1239,10 +1239,9 @@ def test_hosted_boot_lifespan_runs_on_app_startup(monkeypatch) -> None:
 
     from splitsmith.ui.server import _hosted_boot_lifespan
 
-    # Railway env config must not leak into this test - without it the
+    # A worker job in the env must not leak into this test - without it the
     # lifespan's seeding leg stays off and only the retrigger leg matters.
-    for var in ("SPLITSMITH_WORKER_TRIGGER_TOKEN", "SPLITSMITH_WORKER_SERVICE_ID"):
-        monkeypatch.delenv(var, raising=False)
+    monkeypatch.delenv("SPLITSMITH_WORKER_JOB", raising=False)
 
     calls: list[str] = []
 
@@ -1274,17 +1273,17 @@ def test_hosted_boot_lifespan_runs_on_app_startup(monkeypatch) -> None:
 
 
 def test_hosted_boot_lifespan_returned_for_seeding_alone(monkeypatch) -> None:
-    """The lifespan must exist when only the railway-row seeding applies
-    (boot_retrigger None), and it must run ensure_railway_row on startup -
-    a fresh deploy otherwise has an empty workers table and the wake path
-    is silently dead."""
+    """The lifespan must exist when only the platform-row seeding applies
+    (boot_retrigger None), and it must seed the ``cloud_run`` row (the job
+    named by SPLITSMITH_WORKER_JOB) on startup - a fresh deploy otherwise has
+    an empty workers table and the dispatcher no fallback tier."""
     from fastapi import FastAPI
 
     from splitsmith.ui.server import _hosted_boot_lifespan
 
-    monkeypatch.setenv("SPLITSMITH_WORKER_TRIGGER_TOKEN", "t")
-    monkeypatch.setenv("SPLITSMITH_WORKER_SERVICE_ID", "s")
-    monkeypatch.setenv("SPLITSMITH_WORKER_ENVIRONMENT_ID", "e")
+    monkeypatch.setenv(
+        "SPLITSMITH_WORKER_JOB", "projects/p/locations/europe-west1/jobs/splitsmith-worker-staging"
+    )
 
     calls: list[str] = []
     seeded_versions: list[str | None] = []
@@ -1305,41 +1304,11 @@ def test_hosted_boot_lifespan_returned_for_seeding_alone(monkeypatch) -> None:
     with TestClient(FastAPI(lifespan=lifespan)):
         pass
 
-    assert calls == ["seeded:railway"]
-    # The running deploy's version is stamped onto the railway row at boot.
+    assert calls == ["seeded:cloud_run"]
+    # The running deploy's version is stamped onto the platform row at boot.
     from splitsmith import __version__
 
     assert seeded_versions == [__version__]
-
-
-def test_hosted_boot_lifespan_seeds_the_cloud_run_row(monkeypatch) -> None:
-    """On Cloud Run the platform row is ``kind='cloud_run'`` (the job named
-    by SPLITSMITH_WORKER_JOB), so the dispatcher has its fallback tier."""
-    from fastapi import FastAPI
-
-    from splitsmith.ui.server import _hosted_boot_lifespan
-
-    for var in ("SPLITSMITH_WORKER_TRIGGER_TOKEN", "SPLITSMITH_WORKER_SERVICE_ID", "RAILWAY_ENVIRONMENT_ID"):
-        monkeypatch.delenv(var, raising=False)
-    monkeypatch.setenv(
-        "SPLITSMITH_WORKER_JOB", "projects/p/locations/europe-west1/jobs/splitsmith-worker-staging"
-    )
-    calls: list[str] = []
-
-    class _FakeWorkersStore:
-        async def ensure_platform_row(self, kind: str, *, version: str | None = None) -> None:
-            calls.append(kind)
-
-    class _FakeState:
-        boot_retrigger = None
-        workers_store = _FakeWorkersStore()
-        db_engines = None
-
-    lifespan = _hosted_boot_lifespan(_FakeState())
-    assert lifespan is not None
-    with TestClient(FastAPI(lifespan=lifespan)):
-        pass
-    assert calls == ["cloud_run"]
 
 
 @pytest.mark.parametrize("request_style", [{}, {"overlay_variant": "plate"}], ids=["classic", "plate"])

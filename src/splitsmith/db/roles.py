@@ -6,8 +6,8 @@ Hosted mode connects with two kinds of credential:
   function, and is the only role Alembic runs as. Its URL is
   ``SPLITSMITH_MIGRATION_DATABASE_URL`` and lives with the deploy job, never
   in the runtime environment.
-- **Runtime login roles** -- ``splitsmith_app`` for the API and the Railway
-  worker, ``splitsmith_agent`` for self-hosted agents -- read and write rows
+- **Runtime login roles** -- ``splitsmith_app`` for the API and the
+  platform worker job, ``splitsmith_agent`` for self-hosted agents -- read and write rows
   and nothing else. Both are members of the ``splitsmith_runtime`` group,
   which holds the grants, so revoking one box's credential leaves the API
   untouched.

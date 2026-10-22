@@ -85,7 +85,7 @@ dependencies = [
     # environment that rasterizes an overlay needs the one-time install
     # step once per environment: ``uv run playwright install chromium
     # --only-shell`` (the hosted image's Dockerfile, the self-hosted
-    # worker's provisioning, the Railway fallback, and CI all need this
+    # worker's provisioning, the Cloud Run worker job, and CI all need this
     # run once, independently). ``--only-shell`` fetches the
     # headless-shell build ``overlay_raster.CHROMIUM_CHANNEL`` launches
     # -- 260M against the full browser's 377M -- verified to render the

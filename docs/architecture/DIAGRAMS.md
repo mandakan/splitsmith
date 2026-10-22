@@ -11,13 +11,13 @@ Interactive: [`splitsmith.html`](splitsmith.html) (source: `splitsmith.architect
 ```mermaid
 %%{init: {"flowchart": {"defaultRenderer": "elk"}}}%%
 flowchart TB
-    subgraph b0 ["Serve tier: Railway + Neon + R2"]
+    subgraph b0 ["Serve tier: Cloud Run + Neon + R2"]
         api["FastAPI server<br>splitsmith serve / ui"]
         db[("Postgres<br>Neon; SQLite on desktop")]
         storage[("Object storage<br>R2; filesystem on desktop")]
     end
     subgraph b1 ["Compute tier: one worker per job"]
-        worker["Compute worker<br>Railway or self-hosted agent"]
+        worker["Compute worker<br>Cloud Run job or self-hosted agent"]
         engine["Detection engine<br>beep + 3-voter shot ensemble"]
         exports["Export pipeline<br>FCPXML, CSV, MP4 renders"]
         ffmpeg(["ffmpeg<br>subprocess"])
@@ -28,7 +28,7 @@ flowchart TB
     spa ==>|"HTTPS /api"| api
     api ==>|"state docs, enqueue"| db
     db ==>|"Procrastinate drain"| worker
-    api -.->|"wake: SSE channel or Railway redeploy"| worker
+    api -.->|"wake: bucket marker or SSE, or Cloud Run jobs.run"| worker
     worker ==>|"detect beep, shots"| engine
     worker -->|"export jobs"| exports
     engine -->|"audio extract -ss/-t"| ffmpeg
@@ -60,7 +60,7 @@ flowchart TB
 **Jobs**
 
 - Postgres is the queue (Procrastinate); no separate broker
-- Dispatcher wakes the cheapest tier first: self-hosted agent over SSE, Railway redeploy as fallback
+- Dispatcher wakes the preferred tier first: self-hosted agent (bucket marker or SSE), the Cloud Run worker job as fallback
 - Desktop mode runs the same server on SQLite + filesystem with jobs in-process
 
 **Pipeline**

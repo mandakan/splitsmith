@@ -267,7 +267,7 @@ class AppState:
     background_tasks: set[asyncio.Task] = field(default_factory=set)
     # Hosted + launcher only: serve-boot pending-jobs re-check, registered
     # as a FastAPI startup handler by create_app. Runs on every cold start
-    # (incl. each wake from Railway app sleeping).
+    # (serve scales to zero on Cloud Run, so that is every first visit).
     boot_retrigger: Callable[[], Awaitable[None]] | None = None
     # Operator-scoped worker registry (self-hosted workers). ``None`` in
     # local mode. Built over the RAW session factory - workers are operator

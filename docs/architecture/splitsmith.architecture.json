@@ -169,7 +169,7 @@
       "id": "worker",
       "type": "backend",
       "label": "Compute worker",
-      "sublabel": "Railway or self-hosted agent",
+      "sublabel": "Cloud Run job or self-hosted agent",
       "pos": [
         820,
         240
@@ -298,7 +298,7 @@
   "boundaries": [
     {
       "kind": "region",
-      "label": "Serve tier: Railway + Neon + R2",
+      "label": "Serve tier: Cloud Run + Neon + R2",
       "wraps": [
         "api",
         "db",
@@ -342,7 +342,7 @@
       "id": "api-wake",
       "from": "api",
       "to": "worker",
-      "label": "wake: SSE channel or Railway redeploy",
+      "label": "wake: bucket marker or SSE, or Cloud Run jobs.run",
       "variant": "dashed",
       "fromSide": "top",
       "toSide": "top"
@@ -418,7 +418,7 @@
       "title": "Jobs",
       "items": [
         "Postgres is the queue (Procrastinate); no separate broker",
-        "Dispatcher wakes the cheapest tier first: self-hosted agent over SSE, Railway redeploy as fallback",
+        "Dispatcher wakes the preferred tier first: self-hosted agent (bucket marker or SSE), the Cloud Run worker job as fallback",
         "Desktop mode runs the same server on SQLite + filesystem with jobs in-process"
       ]
     },

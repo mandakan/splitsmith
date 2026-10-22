@@ -11,7 +11,7 @@
 # - spa: a Node stage that builds ``src/splitsmith/ui_static`` into dist/.
 #   This makes the image self-contained from a clean git checkout -- dist/
 #   is gitignored, so a host-prebuilt dist/ is no longer required (e.g. a
-#   Railway / Cloud build straight from the repo).
+#   cloud build straight from the repo).
 # - builder: installs the venv (deps + the splitsmith package, editable),
 #   overlays the SPA dist from the ``spa`` stage, and bakes the slim ONNX
 #   models.

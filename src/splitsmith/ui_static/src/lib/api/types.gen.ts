@@ -181,7 +181,7 @@ export interface paths {
          *
          *     Pushes ``"disabled"`` to a connected channel first (best-effort) so
          *     the daemon parks before the row vanishes. Returns 400 for the
-         *     singleton railway row (cannot be deleted), 404 for an unknown id.
+         *     platform worker row (cannot be deleted), 404 for an unknown id.
          */
         delete: operations["_admin_delete_worker_api_admin_workers__worker_id__delete"];
         options?: never;
@@ -12228,7 +12228,7 @@ export interface components {
          * @description One worker as returned by admin routes (Task 7).
          *
          *     ``status`` is derived at query time - not stored - so it reflects live
-         *     channel state and the Railway config presence without a separate field.
+         *     channel state and the platform job's config presence without a separate field.
          */
         WorkerView: {
             /** Enabled */
@@ -12243,7 +12243,7 @@ export interface components {
              * Kind
              * @enum {string}
              */
-            kind: "self_hosted" | "railway" | "cloud_run";
+            kind: "self_hosted" | "cloud_run";
             /** Last Seen At */
             last_seen_at: string | null;
             /** Last Wake At */

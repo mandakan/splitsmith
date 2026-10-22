@@ -44,8 +44,8 @@ CORS_RULE: dict = {
     "MaxAgeSeconds": 3600,
 }
 
-# Env var names - match server.py exactly so they can share the same Railway
-# variable set without duplication.
+# Env var names - match server.py exactly so the same values (the hosted
+# environment, or .env.local) serve both without duplication.
 _ENV_BUCKET = "SPLITSMITH_S3_BUCKET"
 _ENV_ENDPOINT = "SPLITSMITH_S3_ENDPOINT_URL"
 _ENV_REGION = "SPLITSMITH_S3_REGION"

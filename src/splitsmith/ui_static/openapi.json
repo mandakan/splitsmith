@@ -11871,7 +11871,7 @@
     "type": "object"
    },
    "WorkerView": {
-    "description": "One worker as returned by admin routes (Task 7).\n\n``status`` is derived at query time - not stored - so it reflects live\nchannel state and the Railway config presence without a separate field.",
+    "description": "One worker as returned by admin routes (Task 7).\n\n``status`` is derived at query time - not stored - so it reflects live\nchannel state and the platform job's config presence without a separate field.",
     "properties": {
      "enabled": {
       "title": "Enabled",
@@ -11896,7 +11896,6 @@
      "kind": {
       "enum": [
        "self_hosted",
-       "railway",
        "cloud_run"
       ],
       "title": "Kind",
@@ -12509,7 +12508,7 @@
   },
   "/api/admin/workers/{worker_id}": {
    "delete": {
-    "description": "Delete a self-hosted worker row.\n\nPushes ``\"disabled\"`` to a connected channel first (best-effort) so\nthe daemon parks before the row vanishes. Returns 400 for the\nsingleton railway row (cannot be deleted), 404 for an unknown id.",
+    "description": "Delete a self-hosted worker row.\n\nPushes ``\"disabled\"`` to a connected channel first (best-effort) so\nthe daemon parks before the row vanishes. Returns 400 for the\nplatform worker row (cannot be deleted), 404 for an unknown id.",
     "operationId": "_admin_delete_worker_api_admin_workers__worker_id__delete",
     "parameters": [
      {

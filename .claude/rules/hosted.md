@@ -126,9 +126,9 @@ Deploy facts (worker env, `FORWARDED_ALLOW_IPS`, the waitlist cut-over) are in
   `neon_superuser`, which skips every tenant policy, `FORCE` included, and
   cannot be removed. It owns the schema and only migrates:
   `SPLITSMITH_MIGRATION_DATABASE_URL`, a GitHub Environment secret that
-  `deploy-app.yml` migrates with before `railway up`, never a Railway
+  `deploy-app.yml` migrates with before it deploys, never a runtime
   variable. `alembic/env.py` prefers it over `SPLITSMITH_DATABASE_URL`.
-- The API and Railway worker connect as `splitsmith_app`, self-hosted agents
+- The API and the worker job connect as `splitsmith_app`, self-hosted agents
   as `splitsmith_agent` (`SPLITSMITH_AGENT_DATABASE_URL` on serve, handed out
   at registration). Both are plain SQL roles in the `splitsmith_runtime`
   group, which holds row grants plus default privileges for objects the owner

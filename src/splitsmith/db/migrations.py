@@ -154,7 +154,7 @@ async def connect_with_retry(
     than a wrapper.
 
     Each retry logs to stderr: a deploy that took three tries should say
-    so in the Railway log, otherwise the flake is invisible and #559
+    so in the deploy log, otherwise the flake is invisible and #559
     reads as "it just works now".
 
     ``sleep`` and ``now`` are injectable so tests don't spend the real

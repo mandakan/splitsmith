@@ -679,9 +679,9 @@ the only control character a person plausibly types into a text field.
 ## Hosted deployment: self-hosted workers
 
 The production server supports registering home Docker boxes as compute workers alongside
-the Railway worker. Self-hosted workers run the same Procrastinate worker code against
+the Cloud Run worker job. Self-hosted workers run the same Procrastinate worker code against
 Neon and R2 directly (direct-DB model), so no new job transport is needed. The dispatcher
-wakes the cheapest available tier first; the Railway worker is the fallback.
+wakes the preferred available tier first; the Cloud Run job is the fallback.
 
 ### Registration
 
@@ -701,45 +701,54 @@ docker run -d --restart unless-stopped \
 ```
 
 The agent calls `POST /api/workers/register` once, exchanging the token for a permanent
-worker token and direct Neon and R2 credentials (identical to those the Railway worker
-uses). Both are persisted to the state dir (`agent.json`, mode 0600). Subsequent starts
+worker token and direct Neon and R2 credentials (the R2 keys are the worker job's; the
+database role is the agent's own, `splitsmith_agent`, separate from the API's). Both are
+persisted to the state dir (`agent.json`, mode 0600). Subsequent starts
 reuse that file; `--token` is not needed again.
 
 **Credential-revocation limitation.** Deleting a worker in the admin UI revokes its
 channel and worker tokens but does not invalidate the Neon or R2 credentials the agent
 already downloaded. Real revocation requires rotating those at the provider (Neon
-connection string, R2 access keys).
+role password via `scripts/db_roles.py rotate`, R2 access keys), then re-registering the
+remaining boxes, which hold the bundle they were given.
 
 ### Wake channel
 
-The agent holds a long-lived outbound SSE connection to `GET /api/workers/channel`
-authenticated by the worker token. No inbound port is required on the home box. The
-server pushes a `wake` event each time a compute job is enqueued. The agent runs one
-drain (`run_worker(wait=False)`) then releases the Neon connection so the database scales
-to zero between jobs. The connection uses periodic keepalives; edge idle-timeouts are
-normal and the agent reconnects with exponential backoff.
+Production uses the bucket marker (`SPLITSMITH_WAKE_CHANNEL=r2`): when a compute job is
+enqueued the server writes a small marker object to the storage bucket, and each agent
+HEADs it every 30 s and drains when its ETag changes. Nothing holds a connection to the
+serve instance, so serve (on Cloud Run) and Neon both scale to zero between jobs; pickup
+takes up to the poll interval. The agent learns the channel from its registration bundle.
 
-Because the SSE channel keeps an open HTTP connection to the serve instance, the serve
-process cannot scale to zero while a home worker is connected. This is a known cost of
-the outbound-SSE model.
+The original channel, still the default when `SPLITSMITH_WAKE_CHANNEL` is unset, is a
+long-lived outbound SSE connection to `GET /api/workers/channel` authenticated by the
+worker token, on which the server pushes a `wake` event per enqueue. It needs no inbound
+port either, but the open connection keeps serve running for as long as a box is
+connected, which on Cloud Run is billed around the clock.
+
+Either way the agent runs one drain (`run_worker(wait=False)`) per wake, then releases the
+Neon connection.
 
 ### Dispatch policy
 
-The `workers` table holds every compute target, including Railway (seeded automatically
-as `kind='railway'` when the Railway env vars are present). Each row has `enabled` (bool)
-and `priority` (int, lower fires first; self-hosted default 10, Railway default 100).
+The `workers` table holds every compute target, including the Cloud Run worker job
+(seeded automatically as `kind='cloud_run'` when `SPLITSMITH_WORKER_JOB` names it). Each
+row has `enabled` (bool) and `priority` (int, higher fires first; self-hosted default 1000,
+the Cloud Run job 100).
 
 On enqueue, the dispatcher:
 
 1. Groups enabled, registered targets by priority into tiers and takes the top tier.
-2. Wakes each target in the tier - self-hosted via the SSE channel, Railway via a
-   `serviceInstanceRedeploy` GraphQL call.
-3. If the top tier had no available target (no connected home agent), falls through to
-   the next tier immediately.
+2. Wakes each target in the tier - self-hosted via the bucket marker (or the SSE
+   channel), the Cloud Run job by starting an execution (`jobs.run`, authenticated with
+   serve's service account).
+3. If the top tier had no available target (no connected home agent on SSE; the marker
+   cannot tell, so it always counts as delivered), falls through to the next tier
+   immediately.
 4. If a wake was delivered but no Procrastinate heartbeat appears within the grace window
    (default 90 s), escalates to the next tier.
 
-Disabling a target (including the Railway row) prevents the dispatcher from waking it. A
+Disabling a target (including the Cloud Run row) prevents the dispatcher from waking it. A
 connected but disabled agent receives a `disabled` event and idles without draining.
 
 ### Env vars

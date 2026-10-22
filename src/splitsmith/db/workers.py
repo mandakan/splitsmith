@@ -47,7 +47,7 @@ from .models import WorkerRow
 
 #: Worker kinds that are the hosting platform's own one-shot worker: seeded
 #: by serve at boot, never registered, never deletable from the admin view.
-PLATFORM_KINDS: tuple[str, ...] = ("railway", "cloud_run")
+PLATFORM_KINDS: tuple[str, ...] = ("cloud_run",)
 
 
 def _aware(value: datetime) -> datetime:
@@ -288,14 +288,10 @@ class WorkersStore:
             )
             await session.commit()
 
-    async def ensure_railway_row(self, *, version: str | None = None) -> None:
-        """Idempotent upsert of the single kind='railway' row (see ensure_platform_row)."""
-        await self.ensure_platform_row("railway", version=version)
-
     async def ensure_platform_row(self, kind: str, *, version: str | None = None) -> None:
         """Idempotent upsert of the hosting platform's single worker row.
 
-        ``kind`` is ``railway`` or ``cloud_run``. Creates name=kind, priority=100,
+        ``kind`` is one of :data:`PLATFORM_KINDS`. Creates name=kind, priority=100,
         enabled=True, registered_at=now if no row of that kind exists. If one
         already exists, the operator's enabled/priority settings are preserved -
         but ``version`` is always refreshed to the running deploy (web and worker
