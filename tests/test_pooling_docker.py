@@ -18,8 +18,8 @@ stack's live Postgres and the API + worker containers that run on it:
 3. A connection the server closes while idle (Neon's Activity Monitor does
    this after five minutes) costs nothing: ``pg_terminate_backend`` on the
    API's idle connections, and the next requests still answer 200 because
-   ``pool_pre_ping`` finds the dead connection at checkout and replaces it.
-   Without pre_ping the first request after the termination answers 500.
+   The checkout ping finds the dead connection at checkout and replaces it.
+   Without it the first request after the termination answers 500.
 4. The queue deferrer keeps its Procrastinate pool open on a long-lived
    loop (#1199): twenty submits start at most a pool's worth of sessions,
    where opening a pool per submit started one each.
@@ -192,7 +192,7 @@ def test_sync_and_async_handlers_share_pooled_connections_without_loop_errors(ho
 
 def test_idle_connection_closed_by_the_server_is_reconnected_silently(hosted_stack: None) -> None:
     """Neon's Activity Monitor closes idle connections after five minutes.
-    ``pool_pre_ping`` must turn that into a reconnect, not a 500 (removing
+    The checkout ping must turn that into a reconnect, not a 500 (removing
     it makes the first request below answer 500)."""
     cookies, sync_path, async_path = _signed_in_with_a_match("pooling-idle@example.com")
     api_conns = _app_conns(api=True)

@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import logging
+import sys
 import time
 from datetime import UTC, datetime, timedelta
 
@@ -134,6 +135,30 @@ def test_structured_json_formatter_plain_record_is_valid_json() -> None:
     ts = datetime.fromisoformat(parsed["ts"])
     assert ts.tzinfo is not None
     assert ts.utcoffset() == timedelta(0)
+    assert "stack_trace" not in parsed
+
+
+def test_structured_json_formatter_carries_the_traceback() -> None:
+    """A logger.exception() line keeps its traceback, in the field Cloud
+    Error Reporting groups by; the formatter used to drop it."""
+    formatter = StructuredJsonFormatter()
+    try:
+        raise ValueError("boom")
+    except ValueError:
+        record = logging.LogRecord(
+            name="splitsmith.misc",
+            level=logging.ERROR,
+            pathname=__file__,
+            lineno=1,
+            msg="job crashed",
+            args=(),
+            exc_info=sys.exc_info(),
+        )
+    parsed = json.loads(formatter.format(record))
+    assert parsed["message"] == "job crashed"
+    assert parsed["severity"] == "ERROR"
+    assert parsed["stack_trace"].startswith("Traceback (most recent call last):")
+    assert parsed["stack_trace"].rstrip().endswith("ValueError: boom")
 
 
 def test_emit_job_event_attaches_extras(caplog) -> None:

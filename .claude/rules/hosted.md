@@ -175,7 +175,7 @@ Deploy facts (worker env, `FORWARDED_ALLOW_IPS`, the waitlist cut-over) are in
   runs database work on exactly two long-lived loops per process: the main loop
   (uvicorn's or the Procrastinate worker's) and the `DbRunner` thread's
   (`splitsmith.async_bridge`). `db.engine.LoopEngines` gives each *adopted* loop
-  its own pooled engine (`pool_size=5, max_overflow=10, pool_pre_ping=True`);
+  its own pooled engine (`pool_size=5, max_overflow=10`, checkout ping);
   any other loop gets the shared NullPool fallback, which never reuses a
   connection.
 - **Every sync caller goes through `run_sync`, never `asyncio.run`** (the state
@@ -183,9 +183,15 @@ Deploy facts (worker env, `FORWARDED_ALLOW_IPS`, the waitlist cut-over) are in
   `asyncio.run(<store coroutine>)` on the hosted path is a per-call connection
   again. Local mode builds no engine and installs no runner, so `run_sync` is
   `asyncio.run` there.
-- The pool adds no traffic of its own (no warm-up, no ping, no `pool_recycle`):
-  Neon closes idle connections after five minutes and scales to zero, and
-  `pre_ping` reconnects on the next request.
+- The pool adds no traffic of its own (no warm-up, no periodic ping, no
+  `pool_recycle`): Neon closes idle connections after five minutes and scales
+  to zero, and the checkout ping reconnects on the next request.
+- That ping is `_install_checkout_ping`, not `pool_pre_ping`: SQLAlchemy's
+  asyncpg pre-ping is `BEGIN`, `;`, `ROLLBACK`, three round trips before every
+  session (each about 13 ms from Cloud Run to Neon). Ours is one bare `;` over
+  the simple query protocol, safe through PgBouncer, and a failure raises
+  `DisconnectionError` so the pool swaps the connection. Pinned in
+  `tests/test_db_engine_loops.py`; the reconnect in `test_pooling_docker.py`.
 - The regression gate is `tests/test_pooling_docker.py`, which proves pooling
   by a `pg_stat_database.sessions` delta over 40 requests, not by connection
   count (NullPool also keeps that flat). SQLite in tests keeps one NullPool
