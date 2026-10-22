@@ -23,7 +23,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from .. import coach as coach_module
 from .. import coach_distributions as coach_distributions_module
 from .. import events as events_module
-from .. import report
+from .. import report, stage_details
 from .. import waveform as waveform_helpers
 from ..access import Feature, FeatureRequiredError
 from ..audit_clock import rebase_to_clip, stamp_clip_beep
@@ -1023,6 +1023,13 @@ def set_stage_time(request: Request, slug: str, stage_number: int, req: StageTim
             )
         stage.time_seconds = float(req.time_seconds)
         stage.time_seconds_manual = True
+    if stage.scorecard is not None:
+        # A hit factor worked out from the old time follows the new one.
+        stage.scorecard = stage_details.derive(
+            stage.scorecard,
+            stage.time_seconds,
+            stage_details.power_factor_for(project.competitor_division, project.power_factor),
+        )
     project.save(state.shooter_root(slug))
     return JSONResponse(project.model_dump(mode="json"))
 

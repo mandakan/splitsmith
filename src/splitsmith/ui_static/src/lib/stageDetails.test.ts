@@ -142,6 +142,19 @@ describe("scores", () => {
     expect(disagreement(withCells(r, { stage_points: "21" }), "minor")).toBeNull();
   });
 
+  it("works points out again once a typed value is emptied", () => {
+    const typed = row({ alphas: "5", charlies: "4", ...HITS, stage_points: "40" });
+    const emptied = withCells(typed, { stage_points: "" });
+    expect(emptied.manual.has("stage_points")).toBe(false);
+    expect(shownScores(emptied, "minor").points).toEqual({ value: "37", derived: true });
+    expect(toRequest([emptied], null).rows[0].manual).not.toContain("stage_points");
+  });
+
+  it("previews whole counts the way the save rounds them", () => {
+    const r = row({ alphas: "2,6", charlies: "0", ...HITS });
+    expect(shownScores(r, "minor").points.value).toBe("15");
+  });
+
   it("needs every hit field before working out points", () => {
     expect(shownScores(row({ alphas: "5", charlies: "4" }), "minor").points).toEqual({ value: "", derived: false });
   });

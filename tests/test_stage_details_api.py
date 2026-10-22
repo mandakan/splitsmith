@@ -149,3 +149,41 @@ def test_the_shooter_list_counts_stages_without_a_time(tmp_path: Path) -> None:
 
     assert rows["janne"]["stages_without_time"] == 3
     assert rows["mathias"]["stages_without_time"] == 0
+
+
+def test_an_emptied_field_goes_back_to_being_worked_out(tmp_path: Path) -> None:
+    client, _, base = _app(tmp_path)
+    url = f"{base}/janne/stage-details"
+    hits = {"alphas": 5, "charlies": 4, "deltas": 0, "misses": 0, "no_shoots": 0, "procedurals": 0}
+    typed = ["alphas", "charlies", "deltas", "misses", "no_shoots", "procedurals"]
+    client.put(
+        url,
+        json={
+            "rows": [_row(1, time_seconds=12.68, stage_points=40, manual=[*typed, "stage_points"], **hits)]
+        },
+    )
+
+    resp = client.put(
+        url,
+        json={
+            "rows": [_row(1, time_seconds=12.68, stage_points=None, manual=[*typed, "stage_points"], **hits)]
+        },
+    )
+
+    card = resp.json()["stages"][0]["scorecard"]
+    assert card["stage_points"] == 37.0 and "stage_points" in card["derived"]
+    assert "stage_points" not in card["manual"]
+
+
+def test_a_new_time_from_audit_updates_a_worked_out_hit_factor(tmp_path: Path) -> None:
+    client, _, base = _app(tmp_path)
+    hits = {"alphas": 5, "charlies": 4, "deltas": 0, "misses": 0, "no_shoots": 0, "procedurals": 0}
+    client.put(
+        f"{base}/janne/stage-details",
+        json={"rows": [_row(1, time_seconds=12.68, manual=list(hits), **hits)]},
+    )
+
+    project = client.post(f"{base}/janne/stages/1/time", json={"time_seconds": 18.5}).json()
+
+    card = next(s for s in project["stages"] if s["stage_number"] == 1)["scorecard"]
+    assert card["hit_factor"] == round(37 / 18.5, 4)

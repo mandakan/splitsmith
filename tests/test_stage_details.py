@@ -151,3 +151,53 @@ def test_project_round_trips_the_new_fields(tmp_path: Path) -> None:
     assert loaded.power_factor == "major"
     assert loaded.stage(1).shot_order == 3
     assert loaded.stage(1).scorecard.manual == ["alphas"]  # type: ignore[union-attr]
+
+
+def test_linking_the_scoreboard_keeps_what_was_typed(tmp_path: Path) -> None:
+    """A hand-made match filled in on Stage details, then linked: the
+    rebuild keeps the typed time, the order and the typed scores."""
+    project = _project(tmp_path)
+    for entry in project.stages:
+        entry.placeholder = True
+    stage = project.stage(1)
+    stage.time_seconds, stage.time_seconds_manual, stage.shot_order = 12.5, True, 2
+    stage.scorecard = _card(alphas=5, manual=["alphas"])
+    raw = {
+        "match": {"name": "BH"},
+        "competitors": [
+            {
+                "name": "Janne",
+                "stages": [
+                    {
+                        "stage_number": 1,
+                        "stage_name": "Now You See Me",
+                        "time_seconds": 0.0,
+                        "scorecard_updated_at": "2023-09-09T08:00:00+00:00",
+                    },
+                    {
+                        "stage_number": 2,
+                        "stage_name": "Weak Sandman",
+                        "time_seconds": 20.95,
+                        "scorecard_updated_at": "2023-09-09T09:00:00+00:00",
+                    },
+                ],
+            }
+        ],
+    }
+
+    project.import_scoreboard(raw)
+
+    kept = project.stage(1)
+    assert (kept.time_seconds, kept.time_seconds_manual, kept.shot_order) == (12.5, True, 2)
+    assert kept.scorecard is not None and kept.scorecard.alphas == 5
+    assert project.stage(2).time_seconds == 20.95
+
+
+def test_an_emptied_typed_field_is_not_kept_over_the_scoreboard(tmp_path: Path) -> None:
+    project = _project(tmp_path)
+    project.stage(1).scorecard = _card(stage_points=None, manual=["stage_points"])
+
+    project.merge_stage_times({"competitorId": 1, "stages": [{"stage_number": 1, "stage_points": 37.0}]})
+
+    card = project.stage(1).scorecard
+    assert card is not None and card.stage_points == 37.0 and card.manual == []

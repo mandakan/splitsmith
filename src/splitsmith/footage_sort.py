@@ -71,6 +71,8 @@ class ShooterScorecards(BaseModel):
     order: list[int] = Field(default_factory=list)
     #: Stages the shooter's project already has footage on.
     covered: list[int] = Field(default_factory=list)
+    #: Every stage of the shooter's project; empty when not known.
+    stages: list[int] = Field(default_factory=list)
 
 
 class Anchor(BaseModel):
@@ -632,7 +634,8 @@ def _order_pass(
         shooter = by_key.get(owners[key][0])
         if shooter is None:
             continue
-        stages = set(shooter.order) | set(shooter.scorecards)
+        stages = set(shooter.stages) or (set(shooter.order) | set(shooter.scorecards))
+        covered = set(shooter.covered)
         undecided = [
             c
             for c in members
@@ -641,7 +644,8 @@ def _order_pass(
         # A stage named in the file places the clip outright.
         for clip in undecided:
             n = stage_in_name(clip.filename)
-            if n is not None and (not stages or n in stages):
+            # Only a stage the match has, and one the shooter still lacks.
+            if n is not None and n in stages and n not in covered:
                 p = index[clip.clip_id]
                 p.shooter, p.stage, p.confidence = shooter.key, n, "medium"
                 p.reason.issue = None

@@ -166,10 +166,28 @@ def test_a_stage_in_the_file_name_places_the_clip() -> None:
         SortClip(clip_id="b", filename="janne_stage_5.MOV"),
     ]
 
-    out = propose(clips, [_janne([])])
+    janne = _janne([])
+    janne.stages = [1, 2, 3, 4, 5, 6]
+    out = propose(clips, [janne])
 
     assert _by_clip(out) == {"a": ("janne", 2, "medium"), "b": ("janne", 5, "medium")}
     assert all(p.reason.stage_from_name for p in out.clips)
+
+
+def test_a_named_stage_must_exist_and_still_be_missing() -> None:
+    clips = [
+        SortClip(clip_id="a", filename="janne_stage_99.MOV"),
+        SortClip(clip_id="b", filename="janne_stage_3.MOV"),
+        SortClip(clip_id="c", filename="janne_stage_4.MOV"),
+    ]
+    janne = _janne([], covered=[3])
+    janne.stages = [1, 2, 3, 4]
+
+    out = propose(clips, [janne])
+
+    assert _by_clip(out)["a"][:2] == (None, None)
+    assert _by_clip(out)["b"][:2] == (None, None)
+    assert _by_clip(out)["c"] == ("janne", 4, "medium")
 
 
 def test_without_an_order_the_clips_ask_for_one() -> None:
@@ -201,3 +219,35 @@ def test_a_camera_the_clock_places_is_untouched() -> None:
 
     assert _by_clip(plain) == _by_clip(ordered)
     assert all(p.reason.order_rank is None for p in ordered.clips)
+
+
+def test_a_trusted_camera_leaves_an_unplaced_clip_alone() -> None:
+    """A clip a trusted clock places on nobody (a warm-up) stays skipped,
+    even with the camera's shooter and order known."""
+    cards = {1: T0 + timedelta(minutes=3), 2: T0 + timedelta(minutes=33)}
+    clips = [
+        SortClip(clip_id="x1", folder="Janne", filename="IMG_0001.MOV", start=T0, duration=60.0),
+        SortClip(
+            clip_id="x2",
+            folder="Janne",
+            filename="IMG_0002.MOV",
+            start=T0 + timedelta(minutes=30),
+            duration=60.0,
+        ),
+        SortClip(
+            clip_id="warm",
+            folder="Janne",
+            filename="IMG_0003.MOV",
+            start=T0 + timedelta(hours=2),
+            duration=60.0,
+        ),
+    ]
+    janne = ShooterScorecards(
+        key="janne", name="Janne Hauta", scorecards=cards, order=[1, 2, 3], stages=[1, 2, 3]
+    )
+
+    out = propose(clips, [janne])
+
+    warm = next(p for p in out.clips if p.clip_id == "warm")
+    assert out.cameras[0].clock == "trusted"
+    assert (warm.shooter, warm.stage, warm.reason.order_rank) == (None, None, None)

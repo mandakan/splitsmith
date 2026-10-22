@@ -724,6 +724,19 @@ class StageEntry(BaseModel):
         return None
 
 
+def _carry_typed(new: StageEntry, old: StageEntry | None) -> None:
+    """Keep what the user typed on Stage details when a scoreboard link
+    rebuilds the stage list: the shooting order, a typed time, and the
+    scorecard's typed fields (a later ``merge_stage_times`` fills the rest)."""
+    if old is None:
+        return
+    new.shot_order = old.shot_order
+    if old.time_seconds_manual and old.time_seconds > 0:
+        new.time_seconds, new.time_seconds_manual = old.time_seconds, True
+    if old.scorecard is not None and old.scorecard.manual:
+        new.scorecard = old.scorecard.model_copy(deep=True)
+
+
 TrimBlocker = Literal["skipped", "no_beep", "no_stage_time"]
 """Why a stage cannot be trim-exported. ``None`` means it can."""
 
@@ -1886,6 +1899,7 @@ class MatchProject(BaseModel):
         # re-scanning per stage.
         rounds_by_number = _stage_rounds_by_number(raw.get("stages") or [])
         start_by_number = {s.stage_number: s.start for s in self.stages}
+        old_by_number = {s.stage_number: s for s in self.stages}
         for s in primary_competitor.get("stages", []):
             stage_data = StageData.model_validate(s)
             scoreboard_numbers.add(stage_data.stage_number)
@@ -1900,6 +1914,7 @@ class MatchProject(BaseModel):
                     start=start_by_number.get(stage_data.stage_number, "standard"),
                 )
             )
+            _carry_typed(new_stages[-1], old_by_number.get(stage_data.stage_number))
         new_stages.sort(key=lambda s: s.stage_number)
         self.stages = new_stages
 
@@ -1993,6 +2008,9 @@ class MatchProject(BaseModel):
             )
             for stage in match_data.stages
         ]
+        old_by_number = {s.stage_number: s for s in self.stages}
+        for entry in new_stages:
+            _carry_typed(entry, old_by_number.get(entry.stage_number))
         new_stages.sort(key=lambda s: s.stage_number)
         self.stages = new_stages
 
@@ -2105,9 +2123,10 @@ class MatchProject(BaseModel):
             )
             old = stage.scorecard
             if old is not None and old.manual:
-                for field in old.manual:
+                kept = [f for f in old.manual if getattr(old, f) is not None]
+                for field in kept:
                     setattr(card, field, getattr(old, field))
-                card.manual = list(old.manual)
+                card.manual = kept
             stage.scorecard = stage_details.derive(
                 card,
                 stage.time_seconds,

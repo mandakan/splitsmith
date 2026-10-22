@@ -72,7 +72,8 @@ export function pointsFromHits(row: EditRow, pf: PowerFactor): number | null {
   for (const f of HIT_FIELDS) {
     const n = parseNumber(row.cells[f]);
     if (n === null) return null;
-    total += VALUES[pf][f] * n;
+    // Counts are whole numbers; the save rounds them the same way.
+    total += VALUES[pf][f] * Math.round(n);
   }
   return Math.max(total, 0);
 }
@@ -229,8 +230,11 @@ export function withCells(row: EditRow, values: Partial<Record<CellField, string
   const derived = new Set(row.derived);
   for (const k of Object.keys(values) as CellField[]) {
     if (k === "time_seconds" || k === "shot_order") continue;
-    manual.add(k);
     derived.delete(k);
+    // An emptied cell is not typed any more: the page works it out again
+    // and a sync may fill it.
+    if ((values[k] ?? "").trim() === "") manual.delete(k);
+    else manual.add(k);
   }
   return { ...row, cells, manual, derived, pasted: new Set(row.pasted) };
 }

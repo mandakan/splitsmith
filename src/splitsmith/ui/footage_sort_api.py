@@ -315,6 +315,7 @@ def _shooters(state: Any) -> tuple[list[ShooterScorecards], list[ShooterRef]]:
                 },
                 order=_shot_order(project),
                 covered=[s.stage_number for s in project.stages if s.videos],
+                stages=[s.stage_number for s in project.stages],
             )
         )
         refs.append(

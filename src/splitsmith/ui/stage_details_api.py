@@ -174,7 +174,9 @@ def apply_rows(project: MatchProject, req: StageDetailsRequest) -> None:
                 stage.time_seconds, stage.time_seconds_manual = 0.0, False
             else:
                 stage.time_seconds, stage.time_seconds_manual = float(row.time_seconds), True
-        manual = [f for f in stage_details.SCORE_FIELDS if f in row.manual]
+        # A field typed and then emptied is not typed any more: it goes back
+        # to being filled by the derivation or the next sync.
+        manual = [f for f in stage_details.SCORE_FIELDS if f in row.manual and getattr(row, f) is not None]
         card = stage.scorecard or StageScorecard()
         if not manual and not card.manual and stage.scorecard is None:
             continue
