@@ -43,7 +43,9 @@ function byStageThenStart(a: SortClipView, b: SortClipView): number {
 export function sortSections(view: SortView): SortSections {
   const open = view.clips.filter((c) => c.imported_by === null);
   const anchorKeys = new Set(
-    view.cameras.filter((c) => c.clock === "needs_anchor").map((c) => c.key),
+    view.cameras
+      .filter((c) => c.clock === "needs_anchor" || c.clock === "no_timestamps")
+      .map((c) => c.key),
   );
   const anchorCameras = view.cameras
     .filter((c) => anchorKeys.has(c.key))
@@ -171,6 +173,7 @@ function current(view: SortView): SortDecisions {
     anchors: [...view.anchors],
     overrides: [...view.overrides],
     checked: { ...view.user_checked },
+    camera_shooters: [...view.camera_shooters],
   };
 }
 
@@ -179,7 +182,44 @@ function without(d: SortDecisions, clipId: string): SortDecisions {
     anchors: d.anchors.filter((a) => a.clip_id !== clipId),
     overrides: d.overrides.filter((o) => o.clip_id !== clipId),
     checked: d.checked,
+    camera_shooters: d.camera_shooters,
   };
+}
+
+/** The user says whose clips a camera holds; null clears the choice. No
+ *  stage is committed: with the shooter's order known, the clips line up
+ *  as suggestions. */
+export function setCameraShooter(view: SortView, cameraKey: string, shooter: string | null): SortDecisions {
+  const d = current(view);
+  const rest = d.camera_shooters.filter((c) => c.camera_key !== cameraKey);
+  return { ...d, camera_shooters: shooter ? [...rest, { camera_key: cameraKey, shooter }] : rest };
+}
+
+/** Where a camera's shooter came from, when the user did not choose. */
+export function cameraShooterHint(camera: SortCamera): string | null {
+  switch (camera.shooter_source) {
+    case "folder":
+      return "from the folder name";
+    case "name":
+      return "from the file names";
+    case "clip":
+      return "from a clip you placed";
+    default:
+      return null;
+  }
+}
+
+const EVIDENCE: Record<string, string> = {
+  clock: "recording time",
+  name_time: "the time in its file name",
+  name_number: "file number",
+  recorded: "recorded time",
+  modified: "file date",
+};
+
+function ordinal(n: number): string {
+  const tail = n % 100 >= 11 && n % 100 <= 13 ? "th" : (["th", "st", "nd", "rd"][n % 10] ?? "th");
+  return `${n}${tail}`;
 }
 
 function cameraOf(view: SortView, clipId: string): SortCamera | undefined {
@@ -274,7 +314,16 @@ export function reasonText(view: SortView, clip: SortClipView): string {
   const r = p.reason;
   if (p.decided_by === "user")
     return p.confidence === "skipped" ? "Skipped by you" : "Your choice";
+  if (r.stage_from_name) return "Stage number in the file name";
+  if (r.order_rank !== null && r.order_position !== null && p.stage !== null) {
+    const by = EVIDENCE[r.order_evidence ?? ""] ?? "recording order";
+    return `${ordinal(r.order_rank)} clip from this camera by ${by}, and stage ${String(p.stage).padStart(2, "0")} is the ${ordinal(r.order_position)} stage ${shooterName(view, p.shooter)} shot. A suggestion: the clock does not say.`;
+  }
   switch (r.issue) {
+    case "needs_order": {
+      const owner = view.cameras.find((c) => c.key === p.camera_key)?.shooter ?? null;
+      return `Set the order ${shooterName(view, owner)} shot the stages to place this clip`;
+    }
     case "no_timestamp":
       return "No recording time in the file";
     case "needs_anchor":

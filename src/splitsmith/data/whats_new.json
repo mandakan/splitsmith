@@ -1,6 +1,12 @@
 {
   "entries": [
     {
+      "id": "sort-footage-order",
+      "date": "2026-10-22",
+      "title": "Sort footage by shooting order",
+      "body": "When a camera's clock is off, Sort footage can line its clips up with the order a shooter shot the stages. Say whose camera it is under Needs you, or name stages in the file names."
+    },
+    {
       "id": "stage-details",
       "date": "2026-10-22",
       "title": "Type in stage times, scores and shooting order",

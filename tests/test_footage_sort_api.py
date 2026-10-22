@@ -901,3 +901,39 @@ def test_a_frame_that_cannot_be_built_stops_the_polling(tmp_path: Path, source_c
     client.get(f"{base}/match/footage-sort/{view['scan_id']}")
     jobs = [j for j in client.get("/api/me/jobs").json() if j["kind"] == footage_sort_api.FRAMES_JOB_KIND]
     assert jobs == []
+
+
+def test_a_camera_shooter_is_stored_and_kept(tmp_path: Path, source_clip: Path) -> None:
+    """Whose camera (spec 2026-10-22): the user's choice is stored on the
+    sort, shown on the camera, and a decisions write without it keeps it."""
+    _, client, _, base = _match_app(tmp_path)
+    view = _scan(client, base, _shared_folder(tmp_path, source_clip))
+    url = f"{base}/match/footage-sort/{view['scan_id']}/decisions"
+    key = view["cameras"][0]["key"]
+
+    chosen = client.put(
+        url, json={"camera_shooters": [{"camera_key": key, "shooter": "bob"}], "checked": {}}
+    ).json()
+    assert chosen["camera_shooters"] == [{"camera_key": key, "shooter": "bob"}]
+    assert (chosen["cameras"][0]["shooter"], chosen["cameras"][0]["shooter_source"]) == ("bob", "user")
+
+    kept = client.put(url, json={"checked": {}}).json()
+    assert kept["camera_shooters"] == [{"camera_key": key, "shooter": "bob"}]
+    cleared = client.put(url, json={"camera_shooters": [], "checked": {}}).json()
+    assert cleared["camera_shooters"] == []
+
+
+def test_the_engine_gets_each_shooters_order(tmp_path: Path) -> None:
+    project = MatchProject.init(tmp_path / "p", name="Order")
+    project.stages = [
+        StageEntry(
+            stage_number=n,
+            stage_name=f"S{n}",
+            time_seconds=20.0,
+            scorecard_updated_at=T0 + timedelta(minutes=m),
+        )
+        for n, m in ((1, 30), (2, 10), (3, 20))
+    ]
+    assert footage_sort_api._shot_order(project) == [2, 3, 1]
+    project.stage(1).shot_order, project.stage(3).shot_order = 1, 2
+    assert footage_sort_api._shot_order(project) == [1, 3]

@@ -7501,6 +7501,16 @@ export interface components {
             /** Mount */
             mount: string | null;
         };
+        /**
+         * CameraShooter
+         * @description The user's word on whose clips a camera holds, no stage committed.
+         */
+        CameraShooter: {
+            /** Camera Key */
+            camera_key: string;
+            /** Shooter */
+            shooter: string;
+        };
         /** CheckRequest */
         CheckRequest: {
             draft?: components["schemas"]["StoredLookBody"] | null;
@@ -7587,7 +7597,7 @@ export interface components {
          */
         ClipReason: {
             /** Issue */
-            issue: ("ambiguous" | "conflict" | "no_candidate" | "no_timestamp" | "needs_anchor" | "outside_match") | null;
+            issue: ("ambiguous" | "conflict" | "no_candidate" | "no_timestamp" | "needs_anchor" | "outside_match" | "needs_order") | null;
             /** Lead Seconds */
             lead_seconds: number | null;
             /**
@@ -7595,6 +7605,12 @@ export interface components {
              * @default 0
              */
             offset_seconds: number;
+            /** Order Evidence */
+            order_evidence: ("clock" | "name_time" | "name_number" | "recorded" | "modified") | null;
+            /** Order Position */
+            order_position: number | null;
+            /** Order Rank */
+            order_rank: number | null;
             /** Rival */
             rival: string | null;
             /** Rival Stage */
@@ -7606,6 +7622,11 @@ export interface components {
             run_size: number;
             /** Scorecard At */
             scorecard_at: string | null;
+            /**
+             * Stage From Name
+             * @default false
+             */
+            stage_from_name: boolean;
         };
         /** ClipView */
         ClipView: {
@@ -8155,6 +8176,8 @@ export interface components {
         DecisionsRequest: {
             /** Anchors */
             anchors?: components["schemas"]["Anchor"][];
+            /** Camera Shooters */
+            camera_shooters?: components["schemas"]["CameraShooter"][] | null;
             /** Checked */
             checked?: {
                 [key: string]: boolean;
@@ -10899,6 +10922,10 @@ export interface components {
             offset_seconds: number;
             /** Scheme */
             scheme: string;
+            /** Shooter */
+            shooter: string | null;
+            /** Shooter Source */
+            shooter_source: ("user" | "clip" | "name" | "folder") | null;
         };
         /**
          * SortReference
@@ -10964,6 +10991,8 @@ export interface components {
         SortView: {
             /** Anchors */
             anchors: components["schemas"]["Anchor"][];
+            /** Camera Shooters */
+            camera_shooters: components["schemas"]["CameraShooter"][];
             /** Cameras */
             cameras: components["schemas"]["SortCamera"][];
             /** Clips */

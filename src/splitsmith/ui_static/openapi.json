@@ -1407,6 +1407,25 @@
     "title": "CameraMountRequest",
     "type": "object"
    },
+   "CameraShooter": {
+    "description": "The user's word on whose clips a camera holds, no stage committed.",
+    "properties": {
+     "camera_key": {
+      "title": "Camera Key",
+      "type": "string"
+     },
+     "shooter": {
+      "title": "Shooter",
+      "type": "string"
+     }
+    },
+    "required": [
+     "camera_key",
+     "shooter"
+    ],
+    "title": "CameraShooter",
+    "type": "object"
+   },
    "CheckRequest": {
     "properties": {
      "draft": {
@@ -1593,7 +1612,8 @@
          "no_candidate",
          "no_timestamp",
          "needs_anchor",
-         "outside_match"
+         "outside_match",
+         "needs_order"
         ],
         "type": "string"
        },
@@ -1618,6 +1638,46 @@
       "default": 0.0,
       "title": "Offset Seconds",
       "type": "number"
+     },
+     "order_evidence": {
+      "anyOf": [
+       {
+        "enum": [
+         "clock",
+         "name_time",
+         "name_number",
+         "recorded",
+         "modified"
+        ],
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Order Evidence"
+     },
+     "order_position": {
+      "anyOf": [
+       {
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Order Position"
+     },
+     "order_rank": {
+      "anyOf": [
+       {
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Order Rank"
      },
      "rival": {
       "anyOf": [
@@ -1657,16 +1717,25 @@
        }
       ],
       "title": "Scorecard At"
+     },
+     "stage_from_name": {
+      "default": false,
+      "title": "Stage From Name",
+      "type": "boolean"
      }
     },
     "required": [
      "issue",
      "lead_seconds",
      "offset_seconds",
+     "order_evidence",
+     "order_position",
+     "order_rank",
      "rival",
      "rival_stage",
      "run_size",
-     "scorecard_at"
+     "scorecard_at",
+     "stage_from_name"
     ],
     "title": "ClipReason",
     "type": "object"
@@ -2865,6 +2934,20 @@
       },
       "title": "Anchors",
       "type": "array"
+     },
+     "camera_shooters": {
+      "anyOf": [
+       {
+        "items": {
+         "$ref": "#/components/schemas/CameraShooter"
+        },
+        "type": "array"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Camera Shooters"
      },
      "checked": {
       "additionalProperties": {
@@ -8508,6 +8591,34 @@
      "scheme": {
       "title": "Scheme",
       "type": "string"
+     },
+     "shooter": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Shooter"
+     },
+     "shooter_source": {
+      "anyOf": [
+       {
+        "enum": [
+         "user",
+         "clip",
+         "name",
+         "folder"
+        ],
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Shooter Source"
      }
     },
     "required": [
@@ -8517,7 +8628,9 @@
      "key",
      "model",
      "offset_seconds",
-     "scheme"
+     "scheme",
+     "shooter",
+     "shooter_source"
     ],
     "title": "SortCamera",
     "type": "object"
@@ -8674,6 +8787,13 @@
       "title": "Anchors",
       "type": "array"
      },
+     "camera_shooters": {
+      "items": {
+       "$ref": "#/components/schemas/CameraShooter"
+      },
+      "title": "Camera Shooters",
+      "type": "array"
+     },
      "cameras": {
       "items": {
        "$ref": "#/components/schemas/SortCamera"
@@ -8768,6 +8888,7 @@
     },
     "required": [
      "anchors",
+     "camera_shooters",
      "cameras",
      "clips",
      "error",
