@@ -5084,6 +5084,11 @@ def _hosted_detail_from_docs(
 
 
 SPLITSMITH_DATABASE_URL_ENV = "SPLITSMITH_DATABASE_URL"
+# The URL a self-hosted agent receives at registration: a separate
+# least-privilege role (``splitsmith_agent``) so one box's credential can be
+# revoked without rotating the API's. Unset means the agent gets the API's
+# own URL, which is what a single-role docker / self-host stack wants.
+SPLITSMITH_AGENT_DATABASE_URL_ENV = "SPLITSMITH_AGENT_DATABASE_URL"
 # Comma-separated list of email addresses granted admin access. Comparison
 # is case-insensitive. Unset or empty means nobody is admin (the default).
 # Parsed only in hosted mode by ``_apply_hosted_mode_wiring``; local mode
@@ -5573,7 +5578,7 @@ def _apply_hosted_mode_wiring(
         # normalization (which already failed loud above on a half-configured
         # bucket), so the box connects to the same storage the API uses.
         state.worker_credentials = {
-            "database_url": url,
+            "database_url": os.environ.get(SPLITSMITH_AGENT_DATABASE_URL_ENV, "").strip() or url,
             "public_url": state.public_base_url,
             "s3": (
                 {
@@ -5938,11 +5943,17 @@ def _hosted_boot_lifespan(state: Any) -> Any | None:
 
     @asynccontextmanager
     async def _lifespan(_app: Any) -> AsyncIterator[None]:
+        app_engine = None
         if engines is not None:
             # The app loop is long-lived: give it its pooled engine (#1178),
             # before either boot duty touches the database.
-            engines.adopt_current_loop()
+            app_engine = engines.adopt_current_loop()
         try:
+            if app_engine is not None:
+                # A superuser / BYPASSRLS role would skip every tenant policy.
+                from ..db.roles import assert_runtime_role
+
+                await assert_runtime_role(app_engine)
             if workers_store is not None:
                 await workers_store.ensure_railway_row(version=splitsmith_version)
             if retrigger is not None:

@@ -114,7 +114,13 @@ Both `serve` and `worker` in a given environment share these. The
 | Variable | prod | staging |
 | --- | --- | --- |
 | `SPLITSMITH_MODE` | `hosted` | `hosted` |
-| `SPLITSMITH_DATABASE_URL` | Neon `production` branch: `-pooler` on serve, direct on worker (see Neon above) | Neon `staging` branch, same split |
+| `SPLITSMITH_DATABASE_URL` | Neon `production` branch as `splitsmith_app`: `-pooler` on serve, direct on worker (see Neon above) | Neon `staging` branch, same role and split |
+| `SPLITSMITH_AGENT_DATABASE_URL` | serve only: `splitsmith_agent`, direct; handed to self-hosted agents at registration | same, staging branch |
+
+The schema owner (`neondb_owner`) is in no Railway variable. Its direct
+URL is the `SPLITSMITH_MIGRATION_DATABASE_URL` secret on the GitHub
+`production` / `staging` Environments, and `deploy-app.yml` migrates with
+it before `railway up`. Roles and their passwords: `scripts/db_roles.py`.
 | `SPLITSMITH_PUBLIC_URL` | `https://my.splitsmith.app` | `https://my.staging.splitsmith.app` |
 | `SPLITSMITH_EMAIL_BACKEND` | `lettermint` | `console` |
 | `LETTERMINT_API_TOKEN` | set | unset (console) |
@@ -257,9 +263,11 @@ Nothing in the codebase blocks this; it is operational. Drive Neon and
 R2 entirely via MCP, Railway via its MCP / CLI.
 
 1. **Neon** -- create the project; `main` is prod. Create the long-lived
-   `staging` branch. Run migrations against both (`alembic upgrade head`,
-   or let `serve` migrate on boot). serve gets the `-pooler` string, the
-   worker the direct one; neither sets `prepared_statement_cache_size`.
+   `staging` branch. Run migrations against both as the owner
+   (`SPLITSMITH_MIGRATION_DATABASE_URL=... alembic upgrade head`), then
+   `scripts/db_roles.py apply` and `rotate` on each branch for the runtime
+   roles. serve gets the `-pooler` string, the worker the direct one;
+   neither sets `prepared_statement_cache_size`.
 2. **R2** -- create `splitsmith-uploads-prod` and
    `splitsmith-uploads-staging` buckets + scoped S3 tokens. Leave the
    existing public `splitsmith-models` bucket alone.

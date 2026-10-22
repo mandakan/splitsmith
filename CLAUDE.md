@@ -308,6 +308,9 @@ Rules that reach `ui/server.py`, which is too broad to scope:
   shooters' documents.
 - A request never runs ffmpeg or calls an `ensure_*` producer: it reads the
   derived file and queues its job (`_audio_pending`).
+- The hosted runtime never runs as a superuser or `BYPASSRLS` role (Neon's
+  `neondb_owner` is one): the boot lifespan calls `assert_runtime_role`, and
+  the owner only migrates (`hosted.md`, Database roles).
 - A new `state_docs` kind needs `PULLABLE_DOC_KINDS` (applied in both
   `plan_pull` and `get_doc_manifest`) and a merge rule in
   `sync.run._apply_pull`.

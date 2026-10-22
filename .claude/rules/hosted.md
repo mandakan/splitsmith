@@ -3,6 +3,9 @@ paths:
   - "src/splitsmith/access.py"
   - "src/splitsmith/async_bridge.py"
   - "src/splitsmith/db/**"
+  - "scripts/db_roles.py"
+  - "alembic/env.py"
+  - ".github/workflows/deploy-app.yml"
   - "src/splitsmith/ui/access_gate.py"
   - "src/splitsmith/ui/context.py"
   - "src/splitsmith/ui/docstore/**"
@@ -112,6 +115,32 @@ Deploy facts (worker env, `FORWARDED_ALLOW_IPS`, the waitlist cut-over) are in
   registry steps stay its own.
 - The port holds documents only: media stays on `Storage` and
   `StoragePresence`, jobs on the job backends, merge rules in `sync.run`.
+
+## Database roles
+
+- On Neon the runtime never connects as the owner. `neondb_owner` (like any
+  role made through Neon's console or API) has `BYPASSRLS` through
+  `neon_superuser`, which skips every tenant policy, `FORCE` included, and
+  cannot be removed. It owns the schema and only migrates:
+  `SPLITSMITH_MIGRATION_DATABASE_URL`, a GitHub Environment secret that
+  `deploy-app.yml` migrates with before `railway up`, never a Railway
+  variable. `alembic/env.py` prefers it over `SPLITSMITH_DATABASE_URL`.
+- The API and Railway worker connect as `splitsmith_app`, self-hosted agents
+  as `splitsmith_agent` (`SPLITSMITH_AGENT_DATABASE_URL` on serve, handed out
+  at registration). Both are plain SQL roles in the `splitsmith_runtime`
+  group, which holds row grants plus default privileges for objects the owner
+  creates later; `alembic_version` is read-only to them. They are created
+  with SQL, not Neon's API, because an API role gets `BYPASSRLS` too.
+  `splitsmith.db.roles` renders the SQL; `scripts/db_roles.py apply` runs it
+  and `rotate` sets a password, writing the URL to a 0600 file, never stdout.
+- serve's boot lifespan and the worker's run loop call `assert_runtime_role`,
+  which refuses a superuser or `BYPASSRLS` role
+  (`SPLITSMITH_ALLOW_PRIVILEGED_DB_ROLE=1` downgrades it to an error log for
+  a cut-over). `tests/test_db_roles.py` pins the rendered SQL and the wiring.
+- A migration runs before the new code is live, so it keeps the running
+  version working: add in one release, remove in a later one.
+- The local compose stack keeps one non-superuser owner (`splitsmith_app`)
+  for everything; it has no `BYPASSRLS`, so the same policies apply.
 
 ## Database connections
 
