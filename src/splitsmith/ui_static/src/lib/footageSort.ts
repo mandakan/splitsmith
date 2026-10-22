@@ -9,6 +9,8 @@ import type {
   SortCamera,
   SortClipView,
   SortDecisions,
+  SortReference,
+  SortShooterRef,
   SortSummary,
   SortView,
 } from "./api";
@@ -244,8 +246,11 @@ export function setChecked(
 
 // --- wording -------------------------------------------------------------
 
-export function stageLabel(stage: number): string {
-  return `Stage ${String(stage).padStart(2, "0")}`;
+/** ``Stage 03``, or ``Stage 03 · Lucky Seven`` when the view names it. */
+export function stageLabel(stage: number, view?: SortView): string {
+  const label = `Stage ${String(stage).padStart(2, "0")}`;
+  const name = view?.stages.find((s) => s.stage_number === stage)?.stage_name;
+  return name ? `${label} · ${name}` : label;
 }
 
 /** ``42 s``, ``1:42``, ``2 h 05 min``, ``76 days``. */
@@ -336,4 +341,91 @@ export function cameraLabel(camera: SortCamera): string {
   const device =
     camera.model ?? SCHEME_NAMES[camera.scheme] ?? camera.scheme.toUpperCase();
   return camera.folder ? `${device} · ${camera.folder}` : device;
+}
+
+// --- reference footage (spec 2026-10-21) ----------------------------------
+
+/** One stage of the match as the compare panel shows it. */
+export interface ReferenceTile {
+  stage: number;
+  name: string;
+  /** Footage of the reference shooter on this stage, or none. */
+  reference: SortReference | null;
+  /** The tile's frame exists. */
+  frame: boolean;
+  /** The shooter being assigned already has this stage. */
+  has: boolean;
+}
+
+/** Shooters with reference footage, the most stages first, then by name. */
+export function referenceShooters(view: SortView): SortShooterRef[] {
+  const count = new Map<string, number>();
+  for (const r of view.references)
+    count.set(r.shooter, (count.get(r.shooter) ?? 0) + 1);
+  return view.shooters
+    .filter((s) => (count.get(s.key) ?? 0) > 0)
+    .sort(
+      (a, b) =>
+        (count.get(b.key) ?? 0) - (count.get(a.key) ?? 0) ||
+        a.name.localeCompare(b.name),
+    );
+}
+
+/** The shooter to compare with first: the best other one, else the
+ *  assigned shooter's own footage (it shows the stages already covered). */
+export function defaultReferenceShooter(
+  view: SortView,
+  assigning: string,
+): string | null {
+  const ranked = referenceShooters(view);
+  return (ranked.find((s) => s.key !== assigning) ?? ranked[0])?.key ?? null;
+}
+
+/** Whether ``shooter`` already has ``stage``: a video in their project, or
+ *  a checked clip in this sort other than the one being assigned. */
+function hasStage(
+  view: SortView,
+  shooter: string,
+  stage: number,
+  clipId: string,
+): boolean {
+  if (
+    view.shooters
+      .find((s) => s.key === shooter)
+      ?.stages_with_footage.includes(stage)
+  )
+    return true;
+  return view.clips.some(
+    (c) =>
+      c.clip_id !== clipId &&
+      c.checked &&
+      c.imported_by === null &&
+      c.proposal.shooter === shooter &&
+      c.proposal.stage === stage,
+  );
+}
+
+export function referenceTiles(
+  view: SortView,
+  referenceShooter: string,
+  assigning: string,
+  clipId: string,
+): ReferenceTile[] {
+  return view.stages.map((s) => {
+    const reference =
+      view.references.find(
+        (r) => r.shooter === referenceShooter && r.stage === s.stage_number,
+      ) ?? null;
+    return {
+      stage: s.stage_number,
+      name: s.stage_name,
+      reference,
+      frame: reference?.frame ?? false,
+      has: hasStage(view, assigning, s.stage_number, clipId),
+    };
+  });
+}
+
+export function missingCount(tiles: ReferenceTile[]): number {
+  return tiles.filter((t) => !t.has).length;
 }

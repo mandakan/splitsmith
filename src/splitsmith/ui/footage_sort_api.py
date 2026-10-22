@@ -46,6 +46,7 @@ from ..footage_sort import (
 from ..match_project import VIDEO_EXTENSIONS, StageAutoMatch, atomic_write_json
 from ..runtime import ENV_CONFIG_FILE
 from ..video_match import recording_start_from_tags
+from . import footage_sort_reference as reference
 from .context import _hosted_mode_active
 
 logger = logging.getLogger(__name__)
@@ -53,7 +54,12 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 JOB_KIND = "footage_sort_scan"
+#: Builds the compare panel's reference frames for a scan (spec
+#: 2026-10-21); queued by the view when a project reference lacks one.
+FRAMES_JOB_KIND = "footage_sort_frames"
 SORT_DIR = "footage_sort"
+#: Reference frames, under the sort directory, shared by every scan.
+REFERENCE_DIR = "reference"
 
 # ``discarded``: the user dropped the review; kept for the audit trail and
 # no longer offered on Footage.
@@ -113,6 +119,31 @@ class ShooterRef(BaseModel):
     key: str
     name: str
     stages: list[int]
+    # Stages with a video in the project: the compare panel's "has it".
+    stages_with_footage: list[int]
+
+
+class SortReference(BaseModel):
+    """A shooter's stage as the compare panel can show it: the primary in
+    their project, else this sort's checked clip for it."""
+
+    shooter: str
+    stage: int
+    source: Literal["project", "sort"]
+    # ``project``: ``StageVideo.path`` and id for the stream route.
+    video_path: str | None
+    video_id: str | None
+    # ``sort``: the clip, played through the sort's own video route.
+    clip_id: str | None
+    stream_kind: Literal["trim", "auto"]
+    # The tile's frame exists (a project frame, or the sort clip's thumbnail).
+    frame: bool
+
+
+class SortStage(BaseModel):
+    stage_number: int
+    # Empty for a placeholder stage, whose name is generic.
+    stage_name: str
 
 
 class ClipView(BaseModel):
@@ -142,10 +173,15 @@ class SortView(BaseModel):
     source_dir: str
     skipped_files: int
     shooters: list[ShooterRef]
+    # The match's stage table, so the page names a stage rather than numbering it.
+    stages: list[SortStage]
     cameras: list[SortCamera]
     clips: list[ClipView]
     # Scrub strips still being built; the page polls while this is > 0.
     strips_pending: int
+    references: list[SortReference]
+    # Project reference frames still being built; polled like the strips.
+    frames_pending: int
     # The stored decisions, so the page edits them rather than rebuilding.
     anchors: list[Anchor]
     overrides: list[Override]
@@ -259,8 +295,83 @@ def _shooters(state: Any) -> tuple[list[ShooterScorecards], list[ShooterRef]]:
                 },
             )
         )
-        refs.append(ShooterRef(key=slug, name=name, stages=[s.stage_number for s in project.stages]))
+        refs.append(
+            ShooterRef(
+                key=slug,
+                name=name,
+                stages=[s.stage_number for s in project.stages],
+                stages_with_footage=[s.stage_number for s in project.stages if s.videos],
+            )
+        )
     return cards, refs
+
+
+def _reference_dir(state: Any) -> Path:
+    return _sort_dir(state) / REFERENCE_DIR
+
+
+def _project_references(state: Any) -> list[reference.ProjectReference]:
+    """Every (shooter, stage) with reference footage in a project."""
+    match = match_model.Match.load(state.match_root)
+    out: list[reference.ProjectReference] = []
+    for slug in match.shooters:
+        project = state.shooter_project(slug)
+        root = state.shooter_root(slug)
+        for stage in match.stages:
+            ref = reference.project_reference(project, root, slug, stage.stage_number)
+            if ref is not None:
+                out.append(ref)
+    return out
+
+
+def _references(state: Any, clips: list[ClipView]) -> tuple[list[SortReference], int]:
+    """Project footage first; else the checked, not yet imported clip this
+    sort proposes for the stage (the run's primary before a secondary).
+    Also how many project frames are still to build: missing ones, minus
+    those marked failed (they would otherwise queue a job on every poll)."""
+    out: list[SortReference] = []
+    taken: set[tuple[str, int]] = set()
+    cache = _reference_dir(state)
+    pending = 0
+    for ref in _project_references(state):
+        taken.add((ref.shooter, ref.stage))
+        frame = reference.cached_frame(cache, ref) is not None
+        if not frame and not reference.frame_failed(cache, ref):
+            pending += 1
+        out.append(
+            SortReference(
+                shooter=ref.shooter,
+                stage=ref.stage,
+                source="project",
+                video_path=ref.video_path,
+                video_id=ref.video_id,
+                clip_id=None,
+                stream_kind=ref.stream_kind,
+                frame=frame,
+            )
+        )
+    candidates = sorted(
+        (c for c in clips if c.checked and c.imported_by is None and c.proposal.shooter and c.proposal.stage),
+        key=lambda c: (c.proposal.role != "primary", c.index),
+    )
+    for c in candidates:
+        key = (c.proposal.shooter, c.proposal.stage)
+        if key in taken:
+            continue
+        taken.add(key)  # type: ignore[arg-type]
+        out.append(
+            SortReference(
+                shooter=c.proposal.shooter,  # type: ignore[arg-type]
+                stage=c.proposal.stage,  # type: ignore[arg-type]
+                source="sort",
+                video_path=None,
+                video_id=None,
+                clip_id=c.clip_id,
+                stream_kind="auto",
+                frame=c.thumbnail,
+            )
+        )
+    return out, pending
 
 
 def _view(state: Any, record: ScanRecord) -> SortView:
@@ -317,6 +428,7 @@ def _view(state: Any, record: ScanRecord) -> SortView:
                 proposal=p,
             )
         )
+    references, frames_pending = _references(state, clips) if record.status == "ready" else ([], 0)
     return SortView(
         scan_id=record.scan_id,
         status=record.status,
@@ -324,11 +436,17 @@ def _view(state: Any, record: ScanRecord) -> SortView:
         source_dir=record.source_dir,
         skipped_files=record.skipped_files,
         shooters=refs,
+        stages=[
+            SortStage(stage_number=s.stage_number, stage_name="" if s.placeholder else s.stage_name)
+            for s in match_model.Match.load(state.match_root).stages
+        ],
         cameras=proposal.cameras,
         clips=clips,
         strips_pending=(
             sum(1 for c in clips if not c.strip and (c.duration or 0) > 0) if record.status == "ready" else 0
         ),
+        references=references,
+        frames_pending=frames_pending,
         anchors=record.anchors,
         overrides=record.overrides,
         user_checked=record.checked,
@@ -587,7 +705,10 @@ def run_footage_sort_scan(handle: Any, *, state: Any, scan_id: str) -> None:
         _save(state, record)
         raise
     _save(state, record)
-    # The review is usable now; scrub strips follow, one ffmpeg call each
+    # The review is usable now; the compare panel's frames come first (a
+    # hunt wants them before a hover preview), then the scrub strips.
+    _build_frames(state, handle)
+    # Scrub strips follow, one ffmpeg call each
     # (1-3 s from a USB drive). They are files, never fields on the record,
     # so this loop cannot race the user's decisions being saved.
     for i, item in enumerate(record.clips):
@@ -599,6 +720,36 @@ def run_footage_sort_scan(handle: Any, *, state: Any, scan_id: str) -> None:
             thumbnail.ensure_strip(Path(item.path), cache_dir=thumbs, duration=item.clip.duration)
         except Exception:  # noqa: BLE001 -- a preview never fails the scan
             logger.debug("footage sort: no strip for %s", item.path, exc_info=True)
+
+
+def _build_frames(state: Any, handle: Any) -> None:
+    """Extract the missing reference frame of every project reference.
+    A frame that fails is logged and skipped; the tile stays blank."""
+    cache = _reference_dir(state)
+    try:
+        refs = _project_references(state)
+    except Exception:  # noqa: BLE001 -- a project that will not load is not this job's failure
+        logger.warning("footage sort: reference footage could not be listed", exc_info=True)
+        return
+    for ref in refs:
+        handle.check_cancel()
+        if reference.cached_frame(cache, ref) is not None or reference.frame_failed(cache, ref):
+            continue
+        handle.update(message=f"Frame for {ref.shooter} stage {ref.stage}")
+        try:
+            reference.ensure_frame(cache, ref)
+        except Exception:  # noqa: BLE001 -- a frame never fails the job
+            logger.warning(
+                "footage sort: no reference frame for %s stage %s", ref.shooter, ref.stage, exc_info=True
+            )
+            reference.mark_failed(cache, ref)
+
+
+def run_footage_sort_frames(handle: Any, *, state: Any, scan_id: str) -> None:
+    """Job body for ``footage_sort_frames``: the frames a view found missing
+    (a scan reopened later, an import mid-review, a re-trim)."""
+    _load(state, scan_id)
+    _build_frames(state, handle)
 
 
 def _move_unassigned(
@@ -735,10 +886,20 @@ def discard_sort(scan_id: str, request: Request) -> SortSummary:
 
 
 @router.get("/api/match/footage-sort/{scan_id}", response_model=SortView)
-def get_scan(scan_id: str, request: Request) -> SortView:
+async def get_scan(scan_id: str, request: Request) -> SortView:
     _local_only()
     state = request.app.state.splitsmith_state
-    return _view(state, _load(state, scan_id))
+    view = await run_in_threadpool(_view, state, _load(state, scan_id))
+    # A project reference without a frame: queue the one job that builds
+    # them (never extract on a request), unless one is already at it; a
+    # running scan builds them in its own pass.
+    if (
+        view.frames_pending > 0
+        and await state.jobs.find_active(kind=FRAMES_JOB_KIND) is None
+        and await state.jobs.find_active(kind=JOB_KIND) is None
+    ):
+        await state.jobs.submit(kind=FRAMES_JOB_KIND, args={"scan_id": scan_id})
+    return view
 
 
 @router.put("/api/match/footage-sort/{scan_id}/decisions", response_model=SortView)
@@ -783,6 +944,21 @@ def get_strip(scan_id: str, index: int, request: Request) -> FileResponse:
     hit = thumbnail.cached_strip(Path(record.clips[index].path), _sort_dir(state) / "thumbs")
     if hit is None:
         raise HTTPException(status_code=404, detail="no strip yet")
+    return FileResponse(hit, media_type="image/jpeg")
+
+
+@router.get("/api/match/footage-sort/{scan_id}/reference-frames/{slug}/{stage}.jpg")
+def get_reference_frame(scan_id: str, slug: str, stage: int, request: Request) -> FileResponse:
+    """The compare panel's frame for a shooter's stage; 404 until built."""
+    _local_only()
+    state = request.app.state.splitsmith_state
+    _load(state, scan_id)
+    if slug not in match_model.Match.load(state.match_root).shooters:
+        raise HTTPException(status_code=404, detail="shooter not found")
+    ref = reference.project_reference(state.shooter_project(slug), state.shooter_root(slug), slug, stage)
+    hit = reference.cached_frame(_reference_dir(state), ref) if ref is not None else None
+    if hit is None:
+        raise HTTPException(status_code=404, detail="no frame yet")
     return FileResponse(hit, media_type="image/jpeg")
 
 

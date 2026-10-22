@@ -522,6 +522,8 @@ export interface SortDecisions {
 }
 
 export type SortView = Schema["SortView"];
+export type SortShooterRef = Schema["ShooterRef"];
+export type SortReference = Schema["SortReference"];
 
 /** An unfinished sort, offered on Footage to continue. */
 export type SortSummary = Schema["SortSummary"];

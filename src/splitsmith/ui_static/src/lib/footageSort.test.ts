@@ -19,6 +19,11 @@ import {
   setCheckedMany,
   skipClip,
   sortSections,
+  stageLabel,
+  defaultReferenceShooter,
+  missingCount,
+  referenceShooters,
+  referenceTiles,
 } from "./footageSort";
 
 const PHONE: SortCamera = {
@@ -97,8 +102,22 @@ function view(): SortView {
     source_dir: "/shared",
     skipped_files: 3,
     shooters: [
-      { key: "mathias", name: "Mathias Axell", stages: [1, 2] },
-      { key: "anton", name: "Anton Johansson", stages: [1, 2] },
+      {
+        key: "mathias",
+        name: "Mathias Axell",
+        stages: [1, 2],
+        stages_with_footage: [1, 2],
+      },
+      {
+        key: "anton",
+        name: "Anton Johansson",
+        stages: [1, 2],
+        stages_with_footage: [],
+      },
+    ],
+    stages: [
+      { stage_number: 1, stage_name: "Lucky Seven" },
+      { stage_number: 2, stage_name: "" },
     ],
     cameras: [PHONE, HEAD],
     clips: [
@@ -126,6 +145,39 @@ function view(): SortView {
       }),
     ],
     strips_pending: 0,
+    references: [
+      {
+        shooter: "mathias",
+        stage: 1,
+        source: "project",
+        video_path: "raw/stage1.mp4",
+        video_id: "vid1",
+        clip_id: null,
+        stream_kind: "trim",
+        frame: true,
+      },
+      {
+        shooter: "mathias",
+        stage: 2,
+        source: "project",
+        video_path: "raw/stage2.mp4",
+        video_id: "vid2",
+        clip_id: null,
+        stream_kind: "auto",
+        frame: false,
+      },
+      {
+        shooter: "anton",
+        stage: 2,
+        source: "sort",
+        video_path: null,
+        video_id: null,
+        clip_id: "from-martin/IMG_1.MOV",
+        stream_kind: "auto",
+        frame: true,
+      },
+    ],
+    frames_pending: 1,
     anchors: [],
     overrides: [],
     user_checked: {},
@@ -371,5 +423,68 @@ describe("import summary", () => {
     expect(importedText(v, imported, 8)).toBe(
       "Imported 3 clips: Mathias Axell 1, Anton Johansson 2. 8 still need you",
     );
+  });
+});
+
+describe("stageLabel", () => {
+  it("names the stage when the match does", () => {
+    expect(stageLabel(1, view())).toBe("Stage 01 · Lucky Seven");
+  });
+
+  it("falls back to the number for a placeholder or an unknown stage", () => {
+    expect(stageLabel(2, view())).toBe("Stage 02");
+    expect(stageLabel(9, view())).toBe("Stage 09");
+    expect(stageLabel(1)).toBe("Stage 01");
+  });
+});
+
+describe("reference footage", () => {
+  it("ranks the shooters with footage by how many stages they cover", () => {
+    expect(referenceShooters(view()).map((s) => s.key)).toEqual([
+      "mathias",
+      "anton",
+    ]);
+    const nobody = { ...view(), references: [] };
+    expect(referenceShooters(nobody)).toEqual([]);
+  });
+
+  it("defaults to the best other shooter", () => {
+    expect(defaultReferenceShooter(view(), "mathias")).toBe("anton");
+    expect(defaultReferenceShooter(view(), "anton")).toBe("mathias");
+    expect(defaultReferenceShooter({ ...view(), references: [] }, "anton")).toBeNull();
+  });
+
+  it("builds one tile per match stage with the reference and the frame", () => {
+    const tiles = referenceTiles(view(), "mathias", "anton", "head/VID_1.mp4");
+    expect(tiles.map((t) => [t.stage, t.name, t.reference?.source ?? null, t.frame])).toEqual([
+      [1, "Lucky Seven", "project", true],
+      [2, "", "project", false],
+    ]);
+  });
+
+  it("marks the stages the assigned shooter has, from the project and the sort", () => {
+    // mathias has both stages in his project; anton's checked IMG_1 proposes stage 2.
+    expect(referenceTiles(view(), "anton", "mathias", "head/VID_1.mp4").map((t) => t.has)).toEqual([
+      true,
+      true,
+    ]);
+    const tiles = referenceTiles(view(), "mathias", "anton", "head/VID_1.mp4");
+    expect(tiles.map((t) => t.has)).toEqual([false, true]);
+    expect(missingCount(tiles)).toBe(1);
+  });
+
+  it("excludes the clip being assigned", () => {
+    const tiles = referenceTiles(view(), "mathias", "anton", "from-martin/IMG_1.MOV");
+    expect(tiles.map((t) => t.has)).toEqual([false, false]);
+    expect(missingCount(tiles)).toBe(2);
+  });
+
+  it("an unchecked or imported clip never counts", () => {
+    const v = view();
+    v.clips[0].checked = false;
+    expect(referenceTiles(v, "mathias", "anton", "head/VID_1.mp4").map((t) => t.has)).toEqual([false, false]);
+    v.clips[0].checked = true;
+    v.clips[0].imported_by = "anton";
+    expect(referenceTiles(v, "mathias", "anton", "head/VID_1.mp4").map((t) => t.has)).toEqual([false, false]);
   });
 });

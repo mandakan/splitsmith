@@ -35,7 +35,7 @@ from . import composition
 from .config import StageEvent
 from .division import competitor_division
 from .events import confirmed_from_doc, reload_figures
-from .export_naming import stage_display_name, stage_file_base
+from .export_naming import stage_display_name
 from .grade import ResolvedGrade, apply_lut, blend, read_cube
 from .hud_extras import hud_extras_from
 from .identity import ResolvedIdentity
@@ -64,7 +64,7 @@ from .summary_template import (
     summary_motion,
     summary_poster,
 )
-from .ui.audio import resolve_trim_for_read
+from .ui.audio import stage_trim_for_read
 from .ui.match_exports import title_info_lines
 
 logger = logging.getLogger(__name__)
@@ -342,22 +342,9 @@ def grab_frame(
 
 
 def _trim_for(project: MatchProject, root: Path, stage_number: int) -> tuple[Path | None, float]:
-    """The stage's trim on disk and the clip-local beep time: the lossless
-    export trim when it exists, else the audit trim, else nothing."""
-    stage = project.stage(stage_number)
-    primary = stage.primary()
-    if primary is None or primary.beep_time is None:
-        return None, 0.0
-    beep = min(project.trim_pre_buffer_seconds, primary.beep_time)
-    base = stage_file_base(stage_number, stage.stage_name)
-    lossless = project.exports_path(root) / f"{base}_trimmed.mp4"
-    if lossless.exists():
-        return lossless, beep
-    # The audit trim, through the one resolver that also knows the
-    # pre-take-spec legacy file names; building the name here would miss
-    # every trim cut before the video ids changed.
-    audit_trim = resolve_trim_for_read(root, stage_number, primary, project=project)
-    return audit_trim, beep
+    """The stage's trim on disk and the clip-local beep time
+    (:func:`ui.audio.stage_trim_for_read`)."""
+    return stage_trim_for_read(project, root, stage_number)
 
 
 def _shots_and_regions(

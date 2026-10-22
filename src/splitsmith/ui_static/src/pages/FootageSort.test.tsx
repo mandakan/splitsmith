@@ -78,8 +78,22 @@ function view(): SortView {
     source_dir: "/shared/hostfinalen",
     skipped_files: 39,
     shooters: [
-      { key: "mathias", name: "Mathias Axell", stages: [1, 2] },
-      { key: "anton", name: "Anton Johansson", stages: [1, 2] },
+      {
+        key: "mathias",
+        name: "Mathias Axell",
+        stages: [1, 2],
+        stages_with_footage: [1, 2],
+      },
+      {
+        key: "anton",
+        name: "Anton Johansson",
+        stages: [1, 2],
+        stages_with_footage: [],
+      },
+    ],
+    stages: [
+      { stage_number: 1, stage_name: "Lucky Seven" },
+      { stage_number: 2, stage_name: "Long Way Round" },
     ],
     cameras: [
       {
@@ -119,6 +133,29 @@ function view(): SortView {
       clip("head/VID_1.mp4", 2, HEAD, { confidence: "needs_you", role: null }),
     ],
     strips_pending: 0,
+    references: [
+      {
+        shooter: "mathias",
+        stage: 1,
+        source: "project",
+        video_path: "raw/stage1.mp4",
+        video_id: "vid1",
+        clip_id: null,
+        stream_kind: "trim",
+        frame: true,
+      },
+      {
+        shooter: "mathias",
+        stage: 2,
+        source: "project",
+        video_path: "raw/stage2.mp4",
+        video_id: "vid2",
+        clip_id: null,
+        stream_kind: "auto",
+        frame: true,
+      },
+    ],
+    frames_pending: 0,
     anchors: [],
     overrides: [],
     user_checked: {},
@@ -187,6 +224,15 @@ describe("FootageSort", () => {
       await screen.findByRole("button", { name: "Choose" }),
     );
     const sheet = screen.getByRole("dialog", { name: "VID_1.mp4" });
+    expect(
+      within(sheet)
+        .getAllByRole("option")
+        .map((o) => o.textContent),
+    ).toEqual([
+      "Choose a stage",
+      "Stage 01 · Lucky Seven",
+      "Stage 02 · Long Way Round",
+    ]);
     await userEvent.selectOptions(
       within(sheet).getByRole("combobox", { name: "Stage" }),
       "2",
@@ -392,5 +438,103 @@ describe("FootageSort", () => {
 
     expect(within(lone).getByText("primary")).toBeInTheDocument();
     expect(within(joining).getByText("secondary")).toBeInTheDocument();
+  });
+});
+
+describe("FootageSort compare panel", () => {
+  beforeEach(() => {
+    vi.mocked(api.getFootageSort).mockResolvedValue(view());
+    vi.mocked(api.putFootageSortDecisions).mockImplementation(async () =>
+      view(),
+    );
+  });
+
+  it("compares a clip with a sorted shooter and uses its stage", async () => {
+    renderPage();
+    await userEvent.click(
+      await screen.findByRole("button", { name: "Choose" }),
+    );
+    const sheet = screen.getByRole("dialog", { name: "VID_1.mp4" });
+
+    await userEvent.click(
+      within(sheet).getByRole("button", { name: "Compare with a shooter" }),
+    );
+    const panel = screen.getByRole("complementary", {
+      name: "Compare with a shooter",
+    });
+    expect(
+      within(panel)
+        .getAllByRole("button", { name: /^Stage \d\d/ })
+        .map((b) => b.getAttribute("aria-label")),
+    ).toEqual(["Stage 01 Lucky Seven", "Stage 02 Long Way Round"]);
+    await userEvent.click(
+      within(panel).getByRole("button", { name: "Stage 02 Long Way Round" }),
+    );
+    await userEvent.click(
+      within(panel).getByRole("button", { name: "Use stage 02" }),
+    );
+
+    expect(
+      within(sheet).getByRole("combobox", { name: "Stage" }),
+    ).toHaveValue("2");
+    await userEvent.click(
+      within(sheet).getByRole("button", { name: "Use this" }),
+    );
+    expect(api.putFootageSortDecisions).toHaveBeenCalledWith("abc123", {
+      anchors: [{ clip_id: "head/VID_1.mp4", shooter: "mathias", stage: 2 }],
+      overrides: [],
+      checked: { "head/VID_1.mp4": true },
+    });
+  });
+
+  it("the panel survives the next clip, inside the new sheet, on the same stage", async () => {
+    renderPage();
+    await userEvent.click(
+      await screen.findByRole("button", { name: "Choose" }),
+    );
+    await userEvent.click(
+      screen.getByRole("button", { name: "Compare with a shooter" }),
+    );
+    await userEvent.click(
+      screen.getByRole("button", { name: "Stage 02 Long Way Round" }),
+    );
+
+    await userEvent.keyboard("{ArrowDown}");
+
+    // Inside the sheet's dialog, never a portal of its own: the backdrop
+    // of a remounted sheet painted over a separately mounted panel.
+    const sheet = screen.getByRole("dialog");
+    expect(sheet).not.toHaveAccessibleName("VID_1.mp4");
+    const panel = within(sheet).getByRole("complementary", {
+      name: "Compare with a shooter",
+    });
+    expect(
+      within(panel).getByRole("button", { name: "Use stage 02" }),
+    ).toBeEnabled();
+  });
+
+  it("marks the stages the assigned shooter already has", async () => {
+    renderPage();
+    await userEvent.click(
+      await screen.findByRole("button", { name: "Choose" }),
+    );
+    const sheet = screen.getByRole("dialog", { name: "VID_1.mp4" });
+    await userEvent.click(
+      within(sheet).getByRole("button", { name: "Compare with a shooter" }),
+    );
+    const panel = screen.getByRole("complementary", {
+      name: "Compare with a shooter",
+    });
+
+    // Mathias (the default shooter) has both stages in his project.
+    expect(panel).toHaveTextContent("0 still missing for Mathias Axell");
+    expect(within(panel).getAllByText("has it")).toHaveLength(2);
+    await userEvent.click(
+      within(sheet).getByRole("button", { name: "Anton Johansson" }),
+    );
+
+    // Anton's checked IMG_2 proposes stage 2, so only stage 1 is missing.
+    expect(panel).toHaveTextContent("1 still missing for Anton Johansson");
+    expect(within(panel).getAllByText("has it")).toHaveLength(1);
   });
 });

@@ -127,6 +127,12 @@ export const matchApi = {
   footageSortThumbUrl: (scanId: string, index: number) =>
     scopeRequestPath(`/api/match/footage-sort/${encodeURIComponent(scanId)}/thumbs/${index}.jpg`),
 
+  /** The compare panel's frame for a shooter's stage (404 until built). */
+  footageSortReferenceFrameUrl: (scanId: string, slug: string, stage: number) =>
+    scopeRequestPath(
+      `/api/match/footage-sort/${encodeURIComponent(scanId)}/reference-frames/${encodeURIComponent(slug)}/${stage}.jpg`,
+    ),
+
   /** The event's own logo (the branding work): PNG, JPEG, WebP or SVG, 2 MB. */
   uploadEventLogo: (file: File) => {
     const form = new FormData();

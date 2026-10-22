@@ -1241,6 +1241,28 @@ def resolve_trim_for_read(
     return _legacy_cache_fallback(project, video, output, legacy_mp4)
 
 
+def stage_trim_for_read(project: MatchProject, root: Path, stage_number: int) -> tuple[Path | None, float]:
+    """The stage's trim on disk and the clip-local beep time: the lossless
+    export trim when it exists, else the audit trim through
+    :func:`resolve_trim_for_read` (the one resolver that also knows the
+    pre-take-spec legacy file names), else nothing. ``(None, 0.0)`` with
+    no primary or no beep. The export preview and the footage sort's
+    reference panel both read through this, so they agree on which file
+    stands for a stage."""
+    from ..export_naming import stage_file_base
+
+    stage = project.stage(stage_number)
+    primary = stage.primary()
+    if primary is None or primary.beep_time is None:
+        return None, 0.0
+    beep = min(project.trim_pre_buffer_seconds, primary.beep_time)
+    base = stage_file_base(stage_number, stage.stage_name)
+    lossless = project.exports_path(root) / f"{base}_trimmed.mp4"
+    if lossless.exists():
+        return lossless, beep
+    return resolve_trim_for_read(root, stage_number, primary, project=project), beep
+
+
 def trim_pre_buffer_seconds_for(trim_path: Path, *, default: float) -> float:
     """Pre-buffer the trim at ``trim_path`` was actually cut with.
 

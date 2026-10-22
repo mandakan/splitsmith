@@ -14,6 +14,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 
+import { ReferencePanel } from "@/components/footage/ReferencePanel";
 import { ScrubThumb } from "@/components/sort/ScrubThumb";
 import { Button } from "@/components/ui/button";
 import { Chip } from "@/components/ui/Chip";
@@ -41,6 +42,8 @@ import {
   resetClip,
   reviewOrder,
   checkState,
+  defaultReferenceShooter,
+  referenceShooters,
   setChecked,
   setCheckedMany,
   setsClock,
@@ -75,6 +78,10 @@ export function FootageSort() {
   const [result, setResult] = useState<SortImportResult | null>(null);
   // The last per-shooter import, said once above the review.
   const [batch, setBatch] = useState<string | null>(null);
+  // The compare panel: open across clips, with the shooter chosen in it.
+  const [compare, setCompare] = useState(false);
+  const [referenceShooter, setReferenceShooter] = useState<string | null>(null);
+  const [referenceStage, setReferenceStage] = useState<number | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -90,7 +97,9 @@ export function FootageSort() {
 
   useEffect(() => {
     const waiting = view?.status === "scanning";
-    const strips = view?.status === "ready" && view.strips_pending > 0;
+    const strips =
+      view?.status === "ready" &&
+      (view.strips_pending > 0 || view.frames_pending > 0);
     if (!waiting && !strips) return;
     const timer = setTimeout(
       () => void load(),
@@ -237,6 +246,12 @@ export function FootageSort() {
           onClose={() => setOpenId(null)}
           onGo={setOpenId}
           onDecide={(d) => void decide(d)}
+          compare={compare}
+          onCompare={setCompare}
+          referenceShooter={referenceShooter}
+          onReferenceShooter={setReferenceShooter}
+          referenceStage={referenceStage}
+          onReferenceStage={setReferenceStage}
         />
       ) : null}
     </div>
@@ -422,7 +437,7 @@ function ClipTable({
               <Td kind="name">
                 {clip.proposal.stage !== null &&
                 clip.proposal.confidence !== "skipped"
-                  ? `${checkable ? "" : `${shooterName(view, clip.proposal.shooter)} · `}${stageLabel(clip.proposal.stage)}`
+                  ? `${checkable ? "" : `${shooterName(view, clip.proposal.shooter)} · `}${stageLabel(clip.proposal.stage, view)}`
                   : "None"}
               </Td>
               <Td>
@@ -504,6 +519,12 @@ function AssignSheet({
   onClose,
   onGo,
   onDecide,
+  compare,
+  onCompare,
+  referenceShooter,
+  onReferenceShooter,
+  referenceStage,
+  onReferenceStage,
 }: {
   view: SortView;
   clip: SortClipView;
@@ -512,6 +533,13 @@ function AssignSheet({
   /** Open another clip in the player. */
   onGo: (clipId: string) => void;
   onDecide: (d: SortDecisions) => void;
+  /** The compare panel (spec 2026-10-21), kept by the page across clips. */
+  compare: boolean;
+  onCompare: (open: boolean) => void;
+  referenceShooter: string | null;
+  onReferenceShooter: (key: string) => void;
+  referenceStage: number | null;
+  onReferenceStage: (stage: number | null) => void;
 }) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const order = reviewOrder(view);
@@ -561,9 +589,28 @@ function AssignSheet({
   const camera = view.cameras.find((c) => c.key === clip.proposal.camera_key);
   const clock = camera ? clockText(camera) : null;
   const anchoring = setsClock(view, clip.clip_id);
+  const canCompare = referenceShooters(view).length > 0;
+  const referenceKey =
+    referenceShooter &&
+    referenceShooters(view).some((s) => s.key === referenceShooter)
+      ? referenceShooter
+      : defaultReferenceShooter(view, shooter);
 
   return (
     <Sheet open onClose={onClose} label={clip.filename}>
+      {compare && referenceKey ? (
+        <ReferencePanel
+          view={view}
+          referenceShooter={referenceKey}
+          onReferenceShooter={onReferenceShooter}
+          stage={referenceStage}
+          onStage={onReferenceStage}
+          assigning={shooter}
+          clipId={clip.clip_id}
+          onUseStage={setStage}
+          onClose={() => onCompare(false)}
+        />
+      ) : null}
       <div className="flex items-center gap-3 border-b border-rule px-4 py-3">
         <span
           className="min-w-0 flex-1 truncate font-mono text-md text-ink"
@@ -657,7 +704,7 @@ function AssignSheet({
             <option value="">Choose a stage</option>
             {stages.map((n) => (
               <option key={n} value={n}>
-                {stageLabel(n)}
+                {stageLabel(n, view)}
               </option>
             ))}
           </select>
@@ -667,6 +714,16 @@ function AssignSheet({
             This also sets the clock for every clip from this camera.
           </p>
         ) : null}
+        <div className="hidden lg:block">
+          <Button
+            size="sm"
+            onClick={() => onCompare(!compare)}
+            disabled={!canCompare}
+            title={canCompare ? undefined : "No shooter has footage yet"}
+          >
+            {compare ? "Hide the comparison" : "Compare with a shooter"}
+          </Button>
+        </div>
         <p className="text-sm text-subtle">
           Space plays, ← → jump 5 s, ↑ ↓ change clip.
         </p>
