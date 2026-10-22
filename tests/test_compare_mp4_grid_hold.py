@@ -1797,9 +1797,12 @@ def test_only_a_stage_with_no_hold_freezes_its_tiles():
     """With a hold the early per-tile summary covers a finished tile; with
     none it sat on black and the stage's transition ran over black."""
     anders = _bundle("Anders", {1: _stage(1, trim=Path("/a1.mp4"), beep=2.0, duration=12.0)})
-    common = dict(audio_label="Anders", head_pad_seconds=1.0, tail_pad_seconds=0.5)
-    (no_hold,) = mp4_grid.build_stage_plans([anders], **common)
-    (held,) = mp4_grid.build_stage_plans([anders], **common, hold_seconds=HOLD)
+    (no_hold,) = mp4_grid.build_stage_plans(
+        [anders], audio_label="Anders", head_pad_seconds=1.0, tail_pad_seconds=0.5
+    )
+    (held,) = mp4_grid.build_stage_plans(
+        [anders], audio_label="Anders", head_pad_seconds=1.0, tail_pad_seconds=0.5, hold_seconds=HOLD
+    )
     assert no_hold.freeze_tile_ends and not held.freeze_tile_ends
 
 
