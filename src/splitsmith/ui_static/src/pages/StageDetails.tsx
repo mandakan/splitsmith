@@ -39,7 +39,7 @@ import {
 import { cn } from "@/lib/utils";
 
 const CELL =
-  "w-14 rounded-md border border-rule-strong bg-surface-2 px-1.5 py-1 text-right font-mono text-sm text-ink disabled:opacity-60";
+  "w-12 rounded-md border border-rule-strong bg-surface-2 px-1.5 py-1 text-right font-mono text-sm text-ink disabled:opacity-60";
 
 const HIT_HEAD: Record<(typeof HIT_FIELDS)[number], string> = {
   alphas: "A",
@@ -180,8 +180,8 @@ export function StageDetails() {
       {readOnly ? (
         <p className="text-md text-muted">This match is edited on the desktop. Stage details are read only here.</p>
       ) : null}
-      <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_320px]">
-        <div className="flex min-w-0 flex-col gap-3">
+      <div className="grid gap-5 2xl:grid-cols-[minmax(0,1fr)_320px]">
+        <div className="order-2 flex min-w-0 flex-col gap-3 2xl:order-1">
           <div className="flex flex-wrap items-center gap-3">
             <Label>Stages</Label>
             <span className="text-sm text-muted">
@@ -217,15 +217,15 @@ export function StageDetails() {
               <tr>
                 <Th>Order</Th>
                 <Th>Stage</Th>
-                <Th align="right">Time</Th>
+                <Th align="right" className="px-1.5">Time</Th>
                 {HIT_FIELDS.map((f) => (
-                  <Th key={f} align="right">
+                  <Th key={f} align="right" className="px-1.5">
                     {HIT_HEAD[f]}
                   </Th>
                 ))}
-                <Th align="right">Points</Th>
-                <Th align="right">HF</Th>
-                <Th align="right">%</Th>
+                <Th align="right" className="px-1.5">Points</Th>
+                <Th align="right" className="px-1.5">HF</Th>
+                <Th align="right" className="px-1.5">%</Th>
                 <Th>DQ</Th>
               </tr>
             </thead>
@@ -296,15 +296,15 @@ export function StageDetails() {
                         <span className="numeral mr-2 text-muted">{pad2(r.stage_number)}</span>
                         {r.stage_name}
                       </Td>
-                      <Td kind="num">{cell("time_seconds", "Time", true)}</Td>
+                      <Td kind="num" className="px-1.5">{cell("time_seconds", "Time", true)}</Td>
                       {HIT_FIELDS.map((f) => (
                         <Td key={f} kind="num">
                           {cell(f, HIT_HEAD[f])}
                         </Td>
                       ))}
-                      <Td kind="num">{shown("stage_points", points, "Points")}</Td>
-                      <Td kind="num">{shown("hit_factor", hf, "Hit factor")}</Td>
-                      <Td kind="num">{cell("stage_pct", "Stage percent")}</Td>
+                      <Td kind="num" className="px-1.5">{shown("stage_points", points, "Points")}</Td>
+                      <Td kind="num" className="px-1.5">{shown("hit_factor", hf, "Hit factor")}</Td>
+                      <Td kind="num" className="px-1.5">{cell("stage_pct", "Stage percent")}</Td>
                       <Td>
                         <input
                           type="checkbox"
@@ -353,7 +353,7 @@ export function StageDetails() {
             </Button>
           </div>
         </div>
-        <aside className="flex h-fit flex-col gap-3 rounded-[10px] border border-rule bg-surface p-4">
+        <aside className="order-1 flex h-fit flex-col gap-3 rounded-[10px] border border-rule bg-surface p-4 2xl:order-2">
           <Label>Paste results</Label>
           <ol className="list-decimal space-y-1 pl-5 text-md text-ink-2">
             <li>
