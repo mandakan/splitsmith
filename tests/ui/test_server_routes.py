@@ -1290,8 +1290,8 @@ def test_hosted_boot_lifespan_returned_for_seeding_alone(monkeypatch) -> None:
     seeded_versions: list[str | None] = []
 
     class _FakeWorkersStore:
-        async def ensure_railway_row(self, *, version: str | None = None) -> None:
-            calls.append("seeded")
+        async def ensure_platform_row(self, kind: str, *, version: str | None = None) -> None:
+            calls.append(f"seeded:{kind}")
             seeded_versions.append(version)
 
     class _FakeState:
@@ -1305,11 +1305,41 @@ def test_hosted_boot_lifespan_returned_for_seeding_alone(monkeypatch) -> None:
     with TestClient(FastAPI(lifespan=lifespan)):
         pass
 
-    assert calls == ["seeded"]
+    assert calls == ["seeded:railway"]
     # The running deploy's version is stamped onto the railway row at boot.
     from splitsmith import __version__
 
     assert seeded_versions == [__version__]
+
+
+def test_hosted_boot_lifespan_seeds_the_cloud_run_row(monkeypatch) -> None:
+    """On Cloud Run the platform row is ``kind='cloud_run'`` (the job named
+    by SPLITSMITH_WORKER_JOB), so the dispatcher has its fallback tier."""
+    from fastapi import FastAPI
+
+    from splitsmith.ui.server import _hosted_boot_lifespan
+
+    for var in ("SPLITSMITH_WORKER_TRIGGER_TOKEN", "SPLITSMITH_WORKER_SERVICE_ID", "RAILWAY_ENVIRONMENT_ID"):
+        monkeypatch.delenv(var, raising=False)
+    monkeypatch.setenv(
+        "SPLITSMITH_WORKER_JOB", "projects/p/locations/europe-west1/jobs/splitsmith-worker-staging"
+    )
+    calls: list[str] = []
+
+    class _FakeWorkersStore:
+        async def ensure_platform_row(self, kind: str, *, version: str | None = None) -> None:
+            calls.append(kind)
+
+    class _FakeState:
+        boot_retrigger = None
+        workers_store = _FakeWorkersStore()
+        db_engines = None
+
+    lifespan = _hosted_boot_lifespan(_FakeState())
+    assert lifespan is not None
+    with TestClient(FastAPI(lifespan=lifespan)):
+        pass
+    assert calls == ["cloud_run"]
 
 
 @pytest.mark.parametrize("request_style", [{}, {"overlay_variant": "plate"}], ids=["classic", "plate"])
