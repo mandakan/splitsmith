@@ -63,7 +63,7 @@ function clip(
         issue: null,
         rival: null,
         rival_stage: null,
-        run_size: 1,
+        run_size: 1, order_rank: null, order_position: null, order_evidence: null, stage_from_name: false,
       },
       ...over,
     },
@@ -103,7 +103,7 @@ function view(): SortView {
         scheme: "IMG",
         clip_ids: [],
         clock: "trusted",
-        offset_seconds: 0,
+        offset_seconds: 0, shooter: null, shooter_source: null,
       },
       {
         key: HEAD,
@@ -112,7 +112,7 @@ function view(): SortView {
         scheme: "VID_datetime",
         clip_ids: ["head/VID_1.mp4"],
         clock: "needs_anchor",
-        offset_seconds: 0,
+        offset_seconds: 0, shooter: null, shooter_source: null,
       },
     ],
     clips: [
@@ -159,6 +159,7 @@ function view(): SortView {
     anchors: [],
     overrides: [],
     user_checked: {},
+    camera_shooters: [],
   };
 }
 
@@ -196,11 +197,25 @@ describe("FootageSort", () => {
     expect(
       await screen.findByText(/the clock lines up with no scorecard/),
     ).toBeInTheDocument();
-    expect(screen.getByText("Mathias Axell")).toBeInTheDocument();
-    expect(screen.getByText("Anton Johansson")).toBeInTheDocument();
+    expect(screen.getByText("Mathias Axell", { selector: ":not(option)" })).toBeInTheDocument();
+    expect(screen.getByText("Anton Johansson", { selector: ":not(option)" })).toBeInTheDocument();
     expect(
       screen.getByRole("button", { name: "Import 2 clips" }),
     ).toBeEnabled();
+  });
+
+  it("says whose camera an unknown-clock camera is, without a stage", async () => {
+    renderPage();
+
+    const pick = await screen.findByRole("combobox", { name: /^Whose camera:/ });
+    await userEvent.selectOptions(pick, "anton");
+
+    expect(api.putFootageSortDecisions).toHaveBeenCalledWith("abc123", {
+      anchors: [],
+      overrides: [],
+      checked: {},
+      camera_shooters: [{ camera_key: HEAD, shooter: "anton" }],
+    });
   });
 
   it("an unchecked clip reaches the server as a check mark", async () => {
@@ -214,6 +229,7 @@ describe("FootageSort", () => {
       anchors: [],
       overrides: [],
       checked: { "from-martin/IMG_1.MOV": false },
+      camera_shooters: [],
     });
   });
 
@@ -248,6 +264,7 @@ describe("FootageSort", () => {
       anchors: [{ clip_id: "head/VID_1.mp4", shooter: "anton", stage: 2 }],
       overrides: [],
       checked: { "head/VID_1.mp4": true },
+      camera_shooters: [],
     });
   });
 
@@ -276,6 +293,7 @@ describe("FootageSort", () => {
       anchors: [{ clip_id: "head/VID_1.mp4", shooter: "mathias", stage: 2 }],
       overrides: [],
       checked: { "head/VID_1.mp4": true },
+      camera_shooters: [],
     });
   });
 
@@ -385,6 +403,7 @@ describe("FootageSort", () => {
       anchors: [],
       overrides: [],
       checked: { "from-martin/IMG_1.MOV": false },
+      camera_shooters: [],
     });
   });
 
@@ -419,7 +438,7 @@ describe("FootageSort", () => {
     expect(await screen.findByRole("status")).toHaveTextContent(
       "Imported 1 clip to Anton Johansson",
     );
-    expect(screen.getByText("Mathias Axell")).toBeInTheDocument();
+    expect(screen.getByText("Mathias Axell", { selector: ":not(option)" })).toBeInTheDocument();
   });
 
   it("labels every placed clip with the role the import gives it", async () => {
@@ -484,6 +503,7 @@ describe("FootageSort compare panel", () => {
       anchors: [{ clip_id: "head/VID_1.mp4", shooter: "mathias", stage: 2 }],
       overrides: [],
       checked: { "head/VID_1.mp4": true },
+      camera_shooters: [],
     });
   });
 

@@ -87,6 +87,12 @@ describe("continue label, verb and href", () => {
     expect(continueVerb(done.next_step!)).toBe("Export");
     expect(continueHref(done)).toBe("/match/stockholm-2026/export/s_ma");
   });
+  it("sends missing stage details to that shooter's Stage details", () => {
+    const details = match({ next_step: { kind: "details", shooter_slug: "janne", stage_number: null, stage_name: null } });
+    expect(continueLabel(details.next_step!)).toBe("Fill in stage details");
+    expect(continueVerb(details.next_step!)).toBe("Stage details");
+    expect(continueHref(details)).toBe("/match/stockholm-2026/stage-details/janne");
+  });
 });
 
 describe("progressStates", () => {

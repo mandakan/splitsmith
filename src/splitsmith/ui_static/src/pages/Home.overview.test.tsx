@@ -46,7 +46,7 @@ vi.mock("@/lib/features", async (importOriginal) => {
 });
 
 function project(): MatchProject {
-  return { capabilities: [], competitor_division: null, identity: { accent: null, club: null, logo: null }, trim_audit_encoder: "auto",
+  return { capabilities: [], competitor_division: null, power_factor: null, identity: { accent: null, club: null, logo: null }, trim_audit_encoder: "auto",
     schema_version: 1,
     name: "Stockholm IPSC Open 2026",
     created_at: "2026-01-01T00:00:00Z",
@@ -85,7 +85,7 @@ const SHOOTER: ShooterListEntry = { identity: { accent: null, club: null, logo: 
   stages_total: 4,
   video_count: 3,
   cameras: [],
-  stages_missing_trim: 0,
+  stages_missing_trim: 0, stages_without_time: 0,
   stage_statuses: [],
 };
 
@@ -404,7 +404,7 @@ describe("Breakdown is optional by design (#1371)", () => {
 
   function withRegions(regions: number | null): MatchProject {
     const p = project();
-    p.stages = TRIAGE.cells.map((c) => ({ start: "standard", status: null,
+    p.stages = TRIAGE.cells.map((c) => ({ start: "standard", shot_order: null, status: null,
       stage_number: c.stage_number,
       stage_name: c.stage_name,
       time_seconds: c.time_seconds,

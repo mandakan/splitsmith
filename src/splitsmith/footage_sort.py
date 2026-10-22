@@ -35,11 +35,15 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 from .config import FootageSortConfig
+from .footage_sort_names import RankEvidence, recording_rank, shooter_in_name, stage_in_name
 from .match_project import _PRIMARY_MOUNT_RANK, _heuristic_mount_from_make
 
 CameraClock = Literal["trusted", "fitted", "anchored", "needs_anchor", "no_timestamps"]
 Confidence = Literal["high", "medium", "needs_you", "skipped"]
-Issue = Literal["ambiguous", "conflict", "no_candidate", "no_timestamp", "needs_anchor", "outside_match"]
+Issue = Literal[
+    "ambiguous", "conflict", "no_candidate", "no_timestamp", "needs_anchor", "outside_match", "needs_order"
+]
+CameraShooterSource = Literal["user", "clip", "name", "folder"]
 
 
 class SortClip(BaseModel):
@@ -52,6 +56,8 @@ class SortClip(BaseModel):
     duration: float | None = None
     make: str | None = None
     model: str | None = None
+    #: The file's modification time: the last resort for recording order.
+    modified: datetime | None = None
 
 
 class ShooterScorecards(BaseModel):
@@ -60,6 +66,13 @@ class ShooterScorecards(BaseModel):
     key: str
     name: str
     scorecards: dict[int, datetime] = Field(default_factory=dict)
+    #: Stage numbers in the order the shooter shot them (typed on Stage
+    #: details, else the scorecard order); empty when unknown.
+    order: list[int] = Field(default_factory=list)
+    #: Stages the shooter's project already has footage on.
+    covered: list[int] = Field(default_factory=list)
+    #: Every stage of the shooter's project; empty when not known.
+    stages: list[int] = Field(default_factory=list)
 
 
 class Anchor(BaseModel):
@@ -68,6 +81,13 @@ class Anchor(BaseModel):
     clip_id: str
     shooter: str
     stage: int
+
+
+class CameraShooter(BaseModel):
+    """The user's word on whose clips a camera holds, no stage committed."""
+
+    camera_key: str
+    shooter: str
 
 
 class Override(BaseModel):
@@ -88,6 +108,9 @@ class SortCamera(BaseModel):
     clock: CameraClock
     # Seconds added to the camera's recorded starts.
     offset_seconds: float = 0.0
+    #: Whose clips the camera holds, when known, and how that is known.
+    shooter: str | None = None
+    shooter_source: CameraShooterSource | None = None
 
 
 class ClipReason(BaseModel):
@@ -103,6 +126,13 @@ class ClipReason(BaseModel):
     rival_stage: int | None = None
     # Clips in the same run (1 = this camera alone).
     run_size: int = 1
+    # Placed by the shooter's shooting order or the file name (spec
+    # 2026-10-22): the clip's place in its camera's recording order, the
+    # stage's place in the shooter's order, and what ranked the clip.
+    order_rank: int | None = None
+    order_position: int | None = None
+    order_evidence: RankEvidence | None = None
+    stage_from_name: bool = False
 
 
 class ClipProposal(BaseModel):
@@ -165,6 +195,8 @@ def propose(
     *,
     anchors: Iterable[Anchor] = (),
     overrides: Iterable[Override] = (),
+    camera_shooters: Iterable[CameraShooter] = (),
+    root_folder: str = "",
     config: FootageSortConfig | None = None,
 ) -> SortProposal:
     """Propose a (shooter, stage) for every clip. See the module docstring."""
@@ -241,6 +273,8 @@ def propose(
         Override(clip_id=a.clip_id, shooter=a.shooter, stage=a.stage) for a in anchor_for.values()
     ]
     _apply_overrides(proposals, [*anchor_overrides, *overrides], by_card)
+    owners = _camera_shooters(by_camera, proposals, shooters, camera_shooters, root_folder)
+    _order_pass(proposals, by_camera, clocks, owners, shooters)
     _group_runs(proposals, corrected, {c.clip_id: c for c in clips}, cfg)
 
     cameras = [
@@ -252,6 +286,8 @@ def propose(
             clip_ids=[c.clip_id for c in members],
             clock=clocks[key][0],
             offset_seconds=clocks[key][1],
+            shooter=owners[key][0] if key in owners else None,
+            shooter_source=owners[key][1] if key in owners else None,
         )
         for key, members in by_camera.items()
     ]
@@ -536,3 +572,141 @@ def _group_runs(
                 if len(runs) > 1 and p.decided_by == "engine":
                     p.confidence = "needs_you"
                     p.reason.issue = "conflict"
+
+
+def _camera_shooters(
+    by_camera: dict[str, list[SortClip]],
+    proposals: list[ClipProposal],
+    shooters: Sequence[ShooterScorecards],
+    camera_shooters: Iterable[CameraShooter],
+    root_folder: str,
+) -> dict[str, tuple[str, CameraShooterSource]]:
+    """Whose clips each camera holds, where something says so: the user's
+    choice, then the user's decided clips (all one shooter), then a shooter
+    named in every named file, then the folder's name."""
+    known = {s.key for s in shooters}
+    people = [(s.key, s.name) for s in shooters]
+    chosen = {c.camera_key: c.shooter for c in camera_shooters if c.shooter in known}
+    index = {p.clip_id: p for p in proposals}
+    out: dict[str, tuple[str, CameraShooterSource]] = {}
+    for key, members in by_camera.items():
+        if key in chosen:
+            out[key] = (chosen[key], "user")
+            continue
+        decided = {
+            index[c.clip_id].shooter
+            for c in members
+            if index[c.clip_id].decided_by == "user" and index[c.clip_id].shooter is not None
+        }
+        if len(decided) == 1:
+            out[key] = (next(iter(decided)), "clip")
+            continue
+        named = {shooter_in_name(c.filename, people) for c in members}
+        named.discard(None)
+        if len(named) == 1:
+            out[key] = (next(iter(named)), "name")  # type: ignore[arg-type]
+            continue
+        folder = members[0].folder or root_folder
+        by_folder = shooter_in_name(folder, people)
+        if by_folder is not None:
+            out[key] = (by_folder, "folder")
+    return out
+
+
+def _order_pass(
+    proposals: list[ClipProposal],
+    by_camera: dict[str, list[SortClip]],
+    clocks: dict[str, tuple[CameraClock, float]],
+    owners: dict[str, tuple[str, CameraShooterSource]],
+    shooters: Sequence[ShooterScorecards],
+) -> None:
+    """Place a clockless camera's undecided clips by the file names and
+    the shooter's shooting order (spec 2026-10-22). Conservative: clips
+    already placed are fixed points, and a stretch between two of them is
+    proposed one clip per open stage only when the counts match. Every
+    proposal here waits for the user (``needs_you``) or, named in its
+    file, is ``medium``; nothing is pre-checked."""
+    index = {p.clip_id: p for p in proposals}
+    by_key = {s.key: s for s in shooters}
+    for key, members in by_camera.items():
+        if clocks[key][0] not in ("needs_anchor", "no_timestamps") or key not in owners:
+            continue
+        shooter = by_key.get(owners[key][0])
+        if shooter is None:
+            continue
+        stages = set(shooter.stages) or (set(shooter.order) | set(shooter.scorecards))
+        covered = set(shooter.covered)
+        undecided = [
+            c
+            for c in members
+            if index[c.clip_id].shooter is None and index[c.clip_id].confidence != "skipped"
+        ]
+        # A stage named in the file places the clip outright.
+        for clip in undecided:
+            n = stage_in_name(clip.filename)
+            # Only a stage the match has, and one the shooter still lacks.
+            if n is not None and n in stages and n not in covered:
+                p = index[clip.clip_id]
+                p.shooter, p.stage, p.confidence = shooter.key, n, "medium"
+                p.reason.issue = None
+                p.reason.stage_from_name = True
+        if not shooter.order:
+            for clip in members:
+                p = index[clip.clip_id]
+                if p.shooter is None and p.confidence != "skipped":
+                    p.reason.issue = "needs_order"
+            continue
+        ranked = recording_rank(
+            [c.filename for c in members],
+            [c.start for c in members],
+            [c.modified for c in members],
+            clock_ok=False,
+        )
+        if ranked is None:
+            continue
+        order_idx, evidence = ranked
+        _align([members[i] for i in order_idx], index, shooter, evidence, owners[key][0])
+
+
+def _align(
+    ranked: list[SortClip],
+    index: dict[str, ClipProposal],
+    shooter: ShooterScorecards,
+    evidence: RankEvidence,
+    owner: str,
+) -> None:
+    position = {stage: i for i, stage in enumerate(shooter.order)}
+    covered = set(shooter.covered)
+    # Fixed points: (rank, order position) of clips already placed for the
+    # shooter on a stage in the order. A clip placed for someone else, or
+    # skipped, is neither fixed nor open.
+    fixed: list[tuple[int, int]] = []
+    open_clips: list[tuple[int, SortClip]] = []
+    for rank, clip in enumerate(ranked):
+        p = index[clip.clip_id]
+        if p.confidence == "skipped":
+            continue
+        if p.shooter is None:
+            open_clips.append((rank, clip))
+        elif p.shooter == owner and p.stage in position:
+            fixed.append((rank, position[p.stage]))  # type: ignore[index]
+    if any(b[1] <= a[1] for a, b in zip(fixed, fixed[1:], strict=False)):
+        return  # placed clips disagree with the order: leave it to the user
+    taken = {pos for _, pos in fixed}
+    bounds = [(-1, -1), *fixed, (len(ranked), len(shooter.order))]
+    for (lo_rank, lo_pos), (hi_rank, hi_pos) in zip(bounds, bounds[1:], strict=False):
+        clips = [c for r, c in open_clips if lo_rank < r < hi_rank]
+        stages = [
+            shooter.order[i]
+            for i in range(lo_pos + 1, hi_pos)
+            if i not in taken and shooter.order[i] not in covered
+        ]
+        if not clips or len(clips) != len(stages):
+            continue
+        for clip, stage in zip(clips, stages, strict=True):
+            p = index[clip.clip_id]
+            p.shooter, p.stage, p.confidence = shooter.key, stage, "needs_you"
+            p.reason.issue = None
+            p.reason.order_rank = ranked.index(clip) + 1
+            p.reason.order_position = position[stage] + 1
+            p.reason.order_evidence = evidence

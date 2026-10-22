@@ -50,13 +50,13 @@ function makeShooter(slug: string, name: string): ShooterListEntry {
     stages_total: 2,
     video_count: 0,
     cameras: [],
-    stages_missing_trim: 0,
+    stages_missing_trim: 0, stages_without_time: 0,
     stage_statuses: [],
   };
 }
 
 function makeStage(n: number, name: string, skipped = false): MatchProject["stages"][number] {
-  return { figures: null, start: "standard", status: null,
+  return { figures: null, start: "standard", shot_order: null, status: null,
     stage_number: n,
     stage_name: name,
     time_seconds: 20,
@@ -71,7 +71,7 @@ function makeStage(n: number, name: string, skipped = false): MatchProject["stag
 }
 
 function makeProject(stages: MatchProject["stages"]): MatchProject {
-  return { capabilities: [], competitor_division: null, identity: { accent: null, club: null, logo: null }, trim_audit_encoder: "auto",
+  return { capabilities: [], competitor_division: null, power_factor: null, identity: { accent: null, club: null, logo: null }, trim_audit_encoder: "auto",
     schema_version: 1,
     name: "bromma-2026",
     created_at: "2026-01-01T00:00:00Z",

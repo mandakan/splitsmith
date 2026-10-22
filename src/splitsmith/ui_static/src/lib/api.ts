@@ -453,54 +453,13 @@ export type ScanResponse = Schema["ScanResponse"];
  *  match's shooters. Shapes mirror ``ui/footage_sort_api.py``. */
 export type SortCameraClock = "trusted" | "fitted" | "anchored" | "needs_anchor" | "no_timestamps";
 export type SortConfidence = "high" | "medium" | "needs_you" | "skipped";
-export type SortIssue =
-  | "ambiguous"
-  | "conflict"
-  | "no_candidate"
-  | "no_timestamp"
-  | "needs_anchor"
-  | "outside_match";
+export type SortIssue = NonNullable<Schema["ClipReason"]["issue"]>;
 
 export type SortCamera = Schema["SortCamera"];
 
-export interface SortClipProposal {
-  clip_id: string;
-  camera_key: string;
-  shooter: string | null;
-  stage: number | null;
-  confidence: SortConfidence;
-  run_id: string | null;
-  role: "primary" | "secondary" | null;
-  decided_by: "engine" | "user";
-  reason: {
-    scorecard_at: string | null;
-    lead_seconds: number | null;
-    offset_seconds: number;
-    issue: SortIssue | null;
-    rival: string | null;
-    rival_stage: number | null;
-    run_size: number;
-  };
-}
+export type SortClipProposal = Schema["ClipProposal"];
 
-export interface SortClipView {
-  clip_id: string;
-  index: number;
-  folder: string;
-  filename: string;
-  start: string | null;
-  duration: number | null;
-  model: string | null;
-  imported_by: string | null;
-  /** The shooter whose unassigned list holds the file; import moves it when
-   *  the proposal names someone else. */
-  unassigned_in: string | null;
-  thumbnail: boolean;
-  /** A hover-scrub strip exists (built after the scan). */
-  strip: boolean;
-  checked: boolean;
-  proposal: SortClipProposal;
-}
+export type SortClipView = Schema["ClipView"];
 
 export interface SortAnchor {
   clip_id: string;
@@ -519,11 +478,19 @@ export interface SortDecisions {
   anchors: SortAnchor[];
   overrides: SortOverride[];
   checked: Record<string, boolean>;
+  /** Whose clips each camera holds, as the user said (spec 2026-10-22). */
+  camera_shooters: SortCameraShooter[];
 }
+export type SortCameraShooter = Schema["CameraShooter"];
 
 export type SortView = Schema["SortView"];
 export type SortShooterRef = Schema["ShooterRef"];
 export type SortReference = Schema["SortReference"];
+/** GET/PUT /api/shooters/{slug}/stage-details (spec 2026-10-22). */
+export type StageDetailsView = Schema["StageDetailsView"];
+export type StageDetailsStage = Schema["StageDetailsStage"];
+export type StageDetailsRow = Schema["StageDetailsRow"];
+export type StageDetailsRequest = Schema["StageDetailsRequest"];
 
 /** An unfinished sort, offered on Footage to continue. */
 export type SortSummary = Schema["SortSummary"];
@@ -2086,7 +2053,7 @@ export function capabilityDenied(
 /** The picker's Continue card target (UX PR 8): the first open stage in
  *  shooter then stage order, or the phase the match is in. */
 export interface NextStep {
-  kind: "footage" | "audit" | "export";
+  kind: "details" | "footage" | "audit" | "export";
   shooter_slug: string | null;
   stage_number: number | null;
   stage_name: string | null;

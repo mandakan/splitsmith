@@ -60,13 +60,13 @@ function makeShooter(
     stages_total: statuses.length,
     video_count: 0,
     cameras: [],
-    stages_missing_trim: 0,
+    stages_missing_trim: 0, stages_without_time: 0,
     stage_statuses: statuses.map(([stage_number, status]) => ({ stage_number, status })),
   };
 }
 
 function makeProject(): MatchProject {
-  return { capabilities: [], competitor_division: null, identity: { accent: null, club: null, logo: null }, trim_audit_encoder: "auto",    schema_version: 1,
+  return { capabilities: [], competitor_division: null, power_factor: null, identity: { accent: null, club: null, logo: null }, trim_audit_encoder: "auto",    schema_version: 1,
     name: "bromma-2026",
     created_at: "2026-01-01T00:00:00Z",
     updated_at: "2026-01-01T00:00:00Z",
@@ -78,7 +78,7 @@ function makeProject(): MatchProject {
     shooter_token: null,
     match_date: "2026-06-27",
     stages: [
-      { start: "standard",
+      { start: "standard", shot_order: null,
         stage_number: 1,
         stage_name: "Steel Rush",
         time_seconds: 20,
@@ -89,7 +89,7 @@ function makeProject(): MatchProject {
         time_seconds_manual: false,
         status: "audited",
         stage_rounds: null,
-        scorecard: {
+        scorecard: { manual: [], derived: [],
           hit_factor: 5.15,
           stage_points: 103,
           stage_pct: 71.5,
@@ -103,7 +103,7 @@ function makeProject(): MatchProject {
         },
         figures: { exposed_reload_s: null, moving_shots: null, regions: null, reload_avg_s: null, reloads: null, draw: 1.84, avg_split: 0.52, fastest_split: 0.31, shot_count: 28, split_count: 9 },
       },
-      { start: "standard",
+      { start: "standard", shot_order: null,
         stage_number: 2,
         stage_name: "Brass Monkey",
         time_seconds: 0,
@@ -117,7 +117,7 @@ function makeProject(): MatchProject {
         scorecard: null,
         figures: null,
       },
-      { start: "standard",
+      { start: "standard", shot_order: null,
         stage_number: 3,
         stage_name: "Quiet",
         time_seconds: 0,

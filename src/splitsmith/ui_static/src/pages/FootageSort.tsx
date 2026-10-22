@@ -34,6 +34,8 @@ import {
 import {
   assignClip,
   cameraLabel,
+  cameraShooterHint,
+  setCameraShooter,
   clockText,
   importCount,
   importedText,
@@ -280,10 +282,35 @@ function Review({
           <Label>Needs you</Label>
           {s.anchorCameras.map(({ camera, clips }) => (
             <div key={camera.key} className="flex flex-col gap-2">
-              <p className="text-md text-ink-2">
-                {cameraLabel(camera)}: the clock lines up with no scorecard.
-                Open one clip and name its run; the rest of this camera follows.
-              </p>
+              <div className="flex flex-wrap items-center gap-3">
+                <p className="min-w-0 flex-1 text-md text-ink-2">
+                  {cameraLabel(camera)}:{" "}
+                  {camera.clock === "no_timestamps"
+                    ? "no recording times in its files."
+                    : "the clock lines up with no scorecard."}{" "}
+                  {camera.shooter
+                    ? `Its clips line up with the order ${shooterName(view, camera.shooter)} shot the stages, as suggestions.`
+                    : "Say whose camera it is, or open one clip and name its run."}
+                </p>
+                <Label>Whose camera</Label>
+                <select
+                  aria-label={`Whose camera: ${cameraLabel(camera)}`}
+                  className="rounded-md border border-rule-strong bg-surface-2 px-2.5 py-1.5 text-md text-ink"
+                  value={camera.shooter ?? ""}
+                  disabled={busy}
+                  onChange={(e) => onDecide(setCameraShooter(view, camera.key, e.target.value || null))}
+                >
+                  <option value="">Not set</option>
+                  {view.shooters.map((sh) => (
+                    <option key={sh.key} value={sh.key}>
+                      {sh.name}
+                    </option>
+                  ))}
+                </select>
+                {cameraShooterHint(camera) ? (
+                  <span className="text-sm text-muted">{cameraShooterHint(camera)}</span>
+                ) : null}
+              </div>
               <ClipTable clips={clips} {...rowProps} />
             </div>
           ))}
@@ -674,6 +701,7 @@ function AssignSheet({
           ) : null}
         </div>
         <p className="text-sm text-ink-2">{reasonText(view, clip)}</p>
+        <OrderLink view={view} clip={clip} />
         <div className="flex flex-col gap-2">
           <Label>Shooter</Label>
           <Segmented
@@ -809,5 +837,18 @@ function Imported({
         </Button>
       </div>
     </div>
+  );
+}
+
+/** A clip waiting for its shooter's order links to where the order is set. */
+function OrderLink({ view, clip }: { view: SortView; clip: SortClipView }) {
+  const { matchId } = useParams<{ matchId?: string }>();
+  if (clip.proposal.reason.issue !== "needs_order") return null;
+  const owner = view.cameras.find((c) => c.key === clip.proposal.camera_key)?.shooter;
+  if (!owner) return null;
+  return (
+    <Link className="text-sm text-ink underline decoration-rule-strong" to={matchHref(matchId, "stage-details", owner)}>
+      Set {shooterName(view, owner)}&apos;s order on Stage details
+    </Link>
   );
 }

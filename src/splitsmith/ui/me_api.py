@@ -253,6 +253,7 @@ def _enrich_recent_project(rp: user_config.RecentProject) -> RecentProjectDetail
             video_total = 0
             shooter_names: list[str] = []
             per_shooter: list[tuple[str, dict[int, StageStatus]]] = []
+            untimed: list[str] = []
             stage_names = {s.stage_number: s.stage_name for s in match.stages}
             for slug in match.shooters:
                 shooter_root = match_model.Match.shooter_root(path, slug)
@@ -268,6 +269,8 @@ def _enrich_recent_project(rp: user_config.RecentProject) -> RecentProjectDetail
                     continue
                 statuses = legacy.stage_statuses(audit_docs=legacy.audit_docs_from_disk(shooter_root))
                 per_shooter.append((slug, statuses))
+                if any(st.time_seconds <= 0 and not st.skipped for st in legacy.stages):
+                    untimed.append(slug)
                 for st_entry in legacy.stages:
                     stage_names.setdefault(st_entry.stage_number, st_entry.stage_name)
                 video_total += len(legacy.all_videos())
@@ -275,7 +278,9 @@ def _enrich_recent_project(rp: user_config.RecentProject) -> RecentProjectDetail
             detail.shooter_names = shooter_names
             detail.stages_audited = _server._stages_audited_across(per_shooter)
             detail.video_count = video_total
-            detail.next_step = _server._next_step_from_statuses(per_shooter, stage_names, video_total)
+            detail.next_step = _server._next_step_from_statuses(
+                per_shooter, stage_names, video_total, untimed
+            )
             metadata_path = path / match_model.MATCH_FILE
         else:
             # Path exists but is not a Match folder -- a pre-Tier-1

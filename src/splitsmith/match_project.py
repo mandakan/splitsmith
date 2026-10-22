@@ -37,7 +37,7 @@ from typing import TYPE_CHECKING, Any, Literal
 
 from pydantic import BaseModel, Field, PrivateAttr, computed_field, model_validator
 
-from . import video_match
+from . import stage_details, video_match
 from .automation import AutomationOverride
 from .config import BeepCandidate, StageData, StageRounds, VideoMatchConfig
 from .export_naming import is_match_export, stage_file_base
@@ -653,6 +653,12 @@ class StageScorecard(BaseModel):
     no_shoots: int | None = None
     procedurals: int | None = None
     dq: bool | None = None
+    #: Fields the user typed or pasted (Stage details): a scoreboard sync
+    #: keeps them and the derivation never computes over them.
+    manual: list[str] = Field(default_factory=list)
+    #: Fields ``stage_details.derive`` filled (points, hit factor): it may
+    #: recompute or clear them; anything else it leaves alone.
+    derived: list[str] = Field(default_factory=list)
 
 
 class StageEntry(BaseModel):
@@ -693,6 +699,10 @@ class StageEntry(BaseModel):
     # share viewers (no live scoreboard access) still see scores. ``None`` for
     # placeholders and pre-scorecard projects; populated by merge_stage_times.
     scorecard: StageScorecard | None = None
+    #: 1-based position in the order this shooter shot the match, typed on
+    #: Stage details; the footage sort lines clips up with it. Never set by
+    #: the scoreboard.
+    shot_order: int | None = None
 
     def primary(self) -> StageVideo | None:
         """Return the primary video, or ``None`` if no video is the primary yet."""
@@ -712,6 +722,19 @@ class StageEntry(BaseModel):
             if v.video_id == video_id:
                 return v
         return None
+
+
+def _carry_typed(new: StageEntry, old: StageEntry | None) -> None:
+    """Keep what the user typed on Stage details when a scoreboard link
+    rebuilds the stage list: the shooting order, a typed time, and the
+    scorecard's typed fields (a later ``merge_stage_times`` fills the rest)."""
+    if old is None:
+        return
+    new.shot_order = old.shot_order
+    if old.time_seconds_manual and old.time_seconds > 0:
+        new.time_seconds, new.time_seconds_manual = old.time_seconds, True
+    if old.scorecard is not None and old.scorecard.manual:
+        new.scorecard = old.scorecard.model_copy(deep=True)
 
 
 TrimBlocker = Literal["skipped", "no_beep", "no_stage_time"]
@@ -1039,6 +1062,9 @@ class MatchProject(BaseModel):
     # because we want to display the shooter id in the UI and use the
     # competitor id for HTTP calls.
     selected_competitor_id: int | None = None
+    #: The user's power factor for scoring typed hits, when the division's
+    #: name does not say (``stage_details.power_factor_for``).
+    power_factor: Literal["minor", "major"] | None = None
     # Optional match date (the day the match was shot). Used as a hint for the
     # SSI Scoreboard suggestion flow and surfaced in the UI. Auto-filled from
     # the earliest video mtime when starting source-first; overwritten by
@@ -1873,6 +1899,7 @@ class MatchProject(BaseModel):
         # re-scanning per stage.
         rounds_by_number = _stage_rounds_by_number(raw.get("stages") or [])
         start_by_number = {s.stage_number: s.start for s in self.stages}
+        old_by_number = {s.stage_number: s for s in self.stages}
         for s in primary_competitor.get("stages", []):
             stage_data = StageData.model_validate(s)
             scoreboard_numbers.add(stage_data.stage_number)
@@ -1887,6 +1914,7 @@ class MatchProject(BaseModel):
                     start=start_by_number.get(stage_data.stage_number, "standard"),
                 )
             )
+            _carry_typed(new_stages[-1], old_by_number.get(stage_data.stage_number))
         new_stages.sort(key=lambda s: s.stage_number)
         self.stages = new_stages
 
@@ -1980,6 +2008,9 @@ class MatchProject(BaseModel):
             )
             for stage in match_data.stages
         ]
+        old_by_number = {s.stage_number: s for s in self.stages}
+        for entry in new_stages:
+            _carry_typed(entry, old_by_number.get(entry.stage_number))
         new_stages.sort(key=lambda s: s.stage_number)
         self.stages = new_stages
 
@@ -2076,8 +2107,9 @@ class MatchProject(BaseModel):
                     pass
             # Persist the full scorecard (previously parsed then discarded).
             # Kept even when time/updated_at are absent so a partially-scored
-            # stage still surfaces hits in the results view.
-            stage.scorecard = StageScorecard(
+            # stage still surfaces hits in the results view. What the user
+            # typed on Stage details stays; the rest is the scoreboard's.
+            card = StageScorecard(
                 hit_factor=r.hit_factor,
                 stage_points=r.stage_points,
                 stage_pct=r.stage_pct,
@@ -2088,6 +2120,17 @@ class MatchProject(BaseModel):
                 no_shoots=r.no_shoots,
                 procedurals=r.procedurals,
                 dq=r.dq,
+            )
+            old = stage.scorecard
+            if old is not None and old.manual:
+                kept = [f for f in old.manual if getattr(old, f) is not None]
+                for field in kept:
+                    setattr(card, field, getattr(old, field))
+                card.manual = kept
+            stage.scorecard = stage_details.derive(
+                card,
+                stage.time_seconds,
+                stage_details.power_factor_for(self.competitor_division, self.power_factor),
             )
             if time_set and scorecard_set:
                 stage.placeholder = False

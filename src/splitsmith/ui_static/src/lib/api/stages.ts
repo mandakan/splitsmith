@@ -5,6 +5,8 @@ import { type Pending, whenReady, type WhenReadyOptions } from "@/lib/pending";
 import { AUTHOR_KEY_HEADER, failedJobError, request, scopeRequestPath } from "./client";
 import type {
   BeepSnapResult,
+  StageDetailsRequest,
+  StageDetailsView,
   BeepSnippetPeaks,
   BulkCameraSetRequest,
   CameraMount,
@@ -128,6 +130,15 @@ export const stagesApi = {
    *  scoreboard data, where ``time_seconds`` would otherwise stay 0 and
    *  block the trim / shot-detect gates. Pass ``null`` to clear back to
    *  placeholder. Does NOT chain a trim -- caller clicks Trim explicitly. */
+  getStageDetails: (slug: string) =>
+    request<StageDetailsView>(`/api/shooters/${encodeURIComponent(slug)}/stage-details`),
+
+  putStageDetails: (slug: string, body: StageDetailsRequest) =>
+    request<StageDetailsView>(`/api/shooters/${encodeURIComponent(slug)}/stage-details`, {
+      method: "PUT",
+      json: body,
+    }),
+
   setStageTime: (
     slug: string,
     stageNumber: number,

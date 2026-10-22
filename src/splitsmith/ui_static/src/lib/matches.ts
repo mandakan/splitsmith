@@ -69,6 +69,7 @@ function pad2(n: number): string {
 
 /** The card's "Next:" line, e.g. "Audit stage 05 B5 Rear". */
 export function continueLabel(step: NextStep): string {
+  if (step.kind === "details") return "Fill in stage details";
   if (step.kind === "footage") return "Add footage";
   if (step.kind === "export") return "Export";
   const ordinal = step.stage_number != null ? ` stage ${pad2(step.stage_number)}` : "";
@@ -78,6 +79,7 @@ export function continueLabel(step: NextStep): string {
 
 /** The card's button verb, shorter than the line: "Audit stage 05". */
 export function continueVerb(step: NextStep): string {
+  if (step.kind === "details") return "Stage details";
   if (step.kind === "footage") return "Add footage";
   if (step.kind === "export") return "Export";
   return step.stage_number != null ? `Audit stage ${pad2(step.stage_number)}` : "Audit";
@@ -88,6 +90,8 @@ export function continueHref(m: RecentProjectDetail): string {
   const base = `/match/${m.match_id}`;
   const step = m.next_step;
   if (!step) return `${base}/`;
+  if (step.kind === "details")
+    return step.shooter_slug ? `${base}/stage-details/${step.shooter_slug}` : `${base}/stage-details`;
   if (step.kind === "footage") return `${base}/ingest`;
   if (step.kind === "export") return step.shooter_slug ? `${base}/export/${step.shooter_slug}` : `${base}/export`;
   if (step.shooter_slug && step.stage_number != null) {

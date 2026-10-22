@@ -31,11 +31,12 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 from starlette.concurrency import run_in_threadpool
 
-from .. import match_model, thumbnail
+from .. import match_model, stage_details, thumbnail
 from ..config import Config, FootageSortConfig
 from ..fingerprint import clip_fingerprint
 from ..footage_sort import (
     Anchor,
+    CameraShooter,
     ClipProposal,
     Override,
     ShooterScorecards,
@@ -110,6 +111,8 @@ class ScanRecord(BaseModel):
     skipped_files: int = 0
     anchors: list[Anchor] = Field(default_factory=list)
     overrides: list[Override] = Field(default_factory=list)
+    # Whose clips a camera holds, as the user said (spec 2026-10-22).
+    camera_shooters: list[CameraShooter] = Field(default_factory=list)
     # The user's check marks; a clip absent here is checked when the engine
     # is confident (``high``) and the clip is not imported yet.
     checked: dict[str, bool] = Field(default_factory=dict)
@@ -185,6 +188,7 @@ class SortView(BaseModel):
     # The stored decisions, so the page edits them rather than rebuilding.
     anchors: list[Anchor]
     overrides: list[Override]
+    camera_shooters: list[CameraShooter]
     user_checked: dict[str, bool]
 
 
@@ -214,6 +218,8 @@ class DecisionsRequest(BaseModel):
     anchors: list[Anchor] = Field(default_factory=list)
     overrides: list[Override] = Field(default_factory=list)
     checked: dict[str, bool] = Field(default_factory=dict)
+    #: None keeps the stored choices; a list replaces them.
+    camera_shooters: list[CameraShooter] | None = None
 
 
 class ImportRequest(BaseModel):
@@ -277,6 +283,20 @@ def _save(state: Any, record: ScanRecord) -> None:
     atomic_write_json(_record_path(state, record.scan_id), record.model_dump(mode="json"))
 
 
+def _shot_order(project: Any) -> list[int]:
+    """The order the shooter shot the stages: typed on Stage details, else
+    the order their scorecards were entered in."""
+    typed = sorted((s for s in project.stages if s.shot_order is not None), key=lambda s: s.shot_order)
+    return [s.stage_number for s in typed] or stage_details.scorecard_order(project)
+
+
+def _modified(path: Path) -> datetime | None:
+    try:
+        return datetime.fromtimestamp(path.stat().st_mtime, UTC)
+    except OSError:
+        return None
+
+
 def _shooters(state: Any) -> tuple[list[ShooterScorecards], list[ShooterRef]]:
     """Every shooter of the match with the scorecards their project holds."""
     cards: list[ShooterScorecards] = []
@@ -293,6 +313,9 @@ def _shooters(state: Any) -> tuple[list[ShooterScorecards], list[ShooterRef]]:
                     for s in project.stages
                     if s.scorecard_updated_at is not None
                 },
+                order=_shot_order(project),
+                covered=[s.stage_number for s in project.stages if s.videos],
+                stages=[s.stage_number for s in project.stages],
             )
         )
         refs.append(
@@ -382,6 +405,8 @@ def _view(state: Any, record: ScanRecord) -> SortView:
         cards,
         anchors=record.anchors,
         overrides=record.overrides,
+        camera_shooters=record.camera_shooters,
+        root_folder=Path(record.source_dir).name,
         config=config,
     )
     by_id = {p.clip_id: p for p in proposal.clips}
@@ -449,6 +474,7 @@ def _view(state: Any, record: ScanRecord) -> SortView:
         frames_pending=frames_pending,
         anchors=record.anchors,
         overrides=record.overrides,
+        camera_shooters=record.camera_shooters,
         user_checked=record.checked,
     )
 
@@ -633,6 +659,7 @@ def keep_this_shooters(
                 duration=meta.get("duration"),
                 make=meta.get("make"),
                 model=meta.get("model"),
+                modified=_modified(source),
             )
         )
     proposal = propose(clips, cards, config=_config())
@@ -677,6 +704,7 @@ def run_footage_sort_scan(handle: Any, *, state: Any, scan_id: str) -> None:
                 duration=meta.get("duration"),
                 make=meta.get("make"),
                 model=meta.get("model"),
+                modified=_modified(path),
             )
             has_thumb = False
             try:
@@ -916,6 +944,8 @@ def put_decisions(scan_id: str, req: DecisionsRequest, request: Request) -> Sort
     if unknown:
         raise HTTPException(status_code=400, detail=f"unknown clips: {unknown[:3]}")
     record.anchors, record.overrides = req.anchors, req.overrides
+    if req.camera_shooters is not None:
+        record.camera_shooters = req.camera_shooters
     record.checked = {k: v for k, v in req.checked.items() if k in known}
     _save(state, record)
     return _view(state, record)

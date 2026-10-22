@@ -40,6 +40,7 @@ import { queueItemHref, queueOrder, reviewEntryText } from "@/lib/beepQueue";
 import { isJobActive } from "@/lib/jobs";
 import { HighlightReelCard } from "@/components/overview/HighlightReelCard";
 import { useMatchHref } from "@/lib/matchHref";
+import { detailsNotice as buildDetailsNotice } from "@/lib/stageDetails";
 import {
   buildOverviewRows,
   formatClock,
@@ -75,6 +76,7 @@ export function Home() {
   const { mode: deploymentMode } = useDeploymentMode();
   const isMobile = useIsMobile();
   const editDenied = capabilityDenied(ctx?.capabilities, "edit");
+  const detailsNotice = useMemo(() => buildDetailsNotice(shooters), [shooters]);
   // A desktop-synced match: the phone's requests to the desktop (#1100).
   const desktopMirror = ctx?.origin === "desktop" && !capabilityDenied(ctx?.capabilities, "review");
   const desktop = useDesktopCommands(desktopMirror);
@@ -304,6 +306,23 @@ export function Home() {
         <p role="alert" className="mb-3 text-sm text-led-text">
           {triageError}
         </p>
+      ) : null}
+
+      {detailsNotice && !editDenied ? (
+        <div className="mb-4 flex flex-wrap items-start gap-3 rounded-[10px] border border-rule bg-surface px-4 py-3">
+          <div className="min-w-0 flex-1">
+            <p className="text-md font-medium text-ink">{detailsNotice.title}</p>
+            <p className="mt-1 text-sm text-ink-2">
+              Add each stage&apos;s time and the order the stages were shot. The order lets Add footage place
+              clips when camera clocks are off, the time is needed to trim, and scores appear on the export cards.
+            </p>
+          </div>
+          <Button asChild>
+            <Link to={href("stage-details", detailsNotice.shooters[0].slug)}>
+              Fill in for {detailsNotice.shooters[0].name}
+            </Link>
+          </Button>
+        </div>
       ) : null}
 
       {deploymentMode === "local" ? <SyncCard jobs={jobs} matchId={matchId} /> : null}

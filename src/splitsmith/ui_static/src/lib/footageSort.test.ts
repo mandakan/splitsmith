@@ -9,6 +9,7 @@ import {
   importCount,
   importedText,
   reasonText,
+  setCameraShooter,
   neighbour,
   resetClip,
   reviewOrder,
@@ -37,7 +38,7 @@ const PHONE: SortCamera = {
     "from-martin/IMG_3.MOV",
   ],
   clock: "trusted",
-  offset_seconds: 0,
+  offset_seconds: 0, shooter: null, shooter_source: null,
 };
 const HEAD: SortCamera = {
   key: "head|||VID_datetime",
@@ -46,7 +47,7 @@ const HEAD: SortCamera = {
   scheme: "VID_datetime",
   clip_ids: ["head/VID_1.mp4", "head/VID_2.mp4"],
   clock: "needs_anchor",
-  offset_seconds: 0,
+  offset_seconds: 0, shooter: null, shooter_source: null,
 };
 
 function clip(
@@ -87,7 +88,7 @@ function clip(
         issue: null,
         rival: null,
         rival_stage: null,
-        run_size: 1,
+        run_size: 1, order_rank: null, order_position: null, order_evidence: null, stage_from_name: false,
       },
       ...proposal,
     },
@@ -181,6 +182,7 @@ function view(): SortView {
     anchors: [],
     overrides: [],
     user_checked: {},
+    camera_shooters: [],
   };
 }
 
@@ -314,6 +316,42 @@ describe("wording", () => {
     expect(reasonText(v, tied)).toBe(
       "Mathias Axell Stage 01 and Anton Johansson Stage 01 were scored seconds apart",
     );
+  });
+
+  it("words a clip placed by shooting order, by its file name, or waiting for an order", () => {
+    const v = view();
+    const base = v.clips[0].proposal.reason;
+    const byOrder = clip("head/IMG_0008.MOV", HEAD, {
+      shooter: "anton",
+      stage: 5,
+      confidence: "needs_you",
+      reason: { ...base, order_rank: 8, order_position: 2, order_evidence: "name_number" },
+    });
+    expect(reasonText(v, byOrder)).toBe(
+      "8th clip from this camera by file number, and stage 05 is the 2nd stage Anton Johansson shot. A suggestion: the clock does not say.",
+    );
+    const byName = clip("head/anton_stage_3.MOV", HEAD, {
+      shooter: "anton",
+      stage: 3,
+      confidence: "medium",
+      reason: { ...base, stage_from_name: true },
+    });
+    expect(reasonText(v, byName)).toBe("Stage number in the file name");
+    const owned = { ...v, cameras: v.cameras.map((c) => (c.key === HEAD.key ? { ...c, shooter: "anton" } : c)) };
+    const waiting = clip("head/IMG_0009.MOV", HEAD, {
+      confidence: "needs_you",
+      reason: { ...base, issue: "needs_order" },
+    });
+    expect(reasonText(owned, waiting)).toBe("Set the order Anton Johansson shot the stages to place this clip");
+  });
+
+  it("sets and clears whose camera, keeping the other decisions", () => {
+    const v = { ...view(), user_checked: { x: true } };
+    const set = setCameraShooter(v, HEAD.key, "anton");
+    expect(set.camera_shooters).toEqual([{ camera_key: HEAD.key, shooter: "anton" }]);
+    expect(set.checked).toEqual({ x: true });
+    const cleared = setCameraShooter({ ...v, camera_shooters: set.camera_shooters }, HEAD.key, null);
+    expect(cleared.camera_shooters).toEqual([]);
   });
 
   it("names a camera's clock only when it is not trusted", () => {

@@ -31,6 +31,8 @@ interface StageSpec {
 
 function scorecard(over: Partial<StageScorecard> = {}): StageScorecard {
   return {
+    manual: [],
+    derived: [],
     hit_factor: 2.12,
     stage_points: 103,
     stage_pct: 71.5,
@@ -50,7 +52,7 @@ function figures(over: Partial<StageFigures> = {}): StageFigures {
 }
 
 function stage(spec: StageSpec): StageEntry {
-  return { start: "standard",
+  return { start: "standard", shot_order: null,
     stage_number: spec.n,
     stage_name: spec.name,
     time_seconds: spec.time ?? 0,
@@ -111,7 +113,7 @@ function shooter(slug: string, name: string): ShooterListEntry {
     stages_total: 0,
     video_count: 0,
     cameras: [],
-    stages_missing_trim: 0,
+    stages_missing_trim: 0, stages_without_time: 0,
     stage_statuses: [],
   };
 }

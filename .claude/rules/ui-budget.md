@@ -68,6 +68,13 @@ Triage and Jobs have no pages (`/triage`, `/jobs` redirect to Overview).
   `buildFootageRows`. A per-video control goes on `ClipSheet`, a per-stage
   action on `CoverageMatrix`'s row menu, shooter management on `ShootersPanel`
   / `AddShooterSheet`.
+- **Stage details** (`pages/StageDetails.tsx`, `lib/stageDetails.ts`,
+  `ui/stage_details_api.py`, `stage_details.py`): a shooter's stage times,
+  scores and shooting order, typed or pasted, saved as one PUT. The
+  scoring rules exist twice, the page's live preview and the server's
+  save (`stage_details.derive`); both test files pin the same numbers, so
+  a rule change edits both. Overview's notice reads
+  `ShooterListEntry.stages_without_time`.
 - **Coach** (`pages/Coach.tsx`, `components/coach/*`, `lib/timeBudget.ts`): the
   budget (`timeBudget` / `matchBudget`) sums each shot's split into its stored interval class; segments equal
   the stage time to 1 ms (pinned by fixture). Budget hues are the chip ticks
@@ -104,5 +111,5 @@ Triage and Jobs have no pages (`/triage`, `/jobs` redirect to Overview).
 `components/MarkerLayer.tsx`, `components/VideoPanel.tsx`,
 `components/audit/MultiCamColumn.tsx`, `CamGridModal.tsx`, `CamSyncPill.tsx`,
 `AnomalyPins.tsx`, `components/FolderPicker.tsx`, `HostedUploadModal.tsx`,
-`RelinkDialog.tsx`, `UploadDock.tsx`, `StageTimeSection.tsx`,
+`RelinkDialog.tsx`, `UploadDock.tsx`,
 `components/scoreboard/ConnectMatchDialog.tsx`.

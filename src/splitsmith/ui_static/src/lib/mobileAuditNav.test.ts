@@ -14,7 +14,7 @@ const shooter = (slug: string, name: string, stages: number[], audited = 0): Sho
     stages_total: stages.length,
     video_count: stages.length,
     cameras: [],
-    stages_missing_trim: 0,
+    stages_missing_trim: 0, stages_without_time: 0,
     stage_statuses: stages.map((n) => ({ stage_number: n, status: "ready" as const })),
   }) as ShooterListEntry;
 

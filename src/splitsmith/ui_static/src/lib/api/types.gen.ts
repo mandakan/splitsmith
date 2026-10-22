@@ -4840,6 +4840,24 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/shooters/{slug}/stage-details": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Stage Details */
+        get: operations["get_stage_details_api_shooters__slug__stage_details_get"];
+        /** Put Stage Details */
+        put: operations["put_stage_details_api_shooters__slug__stage_details_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/shooters/{slug}/stages/camera/bulk-set": {
         parameters: {
             query?: never;
@@ -7483,6 +7501,16 @@ export interface components {
             /** Mount */
             mount: string | null;
         };
+        /**
+         * CameraShooter
+         * @description The user's word on whose clips a camera holds, no stage committed.
+         */
+        CameraShooter: {
+            /** Camera Key */
+            camera_key: string;
+            /** Shooter */
+            shooter: string;
+        };
         /** CheckRequest */
         CheckRequest: {
             draft?: components["schemas"]["StoredLookBody"] | null;
@@ -7569,7 +7597,7 @@ export interface components {
          */
         ClipReason: {
             /** Issue */
-            issue: ("ambiguous" | "conflict" | "no_candidate" | "no_timestamp" | "needs_anchor" | "outside_match") | null;
+            issue: ("ambiguous" | "conflict" | "no_candidate" | "no_timestamp" | "needs_anchor" | "outside_match" | "needs_order") | null;
             /** Lead Seconds */
             lead_seconds: number | null;
             /**
@@ -7577,6 +7605,12 @@ export interface components {
              * @default 0
              */
             offset_seconds: number;
+            /** Order Evidence */
+            order_evidence: ("clock" | "name_time" | "name_number" | "recorded" | "modified") | null;
+            /** Order Position */
+            order_position: number | null;
+            /** Order Rank */
+            order_rank: number | null;
             /** Rival */
             rival: string | null;
             /** Rival Stage */
@@ -7588,6 +7622,11 @@ export interface components {
             run_size: number;
             /** Scorecard At */
             scorecard_at: string | null;
+            /**
+             * Stage From Name
+             * @default false
+             */
+            stage_from_name: boolean;
         };
         /** ClipView */
         ClipView: {
@@ -8137,6 +8176,8 @@ export interface components {
         DecisionsRequest: {
             /** Anchors */
             anchors?: components["schemas"]["Anchor"][];
+            /** Camera Shooters */
+            camera_shooters?: components["schemas"]["CameraShooter"][] | null;
             /** Checked */
             checked?: {
                 [key: string]: boolean;
@@ -10075,6 +10116,8 @@ export interface components {
              * @enum {string}
              */
             origin: "hosted" | "desktop" | "local";
+            /** Power Factor */
+            power_factor: ("minor" | "major") | null;
             /** Probes Dir */
             probes_dir: string | null;
             /** Raw Dir */
@@ -10746,6 +10789,11 @@ export interface components {
             stages_missing_trim: number;
             /** Stages Total */
             stages_total: number;
+            /**
+             * Stages Without Time
+             * @default 0
+             */
+            stages_without_time: number;
             /** Video Count */
             video_count: number;
         };
@@ -10874,6 +10922,10 @@ export interface components {
             offset_seconds: number;
             /** Scheme */
             scheme: string;
+            /** Shooter */
+            shooter: string | null;
+            /** Shooter Source */
+            shooter_source: ("user" | "clip" | "name" | "folder") | null;
         };
         /**
          * SortReference
@@ -10939,6 +10991,8 @@ export interface components {
         SortView: {
             /** Anchors */
             anchors: components["schemas"]["Anchor"][];
+            /** Camera Shooters */
+            camera_shooters: components["schemas"]["CameraShooter"][];
             /** Cameras */
             cameras: components["schemas"]["SortCamera"][];
             /** Clips */
@@ -10982,6 +11036,98 @@ export interface components {
             flagged: boolean;
             /** Note */
             note?: string | null;
+        };
+        /**
+         * StageDetailsOther
+         * @description Another shooter of the match whose order can be copied.
+         */
+        StageDetailsOther: {
+            /** From Scorecards */
+            from_scorecards: boolean;
+            /** Name */
+            name: string;
+            /** Order */
+            order: number[];
+            /** Slug */
+            slug: string;
+        };
+        /** StageDetailsRequest */
+        StageDetailsRequest: {
+            /** Power Factor */
+            power_factor?: ("minor" | "major") | null;
+            /** Rows */
+            rows: components["schemas"]["StageDetailsRow"][];
+        };
+        /** StageDetailsRow */
+        StageDetailsRow: {
+            /** Alphas */
+            alphas?: number | null;
+            /** Charlies */
+            charlies?: number | null;
+            /** Deltas */
+            deltas?: number | null;
+            /** Dq */
+            dq?: boolean | null;
+            /** Hit Factor */
+            hit_factor?: number | null;
+            /** Manual */
+            manual?: string[];
+            /** Misses */
+            misses?: number | null;
+            /** No Shoots */
+            no_shoots?: number | null;
+            /** Procedurals */
+            procedurals?: number | null;
+            /** Shot Order */
+            shot_order?: number | null;
+            /** Stage Number */
+            stage_number: number;
+            /** Stage Pct */
+            stage_pct?: number | null;
+            /** Stage Points */
+            stage_points?: number | null;
+            /** Time Seconds */
+            time_seconds?: number | null;
+        };
+        /** StageDetailsStage */
+        StageDetailsStage: {
+            scorecard: components["schemas"]["StageScorecard"] | null;
+            /** Shot Order */
+            shot_order: number | null;
+            /** Skipped */
+            skipped: boolean;
+            /** Stage Name */
+            stage_name: string;
+            /** Stage Number */
+            stage_number: number;
+            /** Time Manual */
+            time_manual: boolean;
+            /** Time Seconds */
+            time_seconds: number | null;
+        };
+        /** StageDetailsView */
+        StageDetailsView: {
+            /** Division */
+            division: string | null;
+            /** Name */
+            name: string;
+            /** Others */
+            others: components["schemas"]["StageDetailsOther"][];
+            /**
+             * Power Factor
+             * @enum {string}
+             */
+            power_factor: "minor" | "major";
+            /** Power Factor Set */
+            power_factor_set: boolean;
+            /** Scorecard Order */
+            scorecard_order: number[];
+            /** Slug */
+            slug: string;
+            /** Ssi Url */
+            ssi_url: string | null;
+            /** Stages */
+            stages: components["schemas"]["StageDetailsStage"][];
         };
         /**
          * StageEditRequest
@@ -11031,6 +11177,8 @@ export interface components {
             scorecard: components["schemas"]["StageScorecard"] | null;
             /** Scorecard Updated At */
             scorecard_updated_at: string | null;
+            /** Shot Order */
+            shot_order: number | null;
             /**
              * Skipped
              * @default false
@@ -11192,10 +11340,14 @@ export interface components {
             charlies: number | null;
             /** Deltas */
             deltas: number | null;
+            /** Derived */
+            derived: string[];
             /** Dq */
             dq: boolean | null;
             /** Hit Factor */
             hit_factor: number | null;
+            /** Manual */
+            manual: string[];
             /** Misses */
             misses: number | null;
             /** No Shoots */
@@ -18893,6 +19045,72 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_stage_details_api_shooters__slug__stage_details_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StageDetailsView"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    put_stage_details_api_shooters__slug__stage_details_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["StageDetailsRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StageDetailsView"];
                 };
             };
             /** @description Validation Error */

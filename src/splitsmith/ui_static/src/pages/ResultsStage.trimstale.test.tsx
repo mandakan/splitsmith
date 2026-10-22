@@ -95,7 +95,7 @@ function makeVideo(overrides: Partial<StageVideo> = {}): StageVideo {
 }
 
 function makeStageEntry(videos: StageVideo[]): StageEntry {
-  return { figures: null, start: "standard", status: null,
+  return { figures: null, start: "standard", shot_order: null, status: null,
     stage_number: 3,
     stage_name: "Steel Rush",
     time_seconds: 20,
@@ -110,7 +110,7 @@ function makeStageEntry(videos: StageVideo[]): StageEntry {
 }
 
 function makeProject(videos: StageVideo[]): MatchProject {
-  return { capabilities: [], competitor_division: null, identity: { accent: null, club: null, logo: null }, trim_audit_encoder: "auto",
+  return { capabilities: [], competitor_division: null, power_factor: null, identity: { accent: null, club: null, logo: null }, trim_audit_encoder: "auto",
     schema_version: 1,
     name: "bromma-2026",
     created_at: "2026-01-01T00:00:00Z",
@@ -151,7 +151,7 @@ function makeShooter(slug: string, name: string): ShooterListEntry {
     stages_total: 1,
     video_count: 1,
     cameras: [],
-    stages_missing_trim: 0,
+    stages_missing_trim: 0, stages_without_time: 0,
     stage_statuses: [{ stage_number: 3, status: "audited" }],
   };
 }

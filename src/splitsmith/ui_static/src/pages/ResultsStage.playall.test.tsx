@@ -96,7 +96,7 @@ function makeShooter(slug: string, statuses: [number, StageStatus][]): ShooterLi
     stages_total: statuses.length,
     video_count: 0,
     cameras: [],
-    stages_missing_trim: 0,
+    stages_missing_trim: 0, stages_without_time: 0,
     stage_statuses: statuses.map(([stage_number, status]) => ({ stage_number, status })),
   };
 }

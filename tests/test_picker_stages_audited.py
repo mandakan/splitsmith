@@ -50,3 +50,15 @@ def test_the_exported_state_reads_the_walk_not_the_count() -> None:
     assert step is not None and step.kind == "footage"
     assert server._nothing_left_to_do(step) is False
     assert server._nothing_left_to_do(server._next_step_from_statuses([("a", done)], names, 2)) is True
+
+
+def test_next_step_names_missing_stage_details() -> None:
+    names = {1: "One", 2: "Two"}
+    todo = {1: S.todo, 2: S.todo}
+    step = server._next_step_from_statuses([("a", todo), ("b", todo)], names, 0, ["b"])
+    assert step is not None and (step.kind, step.shooter_slug) == ("details", "b")
+    assert server._next_step_from_statuses([("a", todo)], names, 0).kind == "footage"  # type: ignore[union-attr]
+    partial = server._next_step_from_statuses([("a", {1: S.audited, 2: S.partial})], names, 1)
+    assert partial is not None and (partial.kind, partial.stage_number) == ("details", 2)
+    ready = server._next_step_from_statuses([("a", {1: S.partial, 2: S.ready})], names, 2, ["a"])
+    assert ready is not None and ready.kind == "audit"
