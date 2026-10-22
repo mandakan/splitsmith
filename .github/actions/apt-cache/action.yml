@@ -1,0 +1,40 @@
+name: apt download cache
+description: >-
+  Keep the .debs apt-get downloads in the Actions cache. From 2026-10-22
+  azure.archive.ubuntu.com, the runners' mirror, intermittently served
+  package files at tens of kB/s: the ffmpeg install went from ~20 s to as
+  much as 25 min on one shard of most runs, and playwright's --with-deps
+  fonts to 5+ min. On a hit apt installs the same versions with nothing to
+  fetch; a package the index has moved past is downloaded and saved with
+  next week's key. Run this before any apt-get install in the job.
+
+runs:
+  using: composite
+  steps:
+    - id: week
+      shell: bash
+      run: echo "week=$(date -u +%G-%V)" >> "$GITHUB_OUTPUT"
+
+    - uses: actions/cache@v4
+      with:
+        # Only the .debs: apt's partial/ dir belongs to _apt and the
+        # cache's tar (running as the runner user) cannot read it.
+        path: ~/apt-archives/*.deb
+        key: apt-debs-${{ runner.os }}-${{ github.job }}-${{ steps.week.outputs.week }}
+        restore-keys: |
+          apt-debs-${{ runner.os }}-${{ github.job }}-
+          apt-debs-${{ runner.os }}-
+
+    - shell: bash
+      run: |
+        # apt fetches as _apt into partial/, then moves the file up as root.
+        mkdir -p ~/apt-archives/partial
+        sudo chown _apt ~/apt-archives/partial
+        # apt-get keeps downloads by default; plain apt (and some runner
+        # images' configs) deletes them, so say it explicitly.
+        printf '%s\n' \
+          "Dir::Cache::Archives \"$HOME/apt-archives\";" \
+          'APT::Keep-Downloaded-Packages "true";' \
+          'Binary::apt::APT::Keep-Downloaded-Packages "true";' \
+          | sudo tee /etc/apt/apt.conf.d/90-ci-download-cache >/dev/null
+        echo "restored $(ls ~/apt-archives/*.deb 2>/dev/null | wc -l) cached .debs"
