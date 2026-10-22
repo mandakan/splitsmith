@@ -1359,8 +1359,9 @@ export interface paths {
         /**
          * Refresh Look Templates
          * @description ``looks refresh``: drop the Look's unedited copies of shipped
-         *     templates, old or current, so those cards draw the shipped ones. An
-         *     edited file is never touched. Answers the files removed.
+         *     templates, old or current, so those cards draw the shipped ones (an old
+         *     copy of a Broadcast template is overwritten with the current one). An
+         *     edited file is never touched. Answers the files removed or updated.
          */
         post: operations["refresh_look_templates_api_looks__name__refresh_post"];
         delete?: never;

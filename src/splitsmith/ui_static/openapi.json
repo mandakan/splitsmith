@@ -14117,7 +14117,7 @@
   },
   "/api/looks/{name}/refresh": {
    "post": {
-    "description": "``looks refresh``: drop the Look's unedited copies of shipped\ntemplates, old or current, so those cards draw the shipped ones. An\nedited file is never touched. Answers the files removed.",
+    "description": "``looks refresh``: drop the Look's unedited copies of shipped\ntemplates, old or current, so those cards draw the shipped ones (an old\ncopy of a Broadcast template is overwritten with the current one). An\nedited file is never touched. Answers the files removed or updated.",
     "operationId": "refresh_look_templates_api_looks__name__refresh_post",
     "parameters": [
      {

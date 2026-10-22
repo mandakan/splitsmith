@@ -457,8 +457,9 @@ def outdated_templates(name: str) -> OutdatedTemplates:
 @router.post("/api/looks/{name}/refresh", response_model=OutdatedTemplates)
 def refresh_look_templates(name: str) -> OutdatedTemplates:
     """``looks refresh``: drop the Look's unedited copies of shipped
-    templates, old or current, so those cards draw the shipped ones. An
-    edited file is never touched. Answers the files removed."""
+    templates, old or current, so those cards draw the shipped ones (an old
+    copy of a Broadcast template is overwritten with the current one). An
+    edited file is never touched. Answers the files removed or updated."""
     _own_look(name)
     try:
         return OutdatedTemplates(files=list(refresh_templates(name)))

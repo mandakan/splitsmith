@@ -166,15 +166,65 @@ def test_the_broadcast_starter_fills_every_slot(user_dir: Path) -> None:
 
 
 def test_a_broadcast_starter_copy_is_the_looks_own_not_an_outdated_copy(user_dir: Path) -> None:
-    """The starter's files ship as the Broadcast Look's, so the template
-    history knows them; they are still not copies of the default Look's
-    templates: refresh would fall back to the default card, not the same
-    one, and must leave them."""
+    """The starter's files ship as the Broadcast Look's and are current, so
+    they are not outdated; refresh must leave them: dropping them would fall
+    back to the default card, not the same one."""
     look_tools.new_look("mine", starter="broadcast")
     look = looks.load_look("mine")
     assert look_tools.outdated_copies(look) == ()
     assert look_tools.refresh_templates("mine") == ()
     assert set(looks.load_look("mine").manifest.slots) >= {"title_page", "overlay", "thumbnail", "transition"}
+
+
+def _old_broadcast_sting(root: Path, monkeypatch: pytest.MonkeyPatch) -> bytes:
+    """Make ``root``'s broadcast-sting.html an unedited copy of an older
+    shipped version of it."""
+    import hashlib
+
+    old = b"<!doctype html><p>broadcast-sting.html as it shipped once</p>"
+    (root / "broadcast-sting.html").write_bytes(old)
+    digest = hashlib.sha256(old).hexdigest()
+    history = {**look_tools.shipped_template_history(), digest: "broadcast-sting.html"}
+    monkeypatch.setattr(look_tools, "shipped_template_history", lambda: history)
+    return old
+
+
+def test_an_old_copy_of_a_broadcast_template_is_outdated(
+    user_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Broadcast's push was rebuilt to move the footage; a copy made before
+    that kept the old push and was never told."""
+    root = look_tools.new_look("mine", starter="broadcast")
+    _old_broadcast_sting(root, monkeypatch)
+    assert look_tools.outdated_copies(looks.load_look("mine")) == ("broadcast-sting.html",)
+
+
+def test_refresh_brings_an_old_broadcast_copy_up_to_date_in_place(
+    user_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Dropping it from the slots would draw the default Look's push, a
+    different template, so refresh overwrites it with Broadcast's current
+    one and keeps the slot."""
+    root = look_tools.new_look("mine", starter="broadcast")
+    _old_broadcast_sting(root, monkeypatch)
+    slots = looks.load_look("mine").manifest.slots
+
+    assert look_tools.refresh_templates("mine") == ("broadcast-sting.html",)
+
+    shipped = looks.shipped_looks_dir() / "broadcast" / "broadcast-sting.html"
+    assert (root / "broadcast-sting.html").read_bytes() == shipped.read_bytes()
+    look = looks.load_look("mine")
+    assert look.manifest.slots == slots
+    assert looks.sting_template_for(look, "push") == root / "broadcast-sting.html"
+    assert look_tools.outdated_copies(look) == ()
+
+
+def test_refresh_leaves_an_edited_broadcast_template(user_dir: Path) -> None:
+    root = look_tools.new_look("mine", starter="broadcast")
+    (root / "broadcast-sting.html").write_text("<!doctype html><p>my own push</p>", encoding="utf-8")
+    assert look_tools.outdated_copies(looks.load_look("mine")) == ()
+    assert look_tools.refresh_templates("mine") == ()
+    assert (root / "broadcast-sting.html").read_text(encoding="utf-8") == "<!doctype html><p>my own push</p>"
 
 
 def test_the_shipped_broadcast_look_is_the_broadcast_starter() -> None:

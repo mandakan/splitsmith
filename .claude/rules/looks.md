@@ -164,7 +164,11 @@ fonts, brand, one HTML template per card slot) plus its templates.
   otherwise). `look_tools.outdated_copies` uses it to recognise unedited old
   copies: `looks check` warns, `LookHealth` offers "Use the current cards", and
   `looks refresh` / `POST /api/looks/{name}/refresh` (local only) drop each such
-  copy and its slot entries.
+  copy and its slot entries. A copy of a template only another shipped Look
+  draws (Broadcast's) is compared with that Look's file and overwritten in
+  place, never dropped: dropping falls back to the default Look's template, a
+  different one (`_shipped_owners`; pinned by the Broadcast tests in
+  `test_look_tools.py`).
 
 ## Fonts
 
