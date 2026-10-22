@@ -154,9 +154,13 @@ jobs:
           echo "worker=$(join deploy/cloudrun/$DEPLOY_ENV-worker.secrets)" >> "$GITHUB_OUTPUT"
 
       # The job first: serve names it in SPLITSMITH_WORKER_JOB and starts it
-      # on the next enqueue. Model load at the start of each run is why the
-      # job gets more memory than serve. No retries: a failed drain leaves
-      # its jobs queued for the next run.
+      # on the next enqueue. Sized near the home worker (an i7-8700) so a
+      # fallback run is not much slower: the ensemble's ONNX inference scales
+      # with cores, and model load at the start of each run plus long stages'
+      # audio need the memory. Billed per second of a run only; at today's
+      # volume (a few dozen short jobs a month) this stays inside Cloud Run's
+      # free tier. No retries: a failed drain leaves its jobs queued for the
+      # next run.
       - name: Deploy the worker job
         run: |
           gcloud run jobs deploy "splitsmith-worker-$DEPLOY_ENV" \
@@ -164,7 +168,7 @@ jobs:
             --image "${{ steps.image.outputs.ref }}" \
             --args=worker,--one-shot \
             --service-account "splitsmith-worker@$GCP_PROJECT.iam.gserviceaccount.com" \
-            --cpu 2 --memory 4Gi --task-timeout 3600 --max-retries 0 \
+            --cpu 4 --memory 8Gi --task-timeout 3600 --max-retries 0 \
             --env-vars-file "deploy/cloudrun/$DEPLOY_ENV-worker.env.yaml" \
             --set-secrets "${{ steps.secrets.outputs.worker }}"
 
