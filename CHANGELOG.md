@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.87.2](https://github.com/mandakan/splitsmith/compare/v0.87.1...v0.87.2) (2026-10-22)
+
+
+### Performance
+
+* **hosted:** ping pooled connections in one round trip, and log tracebacks ([#1658](https://github.com/mandakan/splitsmith/issues/1658)) ([9db52e3](https://github.com/mandakan/splitsmith/commit/9db52e3469e535afd4292da761d667380673119f))
+
 ## [0.87.1](https://github.com/mandakan/splitsmith/compare/v0.87.0...v0.87.1) (2026-10-22)
 
 
