@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import argparse
 import io
+import math
 import shutil
 import subprocess
 import sys
@@ -34,6 +35,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
 from splitsmith import composition  # noqa: E402
 from splitsmith.composition import XFADE_FAMILIES  # noqa: E402
+from splitsmith.look.frames import FRAMES_MOUNT, wants_frames, with_frames  # noqa: E402
+from splitsmith.look.sandbox import ORIGIN  # noqa: E402
 from splitsmith.look.sting import sting_context  # noqa: E402
 from splitsmith.looks import (  # noqa: E402
     CARD_PREVIEW_SLOTS,
@@ -59,7 +62,7 @@ from splitsmith.overlay.hud import (  # noqa: E402
     resolve_position,
 )
 from splitsmith.overlay.hud_render import hud_context  # noqa: E402
-from splitsmith.overlay.raster import ChromiumRasterizer, Rasterizer  # noqa: E402
+from splitsmith.overlay.raster import ChromiumRasterizer, Rasterizer, TemplateFrames  # noqa: E402
 from splitsmith.overlay.single import OverlayRun, run_groups  # noqa: E402
 from splitsmith.overlay.summary_cell import build_summary_still  # noqa: E402
 from splitsmith.overlay.theme import OverlayTheme, theme_for  # noqa: E402
@@ -300,7 +303,9 @@ def xfade_loop(
 
 def save_loop(path: Path, frames: Sequence[Image.Image], *, fps: int = LOOP_FPS, hold_ms: int = 500) -> None:
     """``frames`` as a looping animated WebP, the first and last frame held
-    ``hold_ms`` so the loop rests on each side of the cut."""
+    ``hold_ms`` so the loop rests on each side of the cut. Every frame is a
+    key frame (``kmax=1``): encoded as lossy differences, a thin line that
+    moves (a push's seam) left faint copies of itself on the frames after."""
     durations = [round(1000 / fps)] * len(frames)
     durations[0] = durations[-1] = hold_ms
     first, *rest = [f.convert("RGB") for f in frames]
@@ -313,6 +318,7 @@ def save_loop(path: Path, frames: Sequence[Image.Image], *, fps: int = LOOP_FPS,
         loop=0,
         quality=80,
         method=4,
+        kmax=1,
     )
 
 
@@ -328,7 +334,10 @@ def sting_loop(
 ) -> list[Image.Image]:
     """The sting ``name`` sampled frame by frame over the fade span of
     ``base_frames`` (a :func:`xfade_loop` of ``fade``), as the renderer
-    lays it over a boundary."""
+    lays it over a boundary. A frames sting (#1535) draws the whole
+    picture, so it is handed the loop's own two stages, the first and the
+    last of ``base_frames``, as its edges: the loop runs on into the push
+    and out of it without a jump."""
     template = sting_template_for(look, name)
     if template is None:
         raise RuntimeError(f"the {look.name} Look has no sting {name!r}")
@@ -343,11 +352,34 @@ def sting_loop(
         theme=theme_for(look),
         shooters=(),
     )
-    frames = rasterizer.render_template_frames(
-        template, context=context, width=WIDTH, height=HEIGHT, fps=float(fps), max_seconds=seconds
-    )
+    with tempfile.TemporaryDirectory(prefix="sting-edges-") as tmp_name:
+        frames_dir: Path | None = None
+        if wants_frames(template):
+            frames_dir = Path(tmp_name)
+            count = max(1, math.ceil(seconds * fps - 1e-9))
+            urls: dict[str, list[str]] = {}
+            for side, still in (("from", base_frames[0]), ("to", base_frames[-1])):
+                (frames_dir / "k" / side).mkdir(parents=True)
+                still.convert("RGB").save(frames_dir / "k" / side / "0000.jpg", quality=95)
+                urls[side] = [f"{ORIGIN}/{FRAMES_MOUNT}/k/{side}/0000.jpg"] * count
+            context = with_frames(
+                context, fps=float(fps), count=count, from_urls=urls["from"], to_urls=urls["to"]
+            )
+        frames = rasterizer.render_template_frames(
+            template,
+            context=context,
+            width=WIDTH,
+            height=HEIGHT,
+            fps=float(fps),
+            max_seconds=seconds,
+            frames_dir=frames_dir,
+        )
+        return _over(base_frames, frames, start=round(hold * fps))
+
+
+def _over(base_frames: Sequence[Image.Image], frames: TemplateFrames, *, start: int) -> list[Image.Image]:
+    """``frames`` (a sting's) composited over ``base_frames`` from ``start``."""
     out = [f.convert("RGBA") for f in base_frames]
-    start = round(hold * fps)
     try:
         for index, raw in enumerate(frames.frames):
             if start + index >= len(out):

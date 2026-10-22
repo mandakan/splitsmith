@@ -6,7 +6,9 @@ from pathlib import Path
 
 import pytest
 
+from splitsmith import looks
 from splitsmith.look import tools as look_tools
+from splitsmith.look.frames import wants_frames
 from splitsmith.look.template import TemplateContext, engine_block, shared_url, theme_tokens
 from splitsmith.overlay.html import single_css
 from splitsmith.overlay.layout import CellScale
@@ -141,6 +143,22 @@ def test_the_shipped_looks_pass_check_without_warnings(
     monkeypatch.setenv("SPLITSMITH_HOME", str(tmp_path))
     checked = look_tools.check_look(name, prober=raster)
     problems = [(i.subject, i.level, i.message) for i in checked.items if i.level != "ok"]
+    assert problems == [], problems
+
+
+@pytest.mark.parametrize("name", ["splitsmith", "broadcast"])
+def test_the_shipped_pushes_draw_the_whole_picture_in_check(
+    raster, name: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``looks check`` draws a frames sting over sample edges (#1535): the
+    shipped pushes draw without an error and leave nothing transparent."""
+    monkeypatch.setenv("SPLITSMITH_HOME", str(tmp_path))
+    template = looks.sting_template_for(looks.load_look(name), "push")
+    assert template is not None and wants_frames(template), "the check below only runs on a frames sting"
+    checked = look_tools.check_look(name, prober=raster)
+    push = [i for i in checked.items if i.subject.startswith("transition push ")]
+    assert push, [i.subject for i in checked.items]
+    problems = [(i.level, i.message) for i in push if i.level == "error" or "transparent" in i.message]
     assert problems == [], problems
 
 

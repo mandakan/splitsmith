@@ -36,6 +36,7 @@ class _StubRasterizer:
         self.frames_rendered = 0
         self.hud_frames_rendered = 0
         self.hud_requests: list[tuple] = []
+        self.mounted: list[list[str] | None] = []
 
     def png(self, html: str, *, width: int, height: int) -> bytes:
         self.calls.append((width, height))
@@ -58,16 +59,21 @@ class _StubRasterizer:
         return "fake"
 
     def render_template_frames(
-        self, template, *, context, width: int, height: int, fps: float, max_seconds: float
+        self, template, *, context, width: int, height: int, fps: float, max_seconds: float, frames_dir=None
     ):
         """A still unless ``motion_seconds`` is set; frames are blank and
-        counted in ``frames_rendered`` as they are pulled."""
+        counted in ``frames_rendered`` as they are pulled. A frames sting's
+        mounted files are listed in ``mounted`` while they exist."""
         import math
 
         from splitsmith.overlay.raster import TemplateFrames
 
         self.calls.append((width, height))
         self.frame_requests.append((template, context.model_dump(), width, height, fps, max_seconds))
+        mounted = None if frames_dir is None else frames_dir.rglob("*.jpg")
+        self.mounted.append(
+            None if mounted is None else sorted(str(p.relative_to(frames_dir)) for p in mounted)
+        )
         duration = self.motion_seconds
         count = 1 if duration <= 0 else max(1, math.ceil(min(duration, max_seconds) * fps - 1e-9))
         blank = bytes(width * height * 4)
@@ -225,6 +231,7 @@ def test_look_previews_write_one_file_per_variant_and_the_sample_tile(tmp_path: 
             "closing-default.png",
             "closing-end-screen.png",
             "closing-rise.png",
+            "transition-push.webp",
             "transition-wipe.webp",
             "overlay-minimal.webp",
             "overlay-pips.webp",
@@ -247,8 +254,29 @@ def test_a_sting_preview_loops_over_the_fade(tmp_path: Path) -> None:
     )
     with Image.open(tmp_path / "splitsmith" / "preview" / "transition-wipe.webp") as loop:
         assert loop.format == "WEBP" and loop.n_frames == 18
-    assert raster.frames_rendered == 12, "one second of sting at the loop's 12 fps"
+    assert raster.frames_rendered == 24, "one second of each sting (push, wipe) at the loop's 12 fps"
     assert raster.frame_requests[-1][4] == 12 and raster.frame_requests[-1][5] == 1.0
+
+
+def test_a_frames_sting_preview_draws_the_loops_own_stages(tmp_path: Path) -> None:
+    """A frames sting draws the whole picture (#1535): its preview hands it
+    the loop's two stages as its edges, mounted while it draws, one URL per
+    frame. A sting without the tag gets none, as before."""
+    mod = _load()
+    raster = _StubRasterizer(motion_seconds=1.0)
+    mod.build_look_previews(
+        tmp_path, look=load_look("splitsmith"), rasterizer=raster, ffmpeg="ffmpeg", runner=_fake_ffmpeg
+    )
+    by_name = {Path(r[0]).name: (r[1], m) for r, m in zip(raster.frame_requests, raster.mounted, strict=True)}
+    push, mounted = by_name["sting-push.html"]
+    frames = push["data"]["transition"]["frames"]
+    assert frames["count"] == 12 and frames["fps"] == 12
+    assert len(frames["from"]) == len(frames["to"]) == 12
+    assert mounted == ["k/from/0000.jpg", "k/to/0000.jpg"]
+    assert set(frames["from"]) == {"https://look.invalid/frames/k/from/0000.jpg"}
+    assert set(frames["to"]) == {"https://look.invalid/frames/k/to/0000.jpg"}
+    wipe, mounted = by_name["sting-wipe.html"]
+    assert "frames" not in wipe["data"]["transition"] and mounted is None
 
 
 def test_a_hud_preview_plays_a_sample_stage_through_the_landing(tmp_path: Path) -> None:

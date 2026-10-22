@@ -258,6 +258,23 @@ class _LazyProber:
             template, context=context, width=width, height=height, plan=plan
         )
 
+    def render_template_frames(  # type: ignore[no-untyped-def]
+        self,
+        template: Path,
+        *,
+        context,
+        width: int,
+        height: int,
+        fps: float,
+        max_seconds: float,
+        frames_dir: Path | None = None,
+    ):
+        """A frames sting drawn over ``looks check``'s sample edges (#1535)."""
+        return self._browser().render_template_frames(
+            template, context=context, width=width, height=height, fps=fps, max_seconds=max_seconds,
+            frames_dir=frames_dir,
+        )  # fmt: skip
+
 
 def _stage_frame(project_root: Path, stage: int, look_name: str):  # type: ignore[no-untyped-def]
     """The stage's first visible frame and the shooter's identity, as the

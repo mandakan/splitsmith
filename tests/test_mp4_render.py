@@ -2119,6 +2119,213 @@ def test_build_boundary_command_lays_a_sting_clip_over_the_fade(tmp_path: Path) 
     assert stung[stung.index("-t") + 1] == "1"
 
 
+def _sequence() -> composition.SequenceFormat:
+    return composition.SequenceFormat(width=1920, height=1080, frame_rate_num=30000, frame_rate_den=1001)
+
+
+#: ``_build_boundary_command`` on main (38305f48) for a padded fade, with
+#: no sting and with an overlay sting's clip: the proof that #1535 left
+#: every non-frames boundary's argv byte for byte as it was.
+_MAIN_PLAIN_BOUNDARY = (
+    "ffmpeg",
+    "-hide_banner",
+    "-y",
+    "-i",
+    "/w/t.mp4",
+    "-i",
+    "/w/h.mp4",
+    "-filter_complex",
+    (
+        "[0:v]tpad=stop_mode=clone:stop_duration=0.25[tv];"
+        "[0:a]apad=pad_dur=0.25[ta];"
+        "[1:v]tpad=start_mode=clone:start_duration=0.5[hv];"
+        "[1:a]adelay=500:all=1[ha];"
+        "[tv][hv]xfade=transition=fade:duration=1:offset=0,format=yuv420p[final];"
+        "[ta][ha]acrossfade=d=1:c1=tri:c2=tri[aout]"
+    ),
+    "-map",
+    "[final]",
+    "-map",
+    "[aout]",
+    "-t",
+    "1",
+    "-c:v",
+    "libx264",
+    "-preset",
+    "fast",
+    "-crf",
+    "20",
+    "-pix_fmt",
+    "yuv420p",
+    "-c:a",
+    "aac",
+    "-b:a",
+    "192k",
+    "-movflags",
+    "+faststart",
+    "/w/b.mp4",
+)
+_MAIN_STUNG_BOUNDARY = (
+    "ffmpeg",
+    "-hide_banner",
+    "-y",
+    "-i",
+    "/w/t.mp4",
+    "-i",
+    "/w/h.mp4",
+    "-i",
+    "/w/s.mov",
+    "-filter_complex",
+    (
+        "[0:v]tpad=stop_mode=clone:stop_duration=0.25[tv];"
+        "[0:a]apad=pad_dur=0.25[ta];"
+        "[1:v]tpad=start_mode=clone:start_duration=0.5[hv];"
+        "[1:a]adelay=500:all=1[ha];"
+        "[tv][hv]xfade=transition=fade:duration=1:offset=0[xf];"
+        "[2:v]format=rgba,fps=30000/1001,setpts=PTS-STARTPTS,tpad=stop_mode=clone:stop_duration=1,trim=0:1[motion];"
+        "[xf][motion]overlay=0:0:format=auto[stung];"
+        "[stung]format=yuv420p[final];"
+        "[ta][ha]acrossfade=d=1:c1=tri:c2=tri[aout]"
+    ),
+    "-map",
+    "[final]",
+    "-map",
+    "[aout]",
+    "-t",
+    "1",
+    "-c:v",
+    "libx264",
+    "-preset",
+    "fast",
+    "-crf",
+    "20",
+    "-pix_fmt",
+    "yuv420p",
+    "-c:a",
+    "aac",
+    "-b:a",
+    "192k",
+    "-movflags",
+    "+faststart",
+    "/w/b.mp4",
+)
+
+
+def test_boundary_argv_is_byte_identical_to_main() -> None:
+    w = Path("/w")
+    common: dict[str, Any] = {
+        "kind": "fade",
+        "seconds": 1.0,
+        "sequence": _sequence(),
+        "output_path": w / "b.mp4",
+        "tail_pad_seconds": 0.25,
+        "head_pad_seconds": 0.5,
+    }
+    plain = mp4_render._build_boundary_command(w / "t.mp4", w / "h.mp4", **common)
+    stung = mp4_render._build_boundary_command(w / "t.mp4", w / "h.mp4", sting_clip=w / "s.mov", **common)
+    assert plain == _MAIN_PLAIN_BOUNDARY
+    assert stung == _MAIN_STUNG_BOUNDARY
+    assert plain == mp4_render._build_boundary_command(
+        w / "t.mp4", w / "h.mp4", sting_replaces=False, **common
+    )
+    assert stung == mp4_render._build_boundary_command(
+        w / "t.mp4", w / "h.mp4", sting_clip=w / "s.mov", sting_replaces=False, **common
+    )
+
+
+def test_a_replacing_sting_boundary_draws_the_clip_over_black_and_keeps_the_audio(tmp_path: Path) -> None:
+    """#1535: a frames sting's clip over opaque black is the whole picture;
+    the edges' video pads would be unconnected outputs, so only the audio
+    pads remain."""
+    cmd = mp4_render._build_boundary_command(
+        tmp_path / "t.mp4", tmp_path / "h.mp4", kind="fade", seconds=1.0, sequence=_sequence(),
+        output_path=tmp_path / "b.mp4", sting_clip=tmp_path / "s.mov", sting_replaces=True,
+        tail_pad_seconds=0.25, head_pad_seconds=0.5,
+    )  # fmt: skip
+    graph = cmd[cmd.index("-filter_complex") + 1]
+    assert "xfade" not in graph and "tpad=start_mode" not in graph and "[tv]" not in graph
+    assert cmd.count("-i") == 3 and _inputs(list(cmd))[2] == str(tmp_path / "s.mov")
+    assert graph == (
+        "[0:a]apad=pad_dur=0.25[ta];"
+        "[1:a]adelay=500:all=1[ha];"
+        "color=c=black:s=1920x1080:r=30000/1001:d=1,format=rgba[canvas];"
+        "[2:v]format=rgba,fps=30000/1001,setpts=PTS-STARTPTS,tpad=stop_mode=clone:stop_duration=1,trim=0:1[motion];"
+        "[canvas][motion]overlay=0:0:format=auto[stung];"
+        "[stung]format=yuv420p[final];"
+        "[ta][ha]acrossfade=d=1:c1=tri:c2=tri[aout]"
+    )
+    assert cmd[cmd.index("-map") :][:4] == ("-map", "[final]", "-map", "[aout]")
+
+
+def _three_pushed_stages(tmp_path: Path) -> composition.Composition:
+    """Three stages with a ``sting:push`` at both boundaries."""
+    stages = [
+        _basic_stage(
+            tmp_path=tmp_path, name=name, primary_name=f"{name.lower()}.mp4", head_pad=3.0, tail_pad=10.0
+        )
+        for name in ("A", "B", "C")
+    ]
+    push = [
+        composition.Transition(
+            from_stage_index=i, to_stage_index=i + 1, kind="sting:push", duration_seconds=1.0
+        )
+        for i in (0, 1)
+    ]
+    return composition.from_stage_compositions(stages, project_name="m", transitions=push)
+
+
+def test_each_frames_boundary_draws_from_its_own_edges_into_its_own_folder(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#1535: the frames sting's ``prepare`` is bound when its boundary is
+    decided, so two boundaries never share a frames folder or read each
+    other's edges; the clip it writes is the boundary's third input."""
+    from tests.look_fixtures import PushRasterizer, install_frames_look
+
+    install_frames_look(tmp_path, monkeypatch)
+    drawn: list[dict[str, Any]] = []
+    monkeypatch.setattr(mp4_render, "render_frames_sting", lambda sting, **kwargs: drawn.append(kwargs))
+    calls: list[list[str]] = []
+    result = _render(
+        tmp_path, _three_pushed_stages(tmp_path), name="m", runner=_writes_output(calls),
+        rasterizer=PushRasterizer(), overlay_theme="framesy",
+    )  # fmt: skip
+    assert result.degradations == ()
+    work = tmp_path / "work_m"
+    boundaries = [next(argv for argv in calls if argv[-1].endswith(f"boundary_00{n}.mp4")) for n in (0, 1)]
+    assert [d["frames_root"] for d in drawn] == [work / "boundary_000_frames", work / "boundary_001_frames"]
+    for argv, d in zip(boundaries, drawn, strict=True):
+        assert _inputs(argv) == [str(d["tail_edge"]), str(d["head_edge"]), str(d["clip_path"])]
+        assert "xfade" not in argv[argv.index("-filter_complex") + 1]
+    assert drawn[0]["head_edge"] != drawn[1]["head_edge"] and drawn[0]["key"] != drawn[1]["key"]
+
+
+def test_a_failed_edge_extraction_makes_the_frames_boundary_a_cut(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#1535: the extraction runs through the render's runner, so its
+    failure is the driver's FFmpegError and the boundary is cut, noted."""
+    from tests.look_fixtures import PushRasterizer, install_frames_look
+
+    install_frames_look(tmp_path, monkeypatch)
+    calls: list[list[str]] = []
+    writes = _writes_output(calls)
+
+    def run(*args: Any, **kwargs: Any) -> subprocess.CompletedProcess:
+        if args[0][-1].endswith("%04d.jpg"):
+            calls.append(list(args[0]))
+            raise subprocess.CalledProcessError(1, args[0], stderr="no edge")
+        return writes(*args, **kwargs)
+
+    result = _render(
+        tmp_path, _three_pushed_stages(tmp_path), name="m", runner=run, rasterizer=PushRasterizer(),
+        overlay_theme="framesy",
+    )  # fmt: skip
+    assert any(argv[-1].endswith("%04d.jpg") for argv in calls), "the extraction went through the runner"
+    assert [n for n in result.degradations if "rendered as a cut" in n and "no edge" in n] != []
+    assert not any(argv[-1].endswith("boundary_000.mp4") for argv in calls)
+
+
 def test_a_sting_adds_the_clip_input_and_overlay_to_the_boundary_only(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setattr(mp4_render, "write_motion_clip", _fake_clip_writer)
     result, calls, fake = _sting_render(tmp_path)

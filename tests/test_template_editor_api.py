@@ -91,7 +91,7 @@ def test_lists_every_slot_and_variant_with_whose_template_it_is(client) -> None:
     assert title["own"] is False and "<" in title["content"]
     assert ("title_page", "rise") in templates and ("transition", "wipe") in templates
     starters = client.get("/api/looks/club/templates").json()["starters"]
-    assert [s["name"] for s in starters] == ["animated", "lower-third", "still", "sting"]
+    assert [s["name"] for s in starters] == ["animated", "lower-third", "still", "sting", "sting-frames"]
     assert all(s["content"].startswith("<!") for s in starters)
 
 

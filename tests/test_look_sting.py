@@ -4,14 +4,21 @@ template receives and how its frames are asked for."""
 from __future__ import annotations
 
 import math
+from collections.abc import Callable
 from pathlib import Path
+from typing import Any
+
+import pytest
 
 from splitsmith.identity import ResolvedIdentity
 from splitsmith.look import sting as look_sting
-from splitsmith.look.template import template_digest
+from splitsmith.look.motion import MotionClipError
+from splitsmith.look.template import TemplateContext, template_digest
 from splitsmith.looks import load_look
+from splitsmith.overlay.card import CardMotion
 from splitsmith.overlay.raster import TemplateFrames
 from splitsmith.overlay.theme import theme_for
+from tests.look_fixtures import install_frames_look
 
 
 class _FakeRasterizer:
@@ -42,7 +49,7 @@ class _FakeRasterizer:
         )
 
 
-def _context(**overrides):  # type: ignore[no-untyped-def]
+def _context(**overrides: Any) -> TemplateContext:
     args = {
         "kind": "sting:wipe",
         "seconds": 1.0,
@@ -126,3 +133,226 @@ def test_sting_overlay_filters_span_the_boundary_from_its_first_frame() -> None:
         "[2:v]format=rgba,fps=30,setpts=PTS-STARTPTS,tpad=stop_mode=clone:stop_duration=1,trim=0:1[motion]",
         "[xf][motion]overlay=0:0:format=auto[stung]",
     ]
+
+
+class _RecordingRasterizer(_FakeRasterizer):
+    def __init__(self) -> None:
+        super().__init__(motion_seconds=1.0)
+        self.contexts: list = []
+        self.frames_dirs: list = []
+
+    def render_template_frames(self, template, *, context, width, height, fps, max_seconds, frames_dir=None):
+        self.contexts.append(context)
+        self.frames_dirs.append(frames_dir)
+        return super().render_template_frames(
+            template, context=context, width=width, height=height, fps=fps, max_seconds=max_seconds
+        )
+
+
+def _plan_args(**over: Any) -> dict[str, Any]:
+    args = {"seconds": 1.0, "from_label": "Stage 1", "to_label": "Stage 2", "width": 64, "height": 36}
+    args["fps"] = 30.0
+    args.update(over)
+    return args
+
+
+def test_a_tagless_sting_plans_as_before() -> None:
+    look = load_look("splitsmith")
+    raster = _RecordingRasterizer()
+    plan = look_sting.sting_plan(look, "sting:wipe", rasterizer=raster, **_plan_args())
+    assert isinstance(plan, CardMotion) and len(raster.contexts) == 1
+    assert "frames" not in raster.contexts[0].data["transition"]
+    direct = look_sting.sting_motion(look, "sting:wipe", rasterizer=_RecordingRasterizer(), **_plan_args())
+    assert direct is not None and plan.digest == direct.digest
+
+
+def test_a_frames_sting_is_loaded_once_without_frames_for_its_sounds(monkeypatch, tmp_path: Path) -> None:
+    look = install_frames_look(tmp_path, monkeypatch)
+    raster = _RecordingRasterizer()
+    plan = look_sting.sting_plan(look, "sting:push", rasterizer=raster, **_plan_args())
+    assert isinstance(plan, look_sting.FramesSting)
+    assert len(raster.contexts) == 1 and raster.frames_dirs == [None]
+    assert "frames" not in plan.context.data["transition"]
+    assert plan.digest == template_digest(plan.template, plan.context, fps=30.0, engine_version="fake")
+
+
+def test_render_frames_sting_extracts_both_edges_then_draws_with_the_mount(
+    monkeypatch, tmp_path: Path
+) -> None:
+    look = install_frames_look(tmp_path, monkeypatch)
+    raster = _RecordingRasterizer()
+    plan = look_sting.sting_plan(look, "sting:push", rasterizer=raster, **_plan_args(width=4, height=2))
+    ran: list[tuple[str, ...]] = []
+
+    def run(cmd: tuple[str, ...]) -> None:
+        ran.append(cmd)
+        out = Path(cmd[-1]).parent
+        out.mkdir(parents=True, exist_ok=True)
+        for i in range(30):
+            (out / f"{i:04d}.jpg").write_bytes(b"\xff\xd8\xff")
+
+    written: list[Path] = []
+    monkeypatch.setattr(
+        look_sting, "write_motion_clip", lambda frames, *, out, fps, ffmpeg_binary: written.append(out)
+    )
+    look_sting.render_frames_sting(
+        plan, tail_edge=tmp_path / "t.mp4", head_edge=tmp_path / "h.mp4", tail_pad_seconds=0.0,
+        head_pad_seconds=0.0, rate="30", key="k", frames_root=tmp_path / "fr",
+        clip_path=tmp_path / "clip.mov", rasterizer=raster, ffmpeg_binary="ff", run=run,
+    )  # fmt: skip
+    assert [cmd[6] for cmd in ran] == [str(tmp_path / "t.mp4"), str(tmp_path / "h.mp4")]
+    assert raster.frames_dirs[-1] == tmp_path / "fr"
+    frames = raster.contexts[-1].data["transition"]["frames"]
+    assert frames["count"] == 30 and frames["from"][0].endswith("/frames/k/from/0000.jpg")
+    assert written == [tmp_path / "clip.mov"]
+
+
+def test_an_edge_with_no_frames_is_a_motion_clip_error(monkeypatch, tmp_path: Path) -> None:
+    look = install_frames_look(tmp_path, monkeypatch)
+    raster = _RecordingRasterizer()
+    plan = look_sting.sting_plan(look, "sting:push", rasterizer=raster, **_plan_args(width=4, height=2))
+    with pytest.raises(MotionClipError, match="no frames"):
+        look_sting.render_frames_sting(
+            plan, tail_edge=tmp_path / "t.mp4", head_edge=tmp_path / "h.mp4", tail_pad_seconds=0.0,
+            head_pad_seconds=0.0, rate="30", key="k", frames_root=tmp_path / "fr",
+            clip_path=tmp_path / "clip.mov", rasterizer=raster, ffmpeg_binary="ff", run=lambda cmd: None,
+        )  # fmt: skip
+
+
+def test_a_frames_sting_that_fails_to_load_is_none(monkeypatch, tmp_path: Path) -> None:
+    look = install_frames_look(tmp_path, monkeypatch)
+
+    class _Throws(_RecordingRasterizer):
+        def render_template_frames(self, *a: Any, **k: Any) -> Any:
+            raise RuntimeError("frames is undefined")
+
+    assert look_sting.sting_plan(look, "sting:push", rasterizer=_Throws(), **_plan_args()) is None
+
+
+def test_the_replacing_graph_is_a_black_canvas_under_the_clip() -> None:
+    parts, out = look_sting.frames_sting_filters(2, rate="30", seconds=1.0, width=640, height=360)
+    assert parts[0] == "color=c=black:s=640x360:r=30:d=1,format=rgba[canvas]"
+    assert parts[-1].startswith("[canvas][motion]overlay=0:0") and out == "stung"
+
+
+def _extract(count: int = 30) -> Callable[[tuple[str, ...]], None]:
+    def run(cmd: tuple[str, ...]) -> None:
+        out = Path(cmd[-1]).parent
+        out.mkdir(parents=True, exist_ok=True)
+        for i in range(count):
+            (out / f"{i:04d}.jpg").write_bytes(b"\xff\xd8\xff")
+
+    return run
+
+
+def _render(
+    plan: look_sting.FramesSting | Any,
+    raster: _RecordingRasterizer,
+    tmp_path: Path,
+    *,
+    key: str = "k",
+    root: str = "fr",
+    head_pad: float = 0.0,
+) -> None:
+    look_sting.render_frames_sting(
+        plan, tail_edge=tmp_path / "t.mp4", head_edge=tmp_path / "h.mp4", tail_pad_seconds=0.0,
+        head_pad_seconds=head_pad, rate="30", key=key, frames_root=tmp_path / root,
+        clip_path=tmp_path / "clip.mov", rasterizer=raster, ffmpeg_binary="ff", run=_extract(),
+    )  # fmt: skip
+
+
+def test_stale_frames_are_never_footage(monkeypatch, tmp_path: Path) -> None:
+    look = install_frames_look(tmp_path, monkeypatch)
+    raster = _RecordingRasterizer()
+    plan = look_sting.sting_plan(look, "sting:push", rasterizer=raster, **_plan_args(width=4, height=2))
+    monkeypatch.setattr(look_sting, "write_motion_clip", lambda *a, **k: None)
+    stale = tmp_path / "fr" / "k" / "from" / "0099.jpg"
+    stale.parent.mkdir(parents=True)
+    stale.write_bytes(b"x")
+    _render(plan, raster, tmp_path)
+    frames = raster.contexts[-1].data["transition"]["frames"]
+    assert not any("0099" in url for url in frames["from"] + frames["to"])
+    assert not stale.exists()
+
+
+def test_an_unreadable_template_is_a_fade(monkeypatch, tmp_path: Path) -> None:
+    look = install_frames_look(tmp_path, monkeypatch)
+
+    def boom(template: Path) -> bool:
+        raise OSError("gone")
+
+    monkeypatch.setattr(look_sting, "wants_frames", boom)
+    assert (
+        look_sting.sting_plan(look, "sting:push", rasterizer=_RecordingRasterizer(), **_plan_args()) is None
+    )
+
+
+def test_the_frames_are_closed_when_the_clip_write_fails(monkeypatch, tmp_path: Path) -> None:
+    look = install_frames_look(tmp_path, monkeypatch)
+    closed: list[bool] = []
+
+    class _Closing(_RecordingRasterizer):
+        def render_template_frames(self, *a: Any, **k: Any) -> Any:
+            frames = super().render_template_frames(*a, **k)
+            frames.close = lambda: closed.append(True)  # type: ignore[method-assign]
+            return frames
+
+    raster = _Closing()
+    plan = look_sting.sting_plan(look, "sting:push", rasterizer=raster, **_plan_args(width=4, height=2))
+    closed.clear()
+
+    def fail(*a: Any, **k: Any) -> None:
+        raise OSError("popen")
+
+    monkeypatch.setattr(look_sting, "write_motion_clip", fail)
+    with pytest.raises(OSError):
+        _render(plan, raster, tmp_path)
+    assert closed == [True]
+
+
+def test_the_digest_ignores_where_and_under_what_key_frames_land(monkeypatch, tmp_path: Path) -> None:
+    look = install_frames_look(tmp_path, monkeypatch)
+    raster = _RecordingRasterizer()
+    plan = look_sting.sting_plan(look, "sting:push", rasterizer=raster, **_plan_args(width=4, height=2))
+    before = plan.digest
+    monkeypatch.setattr(look_sting, "write_motion_clip", lambda *a, **k: None)
+    _render(plan, raster, tmp_path, key="a", root="r1")
+    _render(plan, raster, tmp_path, key="b", root="r2")
+    assert plan.digest == before
+
+
+def test_a_head_pad_holds_the_first_head_frame_and_lists_match_the_count(monkeypatch, tmp_path: Path) -> None:
+    look = install_frames_look(tmp_path, monkeypatch)
+    raster = _RecordingRasterizer()
+    args = _plan_args(width=4, height=2, seconds=1.1)
+    plan = look_sting.sting_plan(look, "sting:push", rasterizer=raster, **args)
+    monkeypatch.setattr(look_sting, "write_motion_clip", lambda *a, **k: None)
+    _render(plan, raster, tmp_path, head_pad=0.5)
+    frames = raster.contexts[-1].data["transition"]["frames"]
+    count = math.ceil(1.1 * 30.0 - 1e-9)
+    assert len(frames["from"]) == len(frames["to"]) == frames["count"] == count
+    assert all(url.endswith("/0000.jpg") for url in frames["to"][:16])
+    assert frames["to"][16].endswith("/0001.jpg")
+
+
+def test_the_edge_frames_are_removed_after_a_render(monkeypatch, tmp_path: Path) -> None:
+    look = install_frames_look(tmp_path, monkeypatch)
+    raster = _RecordingRasterizer()
+    plan = look_sting.sting_plan(look, "sting:push", rasterizer=raster, **_plan_args(width=4, height=2))
+    monkeypatch.setattr(look_sting, "write_motion_clip", lambda *a, **k: None)
+    _render(plan, raster, tmp_path)
+    assert not (tmp_path / "fr" / "k").exists()
+
+
+def test_the_edge_frames_are_removed_when_the_draw_fails(monkeypatch, tmp_path: Path) -> None:
+    look = install_frames_look(tmp_path, monkeypatch)
+    raster = _RecordingRasterizer()
+    plan = look_sting.sting_plan(look, "sting:push", rasterizer=raster, **_plan_args(width=4, height=2))
+
+    def boom(*a: Any, **k: Any) -> Any:
+        raise RuntimeError("draw")
+
+    monkeypatch.setattr(raster, "render_template_frames", boom)
+    with pytest.raises(look_sting.MotionClipError):
+        _render(plan, raster, tmp_path)
+    assert not (tmp_path / "fr" / "k").exists()

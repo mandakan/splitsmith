@@ -10,6 +10,9 @@ request through Playwright routing:
   images, stylesheets, own fonts), never outside it;
 - ``/shared/<path>``: the engine scripts (``fit.js``, ``cell.js``, ...);
 - ``/fonts/<path>``: the bundled faces;
+- ``/frames/<key>/<from|to>/<NNNN>.jpg``: a frames sting's extracted edge
+  frames (#1535), present only when the renderer passes ``frames_dir`` to
+  :func:`prepare`; no text in a context can name that folder;
 - ``/file/<digest>/<name>``: each ``logo`` value (a shooter's or the
   match's), rewritten here to a virtual URL, and only when it names a real
   PNG, JPEG, WebP or checked SVG file that is not a symlink. Nothing else earns one: the
@@ -156,20 +159,26 @@ class Sandbox:
         route.abort("blockedbyclient")
 
 
-def prepare(template: Path, context: TemplateContext) -> tuple[Sandbox, TemplateContext]:
+def prepare(
+    template: Path, context: TemplateContext, *, frames_dir: Path | None = None
+) -> tuple[Sandbox, TemplateContext]:
     """The sandbox for ``template`` and ``context`` with every ``file://``
     URL in it rewritten to the virtual origin: a directory the sandbox
     mounts (the engine scripts, the bundled fonts, the Look folder) by its
     mount, any other file by a ``/file/`` path of its own. A URL naming
     something that is neither is left as it was, which the page cannot
-    load."""
+    load. ``frames_dir`` (a frames sting, #1535) is mounted as ``/frames/``:
+    the renderer's extracted edge frames, named in ``data.transition.frames``
+    by virtual URL. It is added to the sandbox only, never to the folders
+    ``file://`` URLs are rewritten into, so no text in the context can name
+    it."""
     look_root = template.resolve().parent
     mounts = {
         "look": look_root,
         "shared": shared_dir().resolve(),
         "fonts": _bundled_fonts_dir().resolve(),
     }
-    sandbox = Sandbox(template=template.resolve(), mounts=mounts)
+    sandbox = Sandbox(template=template.resolve(), mounts=dict(mounts))
 
     def mounted(match: re.Match[str]) -> str:
         # A file inside a mounted folder (a bundled font, an engine script,
@@ -211,6 +220,9 @@ def prepare(template: Path, context: TemplateContext) -> tuple[Sandbox, Template
     raw = context.model_dump()
     for part in ("engine", "assets", "data", "theme"):
         raw[part] = walk(raw[part])
+    if frames_dir is not None:
+        # Equals ``frames.FRAMES_MOUNT``; not imported (frames.py imports ORIGIN from here).
+        sandbox.mounts["frames"] = frames_dir.resolve()
     return sandbox, TemplateContext.model_validate(raw)
 
 

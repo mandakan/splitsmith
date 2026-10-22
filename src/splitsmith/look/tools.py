@@ -21,6 +21,7 @@ from __future__ import annotations
 import hashlib
 import io
 import json
+import math
 import shutil
 import tempfile
 from collections.abc import Callable, Sequence
@@ -64,6 +65,8 @@ from ..overlay.theme import theme_for
 from ..stage_summary_data import TileShot, TileStageData
 from ..summary_template import match_summary_payload, stage_summary_payload, summary_context
 from .brand import brand_json
+from .frames import misplaced_frames_tag, wants_frames, with_frames
+from .sandbox import ORIGIN
 from .sting import sting_context
 from .template import TemplateContext
 
@@ -73,18 +76,20 @@ STARTERS: dict[str, str] = {
     "animated": "animated.html",
     "lower-third": "lower-third.html",
     "sting": "sting.html",
+    "sting-frames": "sting-frames.html",
     "hud": "hud.html",
     "summary": "summary.html",
     "broadcast": "broadcast-hud.html",
 }
 #: The starters the template editor offers as replacement text: the card and
 #: sting templates it edits. An overlay style or a summary is not edited there.
-EDITOR_STARTERS: tuple[str, ...] = ("animated", "lower-third", "still", "sting")
+EDITOR_STARTERS: tuple[str, ...] = ("animated", "lower-third", "still", "sting", "sting-frames")
 _STARTER_SLOTS: dict[str, dict[str, object]] = {
     "still": {"title_page": "still.html", "slate": "still.html", "closing": "still.html"},
     "animated": {"title_page": "animated.html", "slate": "animated.html", "closing": "animated.html"},
     "lower-third": {"lower_third": "lower-third.html"},
     "sting": {STING_SLOT: {"sting": "sting.html"}},
+    "sting-frames": {STING_SLOT: {"sting": "sting-frames.html"}},
     "hud": {OVERLAY_SLOT: {"hud": "hud.html"}},
     "summary": {"summary": {"summary": "summary.html"}},
     # The reference Look: every slot a template can draw, each using all of
@@ -193,6 +198,18 @@ class Prober(Protocol):
         width: int,
         height: int,
         plan: Callable[[float], Sequence[float]],
+    ) -> TemplateFrames: ...
+
+    def render_template_frames(
+        self,
+        template: Path,
+        *,
+        context: TemplateContext,
+        width: int,
+        height: int,
+        fps: float,
+        max_seconds: float,
+        frames_dir: Path | None = None,
     ) -> TemplateFrames: ...
 
 
@@ -456,6 +473,78 @@ def _context(
         shooters=shooters,
         brand=brand_json(look, slot),
     )
+
+
+#: A frames sting draws the whole picture; one that leaves more than this
+#: share of a frame's pixels below full alpha shows black there in the
+#: export. A little allows antialiased edges against the frame's border.
+TRANSPARENT_SHARE = 0.005
+
+
+def sample_edges(root: Path, *, width: int, height: int, count: int) -> tuple[list[Path], list[Path]]:
+    """Two sample edges for a frames sting: ``from`` a light bar moving
+    across mid grey (a moving clip), ``to`` a still diagonal gradient."""
+    froms, tos = root / "k" / "from", root / "k" / "to"
+    froms.mkdir(parents=True, exist_ok=True)
+    tos.mkdir(parents=True, exist_ok=True)
+    gradient = Image.linear_gradient("L").resize((width, height)).convert("RGB")
+    out_from: list[Path] = []
+    out_to: list[Path] = []
+    for n in range(count):
+        frame = Image.new("RGB", (width, height), (110, 110, 110))
+        x = int((width - width // 8) * n / max(1, count - 1))
+        frame.paste((235, 235, 235), (x, 0, x + width // 8, height))
+        out_from.append(froms / f"{n:04d}.jpg")
+        frame.save(out_from[-1], quality=90)
+        out_to.append(tos / f"{n:04d}.jpg")
+        gradient.save(out_to[-1], quality=90)
+    return out_from, out_to
+
+
+def _check_frames_sting(
+    subject: str, template: Path, context: TemplateContext, prober: Prober, work: Path
+) -> list[CheckItem]:
+    """Draw a frames sting over :func:`sample_edges` and warn when it leaves
+    the picture transparent."""
+    seconds = context.data["transition"]["duration_seconds"]
+    count = max(1, math.ceil(seconds * CHECK_FPS - 1e-9))
+    try:
+        froms, tos = sample_edges(work / "frames", width=CHECK_WIDTH, height=CHECK_HEIGHT, count=count)
+        ctx = with_frames(
+            context,
+            fps=CHECK_FPS,
+            count=count,
+            from_urls=[f"{ORIGIN}/frames/k/from/{p.name}" for p in froms],
+            to_urls=[f"{ORIGIN}/frames/k/to/{p.name}" for p in tos],
+        )
+        frames = prober.render_template_frames(
+            template,
+            context=ctx,
+            width=CHECK_WIDTH,
+            height=CHECK_HEIGHT,
+            fps=CHECK_FPS,
+            max_seconds=seconds,
+            frames_dir=work / "frames",
+        )
+        try:
+            worst = 0.0
+            for raw in frames.frames:
+                opaque = bytes(raw[3::4]).count(255)
+                worst = max(worst, 1 - opaque / (len(raw) // 4))
+        finally:
+            frames.close()
+    except Exception as exc:  # noqa: BLE001 -- a finding, not a crash
+        return [CheckItem(subject, "error", f"failed drawing with sample edges: {exc}")]
+    if worst > TRANSPARENT_SHARE:
+        return [
+            CheckItem(
+                subject,
+                "warn",
+                f"leaves {worst * 100:.0f} % of a frame transparent; a frames sting draws the whole "
+                "picture, and what it leaves shows black in the export",
+            )
+        ]
+    return []
 
 
 def _judge(
@@ -977,6 +1066,31 @@ def check_folder(name: str, root: Path, source: Literal["shipped", "user"], *, p
                 for case, text, shooters in _cases(target_slot, logo)
             ]
             items.extend(_judge(subject, results, look.root / "sounds"))
+            if target_slot == STING_SLOT and wants_frames(template):
+                items.extend(
+                    _check_frames_sting(
+                        subject,
+                        template,
+                        _context(look, STING_SLOT, variant, "Stage 4", ()),
+                        prober,
+                        Path(tmp) / f"frames-{variant}",
+                    )
+                )
+        for slot_name in look.manifest.slots:
+            for variant in look.variants(slot_name):
+                own = look.own_template(slot_name, variant)
+                if own is None or not misplaced_frames_tag(own):
+                    continue
+                if slot_name == STING_SLOT and wants_frames(own):
+                    continue
+                items.append(
+                    CheckItem(
+                        f"{slot_name} {variant} {own.name}",
+                        "warn",
+                        "splitsmith-frames does nothing outside the transition slot "
+                        '(or with a content other than "edges")',
+                    )
+                )
     if borrowed:
         items.append(
             CheckItem(
@@ -1115,10 +1229,33 @@ def preview_look(
                 theme=theme_for(look),
                 shooters=shooters,
             )
-            try:
-                png = rasterizer.render_template(
-                    template, context=context, width=PREVIEW_WIDTH, height=PREVIEW_HEIGHT
+            frames_dir: Path | None = None
+            if wants_frames(template):
+                # A frames sting draws the whole boundary: hand it the sample
+                # edges ``looks check`` uses, or the push shows black.
+                frames_dir = Path(tmp) / f"sting-frames-{variant}"
+                count = max(1, math.ceil(1.0 * CHECK_FPS - 1e-9))
+                froms, tos = sample_edges(frames_dir, width=PREVIEW_WIDTH, height=PREVIEW_HEIGHT, count=count)
+                context = with_frames(
+                    context,
+                    fps=CHECK_FPS,
+                    count=count,
+                    from_urls=[f"{ORIGIN}/frames/k/from/{p.name}" for p in froms],
+                    to_urls=[f"{ORIGIN}/frames/k/to/{p.name}" for p in tos],
                 )
+            try:
+                if frames_dir is None:
+                    png = rasterizer.render_template(
+                        template, context=context, width=PREVIEW_WIDTH, height=PREVIEW_HEIGHT
+                    )
+                else:
+                    png = rasterizer.render_template(
+                        template,
+                        context=context,
+                        width=PREVIEW_WIDTH,
+                        height=PREVIEW_HEIGHT,
+                        frames_dir=frames_dir,
+                    )
             except TemplateScriptError:
                 skipped.append(f"sting / {variant}")
                 continue

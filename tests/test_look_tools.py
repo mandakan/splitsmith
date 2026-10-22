@@ -15,7 +15,7 @@ from PIL import Image
 
 from splitsmith import looks
 from splitsmith.look import tools as look_tools
-from splitsmith.overlay.raster import TemplateProbe
+from splitsmith.overlay.raster import TemplateFrames, TemplateProbe
 
 
 @pytest.fixture
@@ -133,6 +133,7 @@ def test_the_history_holds_every_current_shipped_template() -> None:
         ("animated", {"title_page", "slate", "closing"}),
         ("lower-third", {"lower_third"}),
         ("sting", {"transition"}),
+        ("sting-frames", {"transition"}),
         ("hud", {"overlay"}),
     ],
 )
@@ -269,6 +270,7 @@ class _Prober:
         self.calls: list[tuple[str, dict]] = []
         self.probed_at: list[tuple[str, float | None]] = []
         self.timelines: list[tuple[str, list[float]]] = []
+        self.frames_drawn: list[str] = []
 
     def probe_template(
         self, template: Path, *, context, width: int, height: int, at: float | None = None
@@ -294,6 +296,18 @@ class _Prober:
             frames[-1] = bytes([9]) * 4
         return TemplateFrames(duration=0.5, frame_count=len(times), width=1, height=1, frames=iter(frames))
 
+    def render_template_frames(
+        self, template: Path, *, context, width: int, height: int, fps: float, max_seconds: float, frames_dir
+    ):  # noqa: ANN001
+        """A frames sting (the shipped push) over the sample edges: one
+        fully opaque frame."""
+        from splitsmith.overlay.raster import TemplateFrames
+
+        self.frames_drawn.append(template.name)
+        return TemplateFrames(
+            duration=max_seconds, frame_count=1, width=1, height=1, frames=iter([bytes((9, 9, 9, 255))])
+        )
+
 
 def _levels(report: look_tools.CheckReport) -> list[tuple[str, str]]:
     return [(item.subject, item.level) for item in report.items]
@@ -309,6 +323,7 @@ def test_a_clean_look_checks_ok_and_probes_every_own_template_with_every_sample(
         "card.html",
         "card-rise.html",
         "card-end-screen.html",
+        "sting-push.html",
         "sting-wipe.html",
         "hud-minimal.html",
         "hud-pips.html",
@@ -325,6 +340,7 @@ def test_a_clean_look_checks_ok_and_probes_every_own_template_with_every_sample(
     assert any(len(t) > 40 for t in texts), "a long stage name is among the samples"
     shooters = [len(data["shooters"]) for _, data in prober.calls if "shooters" in data]
     assert 2 in shooters and 1 in shooters
+    assert prober.frames_drawn == ["sting-push.html"], "the frames sting is drawn over sample edges"
 
 
 def test_an_overlay_style_is_probed_on_three_stages_mid_stage_and_landed(user_dir: Path) -> None:
@@ -519,20 +535,24 @@ def test_an_unknown_look_is_an_error(user_dir: Path) -> None:
 class _Raster:
     def __init__(self) -> None:
         self.templates: list[str] = []
+        self.frames_dirs: dict[str, Path | None] = {}
+        self.contexts: dict[str, object] = {}
 
     def png(self, html: str, *, width: int, height: int) -> bytes:
         return self._blank(width, height)
 
-    def render_template(self, template: Path, *, context, width: int, height: int) -> bytes:
+    def render_template(
+        self, template: Path, *, context, width: int, height: int, frames_dir: Path | None = None
+    ) -> bytes:
         self.templates.append(template.name)
+        self.frames_dirs[template.name] = frames_dir
+        self.contexts[template.name] = context
         return self._blank(width, height)
 
     def engine_version(self) -> str:
         return "fake"
 
     def render_template_frames(self, template, *, context, width, height, fps, max_seconds):
-        from splitsmith.overlay.raster import TemplateFrames
-
         self.templates.append(template.name)
         return TemplateFrames(
             duration=0.0, frame_count=1, width=width, height=height, frames=iter([bytes(width * height * 4)])
@@ -563,6 +583,7 @@ def test_preview_renders_every_card_variant_and_sting_and_a_contact_sheet(
             "closing-default.png",
             "closing-end-screen.png",
             "closing-rise.png",
+            "transition-push.png",
             "transition-wipe.png",
             "contact-sheet.png",
         ]
@@ -581,8 +602,34 @@ def test_preview_refuses_a_broken_user_look_instead_of_drawing_the_shipped_one(u
         look_tools.preview_look("clean", rasterizer=_Raster(), out=user_dir / "out")
 
 
+def test_preview_draws_a_frames_sting_over_sample_edges(user_dir: Path, tmp_path: Path) -> None:
+    look_tools.new_look("club", from_look="splitsmith", templates=True)
+    raster = _Raster()
+    seen: dict[str, bool] = {}
+    original = raster.render_template
+
+    def spy(template, *, context, width, height, frames_dir=None):  # noqa: ANN001
+        if frames_dir is not None:
+            urls = context.data["transition"]["frames"]
+            seen["files"] = all(
+                (frames_dir / u.removeprefix("https://look.invalid/frames/")).is_file()
+                for u in (*urls["from"], *urls["to"])
+            )
+        return original(template, context=context, width=width, height=height, frames_dir=frames_dir)
+
+    raster.render_template = spy  # type: ignore[method-assign]
+    look_tools.preview_look("club", rasterizer=raster, out=tmp_path / "out")
+    assert raster.frames_dirs["sting-push.html"] is not None, "the frames sting is given its frames"
+    assert raster.frames_dirs["sting-wipe.html"] is None, "an ordinary sting is not"
+    assert seen == {"files": True}, "the frames still exist while the sting draws"
+    frames = raster.contexts["sting-push.html"].data["transition"]["frames"]
+    assert frames["count"] == len(frames["from"]) == len(frames["to"]) >= 1
+
+
 class _ThrowingRaster(_Raster):
-    def render_template(self, template: Path, *, context, width: int, height: int) -> bytes:
+    def render_template(
+        self, template: Path, *, context, width: int, height: int, frames_dir: Path | None = None
+    ) -> bytes:
         from splitsmith.overlay.raster import TemplateScriptError
 
         raise TemplateScriptError(f"{template.name}: boom")
@@ -615,3 +662,79 @@ def test_new_from_a_look_copies_its_other_files_but_not_its_previews(user_dir: P
     assert (copy / "style.css").is_file() and (copy / "still.html").is_file()
     assert not (copy / "preview").exists()
     assert json.loads((copy / "look.json").read_text(encoding="utf-8"))["name"] == "copy"
+
+
+# --- frames stings (#1535) -----------------------------------------------------------
+
+
+class _FramesProber(_Prober):
+    """A prober whose frames sting is ``opaque_share`` opaque from the left:
+    the right of the frame is fully transparent."""
+
+    def __init__(self, opaque_share: float) -> None:
+        super().__init__()
+        self.opaque_share = opaque_share
+        self.urls: list[str] = []
+
+    def render_template_frames(
+        self, template: Path, *, context, width: int, height: int, fps: float, max_seconds: float, frames_dir
+    ) -> TemplateFrames:  # noqa: ANN001
+        frames = context.data["transition"]["frames"]
+        self.urls.extend(frames["from"] + frames["to"])
+        assert (frames_dir / frames["from"][0].split("/frames/", 1)[1]).is_file()
+        row = bytearray()
+        cut = int(width * self.opaque_share)
+        for x in range(width):
+            row += bytes((9, 9, 9, 255 if x < cut else 0))
+        raw = bytes(row) * height
+        count = frames["count"]
+        return TemplateFrames(
+            duration=max_seconds, frame_count=count, width=width, height=height, frames=iter([raw] * count)
+        )
+
+
+def _transparency(report: look_tools.CheckReport) -> list[look_tools.CheckItem]:
+    return [i for i in report.items if "transparent" in i.message]
+
+
+def test_a_frames_sting_that_leaves_half_the_frame_transparent_warns(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from tests.look_fixtures import install_frames_look
+
+    install_frames_look(tmp_path, monkeypatch)
+    prober = _FramesProber(opaque_share=0.5)
+    report = look_tools.check_look("framesy", prober=prober)
+    (item,) = _transparency(report)
+    assert item.level == "warn" and item.subject.startswith("transition push")
+    assert "50 %" in item.message
+    assert prober.urls and all(u.startswith("https://look.invalid/frames/k/") for u in prober.urls)
+
+
+def test_a_frames_sting_that_draws_every_pixel_has_no_transparency_item(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from tests.look_fixtures import install_frames_look
+
+    install_frames_look(tmp_path, monkeypatch)
+    prober = _FramesProber(opaque_share=1.0)
+    report = look_tools.check_look("framesy", prober=prober)
+    assert prober.urls, "the frames check drew the sting over sample edges"
+    assert _transparency(report) == []
+    assert report.errors == 0
+
+
+def test_a_frames_tag_outside_the_transition_slot_is_a_warning(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from tests.look_fixtures import FRAMES_STING_HTML, install_frames_look
+
+    root = install_frames_look(tmp_path, monkeypatch).root
+    manifest = json.loads((root / "look.json").read_text(encoding="utf-8"))
+    manifest["slots"]["title_page"] = {"default": "title.html"}
+    (root / "look.json").write_text(json.dumps(manifest), encoding="utf-8")
+    (root / "title.html").write_text(FRAMES_STING_HTML, encoding="utf-8")
+    report = look_tools.check_look("framesy", prober=_FramesProber(opaque_share=1.0))
+    misplaced = [i for i in report.items if "does nothing outside the transition slot" in i.message]
+    assert [(i.subject, i.level) for i in misplaced] == [("title_page default title.html", "warn")]
+    assert "splitsmith-frames" in misplaced[0].message

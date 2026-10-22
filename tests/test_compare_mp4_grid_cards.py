@@ -782,6 +782,206 @@ def test_boundary_segment_lays_a_sting_clip_over_the_fade(tmp_path: Path) -> Non
     assert stung[stung.index("-map") :] == plain[plain.index("-map") :], "maps, names and codecs unchanged"
 
 
+#: ``build_boundary_segment_command`` on main (5c6f479f) for a padded
+#: two-shooter fade, with no sting and with an overlay sting's clip: the
+#: proof that #1535 left every non-frames grid boundary byte for byte as it was.
+_MAIN_PLAIN_GRID_BOUNDARY = (
+    "ffmpeg",
+    "-hide_banner",
+    "-y",
+    "-i",
+    "/w/t.mov",
+    "-i",
+    "/w/h.mov",
+    "-t",
+    "1",
+    "-filter_complex",
+    (
+        "[0:v]tpad=stop_mode=clone:stop_duration=0.25[tv];"
+        "[1:v]tpad=start_mode=clone:start_duration=0.5[hv];"
+        "[tv][hv]xfade=transition=fade:duration=1:offset=0,format=yuv420p[final];"
+        "[0:a:0]apad=pad_dur=0.25[t0];"
+        "[1:a:0]adelay=500:all=1[h0];"
+        "[t0][h0]acrossfade=d=1:c1=tri:c2=tri,aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo[x0];"
+        "[0:a:1]apad=pad_dur=0.25[t1];"
+        "[1:a:1]adelay=500:all=1[h1];"
+        "[t1][h1]acrossfade=d=1:c1=tri:c2=tri,aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo[x1];"
+        "[0:a:2]apad=pad_dur=0.25[t2];"
+        "[1:a:2]adelay=500:all=1[h2];"
+        "[t2][h2]acrossfade=d=1:c1=tri:c2=tri,aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo[x2]"
+    ),
+    "-map",
+    "[final]",
+    "-map",
+    "[x0]",
+    "-map",
+    "[x1]",
+    "-map",
+    "[x2]",
+    "-disposition:a:0",
+    "default",
+    "-disposition:a:1",
+    "0",
+    "-disposition:a:2",
+    "0",
+    "-metadata:s:a:0",
+    "title=Mix",
+    "-metadata:s:a:0",
+    "handler_name=Mix",
+    "-metadata:s:a:1",
+    "title=A",
+    "-metadata:s:a:1",
+    "handler_name=A",
+    "-metadata:s:a:2",
+    "title=B",
+    "-metadata:s:a:2",
+    "handler_name=B",
+    "-r",
+    "30000/1001",
+    "-c:v",
+    "libx264",
+    "-preset",
+    "medium",
+    "-crf",
+    "20",
+    "-pix_fmt",
+    "yuv420p",
+    "-c:a",
+    "pcm_s16le",
+    "/w/b.mov",
+)
+_MAIN_STUNG_GRID_BOUNDARY = (
+    "ffmpeg",
+    "-hide_banner",
+    "-y",
+    "-i",
+    "/w/t.mov",
+    "-i",
+    "/w/h.mov",
+    "-i",
+    "/w/s.mov",
+    "-t",
+    "1",
+    "-filter_complex",
+    (
+        "[0:v]tpad=stop_mode=clone:stop_duration=0.25[tv];"
+        "[1:v]tpad=start_mode=clone:start_duration=0.5[hv];"
+        "[tv][hv]xfade=transition=fade:duration=1:offset=0[xf];"
+        "[2:v]format=rgba,fps=30000/1001,setpts=PTS-STARTPTS,tpad=stop_mode=clone:stop_duration=1,trim=0:1[motion];"
+        "[xf][motion]overlay=0:0:format=auto[stung];"
+        "[stung]format=yuv420p[final];"
+        "[0:a:0]apad=pad_dur=0.25[t0];"
+        "[1:a:0]adelay=500:all=1[h0];"
+        "[t0][h0]acrossfade=d=1:c1=tri:c2=tri,aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo[x0];"
+        "[0:a:1]apad=pad_dur=0.25[t1];"
+        "[1:a:1]adelay=500:all=1[h1];"
+        "[t1][h1]acrossfade=d=1:c1=tri:c2=tri,aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo[x1];"
+        "[0:a:2]apad=pad_dur=0.25[t2];"
+        "[1:a:2]adelay=500:all=1[h2];"
+        "[t2][h2]acrossfade=d=1:c1=tri:c2=tri,aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo[x2]"
+    ),
+    "-map",
+    "[final]",
+    "-map",
+    "[x0]",
+    "-map",
+    "[x1]",
+    "-map",
+    "[x2]",
+    "-disposition:a:0",
+    "default",
+    "-disposition:a:1",
+    "0",
+    "-disposition:a:2",
+    "0",
+    "-metadata:s:a:0",
+    "title=Mix",
+    "-metadata:s:a:0",
+    "handler_name=Mix",
+    "-metadata:s:a:1",
+    "title=A",
+    "-metadata:s:a:1",
+    "handler_name=A",
+    "-metadata:s:a:2",
+    "title=B",
+    "-metadata:s:a:2",
+    "handler_name=B",
+    "-r",
+    "30000/1001",
+    "-c:v",
+    "libx264",
+    "-preset",
+    "medium",
+    "-crf",
+    "20",
+    "-pix_fmt",
+    "yuv420p",
+    "-c:a",
+    "pcm_s16le",
+    "/w/b.mov",
+)
+
+
+def _frames_common() -> dict:
+    return {
+        "kind": "fade",
+        "seconds": 1.0,
+        "canvas": mp4_grid.GridCanvas(640, 360, 30000, 1001),
+        "shooter_labels": ("A", "B"),
+        "output_path": Path("/w/b.mov"),
+        "tail_pad_seconds": 0.25,
+        "head_pad_seconds": 0.5,
+    }
+
+
+def test_grid_boundary_argv_is_byte_identical_to_main() -> None:
+    w = Path("/w")
+    common = _frames_common()
+    plain = mp4_grid.build_boundary_segment_command(w / "t.mov", w / "h.mov", **common)
+    stung = mp4_grid.build_boundary_segment_command(
+        w / "t.mov", w / "h.mov", sting_clip=w / "s.mov", **common
+    )
+    assert plain == _MAIN_PLAIN_GRID_BOUNDARY
+    assert stung == _MAIN_STUNG_GRID_BOUNDARY
+    assert plain == mp4_grid.build_boundary_segment_command(
+        w / "t.mov", w / "h.mov", sting_replaces=False, **common
+    )
+    assert stung == mp4_grid.build_boundary_segment_command(
+        w / "t.mov", w / "h.mov", sting_clip=w / "s.mov", sting_replaces=False, **common
+    )
+    assert plain == mp4_grid.build_boundary_segment_command(
+        w / "t.mov", w / "h.mov", sting_replaces=True, **common
+    ), "replacing needs a clip to replace with"
+
+
+def test_a_replacing_grid_sting_draws_the_clip_over_black_and_keeps_every_track() -> None:
+    """#1535: a frames sting's clip over opaque black is the whole grid
+    picture; the edges' video pads would be unconnected outputs, so only
+    the audio pads remain, on every one of the N+1 tracks."""
+    w = Path("/w")
+    cmd = mp4_grid.build_boundary_segment_command(
+        w / "t.mov", w / "h.mov", sting_clip=w / "s.mov", sting_replaces=True, **_frames_common()
+    )
+    graph = cmd[cmd.index("-filter_complex") + 1]
+    assert "xfade" not in graph and "tpad=start_mode" not in graph and "[tv]" not in graph
+    assert [cmd[i + 1] for i, token in enumerate(cmd) if token == "-i"] == [
+        "/w/t.mov",
+        "/w/h.mov",
+        "/w/s.mov",
+    ]
+    stung = _MAIN_STUNG_GRID_BOUNDARY[_MAIN_STUNG_GRID_BOUNDARY.index("-filter_complex") + 1]
+    audio = stung[stung.index("[0:a:0]") :]
+    assert graph == (
+        "color=c=black:s=640x360:r=30000/1001:d=1,format=rgba[canvas];"
+        "[2:v]format=rgba,fps=30000/1001,setpts=PTS-STARTPTS,tpad=stop_mode=clone:stop_duration=1,trim=0:1[motion];"
+        "[canvas][motion]overlay=0:0:format=auto[stung];"
+        "[stung]format=yuv420p[final];" + audio
+    )
+    assert graph.count("acrossfade") == 3 and graph.count("apad=") == 3 and graph.count("adelay=") == 3
+    after = cmd.index("-filter_complex") + 2
+    assert cmd[after:] == _MAIN_STUNG_GRID_BOUNDARY[after:], "maps, names, dispositions and codecs unchanged"
+
+
 def test_a_card_whose_template_fails_is_named_in_the_degradations(tmp_path: Path) -> None:
     """A broken template used to drop its card with only a log line (#1265 review)."""
     from splitsmith.overlay.raster import TemplateScriptError
