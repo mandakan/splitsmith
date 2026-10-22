@@ -673,7 +673,7 @@ def test_run_worker_until_stops_gracefully_between_jobs() -> None:
 
 def test_agent_drain_names_its_connections(monkeypatch: pytest.MonkeyPatch) -> None:
     """#1198: the agent's drains are ``splitsmith-agent`` in ``pg_stat_activity``,
-    not the Railway worker's ``splitsmith-worker``."""
+    not the platform worker job's ``splitsmith-worker``."""
     import splitsmith.queue as queue_mod
 
     seen: list[dict[str, Any]] = []

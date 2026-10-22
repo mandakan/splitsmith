@@ -73,10 +73,10 @@ export const meApi = {
       signal?: AbortSignal;
     } = {},
   ): Promise<RawUploadResult> => {
-    // Large files go direct browser -> R2 via presigned multipart; the
-    // serve-proxied single-shot below 502s on Railway past a few hundred
-    // MB. Small files keep the simpler single-shot (one round-trip, and
-    // serve can still compute the integrity sha256).
+    // Large files go direct browser -> R2 via presigned multipart; Cloud
+    // Run refuses a serve-proxied body over 32 MiB. Small files keep the
+    // simpler single-shot (one round-trip, and serve can still compute the
+    // integrity sha256).
     if (file.size >= MULTIPART_THRESHOLD_BYTES) {
       return uploadRawMultipart(file, { onProgress: opts.onProgress, signal: opts.signal });
     }

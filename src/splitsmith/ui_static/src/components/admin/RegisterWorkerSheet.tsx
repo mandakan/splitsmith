@@ -133,7 +133,7 @@ export function RegisterWorkerSheet({ open, onClose }: RegisterWorkerSheetProps)
                 <Field
                   label="Priority"
                   htmlFor="worker-priority"
-                  help="Higher priority workers are selected first, so your self-hosted workers take jobs before the Railway fallback. Self-hosted defaults to 1000; Railway is 100."
+                  help="Higher priority workers are selected first, so your self-hosted workers take jobs before the Cloud Run fallback. Self-hosted defaults to 1000; Cloud Run is 100."
                 >
                   <input
                     id="worker-priority"

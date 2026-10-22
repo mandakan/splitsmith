@@ -8,19 +8,19 @@ fires the :class:`WorkerDispatcher`.
 
 The queue of record stays in Postgres (Procrastinate); a wake is only a
 signal and must be safe to lose - the serve-boot pending re-check and
-the 6-hourly safety cron on the worker service are the nets. The
+the 6-hourly safety-net workflow (it wakes serve) are the nets. The
 dispatcher walks the registered workers (``workers`` table) in priority
 tiers, descending (higher priority preferred, matching the
 register-worker copy - so a registered home worker at the default 1000
-outranks the railway fallback at 100):
+outranks the platform fallback at 100):
 
 - **self-hosted** workers are woken by pushing "wake" onto their live
-  SSE channel (:class:`~splitsmith.worker_channel.WakeChannelRegistry`);
-  the push doubles as the availability check - a disconnected box simply
-  is not there to wake.
-- **railway** (the single ``kind='railway'`` row) is woken by firing the
-  GraphQL ``serviceInstanceRedeploy`` mutation, available whenever the
-  Railway env config is present.
+  SSE channel (:class:`~splitsmith.worker_channel.WakeChannelRegistry`),
+  where the push doubles as the availability check (a disconnected box
+  simply is not there to wake), or, with ``SPLITSMITH_WAKE_CHANNEL=r2``, by
+  one write of the bucket marker every box polls (:class:`WakeMarker`).
+- **cloud_run** (the single ``kind='cloud_run'`` row) is woken by starting
+  an execution of the Cloud Run Job named by ``SPLITSMITH_WORKER_JOB``.
 
 The first tier with at least one successful wake wins; lower tiers stay
 asleep. Because a self-hosted wake is best-effort (the box may be
@@ -55,7 +55,6 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-RAILWAY_API_URL = "https://backboard.railway.com/graphql/v2"
 CLOUD_RUN_API_URL = "https://run.googleapis.com/v2"
 # The metadata server hands a Cloud Run instance its service account's
 # access token; no key file, no google-auth dependency.
@@ -63,10 +62,10 @@ GCP_METADATA_TOKEN_URL = (
     "http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token"
 )
 
-# Selects the dispatcher mode in build_worker_dispatcher(): unset or
-# "railway" builds the dispatcher with a railway leg (needs the env vars
-# below); "cloud_run" with a Cloud Run Job leg (SPLITSMITH_WORKER_JOB);
-# "none" disables the wake machinery entirely.
+# Selects the dispatcher mode in build_worker_dispatcher(): unset builds a
+# dispatcher whose platform leg is the Cloud Run Job when
+# SPLITSMITH_WORKER_JOB names one (self-hosted workers only otherwise);
+# "cloud_run" requires the job; "none" disables the wake machinery.
 ENV_WORKER_LAUNCHER = "SPLITSMITH_WORKER_LAUNCHER"
 # Full resource name of the worker job:
 # ``projects/<project>/locations/<region>/jobs/<job>``.
@@ -81,35 +80,6 @@ ENV_WAKE_CHANNEL = "SPLITSMITH_WAKE_CHANNEL"
 WAKE_MARKER_KEY = "_splitsmith/wake/self-hosted"
 #: How often a box polls the marker in "r2" mode.
 WAKE_POLL_SECONDS = 30.0
-ENV_TRIGGER_TOKEN = "SPLITSMITH_WORKER_TRIGGER_TOKEN"
-ENV_WORKER_SERVICE_ID = "SPLITSMITH_WORKER_SERVICE_ID"
-ENV_WORKER_ENVIRONMENT_ID = "SPLITSMITH_WORKER_ENVIRONMENT_ID"
-# Railway injects this into every deployed container; the SPLITSMITH_
-# variable above exists only to override it outside Railway.
-ENV_RAILWAY_ENVIRONMENT_ID = "RAILWAY_ENVIRONMENT_ID"
-
-
-class RailwayLauncherConfig(BaseModel):
-    """Railway coordinates + auth for starting a one-shot worker run."""
-
-    token: str
-    service_id: str
-    environment_id: str
-    api_url: str = RAILWAY_API_URL
-    cooldown_seconds: float = 30.0
-
-
-def load_railway_config() -> RailwayLauncherConfig | None:
-    """Read the Railway leg's config from env vars; ``None`` disables it."""
-    token = os.environ.get(ENV_TRIGGER_TOKEN, "").strip()
-    service_id = os.environ.get(ENV_WORKER_SERVICE_ID, "").strip()
-    environment_id = (
-        os.environ.get(ENV_WORKER_ENVIRONMENT_ID, "").strip()
-        or os.environ.get(ENV_RAILWAY_ENVIRONMENT_ID, "").strip()
-    )
-    if not (token and service_id and environment_id):
-        return None
-    return RailwayLauncherConfig(token=token, service_id=service_id, environment_id=environment_id)
 
 
 class CloudRunJobConfig(BaseModel):
@@ -138,8 +108,6 @@ def platform_worker_kind() -> str | None:
     """
     if load_cloud_run_config() is not None:
         return "cloud_run"
-    if load_railway_config() is not None:
-        return "railway"
     return None
 
 
@@ -193,21 +161,14 @@ class WorkerLauncher(Protocol):
 WorkerActiveCheck = Callable[[], Awaitable[bool]]
 PendingJobsCount = Callable[[], Awaitable[int]]
 
-_REDEPLOY_MUTATION = """\
-mutation TriggerWorkerRun($serviceId: String!, $environmentId: String!) {
-  serviceInstanceRedeploy(serviceId: $serviceId, environmentId: $environmentId)
-}
-"""
-
 
 class WorkerDispatcher:
     """Wakes the highest-priority available worker(s), at most once per
     cooldown window, and only when no live worker heartbeat exists.
 
-    Railway's deployment status cannot gate "is a drain running": a
-    one-shot deployment keeps status SUCCESS after its container exits
-    (observed live on staging, 2026-07-03). The authoritative signal is
-    Procrastinate's own worker registry - ``worker_active`` (built by
+    The platform's own run status cannot gate "is a drain running" (a
+    finished one-shot run still reads as a success, and a box has no status
+    at all). The authoritative signal is Procrastinate's own worker registry - ``worker_active`` (built by
     :func:`make_worker_active_checker`) reads it. With no checker
     configured the dispatcher wakes unconditionally, subject to the
     cooldown.
@@ -221,7 +182,6 @@ class WorkerDispatcher:
         store: WorkersStore,
         registry: WakeChannelRegistry,
         *,
-        railway: RailwayLauncherConfig | None,
         worker_active: WorkerActiveCheck | None,
         pending_jobs: PendingJobsCount,
         cooldown_seconds: float = 30.0,
@@ -232,11 +192,9 @@ class WorkerDispatcher:
     ) -> None:
         self._store = store
         self._registry = registry
-        self._railway = railway
         self._cloud_run = cloud_run
         self._wake_marker = wake_marker
-        # Google API calls get their own client: the railway client carries
-        # the Railway token as a default header.
+        # The dispatcher owns an HTTP client only when it has a platform leg.
         self._gcp_client: httpx.AsyncClient | None = (
             httpx.AsyncClient(timeout=10.0, transport=transport) if cloud_run is not None else None
         )
@@ -246,16 +204,6 @@ class WorkerDispatcher:
         self._pending_jobs = pending_jobs
         self._cooldown_seconds = cooldown_seconds
         self._grace_seconds = grace_seconds
-        # The dispatcher owns an HTTP client only when it has a railway leg.
-        self._client: httpx.AsyncClient | None = (
-            httpx.AsyncClient(
-                headers={"Project-Access-Token": railway.token},
-                timeout=10.0,
-                transport=transport,
-            )
-            if railway is not None
-            else None
-        )
         self._lock = asyncio.Lock()
         self._last_attempt: float | None = None
         self._tasks: set[asyncio.Task[Any]] = set()
@@ -276,11 +224,11 @@ class WorkerDispatcher:
     async def trigger(self) -> bool:
         """Wake a worker unless one is draining or we are in cooldown.
 
-        Returns True when a wake was fired. Never raises: a Railway or
+        Returns True when a wake was fired. Never raises: a platform or
         DB hiccup must not break enqueue - a missed signal is repaired by
         the boot re-check or the safety cron. A failing heartbeat check
-        counts as "worker may be active": a Railway redeploy on bad
-        information could kill a live drain, and the nets cover the
+        counts as "worker may be active": a start on bad information
+        would run a second drain beside a live one, and the nets cover the
         missed launch.
         """
         async with self._lock:
@@ -320,17 +268,7 @@ class WorkerDispatcher:
             woke_self_hosted = False
             marker: bool | None = None  # touched once per tier, on first need
             for worker in tier:
-                if worker.kind == "railway":
-                    if self._railway is None:
-                        continue
-                    try:
-                        await self._redeploy()
-                    except Exception:
-                        logger.warning("worker dispatcher: railway redeploy failed", exc_info=True)
-                        continue
-                    logger.info("worker dispatcher: railway redeploy fired")
-                    woken_ids.append(worker.id)
-                elif worker.kind == "cloud_run":
+                if worker.kind == "cloud_run":
                     if self._cloud_run is None:
                         continue
                     try:
@@ -371,8 +309,8 @@ class WorkerDispatcher:
                     logger.warning("worker dispatcher: touch_wake bookkeeping failed", exc_info=True)
                 if woke_self_hosted:
                     # Self-hosted wakes are best-effort (a connected box may
-                    # be wedged); railway-only wakes need no faster net than
-                    # the existing ones.
+                    # be wedged, a marker reader may be gone); a platform-only
+                    # wake needs no faster net than the existing ones.
                     self._spawn(self._grace_escalate(priority, armed_stamp=self._last_attempt))
                 return True
         return False
@@ -386,7 +324,7 @@ class WorkerDispatcher:
         under ``self._lock``: if another wake attempt (a trigger or a racing
         escalation) has moved it since, this window stands down - the newer
         attempt's own grace window (or the nets) covers it. That keeps
-        overlapping grace windows from double-booting Railway, while the
+        overlapping grace windows from starting the platform worker twice, while the
         escalation still bypasses the cooldown its own trigger stamped.
 
         Never raises: it runs as a detached task and a failure is
@@ -421,20 +359,6 @@ class WorkerDispatcher:
         except Exception:
             coro.close()  # silence the "never awaited" warning
             logger.warning("worker dispatcher: schedule failed; nets will recover", exc_info=True)
-
-    async def _redeploy(self) -> None:
-        assert self._railway is not None and self._client is not None
-        variables = {
-            "serviceId": self._railway.service_id,
-            "environmentId": self._railway.environment_id,
-        }
-        response = await self._client.post(
-            self._railway.api_url, json={"query": _REDEPLOY_MUTATION, "variables": variables}
-        )
-        response.raise_for_status()
-        payload = response.json()
-        if payload.get("errors"):
-            raise RuntimeError(f"Railway GraphQL error: {payload['errors']}")
 
     async def _gcp_access_token(self) -> str:
         """The service account's access token, cached until a minute before expiry."""
@@ -540,7 +464,7 @@ def make_boot_retrigger(
 ) -> Callable[[], Awaitable[None]]:
     """Build the serve-boot pending-jobs re-check.
 
-    Railway app sleeping cold-starts serve on each visit, so this runs on
+    serve scales to zero and cold-starts on a visit, so this runs on
     every wake - with the DB already awake from boot migrations. It closes
     the dispatcher's accepted races (missed signal, enqueue during worker exit)
     at the next visit instead of waiting for the safety cron, which can
@@ -589,40 +513,29 @@ def build_worker_dispatcher(
 ) -> WorkerDispatcher | None:
     """Build the dispatcher from ``SPLITSMITH_WORKER_LAUNCHER``.
 
-    Unset or ``railway`` (the historical default) builds a dispatcher whose
-    railway leg is :func:`load_railway_config` (absent env vars just drop
-    that leg - self-hosted workers can still be woken). ``cloud_run`` builds
-    one whose platform leg starts the job named by ``SPLITSMITH_WORKER_JOB``,
-    which must then be set. ``none`` disables the wake machinery (returns
-    None) for deployments with an always-on worker. Unknown names raise so a
-    misconfigured hosted boot fails loudly instead of stranding jobs.
+    Unset builds a dispatcher whose platform leg is the Cloud Run Job named
+    by ``SPLITSMITH_WORKER_JOB`` when that is set, and wakes self-hosted
+    workers only otherwise. ``cloud_run`` is the same but requires the job.
+    ``none`` disables the wake machinery (returns None) for deployments with
+    an always-on worker. Unknown names (``railway`` among them, since its
+    leg is gone) raise, so a misconfigured hosted boot fails loudly instead
+    of stranding jobs.
 
     ``wake_marker`` switches self-hosted wakes from SSE pushes to the
     storage-bucket marker (``SPLITSMITH_WAKE_CHANNEL=r2``).
     """
-    kind = os.environ.get(ENV_WORKER_LAUNCHER, "").strip().lower() or "railway"
+    kind = os.environ.get(ENV_WORKER_LAUNCHER, "").strip().lower()
     if kind == "none":
         return None
-    if kind == "cloud_run":
-        cloud_run = load_cloud_run_config()
-        if cloud_run is None:
-            raise ValueError(f"{ENV_WORKER_LAUNCHER}=cloud_run needs {ENV_WORKER_JOB}")
-        return WorkerDispatcher(
-            store,
-            registry,
-            railway=None,
-            cloud_run=cloud_run,
-            wake_marker=wake_marker,
-            worker_active=worker_active,
-            pending_jobs=pending_jobs,
-            transport=transport,
-        )
-    if kind != "railway":
+    if kind not in ("", "cloud_run"):
         raise ValueError(f"{ENV_WORKER_LAUNCHER}={kind!r}: unknown worker launcher")
+    cloud_run = load_cloud_run_config()
+    if kind == "cloud_run" and cloud_run is None:
+        raise ValueError(f"{ENV_WORKER_LAUNCHER}=cloud_run needs {ENV_WORKER_JOB}")
     return WorkerDispatcher(
         store,
         registry,
-        railway=load_railway_config(),
+        cloud_run=cloud_run,
         wake_marker=wake_marker,
         worker_active=worker_active,
         pending_jobs=pending_jobs,

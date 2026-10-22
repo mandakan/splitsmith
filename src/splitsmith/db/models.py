@@ -739,7 +739,7 @@ class CommentRow(Base):
 
 
 class WorkerRow(Base):
-    """One compute-worker target (self-hosted box or the Railway service).
+    """One compute-worker target (self-hosted box or the Cloud Run worker job).
 
     Operator infrastructure, not tenant data: no user_id column and not
     under RLS - the multi-tenant table checklist does not apply. Tokens
@@ -747,10 +747,11 @@ class WorkerRow(Base):
     share_tokens one): a worker token bootstraps infra credentials, so a
     DB leak must not yield usable tokens.
 
-    kind is "self_hosted" (registered via the admin UI) or "railway"
-    (a single row seeded at serve boot when the Railway launcher env
-    vars are present, so the Railway worker gets the same enabled and
-    priority knobs).
+    kind is "self_hosted" (registered via the admin UI) or "cloud_run"
+    (a single row seeded at serve boot when SPLITSMITH_WORKER_JOB names the
+    worker job, so it gets the same enabled and priority knobs). Rows of
+    kind "railway" were the platform worker before hosting moved to Cloud
+    Run; migration e7a1c3d9f5b2 deleted them.
     """
 
     __tablename__ = "workers"
@@ -767,7 +768,7 @@ class WorkerRow(Base):
     last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     last_wake_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     # Semver string of the code the worker is running (self-hosted agents report
-    # it at register + on each channel reconnect; the Railway row is stamped at
+    # it at register + on each channel reconnect; the platform row is stamped at
     # serve boot). Observational only - nothing gates on it today.
     version: Mapped[str | None] = mapped_column(String, nullable=True)
     info: Mapped[dict | None] = mapped_column(JSON, nullable=True)

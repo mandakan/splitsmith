@@ -5156,7 +5156,7 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
         <rect width="100%" height="100%" fill="url(#grid)" />
 
         <!-- Boundaries (behind everything) -->
-        <rect data-graph-role="structural-frame" data-composition-frame-kind="region" data-composition-frame-id="0" data-composition-frame-label="Serve tier: Railway + Neon + R2" x="270" y="210" width="470" height="294" rx="12" class="c-region" stroke-width="1"/>
+        <rect data-graph-role="structural-frame" data-composition-frame-kind="region" data-composition-frame-id="0" data-composition-frame-label="Serve tier: Cloud Run + Neon + R2" x="270" y="210" width="470" height="294" rx="12" class="c-region" stroke-width="1"/>
 
         <rect data-graph-role="structural-frame" data-composition-frame-kind="region" data-composition-frame-id="1" data-composition-frame-label="Compute tier: one worker per job" x="790" y="210" width="470" height="294" rx="12" class="c-region" stroke-width="1"/>
 
@@ -5164,7 +5164,7 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
         <path data-edge-from="spa" data-edge-to="api" data-edge-label="HTTPS /api" data-edge-key="0" data-edge-id="spa-api" data-composition-points="190,272;300,272" d="M 190 272 L 300 272" class="a-emphasis" stroke-width="1.8" marker-end="url(#arrowhead-emphasis)"/>
         <path data-edge-from="api" data-edge-to="db" data-edge-label="state docs, enqueue" data-edge-key="1" data-edge-id="api-db" data-composition-points="450,272;560,272" d="M 450 272 L 560 272" class="a-emphasis" stroke-width="1.8" marker-end="url(#arrowhead-emphasis)"/>
         <path data-edge-from="db" data-edge-to="worker" data-edge-label="Procrastinate drain" data-edge-key="2" data-edge-id="db-worker" data-composition-points="710,272;820,272" d="M 710 272 L 820 272" class="a-emphasis" stroke-width="1.8" marker-end="url(#arrowhead-emphasis)"/>
-        <path data-edge-from="api" data-edge-to="worker" data-edge-label="wake: SSE channel or Railway redeploy" data-edge-key="3" data-edge-id="api-wake" data-composition-points="382,240;382,216;895,216;895,240" d="M 382 240 L 382 224 Q 382 216 390 216 L 887 216 Q 895 216 895 224 L 895 240" class="a-dashed" stroke-width="1.5" marker-end="url(#arrowhead-dashed)"/>
+        <path data-edge-from="api" data-edge-to="worker" data-edge-label="wake: bucket marker or SSE, or Cloud Run jobs.run" data-edge-key="3" data-edge-id="api-wake" data-composition-points="382,240;382,216;895,216;895,240" d="M 382 240 L 382 224 Q 382 216 390 216 L 887 216 Q 895 216 895 224 L 895 240" class="a-dashed" stroke-width="1.5" marker-end="url(#arrowhead-dashed)"/>
         <path data-edge-from="worker" data-edge-to="engine" data-edge-label="detect beep, shots" data-edge-key="4" data-edge-id="worker-engine" data-composition-points="970,272;1080,272" d="M 970 272 L 1080 272" class="a-emphasis" stroke-width="1.8" marker-end="url(#arrowhead-emphasis)"/>
         <path data-edge-from="worker" data-edge-to="exports" data-edge-label="export jobs" data-edge-key="5" data-edge-id="worker-exports" data-composition-points="895,304;895,420" d="M 895 304 L 895 420" class="a-default" stroke-width="1.5" marker-end="url(#arrowhead)"/>
         <path data-edge-from="engine" data-edge-to="ffmpeg" data-edge-label="audio extract -ss/-t" data-edge-key="6" data-edge-id="engine-ffmpeg" data-composition-points="1155,304;1155,420" d="M 1155 304 L 1155 420" class="a-default" stroke-width="1.5" marker-end="url(#arrowhead)"/>
@@ -5215,8 +5215,8 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
         <text data-detail="context" x="115" y="286" class="t-muted" font-size="9" text-anchor="middle">React / Vite</text>
         </g>
 
-        <g id="node-api" data-node-id="api" data-node-label="FastAPI server" tabindex="0" role="button" aria-label="Focus FastAPI server, splitsmith serve / ui, Serve tier: Railway + Neon + R2" aria-pressed="false" data-node-kind="backend" data-node-sublabel="splitsmith serve / ui" data-node-context="Serve tier: Railway + Neon + R2">
-          <title>FastAPI server · splitsmith serve / ui · Serve tier: Railway + Neon + R2</title>
+        <g id="node-api" data-node-id="api" data-node-label="FastAPI server" tabindex="0" role="button" aria-label="Focus FastAPI server, splitsmith serve / ui, Serve tier: Cloud Run + Neon + R2" aria-pressed="false" data-node-kind="backend" data-node-sublabel="splitsmith serve / ui" data-node-context="Serve tier: Cloud Run + Neon + R2">
+          <title>FastAPI server · splitsmith serve / ui · Serve tier: Cloud Run + Neon + R2</title>
           <rect x="300" y="240" width="150" height="64" rx="6" class="c-mask"/>
           <rect x="300" y="240" width="150" height="64" rx="6" class="c-backend" stroke-width="1.5"/>
           <g aria-hidden="true" data-semantic-sigil="backend" class="semantic-sigil s-backend" transform="translate(306 246) scale(0.6875)">
@@ -5226,8 +5226,8 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
         <text data-detail="context" x="375" y="286" class="t-muted" font-size="9" text-anchor="middle">splitsmith serve / ui</text>
         </g>
 
-        <g id="node-db" data-node-id="db" data-node-label="Postgres" tabindex="0" role="button" aria-label="Focus Postgres, Neon; SQLite on desktop, Serve tier: Railway + Neon + R2" aria-pressed="false" data-node-kind="database" data-node-sublabel="Neon; SQLite on desktop" data-node-tag="state_docs + jobs" data-node-context="Serve tier: Railway + Neon + R2">
-          <title>Postgres · Neon; SQLite on desktop · Serve tier: Railway + Neon + R2 · state_docs + jobs</title>
+        <g id="node-db" data-node-id="db" data-node-label="Postgres" tabindex="0" role="button" aria-label="Focus Postgres, Neon; SQLite on desktop, Serve tier: Cloud Run + Neon + R2" aria-pressed="false" data-node-kind="database" data-node-sublabel="Neon; SQLite on desktop" data-node-tag="state_docs + jobs" data-node-context="Serve tier: Cloud Run + Neon + R2">
+          <title>Postgres · Neon; SQLite on desktop · Serve tier: Cloud Run + Neon + R2 · state_docs + jobs</title>
           <rect x="560" y="240" width="150" height="64" rx="6" class="c-mask"/>
           <rect x="560" y="240" width="150" height="64" rx="6" class="c-database" stroke-width="1.5"/>
           <g aria-hidden="true" data-semantic-sigil="database" class="semantic-sigil s-database" transform="translate(566 246) scale(0.6875)">
@@ -5239,15 +5239,15 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
         <text data-detail="fine" x="635" y="296" class="t-database" font-size="7" text-anchor="middle">state_docs + jobs</text>
         </g>
 
-        <g id="node-worker" data-node-id="worker" data-node-label="Compute worker" tabindex="0" role="button" aria-label="Focus Compute worker, Railway or self-hosted agent, Compute tier: one worker per job" aria-pressed="false" data-node-kind="backend" data-node-sublabel="Railway or self-hosted agent" data-node-context="Compute tier: one worker per job">
-          <title>Compute worker · Railway or self-hosted agent · Compute tier: one worker per job</title>
+        <g id="node-worker" data-node-id="worker" data-node-label="Compute worker" tabindex="0" role="button" aria-label="Focus Compute worker, Cloud Run job or self-hosted agent, Compute tier: one worker per job" aria-pressed="false" data-node-kind="backend" data-node-sublabel="Cloud Run job or self-hosted agent" data-node-context="Compute tier: one worker per job">
+          <title>Compute worker · Cloud Run job or self-hosted agent · Compute tier: one worker per job</title>
           <rect x="820" y="240" width="150" height="64" rx="6" class="c-mask"/>
           <rect x="820" y="240" width="150" height="64" rx="6" class="c-backend" stroke-width="1.5"/>
           <g aria-hidden="true" data-semantic-sigil="backend" class="semantic-sigil s-backend" transform="translate(826 246) scale(0.6875)">
             <path d="M6 3 3 8l3 5M10 3l3 5-3 5"/>
           </g>
           <text data-node-label="" data-detail-anchor="" x="895" y="270" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">Compute worker</text>
-        <text data-detail="context" x="895" y="286" class="t-muted" font-size="8.4" text-anchor="middle">Railway or self-hosted agent</text>
+        <text data-detail="context" x="895" y="286" class="t-muted" font-size="8.4" text-anchor="middle">Cloud Run job or self-hosted agent</text>
         </g>
 
         <g id="node-engine" data-node-id="engine" data-node-label="Detection engine" tabindex="0" role="button" aria-label="Focus Detection engine, beep + 3-voter shot ensemble, Compute tier: one worker per job" aria-pressed="false" data-node-kind="backend" data-node-sublabel="beep + 3-voter shot ensemble" data-node-tag="ONNX, pure modules" data-node-context="Compute tier: one worker per job">
@@ -5262,8 +5262,8 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
         <text data-detail="fine" x="1155" y="296" class="t-backend" font-size="7" text-anchor="middle">ONNX, pure modules</text>
         </g>
 
-        <g id="node-storage" data-node-id="storage" data-node-label="Object storage" tabindex="0" role="button" aria-label="Focus Object storage, R2; filesystem on desktop, Serve tier: Railway + Neon + R2" aria-pressed="false" data-node-kind="database" data-node-sublabel="R2; filesystem on desktop" data-node-context="Serve tier: Railway + Neon + R2">
-          <title>Object storage · R2; filesystem on desktop · Serve tier: Railway + Neon + R2</title>
+        <g id="node-storage" data-node-id="storage" data-node-label="Object storage" tabindex="0" role="button" aria-label="Focus Object storage, R2; filesystem on desktop, Serve tier: Cloud Run + Neon + R2" aria-pressed="false" data-node-kind="database" data-node-sublabel="R2; filesystem on desktop" data-node-context="Serve tier: Cloud Run + Neon + R2">
+          <title>Object storage · R2; filesystem on desktop · Serve tier: Cloud Run + Neon + R2</title>
           <rect x="300" y="420" width="150" height="64" rx="6" class="c-mask"/>
           <rect x="300" y="420" width="150" height="64" rx="6" class="c-database" stroke-width="1.5"/>
           <g aria-hidden="true" data-semantic-sigil="database" class="semantic-sigil s-database" transform="translate(306 426) scale(0.6875)">
@@ -5310,9 +5310,9 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
           <rect x="714.4" y="252" width="101.2" height="14" rx="3" class="c-mask"/>
           <text x="765" y="262" class="t-backend" font-size="8" text-anchor="middle">Procrastinate drain</text>
         </g>
-        <g data-detail="context" data-edge-from="api" data-edge-to="worker" data-edge-label="wake: SSE channel or Railway redeploy" data-edge-key="3" data-edge-id="api-wake">
+        <g data-detail="context" data-edge-from="api" data-edge-to="worker" data-edge-label="wake: bucket marker or SSE, or Cloud Run jobs.run" data-edge-key="3" data-edge-id="api-wake">
           <rect x="544.7" y="196" width="187.6" height="14" rx="3" class="c-mask"/>
-          <text x="638.5" y="206" class="t-messagebus" font-size="8" text-anchor="middle">wake: SSE channel or Railway redeploy</text>
+          <text x="638.5" y="206" class="t-messagebus" font-size="8" text-anchor="middle">wake: bucket marker or SSE, or Cloud Run jobs.run</text>
         </g>
         <g data-detail="context" data-edge-from="worker" data-edge-to="engine" data-edge-label="detect beep, shots" data-edge-key="4" data-edge-id="worker-engine">
           <rect x="976.8" y="252" width="96.39999999999999" height="14" rx="3" class="c-mask"/>
@@ -5348,9 +5348,9 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
         </g>
 
         <!-- Boundary labels (foreground masks keep routes out of titles) -->
-        <g data-graph-role="structural-frame-label" data-composition-frame-id="0" data-composition-frame-kind="region" data-composition-frame-label="Serve tier: Railway + Neon + R2">
+        <g data-graph-role="structural-frame-label" data-composition-frame-id="0" data-composition-frame-kind="region" data-composition-frame-label="Serve tier: Cloud Run + Neon + R2">
           <rect data-graph-role="structural-frame-label-mask" x="274" y="220" width="177.4" height="16" rx="3" class="c-mask"/>
-          <text data-boundary-label="" x="278" y="233" class="t-cloud" font-size="9" font-weight="600">Serve tier: Railway + Neon + R2</text>
+          <text data-boundary-label="" x="278" y="233" class="t-cloud" font-size="9" font-weight="600">Serve tier: Cloud Run + Neon + R2</text>
         </g>
 
         <g data-graph-role="structural-frame-label" data-composition-frame-id="1" data-composition-frame-kind="region" data-composition-frame-label="Compute tier: one worker per job">
@@ -5587,7 +5587,7 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
         </div>
         <ul>
           <li>&bull; Postgres is the queue (Procrastinate); no separate broker</li>
-          <li>&bull; Dispatcher wakes the cheapest tier first: self-hosted agent over SSE, Railway redeploy as fallback</li>
+          <li>&bull; Dispatcher wakes the preferred tier first: self-hosted agent (bucket marker or SSE), the Cloud Run worker job as fallback</li>
           <li>&bull; Desktop mode runs the same server on SQLite + filesystem with jobs in-process</li>
         </ul>
       </div>

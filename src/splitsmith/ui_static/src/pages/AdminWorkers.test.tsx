@@ -112,7 +112,7 @@ describe("AdminWorkers", () => {
 
   it("shows no capability badges when none were advertised", async () => {
     vi.mocked(api.adminListWorkers).mockResolvedValue(
-      listResp([worker({ kind: "railway", info: {} })]),
+      listResp([worker({ kind: "cloud_run", info: {} })]),
     );
     render(<AdminWorkers />);
     await screen.findByText("v0.25.0");

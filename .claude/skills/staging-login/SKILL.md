@@ -5,8 +5,10 @@ description: Use when the user asks for a staging login link, wants to sign in t
 
 # Staging login link
 
-Staging never sends real mail -- magic links land in the Railway serve
-logs. `scripts/staging_login_link.py` mints one and prints it:
+Staging never sends real mail -- magic links land in the staging serve
+service's logs (Cloud Run, `splitsmith-serve-staging`, project
+`splitsmith-hosting`). `scripts/staging_login_link.py` mints one and
+prints it:
 
 ```bash
 uv run python scripts/staging_login_link.py [email]   # default: m@thias.se
@@ -15,18 +17,18 @@ uv run python scripts/staging_login_link.py [email]   # default: m@thias.se
 Paste the printed URL to the user. It is **single-use** and expires in
 **15 minutes**; mint a fresh one on any failure or reuse.
 
-Requirements: an authenticated Railway CLI (`railway` on PATH or
-`~/.railway/bin/railway`) linked to the `splitsmith` project.
-(`railway status` showing "Linked service: None" is normal -- only the
-project/environment link matters.) If the
-CLI is missing or unauthenticated (typical in cloud sessions), say so
-and ask the user to run `railway login` -- there is no other way to
-read the staging logs.
+Requirements: an authenticated gcloud CLI (`gcloud auth login`) that can
+read the project's logs. If gcloud is missing or unauthenticated
+(typical in cloud sessions), say so and ask the user to run
+`gcloud auth login` -- there is no other way to read the staging logs.
 
 If the script fails after login checks out, debug from its two moving
-parts: `POST https://my.staging.splitsmith.app/api/v1/auth/begin`
-(mints the link) and `railway logs -d --lines 200 --since 15m -s serve
--e staging --filter '@logger:splitsmith.db.email'` (must show a
-`MAGIC_LINK <email> <url>` line). Keep the `--filter`: unfiltered tails
-and streams serve records pre-normalization, where the structured
-line's message is empty (#711).
+parts: `POST https://my.staging.splitsmith.app/api/v1/auth/begin` (mints
+the link; the first request after idle cold-starts serve, which can take
+most of a minute) and
+
+```bash
+gcloud logging read 'resource.type="cloud_run_revision" AND resource.labels.service_name="splitsmith-serve-staging" AND jsonPayload.logger="splitsmith.db.email"' --project splitsmith-hosting --freshness 15m --limit 5
+```
+
+which must show a `MAGIC_LINK <email> <url>` line in `jsonPayload.message`.

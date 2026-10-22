@@ -207,7 +207,8 @@ erDiagram
   `share_token_id` is the moderation primitive: every comment that came
   through one link is one query.
 - `workers` has no `user_id`: compute targets belong to the deployment, not
-  a tenant. The `kind='railway'` row is seeded from env vars; self-hosted
+  a tenant. The `kind='cloud_run'` row (the worker job) is seeded when
+  `SPLITSMITH_WORKER_JOB` is set; self-hosted
   agents register through `POST /api/workers/register`.
 - Column types are shown as SQLAlchemy reports them (`varchar`, `json`,
   `datetime`). `state_docs.doc` is JSONB on Postgres (generic JSON

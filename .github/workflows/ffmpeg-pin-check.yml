@@ -3,7 +3,7 @@ name: ffmpeg pin check
 # The Dockerfiles download ffmpeg from a mirror release on this repo
 # (ffmpeg-linux-<date>, made by scripts/mirror_ffmpeg_linux.sh). CI never
 # builds the image, so a pin that does not resolve would only show up as a
-# red Railway deploy and GHCR publish after merge (#962, and again when BtbN
+# red GHCR publish (and so no deploy) after merge (#962, and again when BtbN
 # pruned autobuild-2026-09-10-15-31 after 17 days). This job checks that:
 #
 #   - both Dockerfiles pin the same release and the same files;

@@ -1,5 +1,11 @@
 # SaaS readiness
 
+> **2026-10-22: hosting moved from Railway to Google Cloud Run.** Where these
+> docs say Railway, read them as the design record of that time. The live
+> setup: serve as a Cloud Run service, the one-shot worker as a Cloud Run Job
+> started on enqueue, self-hosted boxes woken through a bucket marker
+> (`deploy/cloudrun/`, `.claude/rules/hosted.md`, SPEC "Hosted deployment").
+
 Architecture doc set for adding a hosted SaaS option to Splitsmith
 without breaking the local-first desktop app.
 

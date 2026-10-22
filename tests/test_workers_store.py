@@ -127,42 +127,42 @@ def test_delete_self_hosted_returns_true() -> None:
     assert asyncio.run(store.get(record.id)) is None
 
 
-# - delete() refuses kind="railway" and returns False
-def test_delete_refuses_railway() -> None:
+# - delete() refuses the platform row (kind="cloud_run") and returns False
+def test_delete_refuses_the_platform_row() -> None:
     store = _fresh_store()
-    asyncio.run(store.ensure_railway_row())
+    asyncio.run(store.ensure_platform_row("cloud_run"))
     workers = asyncio.run(store.list())
-    railway = next(w for w in workers if w.kind == "railway")
-    assert asyncio.run(store.delete(railway.id)) is False
+    platform = next(w for w in workers if w.kind == "cloud_run")
+    assert asyncio.run(store.delete(platform.id)) is False
     # Row still present
-    assert asyncio.run(store.get(railway.id)) is not None
+    assert asyncio.run(store.get(platform.id)) is not None
 
 
-# - ensure_railway_row() is idempotent and preserves a flipped enabled=False
-def test_ensure_railway_row_idempotent_and_preserves_enabled() -> None:
+# - ensure_platform_row("cloud_run") is idempotent and preserves a flipped enabled=False
+def test_ensure_platform_row_idempotent_and_preserves_enabled() -> None:
     store = _fresh_store()
-    asyncio.run(store.ensure_railway_row())
+    asyncio.run(store.ensure_platform_row("cloud_run"))
     workers = asyncio.run(store.list())
-    railway_rows = [w for w in workers if w.kind == "railway"]
-    assert len(railway_rows) == 1
-    railway = railway_rows[0]
-    assert railway.name == "railway"
-    assert railway.enabled is True
-    assert railway.priority == 100
-    assert railway.registered is True  # seeded as registered so list_enabled includes it
+    platform_rows = [w for w in workers if w.kind == "cloud_run"]
+    assert len(platform_rows) == 1
+    platform = platform_rows[0]
+    assert platform.name == "cloud_run"
+    assert platform.enabled is True
+    assert platform.priority == 100
+    assert platform.registered is True  # seeded as registered so list_enabled includes it
     # Flip enabled off
-    asyncio.run(store.update(railway.id, enabled=False))
+    asyncio.run(store.update(platform.id, enabled=False))
     # Call ensure again - must NOT reset enabled back to True
-    asyncio.run(store.ensure_railway_row())
+    asyncio.run(store.ensure_platform_row("cloud_run"))
     workers2 = asyncio.run(store.list())
-    railway2 = next(w for w in workers2 if w.kind == "railway")
-    assert railway2.enabled is False  # preserved
+    platform2 = next(w for w in workers2 if w.kind == "cloud_run")
+    assert platform2.enabled is False  # preserved
     # Still only one row
-    assert len([w for w in workers2 if w.kind == "railway"]) == 1
+    assert len([w for w in workers2 if w.kind == "cloud_run"]) == 1
 
 
-# - list_enabled() excludes disabled, excludes unregistered self-hosted, includes railway
-def test_list_enabled_excludes_disabled_and_unregistered_but_includes_railway() -> None:
+# - list_enabled() excludes disabled, excludes unregistered self-hosted, includes the platform row
+def test_list_enabled_excludes_disabled_and_unregistered_but_includes_the_platform_row() -> None:
     store = _fresh_store()
     # Create registered worker
     record_r, reg_token_r = asyncio.run(store.create_self_hosted("worker-registered", priority=5))
@@ -173,14 +173,14 @@ def test_list_enabled_excludes_disabled_and_unregistered_but_includes_railway() 
     record_d, reg_token_d = asyncio.run(store.create_self_hosted("worker-disabled", priority=7))
     asyncio.run(store.register(reg_token_d, {}))
     asyncio.run(store.update(record_d.id, enabled=False))
-    # Ensure railway row
-    asyncio.run(store.ensure_railway_row())
+    # Ensure the platform row
+    asyncio.run(store.ensure_platform_row("cloud_run"))
     enabled = asyncio.run(store.list_enabled())
     names = {w.name for w in enabled}
     # Registered + enabled self-hosted should appear
     assert "worker-registered" in names
-    # Railway should appear even though it was "registered" synthetically
-    assert "railway" in names
+    # The platform row appears even though it was "registered" synthetically
+    assert "cloud_run" in names
     # Disabled and unregistered must NOT appear
     assert "worker-disabled" not in names
     assert "worker-unregistered" not in names
@@ -249,19 +249,19 @@ def test_touch_seen_without_version_preserves_existing_version() -> None:
     assert updated.version == "1.0.0"
 
 
-# - ensure_railway_row(version=...) stamps the version on create AND on an
+# - ensure_platform_row("cloud_run", version=...) stamps the version on create AND on an
 #   already-existing row, without disturbing operator enabled/priority settings
-def test_ensure_railway_row_stamps_version_create_and_existing() -> None:
+def test_ensure_platform_row_stamps_version_create_and_existing() -> None:
     store = _fresh_store()
-    asyncio.run(store.ensure_railway_row(version="0.8.4"))
-    railway = next(w for w in asyncio.run(store.list()) if w.kind == "railway")
-    assert railway.version == "0.8.4"
+    asyncio.run(store.ensure_platform_row("cloud_run", version="0.8.4"))
+    platform = next(w for w in asyncio.run(store.list()) if w.kind == "cloud_run")
+    assert platform.version == "0.8.4"
     # Operator flips it off; a redeploy at a newer version calls ensure again
-    asyncio.run(store.update(railway.id, enabled=False))
-    asyncio.run(store.ensure_railway_row(version="0.9.0"))
-    railway2 = next(w for w in asyncio.run(store.list()) if w.kind == "railway")
-    assert railway2.version == "0.9.0"  # refreshed to the running deploy
-    assert railway2.enabled is False  # operator setting preserved
+    asyncio.run(store.update(platform.id, enabled=False))
+    asyncio.run(store.ensure_platform_row("cloud_run", version="0.9.0"))
+    platform2 = next(w for w in asyncio.run(store.list()) if w.kind == "cloud_run")
+    assert platform2.version == "0.9.0"  # refreshed to the running deploy
+    assert platform2.enabled is False  # operator setting preserved
 
 
 # - touch_wake() updates last_wake_at for each id in the list

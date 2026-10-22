@@ -32,7 +32,8 @@ fonts, brand, one HTML template per card slot) plus its templates.
 
 - **Custom templates are desktop only, by decision.** A template is code; hosted
   would run it beside the database and R2 credentials, and Chromium's OS sandbox
-  cannot start on Railway (seccomp refuses user namespaces). On hosted a Look
+  could not start on the former Railway host (seccomp refused user namespaces;
+  not re-tested on Cloud Run, and the decision does not depend on it). On hosted a Look
   carries colours, catalog fonts and card styles, never a template. Do not build
   a hosted render service or relax any local-only guard (`LOCAL_ONLY_ROUTES`,
   `db.looks._check_hosted`) without the user asking.

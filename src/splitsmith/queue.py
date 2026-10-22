@@ -480,7 +480,7 @@ def _attach_procrastinate_logging() -> None:
     procrastinate's records propagate to a bare root logger left at WARNING,
     so a deployed worker's drain lifecycle ("Starting worker", "No job found.
     Stopping worker because wait=False") is invisible - a silent clean exit
-    is indistinguishable from a hang in Railway logs (observed live,
+    is indistinguishable from a hang in the platform's logs (observed live,
     2026-07-03). Reuses the handler objects marked ``_splitsmith_stdout`` so
     hosted-mode JSON formatting stays consistent. Idempotent.
     """
@@ -510,7 +510,7 @@ async def run_worker(
     returns. The one-shot mode is what lets the Postgres compute scale to
     zero between runs -- an always-connected worker polls the queue often
     enough that Neon's idle-suspend window never opens, so a periodic
-    ``wait=False`` drain (Railway cron) trades a little pickup latency for an
+    ``wait=False`` drain (the Cloud Run Job) trades a little pickup latency for an
     idle DB that actually suspends. See ``splitsmith worker --one-shot``.
 
     ``queues=None`` (the default) subscribes to **every** queue --

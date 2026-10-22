@@ -258,7 +258,7 @@ def test_programming_error_is_not_in_the_transient_set() -> None:
 
 
 def test_retry_logs_each_attempt_to_stderr(capsys) -> None:
-    """The flake has to be visible in the Railway deploy log.
+    """The flake has to be visible in the deploy log.
 
     Without this, both ``print`` calls can be deleted and every other
     test still passes -- and a deploy that survived on the third try

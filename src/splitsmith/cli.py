@@ -628,8 +628,8 @@ def serve(
         if result.returncode != 0:
             console.print("[red]alembic upgrade head failed[/] -- see the migration output above.")
             if not _os.environ.get("SPLITSMITH_MIGRATION_DATABASE_URL"):
-                # The hosted deploy migrates as the schema owner before
-                # ``railway up``; the runtime role cannot run DDL, so a
+                # The hosted deploy migrates as the schema owner before it
+                # deploys; the runtime role cannot run DDL, so a
                 # pending migration here means that step did not run.
                 console.print(
                     "If the runtime connects as a least-privilege role, migrations run as the "
@@ -659,7 +659,7 @@ def worker(
     one_shot: bool = typer.Option(
         False,
         "--one-shot",
-        help="Drain the jobs already queued, then exit (Railway cron mode). "
+        help="Drain the jobs already queued, then exit (the Cloud Run Job mode). "
         "Default is a long-lived worker that blocks for new jobs.",
     ),
 ) -> None:
@@ -674,7 +674,7 @@ def worker(
 
     - default (long-lived) -- blocks on LISTEN/NOTIFY and drains forever.
     - ``--one-shot`` -- processes the currently-queued jobs and exits.
-      Run it on a schedule (Railway cron) so nothing holds a Postgres
+      Run it as a job started on demand (the Cloud Run Job) so nothing holds a Postgres
       connection between runs and the Neon compute can scale to zero. An
       always-on worker polls often enough to keep the DB awake 24/7; the
       one-shot drain trades up-to-interval pickup latency for a DB that

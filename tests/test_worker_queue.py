@@ -263,7 +263,7 @@ def test_attach_procrastinate_logging_shares_stdout_handler() -> None:
     """The worker must make procrastinate's INFO logs visible: only the
     ``splitsmith`` logger gets a stdout handler, so procrastinate records
     propagate to a bare root logger at WARNING and vanish - a clean drain
-    is then indistinguishable from a hang in Railway logs."""
+    is then indistinguishable from a hang in the platform's logs."""
     import logging
 
     from splitsmith.queue import _attach_procrastinate_logging
@@ -344,7 +344,7 @@ def test_run_worker_retries_db_connect_then_drains(monkeypatch: pytest.MonkeyPat
 
 def test_worker_command_one_shot_passes_wait_false(monkeypatch: pytest.MonkeyPatch) -> None:
     """``splitsmith worker --one-shot`` runs the drain with ``wait=False`` so a
-    Railway cron run exits once the queue is empty instead of blocking."""
+    worker job run exits once the queue is empty instead of blocking."""
     captured: dict[str, object] = {}
 
     async def _fake_run_worker(_db_url: str, *, concurrency: int = 1, wait: bool = True) -> None:

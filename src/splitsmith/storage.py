@@ -131,8 +131,8 @@ class Storage(Protocol):
     # -- Presigned multipart upload (large files, direct browser->store) --
     #
     # The client uploads parts straight to the store via presigned URLs, so
-    # multi-GB raw footage never streams through the API process (which on
-    # Railway 502s past a few hundred MB). Hosted-only: only S3Storage
+    # multi-GB raw footage never streams through the API process (Cloud Run
+    # refuses a request body over 32 MiB). Hosted-only: only S3Storage
     # implements it; the filesystem stand-in raises NotImplementedError.
 
     def create_multipart_upload(self, path: str) -> str:

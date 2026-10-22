@@ -1,14 +1,13 @@
 """Unit tests for the worker dispatcher - no network, httpx.MockTransport only.
 
 Self-hosted legs run against a real WakeChannelRegistry and an in-memory
-SQLite WorkersStore (same harness as test_workers_store.py); the Railway
+SQLite WorkersStore (same harness as test_workers_store.py); the Cloud Run
 leg is mocked at the httpx transport.
 """
 
 from __future__ import annotations
 
 import asyncio
-import json
 from typing import Any
 
 import httpx
@@ -18,28 +17,20 @@ from splitsmith.db import Base, create_engine, sessionmaker
 from splitsmith.db.workers import WorkersStore
 from splitsmith.worker_channel import WakeChannelRegistry
 from splitsmith.worker_trigger import (
-    ENV_RAILWAY_ENVIRONMENT_ID,
-    ENV_TRIGGER_TOKEN,
-    ENV_WORKER_ENVIRONMENT_ID,
+    ENV_WAKE_CHANNEL,
+    ENV_WORKER_JOB,
     ENV_WORKER_LAUNCHER,
-    ENV_WORKER_SERVICE_ID,
-    RailwayLauncherConfig,
+    GCP_METADATA_TOKEN_URL,
+    CloudRunJobConfig,
     WorkerDispatcher,
     build_worker_dispatcher,
-    load_railway_config,
     make_boot_retrigger,
     make_pending_jobs_counter,
     make_worker_active_checker,
     wrap_deferrer,
 )
 
-_ALL_ENV_VARS = (
-    ENV_WORKER_LAUNCHER,
-    ENV_TRIGGER_TOKEN,
-    ENV_WORKER_SERVICE_ID,
-    ENV_WORKER_ENVIRONMENT_ID,
-    ENV_RAILWAY_ENVIRONMENT_ID,
-)
+_ALL_ENV_VARS = (ENV_WORKER_LAUNCHER, ENV_WORKER_JOB, ENV_WAKE_CHANNEL)
 
 
 def _clear_env(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -47,58 +38,21 @@ def _clear_env(monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.delenv(var, raising=False)
 
 
-def test_load_railway_config_disabled_when_env_absent(monkeypatch: pytest.MonkeyPatch) -> None:
-    _clear_env(monkeypatch)
-    assert load_railway_config() is None
+JOB = "projects/p/locations/europe-west1/jobs/splitsmith-worker-test"
 
 
-def test_load_railway_config_disabled_when_partial(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Token without a service id (or vice versa) must not half-enable the leg."""
-    _clear_env(monkeypatch)
-    monkeypatch.setenv(ENV_TRIGGER_TOKEN, "tok")
-    assert load_railway_config() is None
-
-
-def test_load_railway_config_reads_env(monkeypatch: pytest.MonkeyPatch) -> None:
-    _clear_env(monkeypatch)
-    monkeypatch.setenv(ENV_TRIGGER_TOKEN, "tok")
-    monkeypatch.setenv(ENV_WORKER_SERVICE_ID, "svc-id")
-    monkeypatch.setenv(ENV_WORKER_ENVIRONMENT_ID, "env-id")
-    config = load_railway_config()
-    assert config is not None
-    assert (config.token, config.service_id, config.environment_id) == ("tok", "svc-id", "env-id")
-
-
-def test_load_railway_config_falls_back_to_railway_env_id(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Railway injects RAILWAY_ENVIRONMENT_ID into every container; the
-    SPLITSMITH_ override exists only for running outside Railway."""
-    _clear_env(monkeypatch)
-    monkeypatch.setenv(ENV_TRIGGER_TOKEN, "tok")
-    monkeypatch.setenv(ENV_WORKER_SERVICE_ID, "svc-id")
-    monkeypatch.setenv(ENV_RAILWAY_ENVIRONMENT_ID, "railway-env-id")
-    config = load_railway_config()
-    assert config is not None
-    assert config.environment_id == "railway-env-id"
-
-
-# ---------------------------------------------------------------------------
-# Dispatcher harness
-# ---------------------------------------------------------------------------
-
-
-def _config(**overrides: Any) -> RailwayLauncherConfig:
-    base: dict[str, Any] = {"token": "tok", "service_id": "svc", "environment_id": "env"}
-    base.update(overrides)
-    return RailwayLauncherConfig(**base)
+def _config() -> CloudRunJobConfig:
+    return CloudRunJobConfig(job=JOB)
 
 
 def _transport(requests: list[dict[str, Any]]) -> httpx.MockTransport:
-    """Ack the redeploy mutation, recording every GraphQL request body."""
+    """Hand out a metadata-server token and ack jobs.run, recording each job start."""
 
     def handler(request: httpx.Request) -> httpx.Response:
-        body = json.loads(request.content)
-        requests.append(body)
-        return httpx.Response(200, json={"data": {"serviceInstanceRedeploy": True}})
+        if str(request.url) == GCP_METADATA_TOKEN_URL:
+            return httpx.Response(200, json={"access_token": "sa-token", "expires_in": 3600})
+        requests.append({"method": request.method, "url": str(request.url)})
+        return httpx.Response(200, json={"name": "operations/op"})
 
     return httpx.MockTransport(handler)
 
@@ -143,9 +97,9 @@ async def _add_home(
     return record.id
 
 
-async def _railway_row_id(store: WorkersStore) -> str:
-    await store.ensure_railway_row()
-    rows = [w for w in await store.list() if w.kind == "railway"]
+async def _platform_row_id(store: WorkersStore) -> str:
+    await store.ensure_platform_row("cloud_run")
+    rows = [w for w in await store.list() if w.kind == "cloud_run"]
     assert len(rows) == 1
     return rows[0].id
 
@@ -154,7 +108,7 @@ def _dispatcher(
     store: WorkersStore,
     registry: WakeChannelRegistry,
     *,
-    railway: RailwayLauncherConfig | None,
+    cloud_run: CloudRunJobConfig | None,
     requests: list[dict[str, Any]] | None = None,
     transport: httpx.AsyncBaseTransport | None = None,
     worker_active: Any = None,
@@ -169,7 +123,7 @@ def _dispatcher(
     return WorkerDispatcher(
         store,
         registry,
-        railway=railway,
+        cloud_run=cloud_run,
         worker_active=worker_active,
         pending_jobs=pending_jobs if pending_jobs is not None else _pending(0),
         grace_seconds=grace_seconds,
@@ -187,18 +141,18 @@ async def _drain_tasks(dispatcher: WorkerDispatcher) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_dispatcher_wakes_connected_home_worker_not_railway() -> None:
+def test_dispatcher_wakes_connected_home_worker_not_cloud_run() -> None:
     """A connected self-hosted worker at a higher priority absorbs the wake;
-    the Railway leg is never touched."""
+    the Cloud Run leg is never touched."""
     store = _fresh_store()
     requests: list[dict[str, Any]] = []
 
     async def scenario() -> tuple[bool, int, Any]:
         home_id = await _add_home(store)
-        await _railway_row_id(store)
+        await _platform_row_id(store)
         registry = WakeChannelRegistry()
         queue = registry.connect(home_id)
-        dispatcher = _dispatcher(store, registry, railway=_config(), requests=requests)
+        dispatcher = _dispatcher(store, registry, cloud_run=_config(), requests=requests)
         fired = await dispatcher.trigger()
         woken = await store.get(home_id)
         assert woken is not None
@@ -213,17 +167,17 @@ def test_dispatcher_wakes_connected_home_worker_not_railway() -> None:
 
 def test_dispatcher_prefers_higher_priority_worker() -> None:
     """Higher priority number wins (matches the register-worker copy). A
-    connected self-hosted worker at priority 500 outranks the railway row
-    at 100, so it absorbs the wake and the Railway leg is never touched."""
+    connected self-hosted worker at priority 500 outranks the cloud_run row
+    at 100, so it absorbs the wake and the Cloud Run leg is never touched."""
     store = _fresh_store()
     requests: list[dict[str, Any]] = []
 
     async def scenario() -> tuple[bool, int, Any]:
         home_id = await _add_home(store, priority=500)
-        await _railway_row_id(store)  # railway seeded at priority 100
+        await _platform_row_id(store)  # cloud_run seeded at priority 100
         registry = WakeChannelRegistry()
         queue = registry.connect(home_id)
-        dispatcher = _dispatcher(store, registry, railway=_config(), requests=requests)
+        dispatcher = _dispatcher(store, registry, cloud_run=_config(), requests=requests)
         fired = await dispatcher.trigger()
         woken = await store.get(home_id)
         assert woken is not None
@@ -233,41 +187,39 @@ def test_dispatcher_prefers_higher_priority_worker() -> None:
     assert fired is True
     assert qsize == 1  # home (priority 500) absorbed the wake
     assert last_wake_at is not None
-    assert requests == []  # railway (priority 100) never redeployed
+    assert requests == []  # cloud_run (priority 100) never started
 
 
-def test_dispatcher_falls_through_to_railway_when_home_disconnected() -> None:
+def test_dispatcher_falls_through_to_cloud_run_when_home_disconnected() -> None:
     """A registered-but-disconnected home worker cannot absorb the wake;
-    the tier falls through to the Railway tier immediately."""
+    the tier falls through to the Cloud Run tier immediately."""
     store = _fresh_store()
     requests: list[dict[str, Any]] = []
 
     async def scenario() -> tuple[bool, Any]:
         await _add_home(store)
-        railway_id = await _railway_row_id(store)
-        dispatcher = _dispatcher(store, WakeChannelRegistry(), railway=_config(), requests=requests)
+        platform_id = await _platform_row_id(store)
+        dispatcher = _dispatcher(store, WakeChannelRegistry(), cloud_run=_config(), requests=requests)
         fired = await dispatcher.trigger()
-        row = await store.get(railway_id)
+        row = await store.get(platform_id)
         assert row is not None
         return fired, row.last_wake_at
 
     fired, last_wake_at = asyncio.run(scenario())
     assert fired is True
-    assert len(requests) == 1
-    assert "serviceInstanceRedeploy" in requests[0]["query"]
-    assert requests[0]["variables"] == {"serviceId": "svc", "environmentId": "env"}
+    assert requests == [{"method": "POST", "url": f"https://run.googleapis.com/v2/{JOB}:run"}]
     assert last_wake_at is not None
 
 
-def test_dispatcher_disabled_railway_row_never_called() -> None:
-    """The operator disabling the railway row wins over the env config."""
+def test_dispatcher_disabled_platform_row_never_called() -> None:
+    """The operator disabling the platform row wins over the env config."""
     store = _fresh_store()
     requests: list[dict[str, Any]] = []
 
     async def scenario() -> bool:
-        railway_id = await _railway_row_id(store)
-        await store.update(railway_id, enabled=False)
-        dispatcher = _dispatcher(store, WakeChannelRegistry(), railway=_config(), requests=requests)
+        platform_id = await _platform_row_id(store)
+        await store.update(platform_id, enabled=False)
+        dispatcher = _dispatcher(store, WakeChannelRegistry(), cloud_run=_config(), requests=requests)
         return await dispatcher.trigger()
 
     assert asyncio.run(scenario()) is False
@@ -275,13 +227,13 @@ def test_dispatcher_disabled_railway_row_never_called() -> None:
 
 
 def test_dispatcher_returns_false_when_nothing_wakeable() -> None:
-    """No railway config + no connected homes: nothing woken, trigger False."""
+    """No job configured + no connected homes: nothing woken, trigger False."""
     store = _fresh_store()
 
     async def scenario() -> tuple[bool, Any]:
         home_id = await _add_home(store)
-        await _railway_row_id(store)  # row exists but railway=None (no env config)
-        dispatcher = _dispatcher(store, WakeChannelRegistry(), railway=None)
+        await _platform_row_id(store)  # row exists but cloud_run=None (no env config)
+        dispatcher = _dispatcher(store, WakeChannelRegistry(), cloud_run=None)
         fired = await dispatcher.trigger()
         row = await store.get(home_id)
         assert row is not None
@@ -293,32 +245,36 @@ def test_dispatcher_returns_false_when_nothing_wakeable() -> None:
 
 
 def test_dispatcher_swallows_transport_errors() -> None:
-    """A Railway outage must never fail (or slow) the enqueue path."""
+    """A Cloud Run outage must never fail (or slow) the enqueue path."""
     store = _fresh_store()
 
     def handler(request: httpx.Request) -> httpx.Response:
-        raise httpx.ConnectError("railway down", request=request)
+        raise httpx.ConnectError("cloud run down", request=request)
 
     async def scenario() -> bool:
-        await _railway_row_id(store)
+        await _platform_row_id(store)
         dispatcher = _dispatcher(
-            store, WakeChannelRegistry(), railway=_config(), transport=httpx.MockTransport(handler)
+            store, WakeChannelRegistry(), cloud_run=_config(), transport=httpx.MockTransport(handler)
         )
         return await dispatcher.trigger()
 
     assert asyncio.run(scenario()) is False
 
 
-def test_dispatcher_treats_graphql_errors_as_failure() -> None:
+def test_dispatcher_treats_a_refused_job_start_as_failure() -> None:
+    """jobs.run answering 403 (say, the invoker grant is missing) is a failed
+    wake, not a fired one; the nets drain the queue later."""
     store = _fresh_store()
 
     def handler(request: httpx.Request) -> httpx.Response:
-        return httpx.Response(200, json={"errors": [{"message": "Unauthorized"}]})
+        if str(request.url) == GCP_METADATA_TOKEN_URL:
+            return httpx.Response(200, json={"access_token": "sa-token", "expires_in": 3600})
+        return httpx.Response(403, json={"error": {"status": "PERMISSION_DENIED"}})
 
     async def scenario() -> bool:
-        await _railway_row_id(store)
+        await _platform_row_id(store)
         dispatcher = _dispatcher(
-            store, WakeChannelRegistry(), railway=_config(), transport=httpx.MockTransport(handler)
+            store, WakeChannelRegistry(), cloud_run=_config(), transport=httpx.MockTransport(handler)
         )
         return await dispatcher.trigger()
 
@@ -337,7 +293,7 @@ def test_dispatcher_cooldown_suppresses_burst() -> None:
         home_id = await _add_home(store)
         registry = WakeChannelRegistry()
         queue = registry.connect(home_id)
-        dispatcher = _dispatcher(store, registry, railway=None)
+        dispatcher = _dispatcher(store, registry, cloud_run=None)
         first = await dispatcher.trigger()
         second = await dispatcher.trigger()
         return first, second, queue.qsize()
@@ -350,16 +306,18 @@ def test_dispatcher_cooldown_suppresses_burst() -> None:
 
 def test_dispatcher_skips_while_worker_active() -> None:
     """A live heartbeat means a drain is in flight; waking anything now is
-    pointless (self-hosted) or dangerous (Railway redeploy kills the drain)."""
+    pointless (self-hosted) or wasteful (a second job drain beside the live one)."""
     store = _fresh_store()
     requests: list[dict[str, Any]] = []
 
     async def scenario() -> tuple[bool, int]:
         home_id = await _add_home(store)
-        await _railway_row_id(store)
+        await _platform_row_id(store)
         registry = WakeChannelRegistry()
         queue = registry.connect(home_id)
-        dispatcher = _dispatcher(store, registry, railway=_config(), requests=requests, worker_active=_active)
+        dispatcher = _dispatcher(
+            store, registry, cloud_run=_config(), requests=requests, worker_active=_active
+        )
         fired = await dispatcher.trigger()
         return fired, queue.qsize()
 
@@ -380,9 +338,9 @@ def test_dispatcher_fail_safe_when_checker_raises() -> None:
         raise RuntimeError("db unavailable")
 
     async def scenario() -> bool:
-        await _railway_row_id(store)
+        await _platform_row_id(store)
         dispatcher = _dispatcher(
-            store, WakeChannelRegistry(), railway=_config(), requests=requests, worker_active=_broken
+            store, WakeChannelRegistry(), cloud_run=_config(), requests=requests, worker_active=_broken
         )
         return await dispatcher.trigger()
 
@@ -395,7 +353,7 @@ def test_dispatcher_fail_safe_when_checker_raises() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_grace_escalation_wakes_railway_when_home_stays_idle() -> None:
+def test_grace_escalation_wakes_cloud_run_when_home_stays_idle() -> None:
     """Home worker takes the wake but never starts draining: after
     grace_seconds with jobs still pending, escalate past its tier."""
     store = _fresh_store()
@@ -403,13 +361,13 @@ def test_grace_escalation_wakes_railway_when_home_stays_idle() -> None:
 
     async def scenario() -> bool:
         home_id = await _add_home(store)
-        await _railway_row_id(store)
+        await _platform_row_id(store)
         registry = WakeChannelRegistry()
         registry.connect(home_id)
         dispatcher = _dispatcher(
             store,
             registry,
-            railway=_config(),
+            cloud_run=_config(),
             requests=requests,
             worker_active=_inactive,
             pending_jobs=_pending(1),
@@ -421,7 +379,7 @@ def test_grace_escalation_wakes_railway_when_home_stays_idle() -> None:
         return fired
 
     assert asyncio.run(scenario()) is True
-    assert len(requests) == 1  # escalation fired the Railway leg
+    assert len(requests) == 1  # escalation started the Cloud Run job
 
 
 def test_grace_escalation_skipped_when_worker_became_active() -> None:
@@ -438,13 +396,13 @@ def test_grace_escalation_skipped_when_worker_became_active() -> None:
 
     async def scenario() -> bool:
         home_id = await _add_home(store)
-        await _railway_row_id(store)
+        await _platform_row_id(store)
         registry = WakeChannelRegistry()
         registry.connect(home_id)
         dispatcher = _dispatcher(
             store,
             registry,
-            railway=_config(),
+            cloud_run=_config(),
             requests=requests,
             worker_active=_becomes_active,
             pending_jobs=_pending(1),
@@ -464,13 +422,13 @@ def test_grace_escalation_skipped_when_queue_drained() -> None:
 
     async def scenario() -> None:
         home_id = await _add_home(store)
-        await _railway_row_id(store)
+        await _platform_row_id(store)
         registry = WakeChannelRegistry()
         registry.connect(home_id)
         dispatcher = _dispatcher(
             store,
             registry,
-            railway=_config(),
+            cloud_run=_config(),
             requests=requests,
             worker_active=_inactive,
             pending_jobs=_pending(0),
@@ -484,18 +442,18 @@ def test_grace_escalation_skipped_when_queue_drained() -> None:
 
 
 def test_grace_escalations_racing_fire_exactly_one_redeploy() -> None:
-    """Two overlapping grace windows must not double-boot Railway: the first
+    """Two overlapping grace windows must not start the Cloud Run job twice: the first
     escalation moves the attempt stamp under the lock; the second sees the
     stamp changed and stands down."""
     store = _fresh_store()
     requests: list[dict[str, Any]] = []
 
     async def scenario() -> None:
-        await _railway_row_id(store)
+        await _platform_row_id(store)
         dispatcher = _dispatcher(
             store,
             WakeChannelRegistry(),
-            railway=_config(),
+            cloud_run=_config(),
             requests=requests,
             worker_active=_inactive,
             pending_jobs=_pending(1),
@@ -517,11 +475,11 @@ def test_grace_escalation_stands_down_after_newer_wake_attempt() -> None:
     requests: list[dict[str, Any]] = []
 
     async def scenario() -> None:
-        await _railway_row_id(store)
+        await _platform_row_id(store)
         dispatcher = _dispatcher(
             store,
             WakeChannelRegistry(),
-            railway=_config(),
+            cloud_run=_config(),
             requests=requests,
             worker_active=_inactive,
             pending_jobs=_pending(1),
@@ -541,7 +499,7 @@ def test_touch_wake_failure_does_not_cancel_wake_or_grace() -> None:
 
     async def scenario() -> bool:
         home_id = await _add_home(store)
-        await _railway_row_id(store)
+        await _platform_row_id(store)
         registry = WakeChannelRegistry()
         queue = registry.connect(home_id)
 
@@ -552,7 +510,7 @@ def test_touch_wake_failure_does_not_cancel_wake_or_grace() -> None:
         dispatcher = _dispatcher(
             store,
             registry,
-            railway=_config(),
+            cloud_run=_config(),
             requests=requests,
             worker_active=_inactive,
             pending_jobs=_pending(1),
@@ -564,21 +522,21 @@ def test_touch_wake_failure_does_not_cancel_wake_or_grace() -> None:
         return fired
 
     assert asyncio.run(scenario()) is True
-    assert len(requests) == 1  # grace escalation still armed and fired railway
+    assert len(requests) == 1  # grace escalation still armed and started the job
 
 
-def test_grace_timer_not_armed_for_railway_only_wake() -> None:
-    """A railway-only wake has no faster net than the existing ones; nothing
+def test_grace_timer_not_armed_for_platform_only_wake() -> None:
+    """A platform-only wake has no faster net than the existing ones; nothing
     to escalate to, so no second redeploy after the grace window."""
     store = _fresh_store()
     requests: list[dict[str, Any]] = []
 
     async def scenario() -> None:
-        await _railway_row_id(store)
+        await _platform_row_id(store)
         dispatcher = _dispatcher(
             store,
             WakeChannelRegistry(),
-            railway=_config(),
+            cloud_run=_config(),
             requests=requests,
             worker_active=_inactive,
             pending_jobs=_pending(1),
@@ -604,7 +562,7 @@ def test_schedule_fires_trigger_in_background() -> None:
         home_id = await _add_home(store)
         registry = WakeChannelRegistry()
         queue = registry.connect(home_id)
-        dispatcher = _dispatcher(store, registry, railway=None)
+        dispatcher = _dispatcher(store, registry, cloud_run=None)
         dispatcher.schedule()
         await _drain_tasks(dispatcher)
         return queue.qsize()
@@ -620,7 +578,7 @@ def test_schedule_never_raises_outside_event_loop() -> None:
     raises RuntimeError; the try/except guard must absorb it.
     """
     store = _fresh_store()
-    dispatcher = _dispatcher(store, WakeChannelRegistry(), railway=None)
+    dispatcher = _dispatcher(store, WakeChannelRegistry(), cloud_run=None)
     dispatcher.schedule()  # must not raise
 
 
@@ -684,29 +642,38 @@ def test_make_pending_jobs_counter_counts_todo_rows() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_build_dispatcher_default_has_railway_leg(monkeypatch: pytest.MonkeyPatch) -> None:
-    _clear_env(monkeypatch)
-    monkeypatch.setenv(ENV_TRIGGER_TOKEN, "tok")
-    monkeypatch.setenv(ENV_WORKER_SERVICE_ID, "svc")
-    monkeypatch.setenv(ENV_WORKER_ENVIRONMENT_ID, "env")
-    dispatcher = build_worker_dispatcher(
-        _fresh_store(), WakeChannelRegistry(), worker_active=None, pending_jobs=_pending(0)
-    )
-    assert isinstance(dispatcher, WorkerDispatcher)
-    assert dispatcher._railway is not None
-
-
-def test_build_dispatcher_without_railway_env_still_dispatches(
+def test_build_dispatcher_default_has_the_cloud_run_leg_when_a_job_is_named(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Missing Railway env no longer disables the wake path: self-hosted
-    workers can still be woken; only the railway leg is absent."""
+    _clear_env(monkeypatch)
+    monkeypatch.setenv(ENV_WORKER_JOB, JOB)
+    dispatcher = build_worker_dispatcher(
+        _fresh_store(), WakeChannelRegistry(), worker_active=None, pending_jobs=_pending(0)
+    )
+    assert isinstance(dispatcher, WorkerDispatcher)
+    assert dispatcher._cloud_run == _config()
+
+
+def test_build_dispatcher_without_a_job_still_dispatches(monkeypatch: pytest.MonkeyPatch) -> None:
+    """No worker job does not disable the wake path: self-hosted workers can
+    still be woken; only the platform leg is absent."""
     _clear_env(monkeypatch)
     dispatcher = build_worker_dispatcher(
         _fresh_store(), WakeChannelRegistry(), worker_active=None, pending_jobs=_pending(0)
     )
     assert isinstance(dispatcher, WorkerDispatcher)
-    assert dispatcher._railway is None
+    assert dispatcher._cloud_run is None
+
+
+def test_build_dispatcher_refuses_the_removed_railway_launcher(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A stale SPLITSMITH_WORKER_LAUNCHER=railway must fail the boot loudly:
+    the leg is gone, and silently waking nobody would strand every job."""
+    _clear_env(monkeypatch)
+    monkeypatch.setenv(ENV_WORKER_LAUNCHER, "railway")
+    with pytest.raises(ValueError, match="unknown worker launcher"):
+        build_worker_dispatcher(
+            _fresh_store(), WakeChannelRegistry(), worker_active=None, pending_jobs=_pending(0)
+        )
 
 
 def test_build_dispatcher_none_disables(monkeypatch: pytest.MonkeyPatch) -> None:

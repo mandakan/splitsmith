@@ -2,13 +2,15 @@
 
 Staging's email transport is console-only (see
 docs/saas-readiness/11-environment-strategy.md), so magic links land in
-the serve service's Railway logs as ``MAGIC_LINK <email> <url>`` lines
+the staging serve service's logs as ``MAGIC_LINK <email> <url>`` lines
 instead of a mailbox. This script triggers ``POST /api/v1/auth/begin``
-against staging and fishes the freshest link out of ``railway logs``.
+against staging and reads the freshest link back from Cloud Logging
+(``gcloud logging read``; serve runs on Cloud Run as
+``splitsmith-serve-staging`` in project ``splitsmith-hosting``).
 
 Links are single-use and expire after 15 minutes. Requires an
-authenticated Railway CLI linked to the splitsmith project (``railway``
-on PATH, or ``~/.railway/bin/railway``).
+authenticated gcloud CLI (``gcloud auth login``) with read access to the
+project's logs.
 
 Usage:
     python3 scripts/staging_login_link.py [email]
@@ -25,22 +27,20 @@ import subprocess
 import sys
 import time
 import urllib.request
-from pathlib import Path
 
 BASE_URL = "https://my.staging.splitsmith.app"
+GCP_PROJECT = "splitsmith-hosting"
+SERVICE = "splitsmith-serve-staging"
 MARKER = "MAGIC_LINK"
 DEFAULT_EMAIL = "m@thias.se"
 LINK_RE = re.compile(r"https://\S+/auth/callback\?token=[A-Za-z0-9._~-]+")
 
 
-def _railway_bin() -> str:
-    found = shutil.which("railway")
+def _gcloud_bin() -> str:
+    found = shutil.which("gcloud")
     if found:
         return found
-    fallback = Path.home() / ".railway" / "bin" / "railway"
-    if fallback.exists():
-        return str(fallback)
-    raise SystemExit("railway CLI not found (PATH or ~/.railway/bin) -- run `railway login` first")
+    raise SystemExit("gcloud CLI not found on PATH -- install it and run `gcloud auth login` first")
 
 
 def begin_login(email: str) -> None:
@@ -50,66 +50,84 @@ def begin_login(email: str) -> None:
         headers={"Content-Type": "application/json"},
         method="POST",
     )
-    with urllib.request.urlopen(req, timeout=30) as resp:
+    # Generous: staging scales to zero, and a cold start (boot migration
+    # check, queue re-check) can take most of a minute.
+    with urllib.request.urlopen(req, timeout=90) as resp:
         if resp.status != 200:
             raise SystemExit(f"auth/begin returned HTTP {resp.status}")
 
 
-def fish_link(railway: str, email: str, attempts: int = 6) -> str | None:
-    """Scan staging serve logs for the newest MAGIC_LINK line for ``email``.
+def log_filter(email: str) -> str:
+    """The Cloud Logging filter for this email's MAGIC_LINK lines on staging serve.
 
-    Uses a *filtered* historical fetch, not streaming: Railway serves
-    pre-normalization records (where the app's ``msg`` key is dropped and
-    ``message`` arrives empty, #711) on both the realtime stream and plain
-    ``--lines`` tails. Only attribute-filtered queries go through the
-    normalized index that carries the full message text. The command also
-    exits on its own instead of needing a streaming-window timeout.
+    serve logs one JSON object per line, which Cloud Logging stores as
+    ``jsonPayload`` with the text in ``message`` (``StructuredJsonFormatter``).
     """
+    return " AND ".join(
+        [
+            'resource.type="cloud_run_revision"',
+            f'resource.labels.service_name="{SERVICE}"',
+            'jsonPayload.logger="splitsmith.db.email"',
+            f'jsonPayload.message:"{MARKER} {email}"',
+        ]
+    )
+
+
+def newest_link(entries: list[dict], email: str) -> str | None:
+    """The link in the newest MAGIC_LINK entry for ``email``, if any.
+
+    ``gcloud logging read`` returns newest first.
+    """
+    for entry in entries:
+        message = (entry.get("jsonPayload") or {}).get("message", "")
+        if MARKER in message and email in message:
+            match = LINK_RE.search(message)
+            if match:
+                return match.group(0)
+    return None
+
+
+def fish_link(gcloud: str, email: str, attempts: int = 8) -> str | None:
+    """Poll Cloud Logging for the link; ingestion lags the request by seconds."""
     for _ in range(attempts):
         proc = subprocess.run(
             [
-                railway,
-                "logs",
-                "--service",
-                "serve",
-                "--environment",
-                "staging",
-                "--json",
-                "--since",
+                gcloud,
+                "logging",
+                "read",
+                log_filter(email),
+                "--project",
+                GCP_PROJECT,
+                "--freshness",
                 "15m",
-                "--lines",
-                "200",
-                "--filter",
-                "@logger:splitsmith.db.email",
+                "--limit",
+                "20",
+                "--format",
+                "json",
             ],
             capture_output=True,
             text=True,
             timeout=60,
             check=False,
         )
-        hits: list[str] = []
-        for line in (proc.stdout or "").splitlines():
-            try:
-                message = json.loads(line).get("message", "")
-            except ValueError:
-                message = line
-            if MARKER in message and email in message:
-                hits.append(message)
-        if hits:
-            match = LINK_RE.search(hits[-1])
-            if match:
-                return match.group(0)
-        time.sleep(3)
+        try:
+            entries = json.loads(proc.stdout or "[]")
+        except ValueError:
+            entries = []
+        link = newest_link(entries, email)
+        if link is not None:
+            return link
+        time.sleep(4)
     return None
 
 
 def main() -> None:
     email = sys.argv[1] if len(sys.argv) > 1 else DEFAULT_EMAIL
-    railway = _railway_bin()
+    gcloud = _gcloud_bin()
     begin_login(email)
-    link = fish_link(railway, email)
+    link = fish_link(gcloud, email)
     if link is None:
-        raise SystemExit("no MAGIC_LINK line found in staging logs -- try again")
+        raise SystemExit("no MAGIC_LINK line found in the staging logs -- try again")
     print(link)
 
 

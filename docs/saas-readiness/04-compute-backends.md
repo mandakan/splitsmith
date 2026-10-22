@@ -1,5 +1,11 @@
 # 04 -- Compute backends
 
+> **2026-10-22: hosting moved from Railway to Google Cloud Run.** Where these
+> docs say Railway, read them as the design record of that time. The live
+> setup: serve as a Cloud Run service, the one-shot worker as a Cloud Run Job
+> started on enqueue, self-hosted boxes woken through a bucket marker
+> (`deploy/cloudrun/`, `.claude/rules/hosted.md`, SPEC "Hosted deployment").
+
 This doc defines the **`ComputeBackend` abstraction** that decides
 where the detection ensemble runs, the **three-tier compute model**
 from doc 00 Q3, the **auto-selection** logic, and the **shape of the

@@ -179,7 +179,7 @@ To run the whole hosted stack (server, worker, and bundled Postgres + MinIO) fro
 docker compose -f docker-compose.yml -f docker-compose.ghcr.yml up -d   # SPLITSMITH_IMAGE_TAG=edge tracks main
 ```
 
-`docker-compose.yml` on its own builds from source (the dev / test stack); the overlay swaps that build for the released image. This runs the release locally with bundled dependencies - it is not a production deployment (production is Railway + Neon + R2).
+`docker-compose.yml` on its own builds from source (the dev / test stack); the overlay swaps that build for the released image. This runs the release locally with bundled dependencies - it is not a production deployment (production is Cloud Run + Neon + R2).
 
 The container is for the server and worker roles, not the desktop `ui` workflow. For that, use the PyPI install above so the app has native access to your video files and Final Cut Pro.
 

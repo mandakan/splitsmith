@@ -167,14 +167,11 @@ class StructuredJsonFormatter(logging.Formatter):
         payload: dict[str, Any] = {
             "ts": datetime.fromtimestamp(record.created, tz=UTC).isoformat(),
             "level": record.levelname,
+            # Cloud Logging reads a JSON line's severity from "severity" and
+            # its text from "message"; without "severity" every line lands
+            # as DEFAULT and level filters in the console match nothing.
+            "severity": record.levelname,
             "logger": record.name,
-            # "message" is the key Railway's parsed format documents ("msg"
-            # relies on normalization). Post-#714 live check: this alignment
-            # is NOT sufficient on its own - Railway's realtime stream and
-            # unfiltered tails swallow the message of ANY parsed-JSON record
-            # (message or msg alike) and only the attribute-filtered query
-            # surface (e.g. --filter '@logger:...') returns the text (#711).
-            # Anything scraping these logs must use a filtered query.
             "message": record.getMessage(),
         }
         if hasattr(record, "event"):

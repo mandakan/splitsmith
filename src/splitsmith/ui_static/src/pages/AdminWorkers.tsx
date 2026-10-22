@@ -1,6 +1,6 @@
 /**
- * Workers (admin) -- the server's compute pool: every self-hosted or
- * Railway worker with its state, advertised capabilities, version,
+ * Workers (admin) -- the server's compute pool: every self-hosted box and
+ * the Cloud Run worker job, with its state, advertised capabilities, version,
  * priority and enabled switch, plus registration of a new one.
  *
  * Server-wide rather than match-scoped, so it mounts directly under
@@ -76,8 +76,8 @@ function isOutdated(version: string | null, serverVersion: string): boolean {
 
 /** GPU / NVENC / CUDA chips from a worker's advertised capabilities (#796).
  *
- * ``capabilities`` is absent on workers that never advertised any (e.g. Railway
- * rows) -- render nothing there. A worker that advertised an all-false bundle
+ * ``capabilities`` is absent on workers that never advertised any (e.g. the
+ * Cloud Run row) -- render nothing there. A worker that advertised an all-false bundle
  * is a probed CPU-only box, which we label explicitly. */
 function CapabilityChips({ info }: { info: WorkerInfo | null }) {
   const caps = info?.capabilities;
@@ -188,7 +188,7 @@ function WorkerRow({ worker, serverVersion, onUpdated, onRefetch }: WorkerRowPro
         <Td kind="name">
           <div className="truncate">{worker.name}</div>
           <div className="mt-0.5 whitespace-nowrap text-sm text-muted">
-            {worker.kind === "self_hosted" ? "Self-hosted" : "Railway"}
+            {worker.kind === "self_hosted" ? "Self-hosted" : "Cloud Run"}
             {!worker.registered ? <span className="ml-2 text-live">unregistered</span> : null}
           </div>
         </Td>
