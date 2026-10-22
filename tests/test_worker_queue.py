@@ -390,11 +390,15 @@ class _SpyEngines:
         self.calls = calls
         self.loops: list[object] = []
 
-    def adopt_current_loop(self) -> None:
+    def adopt_current_loop(self) -> object:
         import asyncio
+        from types import SimpleNamespace
 
         self.calls.append("adopt")
         self.loops.append(asyncio.get_running_loop())
+        # Like LoopEngines, hand back the loop's engine; a SQLite one, so the
+        # boot role check (Postgres only) has nothing to ask it.
+        return SimpleNamespace(dialect=SimpleNamespace(name="sqlite"))
 
     async def dispose_current_loop(self) -> None:
         import asyncio

@@ -166,6 +166,23 @@ def test_register_happy_path_returns_token_and_credentials(
     assert record is not None and record.info == {"hostname": "nas"}
 
 
+def test_register_hands_out_the_agent_url_not_the_apis(
+    monkeypatch: pytest.MonkeyPatch,
+    hosted_env: str,
+) -> None:
+    """A self-hosted box gets its own least-privilege role (``splitsmith_agent``)
+    when the API has one configured, so revoking a box never means rotating
+    the API's credential."""
+    from splitsmith.ui.server import create_app
+
+    monkeypatch.setenv("SPLITSMITH_AGENT_DATABASE_URL", "postgresql+asyncpg://splitsmith_agent:pw@db/neondb")
+    _, reg_token = seed_pending_worker(hosted_env)
+    with TestClient(create_app()) as client:
+        resp = client.post("/api/workers/register", json={"token": reg_token})
+    assert resp.status_code == 200
+    assert resp.json()["credentials"]["database_url"] == "postgresql+asyncpg://splitsmith_agent:pw@db/neondb"
+
+
 def test_register_replay_is_uniform_404(
     hosted_env: str,
     hosted_app: tuple[TestClient, _CapturingSender],

@@ -6,8 +6,9 @@
 -- it too unless the table is set FORCE ROW LEVEL SECURITY. By running
 -- everything (including migrations) as `splitsmith_app`, every table is
 -- owned by it, and the RLS migration's `FORCE ROW LEVEL SECURITY` makes
--- the owner-applies case explicit. This mirrors Neon production, where
--- the default role is a non-superuser owner.
+-- the owner-applies case explicit. Hosted Neon differs: its default role
+-- has BYPASSRLS, so there the owner only migrates and the runtime connects
+-- as separate row-only roles (`splitsmith.db.roles`, scripts/db_roles.py).
 --
 -- The POSTGRES_USER superuser (`splitsmith`) stays available for
 -- bootstrap, seeding, and debugging. Tests seed cross-tenant rows

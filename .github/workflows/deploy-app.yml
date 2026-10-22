@@ -17,7 +17,14 @@ name: Deploy app (Railway)
 #
 # Both services build from the same image (ENTRYPOINT `splitsmith`); the
 # `serve` and `worker` Railway services differ only by start command, set
-# on the service itself. `serve` runs `alembic upgrade head` on boot.
+# on the service itself.
+#
+# Migrations run here, as the schema owner, before `railway up`: the
+# runtime connects as a least-privilege role that cannot run DDL
+# (`splitsmith.db.roles`), and the owner's URL is this GitHub Environment's
+# SPLITSMITH_MIGRATION_DATABASE_URL secret, never a Railway variable.
+# `serve` still runs `alembic upgrade head` on boot; at head that is a
+# read-only no-op the runtime role is allowed.
 
 on:
   push:
@@ -89,6 +96,29 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          enable-cache: true
+
+      - name: Install Python 3.11
+        run: uv python install 3.11
+
+      # Before the deploy, so the new code never boots against an old
+      # schema. A migration must therefore keep the running version working
+      # (add first, remove in a later release), which boot-time migration
+      # already required. A missing secret fails here, before anything ships.
+      - name: Migrate the database (schema owner)
+        env:
+          SPLITSMITH_MIGRATION_DATABASE_URL: ${{ secrets.SPLITSMITH_MIGRATION_DATABASE_URL }}
+        run: |
+          if [ -z "$SPLITSMITH_MIGRATION_DATABASE_URL" ]; then
+            echo "::error::SPLITSMITH_MIGRATION_DATABASE_URL is not set on the ${{ needs.target.outputs.env }} environment"
+            exit 1
+          fi
+          uv sync --frozen --no-dev --extra hosted
+          uv run --frozen --no-dev --extra hosted alembic upgrade head
+
       - name: Install Railway CLI
         run: npm i -g @railway/cli
 
@@ -96,7 +126,6 @@ jobs:
       # CLI exits 1 when it loses the log stream even though the deploy
       # succeeds server-side (#863). The wrapper script treats the deployment
       # status as the success signal, so only a real deploy failure goes red.
-      # The API service migrates the DB on boot.
       - name: Deploy API (serve)
         run: ./scripts/railway_up_verified.sh serve
 

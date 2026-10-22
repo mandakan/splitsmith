@@ -231,6 +231,13 @@ jobs:
         # comment above the job claims doesn't happen.
         run: uv run --no-dev python scripts/ci/assert_migrations_match_models.py
 
+      - name: Runtime roles write rows only, and RLS binds them
+        env:
+          # The schema owner, as on Neon; the script provisions and connects
+          # as splitsmith_app itself (scripts/db_roles.py).
+          SPLITSMITH_MIGRATION_DATABASE_URL: postgresql+asyncpg://splitsmith:splitsmith@localhost:5432/splitsmith_ci
+        run: uv run --no-dev python scripts/ci/assert_runtime_roles.py
+
   spa:
     # The SPA had no CI validation on a normal PR at all: the job above
     # runs ruff, black and pytest and nothing else, so TypeScript could

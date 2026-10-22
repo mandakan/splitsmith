@@ -627,6 +627,14 @@ def serve(
         )
         if result.returncode != 0:
             console.print("[red]alembic upgrade head failed[/] -- see the migration output above.")
+            if not _os.environ.get("SPLITSMITH_MIGRATION_DATABASE_URL"):
+                # The hosted deploy migrates as the schema owner before
+                # ``railway up``; the runtime role cannot run DDL, so a
+                # pending migration here means that step did not run.
+                console.print(
+                    "If the runtime connects as a least-privilege role, migrations run as the "
+                    "owner in the deploy job (SPLITSMITH_MIGRATION_DATABASE_URL): run that first."
+                )
             raise typer.Exit(2)
 
     console.print(

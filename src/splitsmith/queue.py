@@ -581,7 +581,11 @@ async def run_worker(
             # ``run_sync`` -> the process DbRunner, which adopted its own loop.
             # Adopted inside the ``try`` so the ``finally`` disposes it however
             # boot ends, a failed ``_open_app_with_retry`` included.
-            engines.adopt_current_loop()
+            engine = engines.adopt_current_loop()
+            # A superuser / BYPASSRLS role would skip every tenant policy.
+            from .db.roles import assert_runtime_role
+
+            await assert_runtime_role(engine)
         _configure_app_logging()
         try:
             await asyncio.to_thread(warm_ensemble_runtime)

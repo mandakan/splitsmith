@@ -19,10 +19,15 @@ from splitsmith.db.schema_diff import include_object  # noqa: E402
 # access to the values within the .ini file in use.
 config = context.config
 
-# Allow ``SPLITSMITH_DATABASE_URL`` to override the URL baked into
-# ``alembic.ini`` so docker-compose / CI / hosted-mode deployments
-# don't need separate ini files.
-if env_url := os.environ.get("SPLITSMITH_DATABASE_URL"):
+# Allow the environment to override the URL baked into ``alembic.ini`` so
+# docker-compose / CI / hosted-mode deployments don't need separate ini
+# files. ``SPLITSMITH_MIGRATION_DATABASE_URL`` (the schema owner) wins: on
+# Neon the runtime connects as a role that can write rows but not run DDL
+# (``splitsmith.db.roles``). A single-role stack sets only
+# ``SPLITSMITH_DATABASE_URL`` and migrates with it.
+if env_url := (
+    os.environ.get("SPLITSMITH_MIGRATION_DATABASE_URL") or os.environ.get("SPLITSMITH_DATABASE_URL")
+):
     config.set_main_option("sqlalchemy.url", env_url)
 
 # Interpret the config file for Python logging.

@@ -224,12 +224,24 @@ CREATE POLICY tenant_isolation ON <t>
 Two hard requirements make this real rather than decorative:
 
 - **The app's DB role must be a non-superuser without `BYPASSRLS`.**
-  Postgres superusers bypass RLS unconditionally, and the table owner
-  bypasses it unless `FORCE` is set. The API, worker, and Alembic all
-  connect as a least-privilege role (`splitsmith_app` locally; on Neon
-  the project's default role, which is already a non-superuser owner) so
-  the policies apply -- `FORCE` then covers the owner-applies case. The
+  Postgres superusers and `BYPASSRLS` roles skip RLS unconditionally,
+  `FORCE` included; the table owner skips it unless `FORCE` is set.
+  Locally the API, worker and Alembic all connect as `splitsmith_app`, a
+  non-superuser owner, and `FORCE` covers the owner-applies case. The
   `postgres`/`splitsmith` superuser stays for bootstrap and seeding only.
+
+  **Neon's default role does not qualify.** `neondb_owner`, like every role
+  made through Neon's console or API, is a member of `neon_superuser` and
+  has `BYPASSRLS`, which cannot be taken away. Production ran the API and
+  worker as it until the role split, so the policies never applied there
+  (found during the October 2026 Railway credential rotation). Hosted
+  Neon now splits the roles (`splitsmith.db.roles`): `neondb_owner` owns
+  the schema and only runs migrations (`SPLITSMITH_MIGRATION_DATABASE_URL`,
+  in the deploy job); the API and worker connect as `splitsmith_app` and
+  self-hosted agents as `splitsmith_agent`, plain SQL roles without
+  `BYPASSRLS` that may read and write rows and nothing else. Both serve and
+  the worker refuse to boot as a superuser or `BYPASSRLS` role
+  (`assert_runtime_role`).
 - **Every session sets `app.user_id`.** The per-user store sessions run
   through `tenant_session_factory`, which pins the GUC per transaction
   (`set_config(..., true)`, the `SET LOCAL` form) via an `after_begin`
