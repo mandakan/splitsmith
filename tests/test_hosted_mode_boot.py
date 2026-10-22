@@ -559,6 +559,7 @@ def test_rewiring_reuses_the_process_engines_so_the_runner_loop_stays_pooled(
         return made[-1]
 
     monkeypatch.setattr(engine_mod, "create_async_engine", _fake_create)
+    monkeypatch.setattr(engine_mod, "_install_checkout_ping", lambda engine: None)
     monkeypatch.setenv("SPLITSMITH_MODE", "hosted")
     monkeypatch.setenv("SPLITSMITH_DATABASE_URL", "postgresql+asyncpg://u:s3cret@h/db")
     monkeypatch.setenv("SPLITSMITH_PUBLIC_URL", PUBLIC_URL)
@@ -610,6 +611,7 @@ def _recording_engines(monkeypatch: pytest.MonkeyPatch) -> list[Any]:
         return made[-1]
 
     monkeypatch.setattr(engine_mod, "create_async_engine", _fake_create)
+    monkeypatch.setattr(engine_mod, "_install_checkout_ping", lambda engine: None)
     return made
 
 

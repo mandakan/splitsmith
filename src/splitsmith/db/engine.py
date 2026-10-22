@@ -8,7 +8,7 @@ import weakref
 from collections.abc import Awaitable, Callable
 from typing import Any
 
-from sqlalchemy import event, text
+from sqlalchemy import event, exc, text
 from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
@@ -18,6 +18,7 @@ from sqlalchemy.ext.asyncio import (
 )
 from sqlalchemy.orm import Session, SessionTransaction
 from sqlalchemy.pool import NullPool
+from sqlalchemy.util import await_only
 
 from .share_guard import share_request_is_read_only
 
@@ -62,6 +63,39 @@ def sessionmaker(engine: AsyncEngine) -> async_sessionmaker[AsyncSession]:
 
 _POOLED_DRIVERS = ("postgresql+asyncpg://",)
 
+_FRESH = "splitsmith_fresh"
+
+
+def _install_checkout_ping(engine: AsyncEngine) -> None:
+    """Ping a reused pooled connection on checkout in one round trip.
+
+    SQLAlchemy's ``pool_pre_ping`` on asyncpg wraps its ping in a
+    transaction (``BEGIN``, ``;``, ``ROLLBACK``: three round trips, for
+    PgBouncer's transaction mode), and every session pays it before its own
+    ``BEGIN``. A bare ``;`` sent with asyncpg's ``execute`` and no arguments
+    goes over the simple query protocol: one message, no prepared statement,
+    its own transaction, so it is safe through the pooler too. A failure
+    raises ``DisconnectionError``, which makes the pool discard the
+    connection and check out a new one, exactly as ``pool_pre_ping`` does.
+    A connection opened for this checkout is not pinged at all.
+    """
+    pool = engine.sync_engine.pool
+    event.listen(pool, "connect", _mark_fresh)
+    event.listen(pool, "checkout", _checkout_ping)
+
+
+def _mark_fresh(_dbapi_connection: Any, record: Any) -> None:
+    record.info[_FRESH] = True
+
+
+def _checkout_ping(_dbapi_connection: Any, record: Any, _proxy: Any) -> None:
+    if record.info.pop(_FRESH, False):
+        return
+    try:
+        await_only(record.driver_connection.execute(";"))
+    except Exception as error:
+        raise exc.DisconnectionError() from error
+
 
 class LoopEngines:
     """One pooled :class:`AsyncEngine` per *adopted* event loop.
@@ -74,7 +108,8 @@ class LoopEngines:
     Procrastinate worker's in ``worker``) and the ``DbRunner`` loop that
     every sync caller submits to. Each adopts itself with
     :meth:`adopt_current_loop` and gets its own engine with
-    ``pool_size=5, max_overflow=10, pool_pre_ping=True``.
+    ``pool_size=5, max_overflow=10`` and a one-round-trip checkout ping
+    (:func:`_install_checkout_ping`).
 
     Any other loop -- a ``concurrent.futures`` thread's ``asyncio.run``,
     the re-entrant fallback in :func:`splitsmith.async_bridge.run_sync`
@@ -95,7 +130,7 @@ class LoopEngines:
 
     The pool adds no traffic of its own: no warm-up, no periodic ping, no
     ``pool_recycle``. Neon closes an idle connection after five minutes
-    and suspends the compute; ``pool_pre_ping`` turns the closed
+    and suspends the compute; the checkout ping turns the closed
     connection into a silent reconnect on the next checkout. That is the
     scale-to-zero condition from the 2026-07-03 cost plan.
 
@@ -191,9 +226,9 @@ class LoopEngines:
                 pool_size=self._pool_size,
                 max_overflow=self._max_overflow,
                 pool_timeout=30,
-                pool_pre_ping=True,
                 **self._connect_args(label),
             )
+            _install_checkout_ping(engine)
             self._by_loop[loop] = engine
         return engine
 

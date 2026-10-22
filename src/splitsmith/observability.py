@@ -181,6 +181,10 @@ class StructuredJsonFormatter(logging.Formatter):
                     if field == "job_error" and value is None:
                         continue
                     payload[field] = value
+        # Without this a logger.exception() line carries only its message.
+        # Error Reporting groups errors from a "stack_trace" field.
+        if record.exc_info:
+            payload["stack_trace"] = self.formatException(record.exc_info)
         return json.dumps(payload, ensure_ascii=True, default=str)
 
 

@@ -12,8 +12,10 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from sqlalchemy import exc
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.pool import NullPool
+from sqlalchemy.util import greenlet_spawn
 
 from splitsmith.db import Base, User, create_engine, sessionmaker
 from splitsmith.db import engine as engine_mod
@@ -27,6 +29,7 @@ class _FakeEngine:
         self.url = url
         self.kwargs = kwargs
         self.disposed = 0
+        self.pinged = False
 
     async def dispose(self) -> None:
         self.disposed += 1
@@ -43,6 +46,7 @@ class _RecordingSession:
 @pytest.fixture
 def recorder(monkeypatch: pytest.MonkeyPatch) -> list[_FakeEngine]:
     made: list[_FakeEngine] = []
+    monkeypatch.setattr(engine_mod, "_install_checkout_ping", lambda engine: setattr(engine, "pinged", True))
 
     def _fake_create(url: str, **kwargs: Any) -> _FakeEngine:
         e = _FakeEngine(url, kwargs)
@@ -85,9 +89,62 @@ def test_pooled_engine_settings(recorder: list[_FakeEngine]) -> None:
     assert made.kwargs["pool_size"] == 5
     assert made.kwargs["max_overflow"] == 10
     assert made.kwargs["pool_timeout"] == 30
-    assert made.kwargs["pool_pre_ping"] is True
+    assert "pool_pre_ping" not in made.kwargs, "the checkout ping replaces it (three round trips on asyncpg)"
     assert "pool_recycle" not in made.kwargs
     assert "poolclass" not in made.kwargs
+    assert made.pinged, "every pooled engine pings on checkout"
+
+
+class _Record:
+    def __init__(self, driver_connection: Any) -> None:
+        self.info: dict[str, Any] = {}
+        self.driver_connection = driver_connection
+
+
+class _Driver:
+    """An asyncpg connection's ``execute``, recording what was sent."""
+
+    def __init__(self, fail: bool = False) -> None:
+        self.sent: list[tuple[str, tuple[Any, ...]]] = []
+        self.fail = fail
+
+    async def execute(self, query: str, *args: Any) -> str:
+        self.sent.append((query, args))
+        if self.fail:
+            raise ConnectionResetError("connection was closed in the middle of operation")
+        return ""
+
+
+def _checkout(record: _Record) -> None:
+    async def _run() -> None:
+        await greenlet_spawn(engine_mod._checkout_ping, None, record, None)
+
+    asyncio.run(_run())
+
+
+def test_checkout_ping_is_one_bare_statement() -> None:
+    """One simple-protocol message, no arguments and no transaction around it:
+    SQLAlchemy's asyncpg pre-ping sends BEGIN, the ping and ROLLBACK."""
+    driver = _Driver()
+    _checkout(_Record(driver))
+    assert driver.sent == [(";", ())]
+
+
+def test_checkout_ping_skips_a_connection_opened_for_this_checkout() -> None:
+    driver = _Driver()
+    record = _Record(driver)
+    engine_mod._mark_fresh(None, record)
+    _checkout(record)
+    assert driver.sent == []
+    _checkout(record)
+    assert driver.sent == [(";", ())], "only the first checkout after connect is skipped"
+
+
+def test_dead_connection_on_checkout_is_a_disconnect() -> None:
+    """``DisconnectionError`` is what makes the pool drop the connection and
+    check out another instead of handing a dead one to the request."""
+    with pytest.raises(exc.DisconnectionError):
+        _checkout(_Record(_Driver(fail=True)))
 
 
 def test_unadopted_loop_gets_the_shared_nullpool_engine(recorder: list[_FakeEngine]) -> None:

@@ -112,6 +112,7 @@ def fake(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
     monkeypatch.setattr(queue, "build_app", _build)
     monkeypatch.setattr(queue, "_process_deferrers", {})
     monkeypatch.setattr(engine_mod, "create_async_engine", lambda url, **kw: _FakeEngine())
+    monkeypatch.setattr(engine_mod, "_install_checkout_ping", lambda engine: None)
     return log
 
 
