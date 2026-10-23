@@ -576,6 +576,10 @@ async def run_agent(
 
     apply_credentials(state)
     _prepare_cache_env(state_dir)
+    # Names the jobs this agent runs in their timings' ``worker`` record.
+    from .observability import set_worker_name
+
+    set_worker_name(f"agent:{state.worker_id}")
     db_url = state.credentials["database_url"]
 
     from .source_cache import configured_cache_max_bytes

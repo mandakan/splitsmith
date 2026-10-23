@@ -35,6 +35,8 @@ from typing import BinaryIO, Protocol
 
 from pydantic import BaseModel
 
+from .observability import STORAGE_IO
+
 
 class StorageObject(BaseModel):
     """Metadata for a single object in storage.
@@ -343,7 +345,9 @@ class _S3StreamWrapper:
         # boto3's StreamingBody.read uses ``None`` to mean "read all";
         # BinaryIO's ``-1`` means the same. Translate so the caller can
         # pass either convention.
-        return self._body.read(None if size == -1 else size)  # type: ignore[attr-defined]
+        chunk = self._body.read(None if size == -1 else size)  # type: ignore[attr-defined]
+        STORAGE_IO.add_read(len(chunk))
+        return chunk
 
     def close(self) -> None:
         self._body.close()  # type: ignore[attr-defined]
@@ -451,13 +455,16 @@ class S3Storage:
             if code in ("NoSuchKey", "404"):
                 raise FileNotFoundError(f"no object at {path!r}") from exc
             raise
-        return response["Body"].read()
+        data = response["Body"].read()
+        STORAGE_IO.add_read(len(data))
+        return data
 
     def write_bytes(self, path: str, data: bytes) -> None:
         # S3 PUT is atomic: either the new object becomes visible in
         # full, or the put fails and the old object (if any) survives.
         # No temp-and-rename dance needed.
         self._client.put_object(Bucket=self._bucket, Key=self._key(path), Body=data)
+        STORAGE_IO.add_written(len(data))
 
     def upload_stream(self, path: str, fileobj: BinaryIO) -> int:
         # boto3's ``upload_fileobj`` switches to multipart automatically
@@ -468,6 +475,7 @@ class S3Storage:
         # object behind, matching the put_object contract.
         counter = _CountingReader(fileobj)
         self._client.upload_fileobj(counter, self._bucket, self._key(path))
+        STORAGE_IO.add_written(counter.bytes_read)
         return counter.bytes_read
 
     def open_stream(self, path: str) -> BinaryIO:

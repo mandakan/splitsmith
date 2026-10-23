@@ -38,7 +38,15 @@ in the job event)::
       "total_ms": float,              # whole-body perf_counter delta, always present
       "phases": [ {"name": str, "ms": float}, ... ],  # closed phases, in order
       "meta": { ...small scalars... } # job-specific: input_bytes, encoder, ...
+      "worker": { ... }               # hosted backend only, see WorkerProbe
     }
+
+``worker`` is the run's machine, not the body's: which worker ran the job
+(:func:`worker_name`), its container limits, the process uptime when the
+job started (on a one-shot drain's first job that is the startup cost:
+image, imports, model warmup), the storage bytes moved and the memory
+high-water marks. The byte counts and ``peak_rss_mb`` are process-wide, so
+they belong to this job only when ``ran_alone`` is true.
 """
 
 from __future__ import annotations
@@ -47,9 +55,12 @@ import contextlib
 import json
 import logging
 import os
+import socket
+import threading
 import time
 from collections.abc import Iterator
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
 
 # Job-event field names that ride on a LogRecord as ``extra=`` and that the
@@ -102,6 +113,7 @@ class PhaseTimer:
         self._t0 = time.perf_counter()
         self._phases: list[dict[str, Any]] = []
         self._meta: dict[str, Any] = {}
+        self._worker: dict[str, Any] | None = None
         self._open: str | None = None
 
     @contextlib.contextmanager
@@ -132,6 +144,10 @@ class PhaseTimer:
         """Set a single ``meta`` scalar."""
         self._meta[key] = value
 
+    def set_worker(self, facts: dict[str, Any]) -> None:
+        """Attach the run's :class:`WorkerProbe` facts (backend only)."""
+        self._worker = dict(facts)
+
     def build(self) -> dict[str, Any]:
         """Return the timings dict. ``total_ms`` is computed at call time.
 
@@ -140,11 +156,176 @@ class PhaseTimer:
         origin and re-derives ``queue_wait_ms`` from the row timestamps.
         """
         total_ms = (time.perf_counter() - self._t0) * 1000.0
-        return {
+        built: dict[str, Any] = {
             "queue_wait_ms": _queue_wait_ms(self._created_at, self._started_at),
             "total_ms": total_ms,
             "phases": list(self._phases),
             "meta": dict(self._meta),
+        }
+        if self._worker is not None:
+            built["worker"] = dict(self._worker)
+        return built
+
+
+# --- Worker facts ---------------------------------------------------------
+
+_CGROUP_ROOT = Path("/sys/fs/cgroup")
+# perf origin for the uptime fallback where /proc is absent (macOS tests).
+_IMPORT_MONOTONIC = time.monotonic()
+_WORKER_NAME: str | None = None
+
+
+def set_worker_name(name: str) -> None:
+    """Name this process's worker (the agent sets ``agent:<worker_id>``)."""
+    global _WORKER_NAME
+    _WORKER_NAME = name
+
+
+def worker_name() -> str:
+    """The explicit name, else the Cloud Run execution and task, else the host."""
+    if _WORKER_NAME is not None:
+        return _WORKER_NAME
+    execution = os.environ.get("CLOUD_RUN_EXECUTION")
+    if execution:
+        return f"cloudrun:{execution}#{os.environ.get('CLOUD_RUN_TASK_INDEX', '0')}"
+    return f"host:{socket.gethostname()}"
+
+
+def container_limits(cgroup_root: Path = _CGROUP_ROOT) -> dict[str, Any]:
+    """vCPU and memory limits from cgroup v2, falling back to the host.
+
+    ``os.cpu_count()`` reports the host's cores, not a container's quota,
+    which is why the quota is read first. An unlimited memory is ``None``.
+    """
+    vcpu: float | None = None
+    memory_mb: int | None = None
+    try:
+        quota, period = (cgroup_root / "cpu.max").read_text().split()
+        if quota != "max":
+            vcpu = int(quota) / int(period)
+    except (OSError, ValueError):
+        pass
+    try:
+        raw = (cgroup_root / "memory.max").read_text().strip()
+        if raw != "max":
+            memory_mb = int(raw) // (1024 * 1024)
+    except (OSError, ValueError):
+        pass
+    if vcpu is None:
+        cores = os.cpu_count()
+        vcpu = float(cores) if cores else None
+    return {"vcpu": vcpu, "memory_mb": memory_mb}
+
+
+def _process_uptime_s() -> float:
+    """Seconds since this process started (/proc), else since this import."""
+    try:
+        fields = Path("/proc/self/stat").read_text().rsplit(")", 1)[1].split()
+        start_ticks = int(fields[19])  # field 22 overall; 2 consumed by the split
+        boot_uptime = float(Path("/proc/uptime").read_text().split()[0])
+        return max(0.0, boot_uptime - start_ticks / os.sysconf("SC_CLK_TCK"))
+    except (OSError, ValueError, IndexError, AttributeError):
+        return time.monotonic() - _IMPORT_MONOTONIC
+
+
+def _peak_rss_mb() -> tuple[float | None, float | None]:
+    """Process and largest-child (ffmpeg) memory high-water marks, MB."""
+    try:
+        import resource
+        import sys
+    except ImportError:  # Windows
+        return None, None
+    # ru_maxrss is KiB on Linux and bytes on macOS.
+    scale = 1024 * 1024 if sys.platform == "darwin" else 1024
+    own = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / scale
+    child = resource.getrusage(resource.RUSAGE_CHILDREN).ru_maxrss / scale
+    return round(own, 1), round(child, 1)
+
+
+class StorageIO:
+    """Process-wide counters of bytes moved through object storage."""
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._read = 0
+        self._written = 0
+
+    def add_read(self, n: int) -> None:
+        with self._lock:
+            self._read += n
+
+    def add_written(self, n: int) -> None:
+        with self._lock:
+            self._written += n
+
+    def snapshot(self) -> tuple[int, int]:
+        with self._lock:
+            return self._read, self._written
+
+
+STORAGE_IO = StorageIO()
+
+
+class _RunningJobs:
+    """How many jobs this process runs now, and how many it has started."""
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self.active = 0
+        self.started = 0
+
+    def begin(self) -> tuple[int, int]:
+        with self._lock:
+            self.active += 1
+            self.started += 1
+            return self.active, self.started
+
+    def end(self) -> int:
+        with self._lock:
+            self.active -= 1
+            return self.started
+
+
+_RUNNING = _RunningJobs()
+
+
+class WorkerProbe:
+    """Samples the worker at a job's start and reports the facts at its end.
+
+    A job ran alone when nothing else was running as it started and nothing
+    else started before it finished; only then are the process-wide byte
+    counts and memory marks this job's own.
+    """
+
+    def __init__(self) -> None:
+        self._facts: dict[str, Any] = {}
+        self._read0 = self._written0 = 0
+        self._active_at_start = 0
+        self._started_at_start = 0
+
+    @classmethod
+    def start(cls) -> WorkerProbe:
+        probe = cls()
+        probe._active_at_start, probe._started_at_start = _RUNNING.begin()
+        probe._read0, probe._written0 = STORAGE_IO.snapshot()
+        probe._facts = {
+            "name": worker_name(),
+            **container_limits(),
+            "uptime_at_start_ms": round(_process_uptime_s() * 1000.0, 1),
+        }
+        return probe
+
+    def finish(self) -> dict[str, Any]:
+        started_at_end = _RUNNING.end()
+        read, written = STORAGE_IO.snapshot()
+        own_rss, child_rss = _peak_rss_mb()
+        return {
+            **self._facts,
+            "storage_read_bytes": read - self._read0,
+            "storage_written_bytes": written - self._written0,
+            "peak_rss_mb": own_rss,
+            "peak_child_rss_mb": child_rss,
+            "ran_alone": self._active_at_start == 1 and started_at_end == self._started_at_start,
         }
 
 

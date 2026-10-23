@@ -630,6 +630,41 @@ def test_sigterm_mid_drain_finishes_the_drain_then_returns(
     assert drains == ["started", "finished"]
 
 
+@pytest.mark.usefixtures("_sigterm_ignored_outside_the_agent")
+def test_the_agent_names_its_jobs_worker_record(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Jobs the agent drains carry ``agent:<worker_id>`` in their timings."""
+    import signal
+
+    from splitsmith import observability
+
+    _isolate_env(monkeypatch)
+    monkeypatch.setattr(observability, "_WORKER_NAME", None)
+    seen: list[str] = []
+
+    async def drain(db: str, conc: int, *, stop_event: asyncio.Event | None = None) -> None:
+        seen.append(observability.worker_name())
+        os.kill(os.getpid(), signal.SIGTERM)
+        assert stop_event is not None
+        await asyncio.wait_for(stop_event.wait(), timeout=5)
+
+    monkeypatch.setattr(agent, "_run_worker_once", drain)
+
+    async def scenario() -> None:
+        await asyncio.wait_for(
+            agent.run_agent(
+                "http://srv",
+                registration_token="reg",
+                state_dir=tmp_path,
+                transport=_open_channel_transport(wake=True),
+            ),
+            timeout=5,
+        )
+
+    asyncio.run(scenario())
+    worker_id = agent.AgentState.load(tmp_path).worker_id
+    assert seen == [f"agent:{worker_id}"]
+
+
 def test_run_worker_until_stops_gracefully_between_jobs() -> None:
     """``queue._run_worker_until``: setting the event mid-job lets that job
     finish and takes no further job, with no signal handler installed."""
