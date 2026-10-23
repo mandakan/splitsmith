@@ -19,7 +19,9 @@ from splitsmith.worker_channel import WakeChannelRegistry
 from splitsmith.worker_trigger import (
     ENV_WAKE_CHANNEL,
     ENV_WORKER_JOB,
+    ENV_WORKER_JOBS_PER_EXECUTION,
     ENV_WORKER_LAUNCHER,
+    ENV_WORKER_MAX_EXECUTIONS,
     GCP_METADATA_TOKEN_URL,
     CloudRunJobConfig,
     WorkerDispatcher,
@@ -30,7 +32,13 @@ from splitsmith.worker_trigger import (
     wrap_deferrer,
 )
 
-_ALL_ENV_VARS = (ENV_WORKER_LAUNCHER, ENV_WORKER_JOB, ENV_WAKE_CHANNEL)
+_ALL_ENV_VARS = (
+    ENV_WORKER_LAUNCHER,
+    ENV_WORKER_JOB,
+    ENV_WAKE_CHANNEL,
+    ENV_WORKER_MAX_EXECUTIONS,
+    ENV_WORKER_JOBS_PER_EXECUTION,
+)
 
 
 def _clear_env(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -117,6 +125,9 @@ def _dispatcher(
     # the production 90s window (pending_jobs defaults to 0, so the drained
     # grace task no-ops).
     grace_seconds: float = 0.01,
+    # Off unless a test is about it: with jobs pending and no live worker
+    # the after-wake watch keeps waking, so ``_drain_tasks`` would not end.
+    watch_seconds: float | None = None,
 ) -> WorkerDispatcher:
     if transport is None and requests is not None:
         transport = _transport(requests)
@@ -128,6 +139,7 @@ def _dispatcher(
         pending_jobs=pending_jobs if pending_jobs is not None else _pending(0),
         grace_seconds=grace_seconds,
         transport=transport,
+        watch_seconds=watch_seconds,
     )
 
 
@@ -515,6 +527,7 @@ def test_grace_escalation_survives_triggers_faster_than_the_window() -> None:
             cooldown_seconds=0.0,
             grace_seconds=0.2,
             transport=_transport(requests),
+            watch_seconds=None,
         )
         for _ in range(12):  # a trigger every 50 ms for 600 ms
             await dispatcher.trigger()
@@ -553,6 +566,7 @@ def test_a_seen_drain_gives_the_next_wake_a_fresh_window() -> None:
             cooldown_seconds=0.0,
             grace_seconds=0.3,
             transport=_transport(requests),
+            watch_seconds=None,
         )
         await dispatcher.trigger()  # t=0: first wake
         await asyncio.sleep(0.1)
@@ -632,6 +646,252 @@ def test_grace_timer_not_armed_for_platform_only_wake() -> None:
 # ---------------------------------------------------------------------------
 # schedule()
 # ---------------------------------------------------------------------------
+
+
+# ---------------------------------------------------------------------------
+# After-wake watch (#1677): a drain that ends with work left is woken again
+# ---------------------------------------------------------------------------
+
+
+def _sequence(*values: Any) -> Any:
+    """An async callable returning ``values`` in turn, then the last forever."""
+    remaining = list(values)
+
+    async def _next() -> Any:
+        return remaining.pop(0) if len(remaining) > 1 else remaining[0]
+
+    return _next
+
+
+def _watch_scenario(*, pending: Any, worker_active: Any) -> list[dict[str, Any]]:
+    """Wake the platform worker once and let the watch run to its end; return the job starts."""
+    store = _fresh_store()
+    requests: list[dict[str, Any]] = []
+
+    async def scenario() -> None:
+        await _platform_row_id(store)
+        dispatcher = _dispatcher(
+            store,
+            WakeChannelRegistry(),
+            cloud_run=_config(),
+            requests=requests,
+            worker_active=worker_active,
+            pending_jobs=pending,
+            watch_seconds=0.01,
+        )
+        dispatcher._cooldown_seconds = 0.0
+        assert await dispatcher.trigger() is True
+        await asyncio.wait_for(_drain_tasks(dispatcher), 5)
+
+    asyncio.run(scenario())
+    return requests
+
+
+def test_watch_wakes_again_while_jobs_are_left_and_no_worker_lives() -> None:
+    """The execution exits (its budget spent, or killed) with jobs still
+    outstanding and no heartbeat: the watch starts another, until the queue
+    is empty."""
+    requests = _watch_scenario(pending=_sequence(3, 2, 0), worker_active=_inactive)
+    assert len(requests) == 3  # the trigger, then one re-wake per non-empty check
+
+
+def test_watch_waits_while_a_worker_is_live() -> None:
+    # No worker at the trigger; the woken one is live at every watch check.
+    requests = _watch_scenario(pending=_sequence(5, 5, 0), worker_active=_sequence(False, True))
+    assert len(requests) == 1
+
+
+def test_watch_gives_up_when_re_wakes_make_no_progress() -> None:
+    """A queue no drain can shorten must not start executions forever."""
+    from splitsmith.worker_trigger import WATCH_MAX_FRUITLESS_WAKES
+
+    requests = _watch_scenario(pending=_pending(4), worker_active=_inactive)
+    assert len(requests) == 1 + WATCH_MAX_FRUITLESS_WAKES
+
+
+# ---------------------------------------------------------------------------
+# Fan-out (#1671): a backlog runs on several executions, up to the cap
+# ---------------------------------------------------------------------------
+
+
+def _count(n: int) -> Any:
+    async def _n() -> int:
+        return n
+
+    return _n
+
+
+def _fan_out_starts(
+    *,
+    pending: int,
+    live: int,
+    max_executions: int,
+    active: Any = _active,
+    triggers: int = 1,
+    instances: int = 1,
+) -> list[int]:
+    """Trigger ``triggers`` times on a platform-only fleet, round-robin over
+    ``instances`` serve processes sharing one database; return the job
+    starts after each."""
+    store = _fresh_store()
+    requests: list[dict[str, Any]] = []
+    starts: list[int] = []
+
+    async def scenario() -> None:
+        await _platform_row_id(store)
+        dispatchers = [
+            WorkerDispatcher(
+                store,
+                WakeChannelRegistry(),
+                cloud_run=_config(),
+                worker_active=active,
+                pending_jobs=_pending(pending),
+                cooldown_seconds=0.0,
+                transport=_transport(requests),
+                watch_seconds=None,
+                live_workers=_count(live),
+                max_executions=max_executions,
+                jobs_per_execution=4,
+            )
+            for _ in range(instances)
+        ]
+        for n in range(triggers):
+            await dispatchers[n % instances].trigger()
+            starts.append(len(requests))
+        for dispatcher in dispatchers:
+            await _drain_tasks(dispatcher)
+
+    asyncio.run(scenario())
+    return starts
+
+
+def test_fan_out_adds_executions_beside_a_live_drain_for_a_backlog() -> None:
+    """Twelve queued jobs at four per execution want three; one is live."""
+    assert _fan_out_starts(pending=12, live=1, max_executions=3) == [2]
+
+
+def test_fan_out_is_capped() -> None:
+    assert _fan_out_starts(pending=100, live=1, max_executions=2) == [1]
+
+
+def test_fan_out_leaves_a_small_queue_to_the_live_drain() -> None:
+    assert _fan_out_starts(pending=3, live=1, max_executions=3) == [0]
+
+
+def test_fan_out_is_off_at_a_cap_of_one() -> None:
+    assert _fan_out_starts(pending=100, live=1, max_executions=1) == [0]
+
+
+def test_a_cold_wake_starts_what_the_backlog_wants_and_counts_them_while_they_boot() -> None:
+    """No drain live: the wake starts three for twelve jobs. A trigger right
+    after, while those three boot without a heartbeat, adds none."""
+    assert _fan_out_starts(
+        pending=12, live=0, max_executions=3, active=_sequence(False, True), triggers=2
+    ) == [
+        3,
+        3,
+    ]
+
+
+def test_a_second_cold_wake_while_the_first_boots_starts_only_one() -> None:
+    """No heartbeat yet at either trigger: the second counts the three still
+    booting and starts one (a booting one may have died), not three more."""
+    assert _fan_out_starts(pending=12, live=0, max_executions=3, active=_inactive, triggers=2) == [3, 4]
+
+
+def test_the_cap_holds_across_serve_instances() -> None:
+    """Serve runs several instances. One cold-wakes four executions for
+    sixteen jobs; the others, triggered while those four boot without a
+    heartbeat, see them through the database and add none."""
+    assert _fan_out_starts(
+        pending=16, live=0, max_executions=4, active=_sequence(False, True), triggers=3, instances=3
+    ) == [4, 4, 4]
+
+
+def test_a_refused_start_releases_its_claim() -> None:
+    """Claims the platform refused are not counted as booting: the next
+    trigger may start them."""
+    store = _fresh_store()
+    attempts: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if str(request.url) == GCP_METADATA_TOKEN_URL:
+            return httpx.Response(200, json={"access_token": "t", "expires_in": 3600})
+        attempts.append(str(request.url))
+        if len(attempts) == 2:
+            return httpx.Response(429, json={"error": "quota"})
+        return httpx.Response(200, json={"name": "operations/op"})
+
+    async def scenario() -> int:
+        row_id = await _platform_row_id(store)
+        dispatcher = WorkerDispatcher(
+            store,
+            WakeChannelRegistry(),
+            cloud_run=_config(),
+            worker_active=_inactive,
+            pending_jobs=_pending(16),
+            transport=httpx.MockTransport(handler),
+            watch_seconds=None,
+            max_executions=4,
+        )
+        assert await dispatcher.trigger() is True  # one started, the second refused
+        await _drain_tasks(dispatcher)
+        return await store.claim_starts(row_id, wanted=4, live=0, grace_seconds=120, at_least_one=False)
+
+    assert asyncio.run(scenario()) == 3
+
+
+def test_a_watch_re_wake_inside_the_cooldown_starts_nothing() -> None:
+    """A re-wake queued behind a trigger's in-flight job start finds the
+    cooldown stamped and stands down instead of starting a second one."""
+    store = _fresh_store()
+    requests: list[dict[str, Any]] = []
+    release = asyncio.Event()
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        if str(request.url) == GCP_METADATA_TOKEN_URL:
+            return httpx.Response(200, json={"access_token": "t", "expires_in": 3600})
+        requests.append({"url": str(request.url)})
+        await release.wait()
+        return httpx.Response(200, json={"name": "operations/op"})
+
+    async def scenario() -> None:
+        await _platform_row_id(store)
+        dispatcher = WorkerDispatcher(
+            store,
+            WakeChannelRegistry(),
+            cloud_run=_config(),
+            worker_active=_inactive,
+            pending_jobs=_pending(1),
+            cooldown_seconds=30.0,
+            transport=httpx.MockTransport(handler),
+            watch_seconds=None,
+        )
+        trigger = asyncio.create_task(dispatcher.trigger())
+        await asyncio.sleep(0.05)  # the trigger holds the lock, its start in flight
+        rewake = asyncio.create_task(dispatcher._rewake())
+        await asyncio.sleep(0.05)
+        release.set()
+        await asyncio.wait_for(asyncio.gather(trigger, rewake), 5)
+
+    asyncio.run(scenario())
+    assert len(requests) == 1
+
+
+def test_build_dispatcher_reads_the_fan_out_settings(monkeypatch: pytest.MonkeyPatch) -> None:
+    _clear_env(monkeypatch)
+    monkeypatch.setenv(ENV_WORKER_MAX_EXECUTIONS, "5")
+    monkeypatch.setenv(ENV_WORKER_JOBS_PER_EXECUTION, "6")
+    dispatcher = build_worker_dispatcher(
+        _fresh_store(), WakeChannelRegistry(), worker_active=None, pending_jobs=_pending(0)
+    )
+    assert dispatcher is not None
+    assert (dispatcher._max_executions, dispatcher._jobs_per_execution) == (5, 6)
+    monkeypatch.setenv(ENV_WORKER_MAX_EXECUTIONS, "0")
+    with pytest.raises(ValueError):
+        build_worker_dispatcher(
+            _fresh_store(), WakeChannelRegistry(), worker_active=None, pending_jobs=_pending(0)
+        )
 
 
 def test_schedule_fires_trigger_in_background() -> None:
@@ -714,6 +974,59 @@ def test_make_pending_jobs_counter_counts_todo_rows() -> None:
     assert asyncio.run(counter()) == 2
     assert "procrastinate_jobs" in session.queries[0]
     assert "todo" in session.queries[0]
+
+
+def test_make_pending_jobs_counter_counts_a_dead_workers_doing_jobs() -> None:
+    """An orphan needs a wake as much as a queued job: only a drain's stalled
+    sweep ends it (#1677). Run against the two tables on SQLite: queued jobs
+    of any priority (proxies are deferred low) and task count once each, as
+    do jobs of a stale or deleted worker; a live worker's job does not."""
+    from datetime import UTC, datetime, timedelta
+
+    from sqlalchemy import DateTime, bindparam, text
+
+    engine = create_engine("sqlite+aiosqlite:///:memory:")
+    factory = sessionmaker(engine)
+    now = datetime.now(UTC)
+    stamp = text("INSERT INTO procrastinate_workers (id, last_heartbeat) VALUES (:id, :at)").bindparams(
+        bindparam("at", type_=DateTime(timezone=True))
+    )
+
+    async def scenario() -> int:
+        async with engine.begin() as conn:
+            await conn.execute(
+                text(
+                    "CREATE TABLE procrastinate_jobs (id INTEGER PRIMARY KEY, status TEXT, "
+                    "worker_id INTEGER, priority INTEGER, task_name TEXT)"
+                )
+            )
+            await conn.execute(
+                text("CREATE TABLE procrastinate_workers (id INTEGER PRIMARY KEY, last_heartbeat)")
+            )
+            await conn.execute(stamp, {"id": 1, "at": now - timedelta(seconds=5)})  # live
+            await conn.execute(stamp, {"id": 2, "at": now - timedelta(seconds=300)})  # killed
+            rows = [
+                ("todo", None, 0, "run_compute_job"),  # counted
+                ("todo", None, -100, "run_compute_job"),  # a proxy, counted once
+                ("todo", None, 0, "ping"),  # counted
+                ("doing", 1, 0, "run_compute_job"),  # live worker: not counted
+                ("doing", 2, 0, "run_compute_job"),  # stale worker: counted
+                ("doing", 2, -100, "run_compute_job"),  # stale worker: counted
+                ("doing", None, 0, "run_compute_job"),  # pruned worker: counted
+                ("succeeded", None, 0, "run_compute_job"),
+                ("failed", 2, 0, "run_compute_job"),
+            ]
+            for status, worker_id, priority, task in rows:
+                await conn.execute(
+                    text(
+                        "INSERT INTO procrastinate_jobs (status, worker_id, priority, task_name) "
+                        "VALUES (:s, :w, :p, :t)"
+                    ),
+                    {"s": status, "w": worker_id, "p": priority, "t": task},
+                )
+        return await make_pending_jobs_counter(factory)()
+
+    assert asyncio.run(scenario()) == 6
 
 
 # ---------------------------------------------------------------------------

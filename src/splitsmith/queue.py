@@ -43,8 +43,11 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+import math
+import os
 import re
 import threading
+import time
 import weakref
 from collections.abc import Awaitable, Callable
 from typing import Any, Protocol
@@ -53,8 +56,10 @@ from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 import procrastinate
 import psycopg
 import psycopg_pool
+from procrastinate.jobs import Status as ProcrastinateStatus
 
 from .observability import init_sentry
+from .worker_trigger import STALLED_HEARTBEAT_SECONDS
 
 logger = logging.getLogger(__name__)
 
@@ -89,6 +94,66 @@ BACKGROUND_JOB_PRIORITY = -100
 def job_priority(kind: str) -> int:
     """The Procrastinate priority a job of ``kind`` is deferred with."""
     return BACKGROUND_JOB_PRIORITY if kind in BACKGROUND_JOB_KINDS else 0
+
+
+#: The worker job's task timeout as deployed (``--task-timeout``), in
+#: seconds. Cloud Run kills a task at it, mid-job or not, and exposes it
+#: nowhere a process can read, so the deploy states it beside the flag
+#: (like the size, ``observability.WORKER_VCPU_ENV``). Unset: no deadline.
+WORKER_TASK_TIMEOUT_ENV = "SPLITSMITH_WORKER_TASK_TIMEOUT_S"
+#: How long before that timeout a one-shot drain stops claiming jobs: room
+#: for the longest job kind to finish after the last claim.
+WORKER_DRAIN_MARGIN_ENV = "SPLITSMITH_WORKER_DRAIN_MARGIN_S"
+DEFAULT_DRAIN_MARGIN_SECONDS = 900.0
+
+
+def drain_budget_seconds() -> float | None:
+    """Seconds a one-shot drain may keep claiming jobs, counted from its start.
+
+    The deployed task timeout less the margin; ``None`` without a stated
+    timeout (the agent, a local run). A bad value never stops the drain,
+    since an execution that exits on a config error drains and sweeps
+    nothing: an unreadable or non-positive timeout logs a warning and drains
+    with no deadline, and an unreadable margin, or one that leaves no budget,
+    logs a warning and falls back to the default margin (no deadline if that
+    leaves none either).
+    """
+    raw = os.environ.get(WORKER_TASK_TIMEOUT_ENV, "").strip()
+    if not raw:
+        return None
+    timeout = _finite_float(raw)
+    if timeout is None:
+        # A zero or negative one falls through: no margin leaves a budget.
+        logger.warning(
+            "%s=%r is not a number of seconds; draining with no deadline",
+            WORKER_TASK_TIMEOUT_ENV,
+            raw,
+        )
+        return None
+    raw_margin = os.environ.get(WORKER_DRAIN_MARGIN_ENV, "").strip()
+    margin = _finite_float(raw_margin) if raw_margin else DEFAULT_DRAIN_MARGIN_SECONDS
+    if margin is None or not 0 <= margin < timeout:
+        logger.warning(
+            "%s=%r does not leave a budget below %s=%g; using the default %gs",
+            WORKER_DRAIN_MARGIN_ENV,
+            raw_margin,
+            WORKER_TASK_TIMEOUT_ENV,
+            timeout,
+            DEFAULT_DRAIN_MARGIN_SECONDS,
+        )
+        margin = DEFAULT_DRAIN_MARGIN_SECONDS
+        if margin >= timeout:
+            return None
+    return timeout - margin
+
+
+def _finite_float(raw: str) -> float | None:
+    """``raw`` as a finite float, or None (garbage, nan, inf)."""
+    try:
+        value = float(raw)
+    except ValueError:
+        return None
+    return value if math.isfinite(value) else None
 
 
 def _to_psycopg_dsn(sqlalchemy_url: str) -> str:
@@ -527,6 +592,7 @@ async def run_worker(
     wait: bool = True,
     stop_event: asyncio.Event | None = None,
     process_name: str = "splitsmith-worker",
+    deadline: float | None = None,
 ) -> None:
     """Run a worker that drains the job queue.
 
@@ -566,6 +632,12 @@ async def run_worker(
     ``process_name`` prefixes the ``application_name`` of every database
     connection the worker opens (#1198); the self-hosted agent passes
     ``splitsmith-agent``.
+
+    ``deadline`` (a ``time.monotonic()`` instant) is when the drain stops
+    claiming jobs: the job in flight finishes, and this returns with any
+    others left queued for the next wake (#1684). The Cloud Run worker sets
+    it from :func:`drain_budget_seconds` so the task timeout never kills a
+    job part-way.
 
     ``build_worker_state`` runs its own ``asyncio.run`` calls (the auth
     bootstrap upserts the user row synchronously), so it can't run inside
@@ -632,11 +704,18 @@ async def run_worker(
             # generator (~1 in 5 one-shot runs locally), leaving a zombie
             # container that never exits - the opposite of scale-to-zero.
             "listen_notify": wait,
+            # Each worker start prunes the workers silent this long, which
+            # nulls their jobs' worker_id and makes them orphans to the sweep
+            # at once; Procrastinate's 30 s would end a job whose worker is
+            # merely behind, inside the sweep's own threshold.
+            "stalled_worker_timeout": STALLED_HEARTBEAT_SECONDS,
         }
-        if stop_event is None:
-            await app.run_worker_async(**options)
-        else:
-            await _run_worker_until(app, stop_event, options)
+        # A job whose worker was killed stays ``doing`` and its row
+        # ``running`` until some worker ends it (#1677): every drain does at
+        # its start, and every STALLED_SWEEP_SECONDS while it runs.
+        end_orphan = _orphan_ender(state)
+        await _sweep_stalled(app, end_orphan)
+        await _run_worker_until(app, stop_event, options, deadline=deadline, end_orphan=end_orphan)
         logger.info("worker: drain complete (wait=%s); shutting down", wait)
     finally:
         try:
@@ -647,31 +726,96 @@ async def run_worker(
                 await engines.dispose_current_loop()
 
 
-async def _run_worker_until(app: Any, stop_event: asyncio.Event, options: dict[str, Any]) -> None:
-    """``app.run_worker_async`` with the stop driven by ``stop_event``.
+async def _run_worker_until(
+    app: Any,
+    stop_event: asyncio.Event | None,
+    options: dict[str, Any],
+    *,
+    deadline: float | None = None,
+    end_orphan: OrphanEnder | None = None,
+    sweep_seconds: float = 0.0,
+    stalled_after_seconds: float = STALLED_HEARTBEAT_SECONDS,
+) -> None:
+    """``app.run_worker_async`` with a graceful stop on ``stop_event`` or at ``deadline``.
 
     The same two steps ``run_worker_async`` takes (import the task paths,
     build a ``Worker`` over the app's defaults), plus a watcher that calls
-    the worker's graceful ``stop``. The watcher is created before
-    ``worker.run`` so it first runs after ``run`` has cleared its own stop
-    flag; a stop set any earlier would be wiped by that clear.
+    the worker's graceful ``stop``: no new job is claimed and the one in
+    flight finishes. The watchers are created before ``worker.run`` so they
+    first run after ``run`` has cleared its own stop flag; a stop set any
+    earlier would be wiped by that clear.
+
+    A caller with a ``stop_event`` owns the signals, so Procrastinate
+    installs none; otherwise its SIGTERM / SIGINT handlers stay.
+
+    Two tasks of our own run until ``worker.run`` returns:
+
+    - a heartbeat for this worker. Procrastinate's graceful stop (the
+      deadline, SIGTERM, the agent's stop, or a failed heartbeat write)
+      cancels its own heartbeat *before* it waits for the job in flight, so
+      without this a stopping drain's job looked orphaned for up to the
+      whole drain margin and any sweep, or serve's wake count, ended it
+      while it ran.
+    - with ``end_orphan``, the periodic stalled sweep (every
+      ``sweep_seconds``, default :data:`STALLED_SWEEP_SECONDS`), which
+      never ends this worker's own jobs.
     """
     from procrastinate.worker import Worker
 
-    if stop_event.is_set():
+    if stop_event is not None and stop_event.is_set():
         return
     app.perform_import_paths()
-    worker = Worker(app=app, **{**app.worker_defaults, **options, "install_signal_handlers": False})
+    worker = Worker(
+        app=app, **{**app.worker_defaults, **options, "install_signal_handlers": stop_event is None}
+    )
+    beat_seconds = float(options.get("update_heartbeat_interval", 10.0))
 
-    async def _watch() -> None:
-        await stop_event.wait()
+    async def _keep_beating() -> None:
+        while True:
+            await asyncio.sleep(beat_seconds)
+            worker_id = worker.worker_id
+            if worker_id is None:
+                continue
+            try:
+                await app.job_manager.update_heartbeat(worker_id)
+            except Exception:
+                logger.warning("worker: heartbeat write failed; retrying", exc_info=True)
+
+    async def _sweep_every(interval: float) -> None:
+        assert end_orphan is not None
+        while True:
+            await asyncio.sleep(interval)
+            await _sweep_stalled(
+                app,
+                end_orphan,
+                exclude_worker_id=worker.worker_id,
+                seconds_since_heartbeat=stalled_after_seconds,
+            )
+
+    async def _watch_event(event: asyncio.Event) -> None:
+        await event.wait()
         worker.stop()
 
-    watcher = asyncio.create_task(_watch())
+    async def _watch_deadline(at: float) -> None:
+        await asyncio.sleep(max(0.0, at - time.monotonic()))
+        logger.info("worker: drain budget spent; finishing the job in flight and claiming no more")
+        worker.stop()
+
+    watchers: list[asyncio.Task[None]] = [asyncio.create_task(_keep_beating())]
+    if stop_event is not None:
+        watchers.append(asyncio.create_task(_watch_event(stop_event)))
+    if deadline is not None:
+        watchers.append(asyncio.create_task(_watch_deadline(deadline)))
+    if end_orphan is not None:
+        watchers.append(asyncio.create_task(_sweep_every(sweep_seconds or STALLED_SWEEP_SECONDS)))
     try:
         await worker.run()
     finally:
-        watcher.cancel()
+        for watcher in watchers:
+            watcher.cancel()
+        for watcher in watchers:
+            with contextlib.suppress(asyncio.CancelledError):
+                await watcher
 
 
 # Connection failures worth retrying when the worker opens its pool against a
@@ -708,6 +852,96 @@ def _job_sweep() -> Callable[[], Awaitable[None]] | None:
         await _run_cache_sweep(cache_root, cap)
 
     return sweep
+
+
+#: The error an orphaned job's row ends with. It says what happened and
+#: what to do, since the user sees it in the failures sheet.
+ORPHANED_JOB_ERROR = (
+    "the worker running this job stopped before it finished (it was killed, ran out of memory "
+    "or hit its time limit); retry it"
+)
+#: How often a running drain looks for other workers' orphans.
+STALLED_SWEEP_SECONDS = 120.0
+
+#: Ends one orphaned job's ``compute_jobs`` row: ``(user_id, job_id)``.
+OrphanEnder = Callable[[str, str], Awaitable[None]]
+
+
+async def recover_stalled_jobs(
+    app: procrastinate.App,
+    end_orphan: OrphanEnder,
+    *,
+    seconds_since_heartbeat: float = STALLED_HEARTBEAT_SECONDS,
+    exclude_worker_id: int | None = None,
+) -> int:
+    """End every job whose worker died mid-run (#1677); return the count.
+
+    Procrastinate's stalled-job query finds the ``doing`` jobs whose worker
+    has no heartbeat newer than ``seconds_since_heartbeat`` (or no row at
+    all), of every task, so the sweep ends exactly what serve's wake count
+    (``worker_trigger.make_pending_jobs_counter``) counts as orphaned.
+    ``exclude_worker_id`` is the sweeping drain's own worker: its jobs are
+    alive by definition. A compute job's ``compute_jobs`` row is ended first through
+    ``end_orphan`` (failed, or cancelled when a cancel was requested: its
+    worker can no longer honour one), then the Procrastinate job is marked
+    failed. In that order, so a row write that fails leaves the job
+    ``doing`` for the next sweep instead of a row stuck ``running`` with
+    nothing left to find it.
+
+    Failed, not re-queued: a worker killed mid-job is now a crash or an
+    out-of-memory kill (the drain budget keeps the task timeout from
+    killing one), which a re-run repeats, and a loop of re-runs bills an
+    execution each time. A failed row shows in the failures sheet with a
+    Retry, and stops blocking its stage's dedupe.
+
+    Never raises past one job: a job another sweep ended first is skipped.
+    """
+    stalled = await app.job_manager.get_stalled_jobs(seconds_since_heartbeat=seconds_since_heartbeat)
+    ended = 0
+    for job in stalled:
+        if exclude_worker_id is not None and job.worker_id == exclude_worker_id:
+            continue
+        kwargs = job.task_kwargs
+        user_id, job_id = kwargs.get("user_id"), kwargs.get("job_id")
+        try:
+            if job.task_name == RUN_COMPUTE_JOB_TASK and isinstance(user_id, str) and isinstance(job_id, str):
+                await end_orphan(user_id, job_id)
+            assert job.id is not None
+            await app.job_manager.finish_job_by_id_async(
+                job_id=job.id, status=ProcrastinateStatus.FAILED, delete_job=False
+            )
+        except Exception:
+            logger.warning(
+                "worker: could not end orphaned job %s; the next sweep retries", job.id, exc_info=True
+            )
+            continue
+        ended += 1
+        logger.warning(
+            "worker: ended orphaned job %s (compute job %s, %s): its worker stopped mid-run",
+            job.id,
+            job_id,
+            kwargs.get("kind"),
+        )
+    return ended
+
+
+async def _sweep_stalled(app: procrastinate.App, end_orphan: OrphanEnder, **kwargs: Any) -> None:
+    """:func:`recover_stalled_jobs`, logged and swallowed: a failed sweep must
+    not stop the drain, and the next one retries."""
+    try:
+        await recover_stalled_jobs(app, end_orphan, **kwargs)
+    except Exception:
+        logger.warning("worker: stalled-job sweep failed", exc_info=True)
+
+
+def _orphan_ender(state: Any) -> OrphanEnder:
+    """End an orphan's row through its owner's job backend (the tenant's
+    RLS-scoped session, like the job itself)."""
+
+    async def end(user_id: str, job_id: str) -> None:
+        await state.build_tenant(user_id).jobs.end_orphaned(job_id, error=ORPHANED_JOB_ERROR)
+
+    return end
 
 
 async def _open_app_with_retry(

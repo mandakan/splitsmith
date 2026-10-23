@@ -69,6 +69,7 @@ def _dispatcher(store: Any, registry: WakeChannelRegistry, **kwargs: Any) -> Wor
     kwargs.setdefault("worker_active", None)
     kwargs.setdefault("pending_jobs", _pending(0))
     kwargs.setdefault("grace_seconds", 0.01)
+    kwargs.setdefault("watch_seconds", None)  # the after-wake watch has its own tests
     return WorkerDispatcher(store, registry, **kwargs)
 
 

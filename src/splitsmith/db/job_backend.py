@@ -135,6 +135,7 @@ class PostgresJobBackend:
         sweep_on_boot: bool = True,
         bodies: JobBodyRegistry | None = None,
         submit_allowed: Callable[[], Awaitable[bool]] | None = None,
+        on_running_cancel: Callable[[], None] | None = None,
     ) -> None:
         # Defence-in-depth: see :class:`PostgresRecentProjectsStore`
         # for the same fail-loud-on-empty-user_id rationale.
@@ -162,6 +163,11 @@ class PostgresJobBackend:
         # refuses unless it answers True. Hosted wiring always sets it;
         # ``None`` is tests and the local registry.
         self._submit_allowed = submit_allowed
+        # Called (never awaited, must not raise) after a cancel is recorded
+        # on a RUNNING row. Hosted wiring passes the worker dispatcher's
+        # ``schedule``: when that row's worker is dead, only a drain's
+        # stalled sweep can end it, and nothing else would start one.
+        self._on_running_cancel = on_running_cancel
 
         self._lock = threading.RLock()
         self._subprocs: dict[str, subprocess.Popen] = {}
@@ -420,6 +426,9 @@ class PostgresJobBackend:
             await session.commit()
             snapshot = _row_to_job(row)
 
+        if snapshot.status == JobStatus.RUNNING and self._on_running_cancel is not None:
+            self._on_running_cancel()
+
         with self._lock:
             proc_to_kill = self._subprocs.pop(job_id, None)
         if proc_to_kill is not None and proc_to_kill.poll() is None:
@@ -428,6 +437,39 @@ class PostgresJobBackend:
             except OSError:
                 logger.warning("cancel: terminate() failed for job %s", job_id, exc_info=True)
         return snapshot
+
+    async def end_orphaned(self, job_id: str, *, error: str) -> Job | None:
+        """End a job whose worker died mid-run (#1677); the worker's stalled sweep calls it.
+
+        A row still PENDING or RUNNING ends CANCELLED when a cancel was
+        requested (the dead worker can no longer honour it, which is why the
+        cancel alone never cleared one), else FAILED with ``error``, so the
+        failures sheet offers a retry. A row already terminal is left alone.
+        Returns the row's snapshot, or None for an id this user doesn't own.
+        """
+        async with self._session_factory() as session:
+            row = (
+                await session.execute(
+                    select(ComputeJobRow).where(
+                        ComputeJobRow.id == job_id,
+                        ComputeJobRow.user_id == self._user_id,
+                    )
+                )
+            ).scalar_one_or_none()
+            if row is None:
+                return None
+            if row.status in (JobStatus.PENDING.value, JobStatus.RUNNING.value):
+                now = datetime.now(UTC)
+                if row.cancel_requested:
+                    row.status = JobStatus.CANCELLED.value
+                    row.error = None
+                else:
+                    row.status = JobStatus.FAILED.value
+                    row.error = error
+                row.finished_at = now
+                row.updated_at = now
+                await session.commit()
+            return _row_to_job(row)
 
     async def acknowledge(self, job_id: str) -> Job | None:
         async with self._session_factory() as session:
@@ -791,6 +833,15 @@ class PostgresJobBackend:
                 )
             ).scalar_one_or_none()
             if row is None:
+                return
+            if row.status not in (JobStatus.PENDING.value, JobStatus.RUNNING.value):
+                # Already ended by someone else: the stalled sweep, which
+                # also failed the Procrastinate job. One terminal write per
+                # row; overwriting it would leave the row and the queue
+                # disagreeing.
+                logger.warning(
+                    "job %s finished %s but its row was already %s; keeping it", job_id, status, row.status
+                )
                 return
             row.status = status.value
             row.finished_at = now

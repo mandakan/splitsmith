@@ -5567,6 +5567,7 @@ def _apply_hosted_mode_wiring(
         WakeMarker,
         build_worker_dispatcher,
         make_boot_retrigger,
+        make_live_workers_counter,
         make_pending_jobs_counter,
         make_worker_active_checker,
         wake_channel,
@@ -5782,6 +5783,8 @@ def _apply_hosted_mode_wiring(
             raise RuntimeError(f"{ENV_WAKE_CHANNEL}=r2 needs the storage bucket ({SPLITSMITH_S3_BUCKET_ENV})")
         wake_marker = WakeMarker(s3_client, s3_bucket)
         state.wake_marker = wake_marker
+
+    on_running_cancel: Callable[[], None] | None = None
     if not worker:
         # Wakes a worker through the priority dispatcher after each defer,
         # gated on the procrastinate_workers heartbeat so a live drain is
@@ -5796,10 +5799,15 @@ def _apply_hosted_mode_wiring(
             worker_active=make_worker_active_checker(session_factory),
             pending_jobs=make_pending_jobs_counter(session_factory),
             wake_marker=wake_marker,
+            live_workers=make_live_workers_counter(session_factory),
         )
         if worker_launcher is not None:
             deferrer = wrap_deferrer(deferrer, worker_launcher)
             state.boot_retrigger = make_boot_retrigger(session_factory, worker_launcher)
+            # A cancel on a running row whose worker is dead is ended by the
+            # next drain's stalled sweep; the wake starts that drain (#1677).
+            # The dispatcher's heartbeat gate skips it while a worker lives.
+            on_running_cancel = worker_launcher.schedule
     if not worker:
         # Connection material handed to a self-hosted worker by the register
         # endpoint. The S3 sub-dict mirrors _build_hosted_s3_client's env
@@ -5877,6 +5885,7 @@ def _apply_hosted_mode_wiring(
                 sweep_on_boot=False,
                 bodies=state.job_bodies,
                 submit_allowed=_may_submit,
+                on_running_cancel=on_running_cancel,
             ),
             matches_store=tenant_matches,
             project_state=tenant_state,
