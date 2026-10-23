@@ -19,6 +19,20 @@ from splitsmith.queue import _to_psycopg_dsn, build_app, run_worker
 _FAKE_PG_URL = "postgresql+asyncpg://u:p@localhost:5432/db"
 
 
+@pytest.fixture(autouse=True)
+def _drain_through_run_worker_async(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The fake Apps here stand in for ``run_worker_async`` only; route the
+    drain (``queue._run_worker_until``, which builds a real Procrastinate
+    Worker) to it so they can record the options. The drain itself is
+    covered against an in-memory queue in ``test_worker_drain_lifecycle``."""
+    import splitsmith.queue as queue_mod
+
+    async def _drain(app: object, _stop: object, options: dict, **_kw: object) -> None:
+        await app.run_worker_async(**options)  # type: ignore[attr-defined]
+
+    monkeypatch.setattr(queue_mod, "_run_worker_until", _drain)
+
+
 def test_to_psycopg_dsn_strips_async_dialect() -> None:
     assert _to_psycopg_dsn(_FAKE_PG_URL) == "postgresql://u:p@localhost:5432/db"
 

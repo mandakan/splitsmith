@@ -786,6 +786,49 @@ def test_a_cold_wake_starts_what_the_backlog_wants_and_counts_them_while_they_bo
     ]
 
 
+def test_a_second_cold_wake_while_the_first_boots_starts_only_one() -> None:
+    """No heartbeat yet at either trigger: the second counts the three still
+    booting and starts one (a booting one may have died), not three more."""
+    assert _fan_out_starts(pending=12, live=0, max_executions=3, active=_inactive, triggers=2) == [3, 4]
+
+
+def test_a_watch_re_wake_inside_the_cooldown_starts_nothing() -> None:
+    """A re-wake queued behind a trigger's in-flight job start finds the
+    cooldown stamped and stands down instead of starting a second one."""
+    store = _fresh_store()
+    requests: list[dict[str, Any]] = []
+    release = asyncio.Event()
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        if str(request.url) == GCP_METADATA_TOKEN_URL:
+            return httpx.Response(200, json={"access_token": "t", "expires_in": 3600})
+        requests.append({"url": str(request.url)})
+        await release.wait()
+        return httpx.Response(200, json={"name": "operations/op"})
+
+    async def scenario() -> None:
+        await _platform_row_id(store)
+        dispatcher = WorkerDispatcher(
+            store,
+            WakeChannelRegistry(),
+            cloud_run=_config(),
+            worker_active=_inactive,
+            pending_jobs=_pending(1),
+            cooldown_seconds=30.0,
+            transport=httpx.MockTransport(handler),
+            watch_seconds=None,
+        )
+        trigger = asyncio.create_task(dispatcher.trigger())
+        await asyncio.sleep(0.05)  # the trigger holds the lock, its start in flight
+        rewake = asyncio.create_task(dispatcher._rewake())
+        await asyncio.sleep(0.05)
+        release.set()
+        await asyncio.wait_for(asyncio.gather(trigger, rewake), 5)
+
+    asyncio.run(scenario())
+    assert len(requests) == 1
+
+
 def test_build_dispatcher_reads_the_fan_out_settings(monkeypatch: pytest.MonkeyPatch) -> None:
     _clear_env(monkeypatch)
     monkeypatch.setenv(ENV_WORKER_MAX_EXECUTIONS, "5")
@@ -886,17 +929,55 @@ def test_make_pending_jobs_counter_counts_todo_rows() -> None:
 
 def test_make_pending_jobs_counter_counts_a_dead_workers_doing_jobs() -> None:
     """An orphan needs a wake as much as a queued job: only a drain's stalled
-    sweep ends it (#1677). The SQL is checked against Postgres by hand in the
-    PR; here the shape."""
-    session = _StubSession(1)
-    counter = make_pending_jobs_counter(lambda: _StubSessionCtx(session))
-    asyncio.run(counter())
-    assert "doing" in session.queries[0]
-    assert "procrastinate_workers" in session.queries[0]
-    assert "last_heartbeat" in session.queries[0]
-    # Background kinds (proxies) are deferred at a low priority; they still
-    # need a worker, so the count covers every priority, each row once.
-    assert "priority" not in session.queries[0]
+    sweep ends it (#1677). Run against the two tables on SQLite: queued jobs
+    of any priority (proxies are deferred low) and task count once each, as
+    do jobs of a stale or deleted worker; a live worker's job does not."""
+    from datetime import UTC, datetime, timedelta
+
+    from sqlalchemy import DateTime, bindparam, text
+
+    engine = create_engine("sqlite+aiosqlite:///:memory:")
+    factory = sessionmaker(engine)
+    now = datetime.now(UTC)
+    stamp = text("INSERT INTO procrastinate_workers (id, last_heartbeat) VALUES (:id, :at)").bindparams(
+        bindparam("at", type_=DateTime(timezone=True))
+    )
+
+    async def scenario() -> int:
+        async with engine.begin() as conn:
+            await conn.execute(
+                text(
+                    "CREATE TABLE procrastinate_jobs (id INTEGER PRIMARY KEY, status TEXT, "
+                    "worker_id INTEGER, priority INTEGER, task_name TEXT)"
+                )
+            )
+            await conn.execute(
+                text("CREATE TABLE procrastinate_workers (id INTEGER PRIMARY KEY, last_heartbeat)")
+            )
+            await conn.execute(stamp, {"id": 1, "at": now - timedelta(seconds=5)})  # live
+            await conn.execute(stamp, {"id": 2, "at": now - timedelta(seconds=300)})  # killed
+            rows = [
+                ("todo", None, 0, "run_compute_job"),  # counted
+                ("todo", None, -100, "run_compute_job"),  # a proxy, counted once
+                ("todo", None, 0, "ping"),  # counted
+                ("doing", 1, 0, "run_compute_job"),  # live worker: not counted
+                ("doing", 2, 0, "run_compute_job"),  # stale worker: counted
+                ("doing", 2, -100, "run_compute_job"),  # stale worker: counted
+                ("doing", None, 0, "run_compute_job"),  # pruned worker: counted
+                ("succeeded", None, 0, "run_compute_job"),
+                ("failed", 2, 0, "run_compute_job"),
+            ]
+            for status, worker_id, priority, task in rows:
+                await conn.execute(
+                    text(
+                        "INSERT INTO procrastinate_jobs (status, worker_id, priority, task_name) "
+                        "VALUES (:s, :w, :p, :t)"
+                    ),
+                    {"s": status, "w": worker_id, "p": priority, "t": task},
+                )
+        return await make_pending_jobs_counter(factory)()
+
+    assert asyncio.run(scenario()) == 6
 
 
 # ---------------------------------------------------------------------------

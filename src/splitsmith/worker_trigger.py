@@ -586,12 +586,15 @@ class WorkerDispatcher:
                 if answered:
                     return
                 self._last_attempt = time.monotonic()
-            logger.info(
-                "worker dispatcher: no drain %.0fs after wake - escalating past priority %s",
-                self._grace_seconds,
-                woken_priority,
-            )
-            await self._wake_from(max_priority_exclusive=woken_priority)
+                logger.info(
+                    "worker dispatcher: no drain %.0fs after wake - escalating past priority %s",
+                    self._grace_seconds,
+                    woken_priority,
+                )
+                # Under the lock, like every wake: a watch re-wake or a
+                # trigger running beside it would count the same booting
+                # executions as missing and start them twice.
+                await self._wake_from(max_priority_exclusive=woken_priority)
         except Exception:
             logger.warning("worker dispatcher: grace escalation failed; nets will recover", exc_info=True)
 
@@ -656,7 +659,11 @@ class WorkerDispatcher:
     async def _rewake(self) -> None:
         """The watch's wake: :meth:`trigger` without re-arming the watch."""
         async with self._lock:
-            self._last_attempt = time.monotonic()
+            now = time.monotonic()
+            if self._last_attempt is not None and now - self._last_attempt < self._cooldown_seconds:
+                # A trigger or an escalation just woke: it is answering this.
+                return
+            self._last_attempt = now
             try:
                 await self._wake_from(max_priority_exclusive=None)
             except Exception:
@@ -787,17 +794,22 @@ def make_pending_jobs_counter(
     """
 
     async def _pending_jobs() -> int:
-        from sqlalchemy import text
+        from datetime import UTC, datetime, timedelta
 
+        from sqlalchemy import DateTime, bindparam, text
+
+        # The cutoff is computed here rather than as ``now() - interval`` so
+        # the same statement runs on SQLite, where the test pins its
+        # semantics; serve's and Neon's clocks agree far inside 60 s.
+        cutoff = datetime.now(UTC) - timedelta(seconds=stalled_after_seconds)
         async with session_factory() as session:
             result = await session.execute(
                 text(
                     "SELECT count(*) FROM procrastinate_jobs job WHERE job.status = 'todo' "
                     "OR (job.status = 'doing' AND (job.worker_id IS NULL OR job.worker_id IN ("
-                    "SELECT id FROM procrastinate_workers "
-                    "WHERE last_heartbeat < now() - make_interval(secs => :age))))"
-                ),
-                {"age": stalled_after_seconds},
+                    "SELECT id FROM procrastinate_workers WHERE last_heartbeat < :cutoff)))"
+                ).bindparams(bindparam("cutoff", type_=DateTime(timezone=True))),
+                {"cutoff": cutoff},
             )
             return int(result.scalar_one())
 

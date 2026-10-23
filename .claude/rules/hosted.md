@@ -183,12 +183,23 @@ Deploy facts (worker env, `FORWARDED_ALLOW_IPS`, the waitlist cut-over) are in
   stalled sweep (`queue.recover_stalled_jobs`, at its start and every 120 s):
   a re-run repeats an out-of-memory kill and bills an execution each time. A
   cancel-requested orphan ends cancelled, and a cancel on a running row wakes
-  a drain so it does. The pending count serve wakes on includes those orphans.
+  a drain so it does. The pending count serve wakes on includes those orphans,
+  of every task, and the sweep ends every task's (a count the sweep cannot
+  drain would re-wake for ever). A drain keeps its own heartbeat until
+  `worker.run` returns, because Procrastinate's graceful stop cancels its
+  heartbeat before it waits for the job in flight; without it a stopping
+  drain's job reads as an orphan. Worker starts prune at the sweep's 60 s,
+  not Procrastinate's 30 s, and a row already terminal is never rewritten
+  by its worker's finish.
 - After a wake serve watches (`WorkerDispatcher._watch`): work outstanding
   with no live heartbeat is woken again, and the watch gives up after three
   re-wakes that cleared nothing. A backlog beside a live drain gets more
   executions, one per `SPLITSMITH_WORKER_JOBS_PER_EXECUTION` queued jobs, up to
-  `SPLITSMITH_WORKER_MAX_EXECUTIONS` (default 2). `tests/test_worker_trigger.py`
+  `SPLITSMITH_WORKER_MAX_EXECUTIONS` (default 2). The cap and the count of
+  booting executions live in one serve process, so with serve at
+  `--max-instances 3` the bound is the cap times the instances (6 at the
+  defaults), and an execution is invisible to other instances for its ~28 s
+  boot. `tests/test_worker_trigger.py`
   and `tests/test_worker_drain_lifecycle.py` pin all three.
 
 ## Database connections

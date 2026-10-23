@@ -73,9 +73,27 @@ def test_drain_budget_is_the_task_timeout_less_the_margin(monkeypatch: pytest.Mo
     assert queue_mod.drain_budget_seconds() == 3600 - queue_mod.DEFAULT_DRAIN_MARGIN_SECONDS
     monkeypatch.setenv(queue_mod.WORKER_DRAIN_MARGIN_ENV, "600")
     assert queue_mod.drain_budget_seconds() == 3000
-    monkeypatch.setenv(queue_mod.WORKER_DRAIN_MARGIN_ENV, "3600")
-    with pytest.raises(ValueError):
-        queue_mod.drain_budget_seconds()
+
+
+@pytest.mark.parametrize("timeout", ["soon", "0", "-5", "nan", "inf"])
+def test_a_bad_task_timeout_drains_with_no_deadline(monkeypatch: pytest.MonkeyPatch, timeout: str) -> None:
+    """A config error must not make every execution exit before it drains."""
+    monkeypatch.setenv(queue_mod.WORKER_TASK_TIMEOUT_ENV, timeout)
+    monkeypatch.delenv(queue_mod.WORKER_DRAIN_MARGIN_ENV, raising=False)
+    assert queue_mod.drain_budget_seconds() is None
+
+
+@pytest.mark.parametrize("margin", ["lots", "nan", "inf", "-1", "3600"])
+def test_a_bad_drain_margin_falls_back_to_the_default(monkeypatch: pytest.MonkeyPatch, margin: str) -> None:
+    monkeypatch.setenv(queue_mod.WORKER_TASK_TIMEOUT_ENV, "3600")
+    monkeypatch.setenv(queue_mod.WORKER_DRAIN_MARGIN_ENV, margin)
+    assert queue_mod.drain_budget_seconds() == 3600 - queue_mod.DEFAULT_DRAIN_MARGIN_SECONDS
+
+
+def test_a_timeout_inside_the_default_margin_drains_with_no_deadline(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv(queue_mod.WORKER_TASK_TIMEOUT_ENV, "600")
+    monkeypatch.setenv(queue_mod.WORKER_DRAIN_MARGIN_ENV, "600")
+    assert queue_mod.drain_budget_seconds() is None
 
 
 def test_worker_command_one_shot_passes_the_task_deadline(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -308,3 +326,171 @@ def test_cancelling_a_running_job_wakes_a_worker(tmp_path: Path) -> None:
     assert kicks == []
     asyncio.run(backend.cancel("running"))  # type: ignore[attr-defined]
     assert kicks == ["wake"]
+
+
+# ---------------------------------------------------------------------------
+# Review of #1697: a stopping drain is not an orphan
+# ---------------------------------------------------------------------------
+
+
+def _fake_server(monkeypatch: pytest.MonkeyPatch, app: object, backend: object, register: object) -> None:
+    """Stub what ``run_worker`` imports so it drains ``app`` with ``backend``."""
+    import sys
+    import types
+
+    server = types.ModuleType("splitsmith.ui.server")
+    server.build_worker_state = lambda **_k: types.SimpleNamespace(  # type: ignore[attr-defined]
+        db_engines=None, build_tenant=lambda _uid: types.SimpleNamespace(jobs=backend)
+    )
+    server._configure_app_logging = lambda: None  # type: ignore[attr-defined]
+    server.warm_ensemble_runtime = lambda: None  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "splitsmith.ui.server", server)
+    monkeypatch.setattr(queue_mod, "init_sentry", lambda **_k: None)
+    monkeypatch.setattr(queue_mod, "build_app", lambda _url, **_k: app)
+    monkeypatch.setattr(queue_mod, "register_compute_task", register)
+    monkeypatch.setattr(queue_mod, "_job_sweep", lambda: None)
+
+
+def test_a_stopping_drain_keeps_its_heartbeat_so_no_sweep_ends_its_job() -> None:
+    """Procrastinate's graceful stop cancels its heartbeat before it waits for
+    the job in flight. That job must still look alive: neither another
+    drain's sweep nor this drain's own may end it, and it ends succeeded."""
+    from procrastinate import App, testing
+
+    app = App(connector=testing.InMemoryConnector())
+    finished: list[str] = []
+    ended: list[str] = []
+
+    async def end(_uid: str, job_id: str) -> None:
+        ended.append(job_id)
+
+    @app.task(name=queue_mod.RUN_COMPUTE_JOB_TASK)
+    async def compute(*, job_id: str, **_rest: object) -> None:
+        await asyncio.sleep(2.0)
+        finished.append(job_id)
+
+    async def scenario() -> int:
+        async with app.open_async():
+            await compute.defer_async(job_id="long", user_id="u", kind="shot_detect", args={}, match_id=None)
+            drain = asyncio.create_task(
+                queue_mod._run_worker_until(
+                    app,
+                    None,
+                    {
+                        "wait": False,
+                        "concurrency": 1,
+                        "listen_notify": False,
+                        "update_heartbeat_interval": 0.2,
+                        "stalled_worker_timeout": 1.0,
+                    },
+                    deadline=time.monotonic() + 0.1,
+                    end_orphan=end,
+                    sweep_seconds=0.3,
+                    stalled_after_seconds=1.0,
+                )
+            )
+            await asyncio.sleep(1.6)  # the stop came at 0.1 s, well past the 1 s threshold
+            swept = await queue_mod.recover_stalled_jobs(app, end, seconds_since_heartbeat=1.0)
+            await asyncio.wait_for(drain, 5)
+            return swept
+
+    swept = asyncio.run(scenario())
+    assert swept == 0
+    assert ended == []
+    assert finished == ["long"]
+    assert [job["status"] for job in app.connector.jobs.values()] == ["succeeded"]  # type: ignore[attr-defined]
+
+
+def test_a_drain_start_does_not_prune_a_worker_inside_the_sweep_threshold(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Every worker start prunes silent workers, which nulls their jobs'
+    worker_id, and a nulled job is swept as an orphan at once. A worker 40 s
+    behind on its heartbeat is inside the 60 s threshold and keeps its job."""
+    from procrastinate import App, testing
+
+    from splitsmith.ui.jobs import JobStatus
+
+    backend, user_id = _backend(tmp_path, [("lagging", JobStatus.RUNNING.value, False)])
+    app = App(connector=testing.InMemoryConnector())
+
+    def register(target: App, _state: object, **_kw: object) -> None:
+        @target.task(name=queue_mod.RUN_COMPUTE_JOB_TASK, queue="default")
+        async def _run(**_rest: object) -> None:
+            return None
+
+    _fake_server(monkeypatch, app, backend, register)
+
+    async def seed() -> int:
+        async with app.open_async():
+            return await _orphan(app, job_id="lagging", user_id=user_id, heartbeat_age_s=40)
+
+    job_id = asyncio.run(seed())
+    asyncio.run(asyncio.wait_for(queue_mod.run_worker("postgresql+asyncpg://u:p@h/db", wait=False), 10))
+
+    job = app.connector.jobs[job_id]  # type: ignore[attr-defined]
+    assert job["status"] == "doing"
+    assert job["worker_id"] is not None
+    assert _status(backend, "lagging") == ("running", None)
+
+
+def test_the_sweep_ends_an_orphan_of_any_task_so_the_wake_count_drains() -> None:
+    """Serve counts every task's orphans as work; a sweep that skipped all but
+    compute jobs would leave one counted for ever and re-wake on it."""
+    from procrastinate import App, testing
+
+    app = App(connector=testing.InMemoryConnector())
+    called: list[str] = []
+
+    async def end(_uid: str, job_id: str) -> None:
+        called.append(job_id)
+
+    @app.task(name="ping")
+    async def ping() -> None:
+        return None
+
+    async def scenario() -> int:
+        import datetime
+
+        async with app.open_async():
+            await ping.defer_async()
+            worker_id = await app.job_manager.register_worker()
+            job = await app.job_manager.fetch_job(queues=None, worker_id=worker_id)
+            assert job is not None
+            app.connector.workers[worker_id] = datetime.datetime.now(  # type: ignore[attr-defined]
+                datetime.UTC
+            ) - datetime.timedelta(seconds=300)
+            return await queue_mod.recover_stalled_jobs(app, end)
+
+    assert asyncio.run(scenario()) == 1
+    assert called == []  # no compute row to end
+    assert [job["status"] for job in app.connector.jobs.values()] == ["failed"]  # type: ignore[attr-defined]
+
+
+def test_the_sweep_never_ends_its_own_workers_jobs() -> None:
+    from procrastinate import App, testing
+
+    app = App(connector=testing.InMemoryConnector())
+
+    async def end(_uid: str, _job_id: str) -> None:
+        return None
+
+    async def scenario() -> tuple[int, int]:
+        async with app.open_async():
+            await _orphan(app, job_id="mine", user_id="u", heartbeat_age_s=300)
+            own = next(iter(app.connector.workers))  # type: ignore[attr-defined]
+            mine = await queue_mod.recover_stalled_jobs(app, end, exclude_worker_id=own)
+            other = await queue_mod.recover_stalled_jobs(app, end)
+            return mine, other
+
+    assert asyncio.run(scenario()) == (0, 1)
+
+
+def test_a_job_ended_by_the_sweep_is_not_rewritten_by_its_worker(tmp_path: Path) -> None:
+    """One terminal write per row: the worker's own finish never overwrites a
+    row the sweep (or a cancel) already ended."""
+    from splitsmith.ui.jobs import JobStatus
+
+    backend, _ = _backend(tmp_path, [("ended", JobStatus.FAILED.value, False)])
+    asyncio.run(backend._finalize_run("ended", JobStatus.SUCCEEDED, error=None))  # type: ignore[attr-defined]
+    assert _status(backend, "ended") == ("failed", None)

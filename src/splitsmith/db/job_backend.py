@@ -834,6 +834,15 @@ class PostgresJobBackend:
             ).scalar_one_or_none()
             if row is None:
                 return
+            if row.status not in (JobStatus.PENDING.value, JobStatus.RUNNING.value):
+                # Already ended by someone else: the stalled sweep, which
+                # also failed the Procrastinate job. One terminal write per
+                # row; overwriting it would leave the row and the queue
+                # disagreeing.
+                logger.warning(
+                    "job %s finished %s but its row was already %s; keeping it", job_id, status, row.status
+                )
+                return
             row.status = status.value
             row.finished_at = now
             row.updated_at = now
