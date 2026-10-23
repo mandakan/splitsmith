@@ -1,8 +1,8 @@
 /**
  * Making a clip primary on its own stage goes through the audit-safe swap:
- * with audit work on the stage it asks first, then the server keeps the
- * audit as a backup and redoes the stage on the new primary. The plain move
- * it used to send left the audit on the old camera's clock (2026-10-16).
+ * with audit work on the stage it asks first, then the server moves the
+ * audit's shots onto the new primary's clip (#1496). The plain move it used
+ * to send left the audit on the old camera's clock (2026-10-16).
  */
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -177,6 +177,18 @@ describe("Making a clip primary", () => {
     await new Promise((r) => setTimeout(r, 50));
     expect(api.swapPrimary).not.toHaveBeenCalled();
     expect(api.moveAssignment).not.toHaveBeenCalled();
+  });
+
+  it("shows why a camera without a confirmed beep cannot become primary", async () => {
+    const message = "Stage 1 has audit work, and VID has no confirmed beep. Confirm its beep first.";
+    vi.mocked(api.swapPrimary).mockRejectedValueOnce(
+      new ApiError(409, "primary_without_beep", { detail: { code: "primary_without_beep", message } }),
+    );
+    renderIngest();
+    const sheet = await openHeadClip();
+    await userEvent.click(within(sheet).getByRole("button", { name: "Primary" }));
+    expect(await screen.findByText(message)).toBeInTheDocument();
+    expect(screen.queryByRole("dialog", { name: /primary on stage 1/ })).toBeNull();
   });
 
   it("swaps without asking when the stage has no audit work", async () => {

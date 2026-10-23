@@ -1,6 +1,12 @@
 {
   "entries": [
     {
+      "id": "make-primary-keeps-audit",
+      "date": "2026-10-23",
+      "title": "Make primary keeps your audit",
+      "body": "Making another camera primary on a stage you audited moves your shots onto its clip instead of starting over. Confirm that camera's beep first, then use Primary on its clip in Footage."
+    },
+    {
       "id": "sort-footage-order",
       "date": "2026-10-22",
       "title": "Sort footage by shooting order",

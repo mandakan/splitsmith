@@ -1375,6 +1375,64 @@ def audit_clocks(
     console.print(f"{found} audit(s) {verb}" if found else "every audit is on its clip's clock")
 
 
+@match_app.command("audit-cameras")
+def audit_cameras(
+    path: Path = typer.Argument(..., exists=True, file_okay=False, dir_okay=True, help="Match folder."),
+) -> None:
+    """List audits that may not be on their stage's primary camera (#1496).
+
+    ``on another camera``: the audit records the camera it was made on, and
+    that is not the primary. ``suspect``: an audit from before that record,
+    on a stage whose primary has no confirmed beep while another camera's
+    is confirmed. Writes nothing. To repair a stage, make the camera the
+    audit was made on primary again (a move keeps the audit as it is), or
+    confirm the primary's beep and use Make primary, which moves the shots.
+    """
+    import json
+
+    from .audit_clock import clip_camera_problem
+
+    if not is_match_folder(path):
+        console.print(f"[red]Not a match folder:[/] {path}")
+        raise typer.Exit(code=2)
+    match = Match.load(path)
+    found = 0
+    for slug in match.shooters:
+        root = Match.shooter_root(path, slug)
+        try:
+            project = match_model.MatchProject.load(root)
+        except FileNotFoundError:
+            continue
+        for stage in project.stages:
+            audit_path = project.audit_path(root) / f"stage{stage.stage_number}.json"
+            if not audit_path.is_file():
+                continue
+            primary = stage.primary()
+            others = [
+                v for v in stage.videos if v is not primary and v.beep_reviewed and v.beep_time is not None
+            ]
+            problem = clip_camera_problem(
+                json.loads(audit_path.read_text(encoding="utf-8")),
+                primary_video_id=primary.video_id if primary is not None else None,
+                primary_beep_confirmed=primary is not None
+                and primary.beep_reviewed
+                and primary.beep_time is not None,
+                confirmed_others=[v.video_id for v in others],
+            )
+            if problem is None:
+                continue
+            found += 1
+            names = {v.video_id: v.path.name for v in stage.videos}
+            kind, video_id = problem
+            camera = names.get(video_id, video_id) if video_id else "another camera"
+            primary_name = primary.path.name if primary is not None else "no primary"
+            label = "on another camera" if kind == "other_camera" else "suspect"
+            console.print(
+                f"{slug} stage {stage.stage_number}: {label}, audit on {camera}, primary {primary_name}"
+            )
+    console.print(f"{found} audit(s) to check" if found else "every audit is on its primary camera")
+
+
 @match_app.command("reclassify")
 def reclassify(
     match_path: Path = typer.Argument(..., exists=True, readable=True, help="Match folder."),

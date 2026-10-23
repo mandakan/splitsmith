@@ -57,7 +57,7 @@ import { openSortText } from "@/lib/footageSort";
 import { useCan } from "@/lib/access";
 import { useDeploymentMode } from "@/lib/features";
 import {
-  identityTarget, buildFootageRows, footageStats, skippedSummary, unassignedVideos, type UnassignedItem } from "@/lib/footage";
+  identityTarget, buildFootageRows, footageStats, primaryRefusal, skippedSummary, unassignedVideos, type UnassignedItem } from "@/lib/footage";
 import { pickDefaultShooterSlug } from "@/lib/defaultShooter";
 import { useMatchHref } from "@/lib/matchHref";
 import { useUploads } from "@/lib/uploads";
@@ -67,6 +67,13 @@ import { pinBody } from "@/lib/you";
 import { applyAssignmentLocally, buildClipModel, removeVideoLocally, type ClipItem } from "@/pages/ingest/model";
 
 type StorageMode = "symlink" | "copy";
+
+
+/** A role change's error: the server's own sentence when it refused a
+ *  primary with no confirmed beep, else the usual text. */
+function moveErrorText(e: unknown, fallback: string): string {
+  return (e instanceof ApiError ? primaryRefusal(e.body) : null) ?? apiErrorText(e, fallback);
+}
 
 export function Ingest() {
   const { slug } = useParams<{ slug: string }>();
@@ -453,7 +460,7 @@ function IngestInner({ slug }: { slug: string }) {
         // predates the still-queued optimistic moves and would revert them.
         if (inflight.current === 1) setProject(updated);
       } catch (e: unknown) {
-        setError(apiErrorText(e, "Could not move the video."));
+        setError(moveErrorText(e, "Could not move the video."));
         // Optimistic state may be ahead of the server now; pull the truth back.
         void reload();
       } finally {
@@ -630,11 +637,11 @@ function IngestInner({ slug }: { slug: string }) {
   );
 
   // Making a clip primary on the stage it is already on is a swap, not a
-  // move: the stage's audit was measured on the old primary's clock. The
-  // server keeps the audit as a backup and redoes the trim and the shots
-  // on the new primary (a beep confirmed on it is kept); with audit work on
-  // the stage it refuses until the user confirms (2026-10-16). A plain move
-  // left the audit in place, on the wrong camera's clock.
+  // move: the stage's audit was measured on the old primary's clock. With
+  // audit work the server moves its shots onto the new primary's clip by
+  // the two cameras' beeps and trims the stage again; it refuses a new
+  // primary whose beep is not confirmed (``primary_without_beep``, shown as
+  // its message) and asks before carrying (``audit_exists``).
   async function promoteToPrimary(targetSlug: string, videoPath: string, stage: number): Promise<void> {
     if (editDenied) {
       setError(READ_ONLY_MIRROR_MESSAGE);
@@ -647,14 +654,14 @@ function IngestInner({ slug }: { slug: string }) {
     } catch (e: unknown) {
       const detail = e instanceof ApiError ? (e.body as { detail?: { code?: string; current_primary?: string } } | null)?.detail : null;
       if (!(e instanceof ApiError && e.status === 409 && detail?.code === "audit_exists")) {
-        setError(apiErrorText(e, "Could not make the video primary."));
+        setError(moveErrorText(e, "Could not make the video primary."));
         return;
       }
       const name = videoPath.split("/").pop() ?? videoPath;
       const current = detail.current_primary?.split("/").pop() ?? "the current primary";
       const ok = await confirm({
         title: `Make ${name} primary on stage ${stage}?`,
-        body: `Stage ${stage} has audit work on ${current}, timed on that camera. It is kept as a backup, the stage is trimmed and its shots detected again on ${name}, and you audit it again. A beep you confirmed on ${name} stays.`,
+        body: `Stage ${stage} has audit work on ${current}. Its shots move onto ${name}, each keeping its time from the beep, and the stage is trimmed again on ${name}.`,
         confirmLabel: "Make primary",
         destructive: false,
       });
@@ -662,7 +669,7 @@ function IngestInner({ slug }: { slug: string }) {
       try {
         updated = await api.swapPrimary(targetSlug, videoPath, stage, true);
       } catch (e2: unknown) {
-        setError(apiErrorText(e2, "Could not make the video primary."));
+        setError(moveErrorText(e2, "Could not make the video primary."));
         return;
       }
     }
@@ -696,7 +703,7 @@ function IngestInner({ slug }: { slug: string }) {
       const updated = await api.moveAssignment(targetSlug, videoPath, toStage, role, fromStage);
       setOthers((cur) => ({ ...cur, [targetSlug]: updated }));
     } catch (e: unknown) {
-      setError(apiErrorText(e, "Could not move the video."));
+      setError(moveErrorText(e, "Could not move the video."));
     }
   }
   async function removeOn(targetSlug: string, videoPath: string, fromStage?: number | null): Promise<void> {

@@ -7,6 +7,7 @@ import {
   buildFootageRows,
   chipBeepMark,
   footageStats,
+  primaryRefusal,
   shortName,
   skippedSummary,
   unassignedVideos,
@@ -157,5 +158,23 @@ describe("identityTarget", () => {
     expect(identityTarget("?identity=s_9", shooters)).toBeNull();
     expect(identityTarget("", shooters)).toBeNull();
     expect(identityTarget("?identity=s_1", [])).toBeNull();
+  });
+});
+
+describe("primaryRefusal", () => {
+  it("reads the sentence out of a primary_without_beep refusal", () => {
+    const body = { detail: { code: "primary_without_beep", message: "Confirm its beep first." } };
+    expect(primaryRefusal(body)).toBe("Confirm its beep first.");
+  });
+
+  it("and out of a primary_not_trimmed one", () => {
+    const body = { detail: { code: "primary_not_trimmed", message: "Its trim is queued." } };
+    expect(primaryRefusal(body)).toBe("Its trim is queued.");
+  });
+
+  it("is null for any other answer", () => {
+    expect(primaryRefusal({ detail: { code: "audit_exists", message: "x" } })).toBeNull();
+    expect(primaryRefusal({ detail: "not found" })).toBeNull();
+    expect(primaryRefusal(null)).toBeNull();
   });
 });

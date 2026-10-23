@@ -36,6 +36,7 @@ from typing import Any
 
 from .. import automation as automation_module
 from .. import ensemble as ensemble_module
+from ..audit_clock import CLIP_VIDEO_FIELD
 from ..beep import detect as beep_detect
 from ..detection_merge import merge_detection_into
 from ..match_project import MatchProject
@@ -304,6 +305,7 @@ def detect_shots_for_stage(
         "stage_name": stage.stage_name,
         "stage_time_seconds": stage.time_seconds,
         "beep_time": round(beep_in_clip, 4),
+        CLIP_VIDEO_FIELD: primary.video_id,
         "shots": [],
     }
     # The server's rule, not a copy of it (#1380): a reset drops the seeder's

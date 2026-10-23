@@ -26,7 +26,7 @@ from .. import events as events_module
 from .. import report, stage_details
 from .. import waveform as waveform_helpers
 from ..access import Feature, FeatureRequiredError
-from ..audit_clock import rebase_to_clip, stamp_clip_beep
+from ..audit_clock import rebase_to_clip, stamp_clip_beep, stamp_clip_video
 from ..audit_data import audit_shots_to_engine_shots, is_kept_shot
 from ..audit_revision import REVISION_FIELD, AuditRevisionConflictError, audit_revision
 from ..beep import detect as beep_detect
@@ -1637,6 +1637,10 @@ def put_stage_audit(request: Request, slug: str, stage_number: int, payload: dic
     # split read as before the beep).
     _stg, _project, clip_beep = _server._coach_stage(state, slug, stage_number)
     stamp_clip_beep(payload, clip_beep)
+    # #1496: and the camera that clip is, so a change of primary knows
+    # which clock the shots are on.
+    _prim = _stg.primary()
+    stamp_clip_video(payload, _prim.video_id if _prim is not None else None)
     # #775: an audited stage is fully classified. Run the auto-classifier
     # on every save so statistic_splits never sees a partial stage; shots
     # whose source is "manual" are preserved, shots with no ms_after_beep
