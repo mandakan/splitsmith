@@ -347,7 +347,9 @@ def test_worker_command_one_shot_passes_wait_false(monkeypatch: pytest.MonkeyPat
     worker job run exits once the queue is empty instead of blocking."""
     captured: dict[str, object] = {}
 
-    async def _fake_run_worker(_db_url: str, *, concurrency: int = 1, wait: bool = True) -> None:
+    async def _fake_run_worker(
+        _db_url: str, *, concurrency: int = 1, wait: bool = True, deadline: float | None = None
+    ) -> None:
         captured["concurrency"] = concurrency
         captured["wait"] = wait
 

@@ -33,6 +33,14 @@ later trigger that re-wakes the same dead tier does not move that
 deadline; anchoring it to the latest attempt starved the queue for as
 long as submits kept arriving faster than the grace window.
 
+A drain can also end with work left: it spends its time budget (the task
+timeout less a margin, ``queue.drain_budget_seconds``) or is killed, which
+leaves its job ``doing`` until the next drain's stalled sweep fails it. So
+every wake arms a watch that wakes again while work is outstanding and no
+heartbeat is live (:meth:`WorkerDispatcher._watch`), and a backlog that
+outgrows the live drains gets more Cloud Run executions, up to a cap
+(:meth:`WorkerDispatcher._fan_out`).
+
 Configuration comes from env vars (:func:`build_worker_dispatcher`);
 ``SPLITSMITH_WORKER_LAUNCHER=none`` disables the dispatcher entirely so
 local / docker-compose deployments (always-on worker) skip the wake
@@ -44,6 +52,7 @@ from __future__ import annotations
 import asyncio
 import itertools
 import logging
+import math
 import os
 import time
 from collections.abc import Awaitable, Callable, Coroutine
@@ -112,6 +121,31 @@ class Heartbeat(BaseModel):
     def fresh(self, now: datetime | None = None) -> bool:
         current = now if now is not None else datetime.now(UTC)
         return (current - self.at).total_seconds() <= HEARTBEAT_STALE_SECONDS
+
+
+#: A ``doing`` job whose worker's heartbeat is older than this (or whose
+#: worker row is gone) is orphaned: its worker was killed. Procrastinate
+#: beats every 10 s and prunes a worker silent for 30 s at a worker's start.
+STALLED_HEARTBEAT_SECONDS = 60.0
+#: How often serve re-checks, after a wake, whether work is outstanding with
+#: no live worker (an execution that exited on its budget, or was killed).
+WATCH_SECONDS = 120.0
+#: Re-wakes in a row that left the outstanding count no lower before the
+#: watch gives up and leaves the rest to the nets.
+WATCH_MAX_FRUITLESS_WAKES = 3
+# Fan-out (#1671): the most Cloud Run executions a backlog may run at once
+# (``SPLITSMITH_WORKER_MAX_EXECUTIONS``, default 2) and the queued jobs one
+# execution is expected to clear in a few minutes
+# (``SPLITSMITH_WORKER_JOBS_PER_EXECUTION``, default 4: a proxy takes 48 to
+# 151 s on 4 vCPU). N executions bill about what one does for N times as
+# long, plus a startup each.
+ENV_WORKER_MAX_EXECUTIONS = "SPLITSMITH_WORKER_MAX_EXECUTIONS"
+ENV_WORKER_JOBS_PER_EXECUTION = "SPLITSMITH_WORKER_JOBS_PER_EXECUTION"
+DEFAULT_MAX_EXECUTIONS = 2
+DEFAULT_JOBS_PER_EXECUTION = 4
+#: How long a started execution counts as live before its heartbeat shows
+#: (measured: 28 s from start to the first job).
+STARTUP_GRACE_SECONDS = 120.0
 
 
 class CloudRunJobConfig(BaseModel):
@@ -238,6 +272,7 @@ class WorkerLauncher(Protocol):
 
 WorkerActiveCheck = Callable[[], Awaitable[bool]]
 PendingJobsCount = Callable[[], Awaitable[int]]
+LiveWorkersCount = Callable[[], Awaitable[int]]
 
 
 class WorkerDispatcher:
@@ -267,7 +302,13 @@ class WorkerDispatcher:
         transport: httpx.AsyncBaseTransport | None = None,
         cloud_run: CloudRunJobConfig | None = None,
         wake_marker: WakeMarker | None = None,
+        watch_seconds: float | None = WATCH_SECONDS,
+        live_workers: LiveWorkersCount | None = None,
+        max_executions: int = 1,
+        jobs_per_execution: int = DEFAULT_JOBS_PER_EXECUTION,
     ) -> None:
+        if max_executions < 1 or jobs_per_execution < 1:
+            raise ValueError("max_executions and jobs_per_execution must be at least 1")
         self._store = store
         self._registry = registry
         self._cloud_run = cloud_run
@@ -289,6 +330,19 @@ class WorkerDispatcher:
         # is seen, the queue is empty, or the dispatcher escalates.
         self._unanswered_since: float | None = None
         self._tasks: set[asyncio.Task[Any]] = set()
+        # The after-wake watch (see :meth:`_watch`); None disables it.
+        self._watch_seconds = watch_seconds
+        self._watching = False
+        # Fan-out (#1671): how many Cloud Run executions a backlog may run at
+        # once, and how many queued jobs one execution is expected to clear
+        # in a few minutes. ``live_workers`` counts heartbeats; without it the
+        # dispatcher never adds an execution beside a live drain.
+        self._live_workers = live_workers
+        self._max_executions = max_executions
+        self._jobs_per_execution = jobs_per_execution
+        # When each recent execution was started: one still booting has no
+        # heartbeat yet, so it counts as live for STARTUP_GRACE_SECONDS.
+        self._recent_starts: list[float] = []
 
     def schedule(self) -> None:
         """Run :meth:`trigger` as a background task; never blocks the caller.
@@ -322,10 +376,15 @@ class WorkerDispatcher:
             self._last_attempt = now
             try:
                 if self._worker_active is not None and await self._worker_active():
-                    logger.info("worker dispatcher: skipped, a live worker heartbeat exists")
                     self._unanswered_since = None
+                    if await self._fan_out():
+                        return True
+                    logger.info("worker dispatcher: skipped, a live worker heartbeat exists")
                     return False
-                return await self._wake_from(max_priority_exclusive=None)
+                woke = await self._wake_from(max_priority_exclusive=None)
+                if woke:
+                    self._start_watch()
+                return woke
             except Exception:
                 logger.warning(
                     "worker dispatcher: failed; boot re-check or safety cron will drain the queue",
@@ -356,12 +415,14 @@ class WorkerDispatcher:
                 if worker.kind == "cloud_run":
                     if self._cloud_run is None:
                         continue
-                    try:
-                        await self._run_job()
-                    except Exception:
-                        logger.warning("worker dispatcher: cloud run job start failed", exc_info=True)
+                    # No drain is live on this path: start as many as the
+                    # backlog wants, up to the cap (#1671), less those still
+                    # booting, and always one (a booting one may have died).
+                    now = time.monotonic()
+                    self._recent_starts = [t for t in self._recent_starts if now - t < STARTUP_GRACE_SECONDS]
+                    count = max(1, await self._executions_wanted() - len(self._recent_starts))
+                    if await self._start_executions(count) == 0:
                         continue
-                    logger.info("worker dispatcher: cloud run job started")
                     woken_ids.append(worker.id)
                 elif self._wake_marker is not None:
                     # "r2" channel: one marker write wakes every box polling
@@ -433,6 +494,70 @@ class WorkerDispatcher:
             live.append(worker)
         return live
 
+    async def _executions_wanted(self) -> int:
+        """Cloud Run executions the backlog wants: one per
+        ``jobs_per_execution`` queued jobs, at least one, at most
+        ``max_executions``. One when fan-out is off or the count fails."""
+        if self._max_executions == 1:
+            return 1
+        try:
+            pending = await self._pending_jobs()
+        except Exception:
+            logger.warning("worker dispatcher: pending count failed; starting one execution", exc_info=True)
+            return 1
+        return min(self._max_executions, max(1, math.ceil(pending / self._jobs_per_execution)))
+
+    async def _start_executions(self, count: int) -> int:
+        """Start ``count`` executions of the worker job; return how many started.
+
+        Separate executions rather than one with several tasks: each drains
+        and exits on its own, and Procrastinate's locking hands every job to
+        one of them. Stops at the first refused start.
+        """
+        started = 0
+        for _ in range(count):
+            try:
+                await self._run_job()
+            except Exception:
+                logger.warning("worker dispatcher: cloud run job start failed", exc_info=True)
+                break
+            started += 1
+            self._recent_starts.append(time.monotonic())
+        if started:
+            logger.info("worker dispatcher: cloud run job started (%s execution(s))", started)
+        return started
+
+    async def _fan_out(self) -> bool:
+        """Add Cloud Run executions beside a live drain when the backlog outgrows it (#1671).
+
+        The live heartbeats plus executions started within
+        :data:`STARTUP_GRACE_SECONDS` (booting, no heartbeat yet) are the
+        capacity; a backlog that wants more than that, up to the cap, gets
+        the difference. An execution counted both ways (started recently
+        and already beating) only makes this start fewer. Off unless a
+        cap above one, a live-worker count and the platform leg are all
+        configured, and the platform row is enabled. Runs under the lock.
+        """
+        if self._max_executions == 1 or self._live_workers is None or self._cloud_run is None:
+            return False
+        now = time.monotonic()
+        self._recent_starts = [t for t in self._recent_starts if now - t < STARTUP_GRACE_SECONDS]
+        platform = [w for w in await self._store.list_enabled() if w.kind == "cloud_run"]
+        if not platform:
+            return False
+        capacity = await self._live_workers() + len(self._recent_starts)
+        extra = await self._executions_wanted() - capacity
+        if extra <= 0:
+            return False
+        logger.info("worker dispatcher: backlog outgrows %s live drain(s); adding %s", capacity, extra)
+        if await self._start_executions(extra) == 0:
+            return False
+        try:
+            await self._store.touch_wake([w.id for w in platform])
+        except Exception:
+            logger.warning("worker dispatcher: touch_wake bookkeeping failed", exc_info=True)
+        return True
+
     async def _grace_escalate(self, woken_priority: int, *, anchor: float, delay: float) -> None:
         """After ``delay`` (the rest of the grace window counted from
         ``anchor``, the first unanswered wake): if jobs are still pending and
@@ -470,15 +595,86 @@ class WorkerDispatcher:
         except Exception:
             logger.warning("worker dispatcher: grace escalation failed; nets will recover", exc_info=True)
 
-    def _spawn(self, coro: Coroutine[Any, Any, Any]) -> None:
-        """Run ``coro`` as a GC-protected background task; never raises."""
+    def _start_watch(self) -> None:
+        """Arm the after-wake watch unless one is already running."""
+        if self._watch_seconds is None or self._watching:
+            return
+        self._watching = self._spawn(self._watch(self._watch_seconds))
+
+    async def _watch(self, interval: float) -> None:
+        """Wake again while work is outstanding and no worker is live (#1677).
+
+        A drain ends with work left when it spends its time budget (#1684),
+        and a killed one leaves its job ``doing`` with nothing to clear it;
+        until now both waited for the next submit's wake. Every ``interval``
+        this counts the outstanding jobs (``pending_jobs``: queued, plus
+        ``doing`` ones whose worker is dead, which the next drain fails at
+        its start) and, with no live heartbeat, triggers again. It ends
+        when nothing is outstanding, or after
+        :data:`WATCH_MAX_FRUITLESS_WAKES` re-wakes in a row left the count
+        no lower (a queue no worker can clear must not start executions
+        forever); the boot re-check and the safety cron stay the nets.
+
+        It lives in serve's process like the grace escalation, so a serve
+        that scales to zero mid-drain drops it; the next boot re-check
+        counts the same outstanding work. Never raises.
+        """
+        fruitless = 0
+        woke_at: int | None = None
+        try:
+            while True:
+                await asyncio.sleep(interval)
+                try:
+                    outstanding = await self._pending_jobs()
+                    if outstanding <= 0:
+                        return
+                    if self._worker_active is not None and await self._worker_active():
+                        continue
+                except Exception:
+                    logger.warning("worker dispatcher: watch check failed; nets will recover", exc_info=True)
+                    return
+                if woke_at is not None and outstanding >= woke_at:
+                    fruitless += 1
+                    if fruitless >= WATCH_MAX_FRUITLESS_WAKES:
+                        logger.warning(
+                            "worker dispatcher: %s job(s) outstanding after %s re-wakes made no progress; "
+                            "leaving them to the boot re-check and the safety cron",
+                            outstanding,
+                            fruitless,
+                        )
+                        return
+                else:
+                    fruitless = 0
+                logger.info(
+                    "worker dispatcher: %s job(s) outstanding and no live worker - waking again", outstanding
+                )
+                woke_at = outstanding
+                await self._rewake()
+        finally:
+            self._watching = False
+
+    async def _rewake(self) -> None:
+        """The watch's wake: :meth:`trigger` without re-arming the watch."""
+        async with self._lock:
+            self._last_attempt = time.monotonic()
+            try:
+                await self._wake_from(max_priority_exclusive=None)
+            except Exception:
+                logger.warning("worker dispatcher: watch re-wake failed; nets will recover", exc_info=True)
+
+    def _spawn(self, coro: Coroutine[Any, Any, Any]) -> bool:
+        """Run ``coro`` as a GC-protected background task; never raises.
+
+        Returns whether the task was created."""
         try:
             task = asyncio.get_running_loop().create_task(coro)
             self._tasks.add(task)
             task.add_done_callback(self._tasks.discard)
+            return True
         except Exception:
             coro.close()  # silence the "never awaited" warning
             logger.warning("worker dispatcher: schedule failed; nets will recover", exc_info=True)
+            return False
 
     async def _gcp_access_token(self) -> str:
         """The service account's access token, cached until a minute before expiry."""
@@ -540,11 +736,54 @@ def make_worker_active_checker(
     return _worker_active
 
 
-def make_pending_jobs_counter(session_factory: Callable[[], Any]) -> PendingJobsCount:
-    """Count Procrastinate jobs still waiting for a worker.
+def make_live_workers_counter(
+    session_factory: Callable[[], Any], max_age_seconds: float = 20.0
+) -> LiveWorkersCount:
+    """Count Procrastinate workers whose heartbeat is fresher than
+    ``max_age_seconds``: the same liveness as :func:`make_worker_active_checker`,
+    counted for the dispatcher's fan-out."""
 
-    Shared by the serve-boot re-check (:func:`make_boot_retrigger`) and the
-    dispatcher's grace escalation - one definition of "pending" for both.
+    async def _live_workers() -> int:
+        from sqlalchemy import text
+
+        async with session_factory() as session:
+            result = await session.execute(
+                text(
+                    "SELECT count(*) FROM procrastinate_workers "
+                    "WHERE last_heartbeat > now() - make_interval(secs => :age)"
+                ),
+                {"age": max_age_seconds},
+            )
+            return int(result.scalar_one())
+
+    return _live_workers
+
+
+def _positive_int_env(name: str, default: int) -> int:
+    raw = os.environ.get(name, "").strip()
+    if not raw:
+        return default
+    value = int(raw)
+    if value < 1:
+        raise ValueError(f"{name}={raw!r}: expected a whole number of at least 1")
+    return value
+
+
+def make_pending_jobs_counter(
+    session_factory: Callable[[], Any], stalled_after_seconds: float = STALLED_HEARTBEAT_SECONDS
+) -> PendingJobsCount:
+    """Count Procrastinate jobs that need a worker to start.
+
+    Queued (``todo``) jobs, plus ``doing`` jobs orphaned by a dead worker:
+    no worker row (Procrastinate nulls ``worker_id`` when it prunes one) or
+    a heartbeat older than ``stalled_after_seconds``. Procrastinate's own
+    stalled-job query, counted. An orphan needs a wake too, since only a
+    worker's start ends it (``queue.recover_stalled_jobs``), and until then
+    its row reads ``running`` and blocks its stage (#1677).
+
+    Shared by the serve-boot re-check (:func:`make_boot_retrigger`), the
+    dispatcher's grace escalation and its after-wake watch - one definition
+    of "pending" for all three.
     """
 
     async def _pending_jobs() -> int:
@@ -552,7 +791,13 @@ def make_pending_jobs_counter(session_factory: Callable[[], Any]) -> PendingJobs
 
         async with session_factory() as session:
             result = await session.execute(
-                text("SELECT count(*) FROM procrastinate_jobs WHERE status = 'todo'")
+                text(
+                    "SELECT count(*) FROM procrastinate_jobs job WHERE job.status = 'todo' "
+                    "OR (job.status = 'doing' AND (job.worker_id IS NULL OR job.worker_id IN ("
+                    "SELECT id FROM procrastinate_workers "
+                    "WHERE last_heartbeat < now() - make_interval(secs => :age))))"
+                ),
+                {"age": stalled_after_seconds},
             )
             return int(result.scalar_one())
 
@@ -630,6 +875,7 @@ def build_worker_dispatcher(
     pending_jobs: PendingJobsCount,
     transport: httpx.AsyncBaseTransport | None = None,
     wake_marker: WakeMarker | None = None,
+    live_workers: LiveWorkersCount | None = None,
 ) -> WorkerDispatcher | None:
     """Build the dispatcher from ``SPLITSMITH_WORKER_LAUNCHER``.
 
@@ -643,6 +889,11 @@ def build_worker_dispatcher(
 
     ``wake_marker`` switches self-hosted wakes from SSE pushes to the
     storage-bucket marker (``SPLITSMITH_WAKE_CHANNEL=r2``).
+
+    The fan-out cap and the jobs one execution is expected to clear come
+    from ``SPLITSMITH_WORKER_MAX_EXECUTIONS`` and
+    ``SPLITSMITH_WORKER_JOBS_PER_EXECUTION`` (#1671); fan-out needs
+    ``live_workers``.
     """
     kind = os.environ.get(ENV_WORKER_LAUNCHER, "").strip().lower()
     if kind == "none":
@@ -660,4 +911,7 @@ def build_worker_dispatcher(
         worker_active=worker_active,
         pending_jobs=pending_jobs,
         transport=transport,
+        live_workers=live_workers,
+        max_executions=_positive_int_env(ENV_WORKER_MAX_EXECUTIONS, DEFAULT_MAX_EXECUTIONS),
+        jobs_per_execution=_positive_int_env(ENV_WORKER_JOBS_PER_EXECUTION, DEFAULT_JOBS_PER_EXECUTION),
     )

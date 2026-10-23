@@ -35,6 +35,7 @@ paths:
   - "tests/test_access*.py"
   - "tests/test_admin_access_routes.py"
   - "tests/test_pooling_docker.py"
+  - "tests/test_worker_drain_lifecycle.py"
   - "tests/test_presence_index.py"
   - "tests/test_recent_projects_batch.py"
   - "tests/test_match_bundle_queries.py"
@@ -173,6 +174,22 @@ Deploy facts (worker env, `FORWARDED_ALLOW_IPS`, the waitlist cut-over) are in
   keeps serve and Neon awake, the thing this mode avoids.
   `tests/test_worker_cloud_run.py` pins the launcher, the marker and the poll;
   `tests/test_worker_heartbeat.py` the heartbeat.
+- **A one-shot drain never outlives its task.** Cloud Run kills a task at
+  `--task-timeout` mid-job, so the worker env repeats it
+  (`SPLITSMITH_WORKER_TASK_TIMEOUT_S`) and the drain stops claiming jobs
+  `SPLITSMITH_WORKER_DRAIN_MARGIN_S` (default 900) before it, finishing the
+  one in flight. A job longer than the margin is still killed; split it.
+- **A killed worker's job is failed, never re-queued**, by the next drain's
+  stalled sweep (`queue.recover_stalled_jobs`, at its start and every 120 s):
+  a re-run repeats an out-of-memory kill and bills an execution each time. A
+  cancel-requested orphan ends cancelled, and a cancel on a running row wakes
+  a drain so it does. The pending count serve wakes on includes those orphans.
+- After a wake serve watches (`WorkerDispatcher._watch`): work outstanding
+  with no live heartbeat is woken again, and the watch gives up after three
+  re-wakes that cleared nothing. A backlog beside a live drain gets more
+  executions, one per `SPLITSMITH_WORKER_JOBS_PER_EXECUTION` queued jobs, up to
+  `SPLITSMITH_WORKER_MAX_EXECUTIONS` (default 2). `tests/test_worker_trigger.py`
+  and `tests/test_worker_drain_lifecycle.py` pin all three.
 
 ## Database connections
 

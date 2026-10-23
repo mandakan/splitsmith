@@ -693,8 +693,14 @@ def worker(
     """
     import asyncio as _asyncio
     import os as _os
+    import time as _time
 
+    from .queue import drain_budget_seconds
     from .queue import run_worker as _run_worker
+
+    # The task timeout counts from the task's start; this is the nearest
+    # instant the process can read, and the drain margin covers the rest.
+    started = _time.monotonic()
 
     _os.environ.setdefault("SPLITSMITH_MODE", "hosted")
     db_url = _os.environ.get("SPLITSMITH_DATABASE_URL")
@@ -706,17 +712,21 @@ def worker(
         )
         raise typer.Exit(2)
 
+    # A one-shot drain stops claiming jobs before the deployed task timeout
+    # would kill one part-way (#1684); a long-lived worker has no timeout.
+    budget = drain_budget_seconds() if one_shot else None
+    deadline = started + budget if budget is not None else None
     if one_shot:
         console.print(
             f"[green]splitsmith worker[/]: one-shot drain of all queues (concurrency={concurrency}), "
-            "exiting when empty"
+            "exiting when empty" + (f" or after {budget:.0f}s of claiming jobs" if budget is not None else "")
         )
     else:
         console.print(
             f"[green]splitsmith worker[/]: draining all queues (concurrency={concurrency})   (Ctrl+C to stop)"
         )
     try:
-        _asyncio.run(_run_worker(db_url, concurrency=concurrency, wait=not one_shot))
+        _asyncio.run(_run_worker(db_url, concurrency=concurrency, wait=not one_shot, deadline=deadline))
     except KeyboardInterrupt:
         console.print("\n[yellow]Stopped.[/]")
 
