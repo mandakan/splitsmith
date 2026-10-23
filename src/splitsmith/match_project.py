@@ -2408,6 +2408,7 @@ class MatchProject(BaseModel):
         """
         if not storage.exists(key):
             return
+        version_before = _object_mtime(storage, key)
         dest.parent.mkdir(parents=True, exist_ok=True)
         fd, tmp_name = tempfile.mkstemp(
             prefix=dest.name + ".",
@@ -2420,9 +2421,14 @@ class MatchProject(BaseModel):
             # The mirror's mtime is the object's: a trim this worker cut
             # before the source cache evicted the source stays current
             # when the source comes down again (#1678). The atime is the
-            # download, which is the LRU sweep's last use.
+            # download, which is the LRU sweep's last use. Only when the
+            # object's version was the same before and after the stream:
+            # one replaced mid-download could pair either version with the
+            # other's bytes, and a trim cut from those would later pass for
+            # the real object's. Then the download time stands, which only
+            # costs a re-cut.
             version = _object_mtime(storage, key)
-            if version is not None:
+            if version is not None and version == version_before:
                 os.utime(tmp_name, (time.time(), version))
             Path(tmp_name).replace(dest)
         except Exception:

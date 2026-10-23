@@ -37,6 +37,7 @@ from ..config import BeepDetectConfig, BeepDetection
 from ..match_project import MatchProject, StageVideo
 from ..media_check import valid_mp4, valid_mp4_cached
 from ..storage import StorageObject
+from .context import current_match_origin
 
 logger = logging.getLogger(__name__)
 
@@ -881,10 +882,13 @@ def invalidate_video_audit_trim(
     ``stored`` also deletes the storage cache's copies (trim, params, web
     rendition, audit WAV): a hosted reader keys on their existence, so a
     trim cut for the old beep would play under the new one until the next
-    cut lands. Only the job bodies of a hosted-native match pass it; a
-    desktop mirror's media belongs to the desktop. Best-effort.
+    cut lands. The trim and detect job bodies pass it. No job of either kind
+    is queued for a desktop mirror today (its routes and confirms chain
+    none), and the copies of a mirror belong to the desktop that pushed
+    them, so a desktop-origin match never drops them here either.
+    Best-effort; a no-op without storage (local mode).
     """
-    if stored:
+    if stored and current_match_origin.get() != "desktop":
         _drop_stored_trim(project, project_root, stage_number, video)
     from .. import trim as trim_module
 
@@ -940,21 +944,31 @@ def trim_params_current(
     stage_time_seconds: float,
     *,
     project: MatchProject,
+    source: Path | None = None,
 ) -> bool:
     """Whether ``video``'s trim is in place (locally or in the storage cache)
     and was cut for its current beep, stage time and buffers, by its params
-    sidecar: the same rule :func:`ensure_video_audit_trim` reuses a trim by.
-    Never downloads the trim; reads the small sidecar from storage when it is
-    not on this disk."""
+    sidecar, and is not older than ``source`` when that is on this disk: the
+    rule :func:`ensure_video_audit_trim` reuses a trim by. Never downloads
+    the trim; reads the small sidecar (and the object's time) from storage
+    when it is not on this disk."""
     if video.beep_time is None:
         return False
     current = _current_trim_params(
         primary_beep_time=video.beep_time, stage_time_seconds=stage_time_seconds, project=project
     )
+    source_mtime: float | None = None
+    if source is not None:
+        try:
+            source_mtime = source.stat().st_mtime
+        except OSError:
+            source_mtime = None
     output = trimmed_video_path(project_root, stage_number, video, project=project)
     params_file = trim_params_path(output)
     try:
         if output.exists() and output.stat().st_size > 0 and params_file.exists():
+            if source_mtime is not None and output.stat().st_mtime < source_mtime:
+                return False
             return json.loads(params_file.read_text(encoding="utf-8")) == current
     except (OSError, ValueError):
         return False
@@ -964,7 +978,12 @@ def trim_params_current(
         return False
     storage = project._storage  # type: ignore[union-attr]
     try:
-        if not storage.exists(mp4_key):
+        meta = storage.stat(mp4_key)
+        if meta is None:
+            return False
+        if source_mtime is not None and (
+            meta.last_modified is None or meta.last_modified.timestamp() < source_mtime
+        ):
             return False
         return json.loads(storage.read_bytes(params_key)) == current
     except Exception as exc:  # noqa: BLE001 - a miss only costs a cache-hit trim job

@@ -331,3 +331,78 @@ def test_a_confirm_saved_just_before_the_trim_saves_still_chains_detection(
 
     assert _primary(tmp_path).processed["trim"] is True
     assert len(shot_detects) == 1
+
+
+@pytest.mark.parametrize("moment", ["before_its_save", "after_its_save"])
+def test_an_override_late_in_the_trim_job_still_ends_trimmed(
+    tmp_path: Path, monkeypatch, moment: str
+) -> None:
+    """The cut is published and the job is saving or chaining when the beep
+    moves. The override still adopts the job (it is active), so the job must
+    notice on its own, drop the stored copies of its cut and trim again."""
+    import splitsmith.ui.server as server_mod
+    from splitsmith.ui import audio as audio_helpers
+
+    client, _ = _seed_project_with_primary(tmp_path)
+    seen = _prepare(tmp_path, monkeypatch)
+    shot_detects = _record_shot_detects(client)
+    _stub_detect(monkeypatch, beep_time=BEEP, confidence=1.0)  # auto-trusted
+    reached, release = threading.Event(), threading.Event()
+    real_update = server_mod._update_project
+
+    def hold(state, slug, apply):  # type: ignore[no-untyped-def]
+        first_trim_save = apply.__name__ == "_apply_trim" and not reached.is_set()
+        if first_trim_save and moment == "before_its_save":
+            reached.set()
+            assert release.wait(timeout=5.0)
+        version = real_update(state, slug, apply)
+        if first_trim_save and moment == "after_its_save":
+            reached.set()
+            assert release.wait(timeout=5.0)
+        return version
+
+    stored_drops: list[bool] = []
+    real_invalidate = audio_helpers.invalidate_video_audit_trim
+
+    def spy(*a, **kw):  # type: ignore[no-untyped-def]
+        if kw.get("stored"):
+            stored_drops.append(True)
+        real_invalidate(*a, **kw)
+
+    monkeypatch.setattr(server_mod, "_update_project", hold)
+    monkeypatch.setattr(audio_helpers, "invalidate_video_audit_trim", spy)
+    client.post("/api/shooters/me/stages/1/detect-beep")
+    assert reached.wait(timeout=5.0), "the trim job never saved"
+    primary = _primary(tmp_path)
+    resp = client.post(f"/api/shooters/me/stages/1/videos/{primary.video_id}/beep", json={"beep_time": 7.0})
+    assert resp.status_code == 200, resp.text
+    stored_drops.clear()  # the first detection's own (no beep before it)
+    release.set()
+    _wait_for_jobs_to_drain(client)
+
+    assert seen == [pytest.approx(BEEP), pytest.approx(7.0)]
+    assert _primary(tmp_path).processed["trim"] is True
+    assert _trim_params(tmp_path)["beep_time"] == pytest.approx(7.0)
+    assert stored_drops == [True], "the stored copies of the old cut were left"
+    assert len(shot_detects) >= 1
+
+
+def test_a_beep_cleared_during_the_cut_queues_no_trim(tmp_path: Path, monkeypatch) -> None:
+    """Clearing the beep leaves nothing to trim: no second trim job, which
+    would fail on the missing beep."""
+    client, _ = _seed_project_with_primary(tmp_path)
+    gate = threading.Event()
+    seen = _prepare(tmp_path, monkeypatch, gate)
+    _stub_detect(monkeypatch, beep_time=BEEP)
+
+    client.post("/api/shooters/me/stages/1/detect-beep")
+    _wait_for(lambda: bool(seen), "the trim never started")
+    primary = _primary(tmp_path)
+    resp = client.post(f"/api/shooters/me/stages/1/videos/{primary.video_id}/beep", json={"beep_time": None})
+    assert resp.status_code == 200, resp.text
+    gate.set()
+    jobs = _wait_for_jobs_to_drain(client)
+
+    assert [j["kind"] for j in jobs].count("trim") == 1
+    assert [j for j in jobs if j["status"] == "failed"] == []
+    assert _primary(tmp_path).processed["trim"] is False

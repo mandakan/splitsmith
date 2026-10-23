@@ -154,6 +154,16 @@ def test_a_stored_invalidation_drops_the_storage_copies(tmp_path: Path, cuts: li
     audio.invalidate_video_audit_trim(root, STAGE, video, project=project)
     assert _stored_keys(tmp_path) == before, "a plain invalidation reaches into storage"
 
+    # A desktop mirror's copies are the desktop's: never dropped from here.
+    from splitsmith.ui.context import current_match_origin
+
+    token = current_match_origin.set("desktop")
+    try:
+        audio.invalidate_video_audit_trim(root, STAGE, video, project=project, stored=True)
+    finally:
+        current_match_origin.reset(token)
+    assert _stored_keys(tmp_path) == before, "a mirror's stored trim was dropped"
+
     audio.invalidate_video_audit_trim(root, STAGE, video, project=project, stored=True)
     assert _stored_keys(tmp_path) == set()
 
@@ -173,3 +183,61 @@ def test_trim_params_current_reads_the_stored_sidecar(tmp_path: Path, cuts: list
     assert audio.trim_params_current(root, STAGE, video, STAGE_TIME, project=project)
     assert not audio.trim_params_current(root, STAGE, video, 25.0, project=project)
     assert not trim.exists(), "the check downloaded the trim"
+
+
+def test_trim_params_current_refuses_a_trim_older_than_the_source(tmp_path: Path, cuts: list[Path]) -> None:
+    """A source uploaded again under the same key after the cut: the same
+    beep and stage time do not make the old trim current, here or in storage
+    (the rule the cut itself reuses a trim by)."""
+    project, video, root = _worker_project(tmp_path)
+    video.beep_time = BEEP_TIME
+    _job(project, video, root)
+    trim = trimmed_video_path(root, STAGE, video, project=project)
+    stored_trim = tmp_path / "tenant" / SCOPE / "trimmed" / trim.name
+    _age(trim, 120)
+    _age(stored_trim, 120)
+    (tmp_path / "tenant" / RAW).write_bytes(b"replaced source bytes")
+    (root / RAW).unlink()
+    source = project.resolve_video_path(root, video.path)
+
+    assert not audio.trim_params_current(root, STAGE, video, STAGE_TIME, project=project, source=source)
+    trim.unlink()
+    audio.trim_params_path(trim).unlink()
+    assert not audio.trim_params_current(root, STAGE, video, STAGE_TIME, project=project, source=source)
+
+
+class _ReplacedMidDownload(FilesystemStorage):
+    """The object is replaced while it streams: ``stat`` reports a new
+    version once the download has started."""
+
+    def __init__(self, root: Path) -> None:
+        super().__init__(root)
+        self.streamed = False
+
+    def open_stream(self, path: str):  # type: ignore[no-untyped-def]
+        self.streamed = True
+        return super().open_stream(path)
+
+    def stat(self, path: str):  # type: ignore[no-untyped-def]
+        meta = super().stat(path)
+        if meta is not None and self.streamed and meta.last_modified is not None:
+            from datetime import timedelta
+
+            meta = meta.model_copy(update={"last_modified": meta.last_modified + timedelta(seconds=30)})
+        return meta
+
+
+def test_a_mirror_of_an_object_replaced_mid_download_keeps_its_download_time(tmp_path: Path) -> None:
+    """Either version's time could be paired with the other's bytes, and a
+    trim cut from those would pass for the real object's later. Without one
+    agreed version the mirror keeps the download time: the next trim check
+    re-cuts, which is the safe side."""
+    project, video, root = _worker_project(tmp_path)
+    project.bind_storage(_ReplacedMidDownload(tmp_path / "tenant"), scope=SCOPE)
+    uploaded = (tmp_path / "tenant" / RAW).stat().st_mtime
+
+    started = time.time()
+    local = project.resolve_video_path(root, video.path)
+
+    assert local.stat().st_mtime >= started - 1
+    assert abs(local.stat().st_mtime - uploaded) > 60

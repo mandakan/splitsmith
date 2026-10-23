@@ -118,8 +118,9 @@ a phone a short WAV.
   and params only.
 - **A storage mirror's mtime is the object's version, never the time this disk
   fetched or used it.** `resolve_video_path` stamps a download with the
-  object's `last_modified` and a cache hit bumps only the atime (the LRU sweep
-  reads the later of the two). Every derived cache is "not older than its
+  object's `last_modified` (only when a stat before and after the stream
+  agree; else the download time stands) and a cache hit bumps only the atime
+  (the LRU sweep reads the later of the two). Every derived cache is "not older than its
   source", so a bumped mtime made each later job on a worker re-cut its trim
   (`tests/test_hosted_trim_reuse.py`).
 - Beep detection saves the beep before any trim work and chains the trim as a

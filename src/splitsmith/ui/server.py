@@ -2645,7 +2645,12 @@ def register_job_bodies(state: AppState) -> None:
                     not moved[0]
                     and bool(v_fresh.processed.get("trim"))
                     and audio_helpers.trim_params_current(
-                        state.shooter_root(slug), stage_number, v_fresh, stg_fresh.time_seconds, project=fresh
+                        state.shooter_root(slug),
+                        stage_number,
+                        v_fresh,
+                        stg_fresh.time_seconds,
+                        project=fresh,
+                        source=source,
                     )
                 )
         # Then the trim, as its own job (#1680): a confirm that lands while it
@@ -2776,13 +2781,43 @@ def register_job_bodies(state: AppState) -> None:
         role_label = "primary" if video.role == "primary" else f"cam {video.video_id[:6]}"
         handle.update(progress=0.3, message=f"Encoding short-GOP MP4 ({role_label})...")
 
-        def _still_current() -> bool:
-            # The beep the project holds now, against the one this cut is for.
+        def _current_beep() -> float | None:
             try:
                 now = state.shooter_project(slug).stage(stage_number).find_video_by_id(video_id)
             except KeyError:
                 now = None
-            return now is not None and _same_beep(now.beep_time, video.beep_time)
+            return now.beep_time if now is not None else None
+
+        def _still_current() -> bool:
+            # The beep the project holds now, against the one this cut is for.
+            return _same_beep(_current_beep(), video.beep_time)
+
+        def _trim_for_current_beep() -> None:
+            # This job's cut is for a beep the video no longer has: drop it
+            # here and in storage (trim jobs run for hosted-native matches
+            # and the desktop, never a desktop mirror), and trim again for
+            # the beep it has now. The beep's movers adopted this job (they
+            # dedupe on the trim kind), so nobody else will. A cleared beep
+            # has nothing to trim.
+            logger.info("trim: stage %s %s beep moved during the job; trimming again", stage_number, video_id)
+            audio_helpers.invalidate_video_audit_trim(root, stage_number, video, project=proj, stored=True)
+            if _current_beep() is None:
+                return
+            handle.update(message="Beep moved; trimming again")
+            run_sync(
+                state.jobs.submit(
+                    kind="trim",
+                    stage_number=stage_number,
+                    shooter_slug=slug,
+                    video_id=video_id,
+                    args={
+                        "slug": slug,
+                        "stage_number": stage_number,
+                        "video_id": video_id,
+                        "chain_shot_detect": chain_shot_detect,
+                    },
+                )
+            )
 
         # A beep that moves while ffmpeg runs (an override, or a re-detection
         # now that the beep is saved before its trim, #1680) makes this a cut
@@ -2846,23 +2881,7 @@ def register_job_bodies(state: AppState) -> None:
                 _update_project(state, slug, _apply_trim)
             superseded = outcome["moved"]
         if superseded:
-            logger.info("trim: stage %s %s beep moved during the cut; trimming again", stage_number, video_id)
-            handle.update(message="Beep moved; trimming again")
-            audio_helpers.invalidate_video_audit_trim(root, stage_number, video, project=proj, stored=True)
-            run_sync(
-                state.jobs.submit(
-                    kind="trim",
-                    stage_number=stage_number,
-                    shooter_slug=slug,
-                    video_id=video_id,
-                    args={
-                        "slug": slug,
-                        "stage_number": stage_number,
-                        "video_id": video_id,
-                        "chain_shot_detect": chain_shot_detect,
-                    },
-                )
-            )
+            _trim_for_current_beep()
             handle.update(progress=1.0, message="Done")
             return
         # Worker callback runs in a ThreadPoolExecutor thread with no
@@ -2898,6 +2917,10 @@ def register_job_bodies(state: AppState) -> None:
                         args={"slug": slug, "stage_number": stage_number},
                     )
                 )
+        # Last step: a beep moved after the save above still found this job
+        # active and adopted it, so it is this job's to trim again.
+        if not _still_current():
+            _trim_for_current_beep()
         handle.update(progress=1.0, message="Done")
 
     def _run_derive_audio(
