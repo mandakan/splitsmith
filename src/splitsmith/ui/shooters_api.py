@@ -2664,18 +2664,20 @@ async def move_assignment(
     state = request.app.state.splitsmith_state
     root = state.shooter_root(slug)
     project = await state.shooter_project_async(slug)
-    carry_from: tuple[float | None, str | None] | None = None
+    carry_from: tuple[dict[str, float | None], str] | None = None
     if req.role == "primary" and req.to_stage_number is not None:
         _refuse_unready_primary(state, slug, project, req.to_stage_number, Path(req.video_path))
         try:
             outgoing = project.stage(req.to_stage_number).primary()
         except KeyError:
             outgoing = None
+        incoming = project.find_video(Path(req.video_path), stage_number=req.to_stage_number)
         if outgoing is not None and outgoing.path != Path(req.video_path):
-            carry_from = (
-                _server._video_beep_in_clip(state, slug, project, req.to_stage_number, outgoing),
-                outgoing.video_id,
-            )
+            if incoming is not None:
+                await _refuse_untrimmed_carry(
+                    state, slug, project, req.to_stage_number, incoming[1], only_when_stamped=True
+                )
+            carry_from = (_clip_beeps(state, slug, project, req.to_stage_number), outgoing.video_id)
     try:
         moved = project.assign_video(
             Path(req.video_path),
@@ -2696,7 +2698,7 @@ async def move_assignment(
             slug,
             project,
             req.to_stage_number,
-            from_clip_beep=carry_from[0],
+            clip_beeps_before=carry_from[0],
             from_video_id=carry_from[1],
             only_when_stamped=True,
         )
@@ -2767,46 +2769,107 @@ def _refuse_unready_primary(
     raise _primary_without_beep(stage_number, video_path)
 
 
+def _carry_needed(doc: dict[str, Any] | None, incoming_video_id: str, *, only_when_stamped: bool) -> bool:
+    """Whether making ``incoming_video_id`` primary moves ``doc``'s shots.
+
+    Not for a doc without shots, nor one already stamped with the incoming
+    camera (how a stage is put back on the camera it was audited on).
+    ``only_when_stamped`` leaves an unstamped doc alone too: a plain move
+    cannot tell which camera an audit from before the stamp was made on,
+    while "Make primary" has always treated it as the outgoing primary's."""
+    if not isinstance(doc, dict) or not doc.get("shots"):
+        return False
+    stamped = doc.get(audit_clock.CLIP_VIDEO_FIELD)
+    if stamped == incoming_video_id:
+        return False
+    return stamped is not None or not only_when_stamped
+
+
+def _clip_beeps(
+    state: AppState, slug: str, project: MatchProject, stage_number: int
+) -> dict[str, float | None]:
+    """Each of the stage's cameras' beep in the clip Audit plays for it, by
+    video id. Read before a change of primary: the clip an audit is on."""
+    stage = project.stage(stage_number)
+    return {
+        v.video_id: _server._video_beep_in_clip(state, slug, project, stage_number, v) for v in stage.videos
+    }
+
+
+async def _refuse_untrimmed_carry(
+    state: AppState,
+    slug: str,
+    project: MatchProject,
+    stage_number: int,
+    incoming: StageVideo,
+    *,
+    only_when_stamped: bool,
+) -> None:
+    """409 ``primary_not_trimmed`` when a change of primary would carry the
+    audit onto a camera whose clip is not cut yet, after queuing that cut.
+
+    Carried onto the source's clock, the audit is right only until the
+    re-trim lands: then a shot before the beep reads the document as mixed
+    and every split after it moves, and the detection the trim chains
+    writes its candidates on the trim's clock beside the source's beep.
+    Trims are per camera whatever its role, so a confirmed secondary
+    usually has one already."""
+    doc, _version = state.load_audit(slug, stage_number)
+    if not _carry_needed(doc, incoming.video_id, only_when_stamped=only_when_stamped):
+        return
+    _anchor, kind = _server._video_clip_anchor(state, slug, project, stage_number, incoming)
+    if kind != "source":
+        return
+    if current_match_origin.get() != "desktop":
+        await _server._maybe_chain_trim(state, slug, project.stage(stage_number), incoming)
+    raise HTTPException(
+        status_code=409,
+        detail={
+            "code": "primary_not_trimmed",
+            "message": (
+                f"Stage {stage_number} has audit work, and {incoming.path.name} has no trimmed clip yet "
+                "for its shots to move onto. Its trim is queued: make it primary again once it is done."
+            ),
+            "stage_number": stage_number,
+        },
+    )
+
+
 def _carry_audit_to_primary(
     state: AppState,
     slug: str,
     project: MatchProject,
     stage_number: int,
     *,
-    from_clip_beep: float | None,
+    clip_beeps_before: dict[str, float | None],
     from_video_id: str | None,
     only_when_stamped: bool,
 ) -> None:
     """Move the stage's audit onto its (new) primary's clip (#1496).
 
     A change of primary is a change of timebase: the audit's shots are on
-    the camera it was made on. ``from_clip_beep`` is that camera's beep in
-    the clip Audit played (read before the change). An audit already
-    stamped with the new primary is left alone, which is how a stage is put
-    back on the camera it was audited on. ``only_when_stamped`` leaves an
-    unstamped audit alone too: a plain move cannot tell which camera an
-    audit from before the stamp was made on, while "Make primary" has
-    always treated it as the outgoing primary's."""
+    the camera it was made on, the one it is stamped with, else (an audit
+    from before the stamp) ``from_video_id``, the outgoing primary. That
+    camera's beep in its clip comes from ``clip_beeps_before``, read before
+    the change. See :func:`_carry_needed` for when nothing moves."""
     stage = project.stage(stage_number)
     new_primary = stage.primary()
     if new_primary is None or not _beep_confirmed(new_primary):
         return
-    to_clip_beep = _server._video_beep_in_clip(state, slug, project, stage_number, new_primary)
-    if to_clip_beep is None:
+    to_clip_beep, kind = _server._video_clip_anchor(state, slug, project, stage_number, new_primary)
+    if to_clip_beep is None or kind == "source":
+        # Never onto a source's clock (see _refuse_untrimmed_carry): the
+        # audit keeps its stamp, so `match audit-cameras` lists the stage.
         return
 
     def merge(doc: dict[str, Any] | None, _version: int) -> dict[str, Any]:
-        if not isinstance(doc, dict) or not doc.get("shots"):
+        if not _carry_needed(doc, new_primary.video_id, only_when_stamped=only_when_stamped):
             raise _server._AuditUnchanged
-        stamped = doc.get(audit_clock.CLIP_VIDEO_FIELD)
-        if stamped == new_primary.video_id:
-            raise _server._AuditUnchanged
-        if stamped is None and only_when_stamped:
-            raise _server._AuditUnchanged
-        source = doc if stamped is not None else {**doc, audit_clock.CLIP_VIDEO_FIELD: from_video_id}
+        assert doc is not None
+        made_on = doc.get(audit_clock.CLIP_VIDEO_FIELD) or from_video_id
         carried, _shift = audit_clock.carry_to_clip(
-            source,
-            from_clip_beep=from_clip_beep,
+            {**doc, audit_clock.CLIP_VIDEO_FIELD: made_on},
+            from_clip_beep=clip_beeps_before.get(made_on) if made_on else None,
             to_clip_beep=to_clip_beep,
             to_video_id=new_primary.video_id,
             event_id=new_event_id(),
@@ -2855,6 +2918,10 @@ async def swap_primary(
     has_work = _audit_has_work(state, slug, req.stage_number)
     if has_work and not _beep_confirmed(located[1]):
         raise _primary_without_beep(req.stage_number, video_path)
+    if has_work:
+        await _refuse_untrimmed_carry(
+            state, slug, project, req.stage_number, located[1], only_when_stamped=False
+        )
     if has_work and not req.confirm:
         raise HTTPException(
             status_code=409,
@@ -2869,14 +2936,8 @@ async def swap_primary(
                 "new_primary": req.video_path,
             },
         )
-    # Read before the swap: the clip the audit's shots are on now.
-    from_clip_beep = (
-        _server._video_beep_in_clip(state, slug, project, req.stage_number, current)
-        if current is not None
-        else None
-    )
-    if has_work:
-        project.pre_swap_backup(root, req.stage_number, keep=True)
+    # Read before the swap: the clips the audit's shots may be on now.
+    clip_beeps_before = _clip_beeps(state, slug, project, req.stage_number) if has_work else {}
     try:
         project.swap_primary(video_path, root=root, stage_number=req.stage_number, backup_audit=False)
     except KeyError as exc:
@@ -2885,12 +2946,13 @@ async def swap_primary(
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     await project.save_async(root)
     if has_work:
+        project.pre_swap_backup(root, req.stage_number, keep=True)
         _carry_audit_to_primary(
             state,
             slug,
             project,
             req.stage_number,
-            from_clip_beep=from_clip_beep,
+            clip_beeps_before=clip_beeps_before,
             from_video_id=current.video_id if current is not None else None,
             only_when_stamped=False,
         )

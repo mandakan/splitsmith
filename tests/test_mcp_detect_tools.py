@@ -539,15 +539,27 @@ def test_detect_shots_backfills_base_fields_over_a_beep_confirm_stub(tmp_path: P
     assert is_stub_audit(payload) is False
 
 
-def test_detect_shots_does_not_overwrite_an_existing_beep_time(tmp_path: Path) -> None:
-    """Backfill is ``setdefault``: a doc that already carries a beep keeps it,
-    even when the audit clip's beep-in-clip disagrees."""
+@pytest.mark.parametrize(
+    ("shots", "beep"),
+    [
+        # The run seeds the shots on its clip, so the beep is the run's: kept,
+        # a stored 4.25 beside shots timed from 5.0 drew every marker late.
+        ([], 5.0),
+        # A run that keeps the audit's shots keeps the beep they are timed from.
+        ([{"shot_number": 1, "time": 5.4, "ms_after_beep": 1150}], 4.25),
+    ],
+)
+def test_detect_shots_keeps_the_beep_the_shots_are_timed_from(
+    tmp_path: Path, shots: list[dict], beep: float
+) -> None:
+    """Backfill is ``setdefault`` for every base field but the beep and the
+    camera of seeded shots (#1496)."""
     root, _src, wav = _seed_shot_detect_project(tmp_path)
     audit_dir = root / "audit"
     audit_dir.mkdir(parents=True, exist_ok=True)
     audit_file = audit_dir / "stage1.json"
     audit_file.write_text(
-        json.dumps({"stage_number": 1, "beep_time": 4.25, "shots": []}, indent=2), encoding="utf-8"
+        json.dumps({"stage_number": 1, "beep_time": 4.25, "shots": shots}, indent=2), encoding="utf-8"
     )
 
     with (
@@ -564,7 +576,7 @@ def test_detect_shots_does_not_overwrite_an_existing_beep_time(tmp_path: Path) -
         detect_tools.detect_shots_for_stage(str(root), stage_number=1)
 
     payload = json.loads(audit_file.read_text())
-    assert payload["beep_time"] == pytest.approx(4.25)
+    assert payload["beep_time"] == pytest.approx(beep)
     assert payload["stage_name"] == "One"
 
 

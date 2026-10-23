@@ -167,6 +167,11 @@ describe("primaryRefusal", () => {
     expect(primaryRefusal(body)).toBe("Confirm its beep first.");
   });
 
+  it("and out of a primary_not_trimmed one", () => {
+    const body = { detail: { code: "primary_not_trimmed", message: "Its trim is queued." } };
+    expect(primaryRefusal(body)).toBe("Its trim is queued.");
+  });
+
   it("is null for any other answer", () => {
     expect(primaryRefusal({ detail: { code: "audit_exists", message: "x" } })).toBeNull();
     expect(primaryRefusal({ detail: "not found" })).toBeNull();

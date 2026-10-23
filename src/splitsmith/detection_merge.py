@@ -285,9 +285,12 @@ def merge_detection_into(
             for i, c in enumerate(kept, start=1)
         ]
         seeded_shots = True
-        # The seeded shots are on the clip this run read (#1496).
-        if base.get(CLIP_VIDEO_FIELD):
-            doc[CLIP_VIDEO_FIELD] = base[CLIP_VIDEO_FIELD]
+        # The seeded shots are on the clip this run read (#1496), so the
+        # beep and the camera are this run's too: ``setdefault`` above
+        # kept the beep of a candidates-only doc from another clip.
+        for key in ("beep_time", CLIP_VIDEO_FIELD):
+            if base.get(key) is not None:
+                doc[key] = base[key]
     events = list(doc.get("audit_events") or [])
     # Deletions first: they describe the state this run superseded,
     # and the merge orders a shot's verdicts by ``ts``.

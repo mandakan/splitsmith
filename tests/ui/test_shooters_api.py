@@ -3254,11 +3254,19 @@ def test_a_mirrors_primary_without_a_beep_says_so_instead_of_queueing_audio(
     assert client.get("/api/shooters/me/stages/1/audio").status_code != 409, "locally the source is here"
 
 
-def _two_cameras_with_audit(tmp_path: Path, *, head_confirmed: bool, stamp: str | None = "primary"):
+def _two_cameras_with_audit(
+    tmp_path: Path,
+    *,
+    head_confirmed: bool,
+    stamp: str | None = "primary",
+    head_trimmed: bool = True,
+    shots: tuple[float, ...] = (6.0, 6.5),
+):
     """Stage 1 with VID primary (beep 20.0, confirmed) and HEAD secondary
-    (beep 3.5), neither trimmed, so each clip's beep is its source beep; an
-    audit of two shots made on VID's clip. ``stamp`` names the camera the
-    audit says it is on: ``"primary"`` (VID), ``"head"``, or ``None``."""
+    (beep 3.5), both trimmed with the 5 s pre-buffer, so VID's clip beep is
+    5.0 and HEAD's 3.5; an audit of ``shots`` made on VID's clip. ``stamp``
+    names the camera the audit says it is on: ``"primary"`` (VID),
+    ``"head"``, or ``None``."""
     client, src = _seed_project_with_primary(tmp_path)
     (src.parent / "HEAD.mp4").write_bytes(b"")
     client.post(
@@ -3277,11 +3285,19 @@ def _two_cameras_with_audit(tmp_path: Path, *, head_confirmed: bool, stamp: str 
     videos["raw/HEAD.mp4"].update(beep_time=3.5, beep_source="manual", beep_reviewed=head_confirmed)
     project_json.write_text(json.dumps(doc))
     ids = {"primary": videos["raw/VID.mp4"]["video_id"], "head": videos["raw/HEAD.mp4"]["video_id"]}
+    from splitsmith.ui import audio as audio_helpers
+
+    project = MatchProject.load(shooter_root)
+    for v in project.stages[0].videos:
+        if v.path.name == "VID.mp4" or head_trimmed:
+            trim = audio_helpers.trimmed_video_path(shooter_root, 1, v, project=project)
+            trim.parent.mkdir(parents=True, exist_ok=True)
+            trim.write_bytes(b"trim")  # a trim counts when non-empty
     audit = {
-        "beep_time": 20.0,
+        "beep_time": 5.0,
         "shots": [
-            {"shot_number": 1, "time": 21.0, "ms_after_beep": 1000},
-            {"shot_number": 2, "time": 21.5, "ms_after_beep": 1500},
+            {"shot_number": i, "time": t, "ms_after_beep": round((t - 5.0) * 1000)}
+            for i, t in enumerate(shots, start=1)
         ],
         "events": [{"id": "r1", "kind": "reload", "start": 0.6, "end": 1.2, "source": "manual"}],
     }
@@ -3318,10 +3334,10 @@ def test_make_primary_carries_the_audit_onto_the_new_cameras_clip(tmp_path: Path
     assert audit["clip_video_id"] == ids["head"]
     moved = [e for e in audit["audit_events"] if e["kind"] == "clip_camera_changed"]
     assert [e["payload"] for e in moved] == [
-        {"from_video_id": ids["primary"], "to_video_id": ids["head"], "shift_ms": -16500.0}
+        {"from_video_id": ids["primary"], "to_video_id": ids["head"], "shift_ms": -1500.0}
     ]
     backups = list((shooter_root / "audit").glob("stage1.pre-swap-*.json"))
-    assert len(backups) == 1 and json.loads(backups[0].read_text())["beep_time"] == 20.0
+    assert len(backups) == 1 and json.loads(backups[0].read_text())["beep_time"] == 5.0
     # Audit reads it on the new primary's clip as stored: nothing to rebase.
     served = client.get("/api/shooters/me/stages/1/audit").json()
     assert [s["time"] for s in served["shots"]] == [4.5, 5.0]
@@ -3408,3 +3424,40 @@ def test_an_audit_save_records_the_camera_its_clip_is(tmp_path: Path, monkeypatc
 
     assert resp.status_code == 200, resp.text
     assert json.loads((shooter_root / "audit" / "stage1.json").read_text())["clip_video_id"] == ids["primary"]
+
+
+def test_make_primary_waits_for_the_new_cameras_trim(tmp_path: Path, monkeypatch) -> None:
+    """Carried onto an uncut camera's source clock, the audit went wrong when
+    the re-trim landed: a shot before the beep made the doc read as mixed
+    and every split moved. Refused, with the trim queued for the retry."""
+    monkeypatch.setenv("SPLITSMITH_AUTO_BEEP_DISABLED", "1")
+    client, shooter_root, ids = _two_cameras_with_audit(tmp_path, head_confirmed=True, head_trimmed=False)
+    before = (shooter_root / "audit" / "stage1.json").read_text()
+
+    resp = client.post(
+        "/api/shooters/me/assignments/swap-primary",
+        json={"video_path": "raw/HEAD.mp4", "stage_number": 1, "confirm": True},
+    )
+
+    assert resp.status_code == 409, resp.text
+    assert resp.json()["detail"]["code"] == "primary_not_trimmed"
+    assert str(MatchProject.load(shooter_root).stages[0].primary().path) == "raw/VID.mp4"
+    assert (shooter_root / "audit" / "stage1.json").read_text() == before
+    kinds = [(j["kind"], j.get("video_id")) for j in client.get("/api/me/jobs").json()]
+    assert ("trim", ids["head"]) in kinds
+
+
+def test_a_shot_before_the_beep_carries_with_the_rest(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("SPLITSMITH_AUTO_BEEP_DISABLED", "1")
+    client, shooter_root, _ids = _two_cameras_with_audit(tmp_path, head_confirmed=True, shots=(4.9, 6.0))
+
+    resp = client.post(
+        "/api/shooters/me/assignments/swap-primary",
+        json={"video_path": "raw/HEAD.mp4", "stage_number": 1, "confirm": True},
+    )
+
+    assert resp.status_code == 200, resp.text
+    served = client.get("/api/shooters/me/stages/1/audit").json()
+    assert served["beep_time"] == 3.5
+    assert [s["time"] for s in served["shots"]] == [3.4, 4.5]
+    assert [s["ms_after_beep"] for s in served["shots"]] == [-100, 1000]

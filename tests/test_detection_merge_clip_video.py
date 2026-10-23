@@ -40,3 +40,17 @@ def test_a_run_that_keeps_the_audits_shots_keeps_its_stamp() -> None:
     doc = {"clip_video_id": "phone", "shots": [{"shot_number": 1, "time": 6.0}]}
     out = merge_detection_into(doc, _run([6.0]), base=BASE, stage_rounds=None, reset=False)
     assert out["clip_video_id"] == "phone"
+
+
+def test_seeding_takes_the_runs_beep_over_a_candidates_only_docs() -> None:
+    """A candidates-only doc from another clip kept its beep through the
+    base's setdefault while the shots were seeded on this run's clip."""
+    doc = merge_detection_into(
+        {"beep_time": 20.0, "_candidates_pending_audit": {"candidates": []}},
+        _run([6.0]),
+        base=BASE,
+        stage_rounds=None,
+        reset=False,
+    )
+    assert doc["beep_time"] == 5.0
+    assert doc["shots"][0]["ms_after_beep"] == 1000
