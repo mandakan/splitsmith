@@ -172,11 +172,12 @@ def test_storage_cache_hit_skips_trim(tmp_path: Path, fake_trim: list[dict[str, 
     assert len(_trim_calls(fake_trim)) == 0  # never re-cut
 
 
-def test_cold_cut_pushes_mp4_and_params_to_storage(
+def test_cold_cut_pushes_params_and_rendition_but_not_the_trim(
     tmp_path: Path, fake_trim: list[dict[str, object]]
 ) -> None:
-    """Neither local nor storage has the trim: ffmpeg runs and both the
-    MP4 and its params sidecar are pushed up for the next worker / API."""
+    """Neither local nor storage has the trim: ffmpeg runs, and storage gets
+    the params sidecar and the rendition. Never the full trim (#1683): it is
+    several times the source, and nothing but this job reads it."""
     backing = tmp_path / "tenant"
     backing.mkdir()
     storage = FilesystemStorage(backing)
@@ -190,10 +191,72 @@ def test_cold_cut_pushes_mp4_and_params_to_storage(
     assert output.read_bytes() == TRIM_MP4
     assert len(_trim_calls(fake_trim)) == 1
     mp4_key, params_key = _trim_keys(project, video, root)
-    assert storage.exists(mp4_key)
-    assert storage.read_bytes(mp4_key) == TRIM_MP4
-    assert storage.exists(params_key)
+    assert not storage.exists(mp4_key)
     assert json.loads(storage.read_bytes(params_key)) == _current_params(project)
+    assert storage.read_bytes(f"{SCOPE}/trimmed/{web_trim_path(output).name}") == WEB_MP4
+
+
+def test_a_failed_rendition_pushes_the_trim_instead(
+    tmp_path: Path, fake_trim: list[dict[str, object]], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """With no rendition the full trim is the stage's one playable clip, so
+    it goes up as it did before renditions existed."""
+    from splitsmith import trim as trim_module
+
+    def failing_web(*args: object, **kwargs: object) -> None:
+        raise trim_module.FFmpegError("no rendition")
+
+    monkeypatch.setattr("splitsmith.trim.transcode_web_trim", failing_web)
+    backing = tmp_path / "tenant"
+    backing.mkdir()
+    storage = FilesystemStorage(backing)
+    root = tmp_path / "p"
+    source = _make_source(tmp_path)
+    project, video = _project_with_stage_video(root, source)
+    project.bind_storage(storage, scope=SCOPE)
+
+    output = _cut(root, project, video, source)
+
+    mp4_key, params_key = _trim_keys(project, video, root)
+    assert storage.read_bytes(mp4_key) == TRIM_MP4
+    assert json.loads(storage.read_bytes(params_key)) == _current_params(project)
+    assert not storage.exists(f"{SCOPE}/trimmed/{web_trim_path(output).name}")
+
+
+def test_a_re_cut_drops_the_stored_rendition_before_it_encodes(
+    tmp_path: Path, fake_trim: list[dict[str, object]], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A web-only reader takes a stored rendition as current with no trim to
+    date it against (#1683), so a re-cut deletes the old window's rendition
+    and audit WAV before ffmpeg runs: a pinned player errors and remounts,
+    and the rendition step never pulls the old one back as the new cut's."""
+    backing = tmp_path / "tenant"
+    backing.mkdir()
+    storage = FilesystemStorage(backing)
+    root = tmp_path / "p"
+    source = _make_source(tmp_path)
+    project, video = _project_with_stage_video(root, source)
+    project.bind_storage(storage, scope=SCOPE)
+    output = trimmed_video_path(root, STAGE, video, project=project)
+    web_key = f"{SCOPE}/trimmed/{web_trim_path(output).name}"
+    wav_key = (
+        f"{SCOPE}/audio/{audio_helpers.video_audit_audio_path(root, STAGE, video, project=project).name}"
+    )
+    storage.write_bytes(web_key, OLDWEB_MP4)
+    storage.write_bytes(wav_key, b"RIFF old window")
+    seen_at_encode: list[tuple[bool, bool]] = []
+    real_trim = __import__("splitsmith.trim", fromlist=["trim_video"]).trim_video
+
+    def watching_trim(**kwargs: object) -> None:
+        seen_at_encode.append((storage.exists(web_key), storage.exists(wav_key)))
+        real_trim(**kwargs)
+
+    monkeypatch.setattr("splitsmith.trim.trim_video", watching_trim)
+
+    _cut(root, project, video, source)
+
+    assert seen_at_encode == [(False, False)]
+    assert storage.read_bytes(web_key) == WEB_MP4
 
 
 def test_local_cache_hit_skips_storage_and_trim(tmp_path: Path, fake_trim: list[dict[str, object]]) -> None:

@@ -22,6 +22,7 @@ import pytest
 from splitsmith.match_project import MatchProject, StageEntry, StageVideo
 from splitsmith.source_cache import sweep_source_cache
 from splitsmith.storage import FilesystemStorage
+from splitsmith.trim import web_trim_path
 from splitsmith.ui import audio
 from splitsmith.ui.audio import ensure_video_audit_trim, trimmed_video_path
 from tests.media_bytes import tiny_mp4
@@ -149,7 +150,7 @@ def test_a_stored_invalidation_drops_the_storage_copies(tmp_path: Path, cuts: li
     project._storage.write_bytes(f"{SCOPE}/audio/{wav.name}", b"RIFF")  # type: ignore[union-attr]
     before = _stored_keys(tmp_path)
     assert {k.split("/")[0] for k in before} == {"trimmed", "audio"}
-    assert len(before) == 4  # trim, params, web rendition, audit WAV
+    assert len(before) == 3  # params, web rendition, audit WAV; no full trim (#1683)
 
     audio.invalidate_video_audit_trim(root, STAGE, video, project=project)
     assert _stored_keys(tmp_path) == before, "a plain invalidation reaches into storage"
@@ -193,9 +194,10 @@ def test_trim_params_current_refuses_a_trim_older_than_the_source(tmp_path: Path
     video.beep_time = BEEP_TIME
     _job(project, video, root)
     trim = trimmed_video_path(root, STAGE, video, project=project)
-    stored_trim = tmp_path / "tenant" / SCOPE / "trimmed" / trim.name
+    # Storage dates the trim by its rendition: it holds no full trim (#1683).
+    stored_web = tmp_path / "tenant" / SCOPE / "trimmed" / web_trim_path(trim).name
     _age(trim, 120)
-    _age(stored_trim, 120)
+    _age(stored_web, 120)
     (tmp_path / "tenant" / RAW).write_bytes(b"replaced source bytes")
     (root / RAW).unlink()
     source = project.resolve_video_path(root, video.path)

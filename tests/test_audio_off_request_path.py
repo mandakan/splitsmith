@@ -150,7 +150,7 @@ def test_a_mirror_serves_the_pushed_wav_when_it_is_newer_than_the_rendition(tmp_
     storage.write_bytes(f"{scope}/audio/{stem}_audit.wav", wav_src.read_bytes())
     _age(storage, f"{scope}/trimmed/{stem}_web.mp4", 60)
 
-    result = audio_helpers.published_audit_audio(root, 1, 4.0, project=project, mirror=True)
+    result = audio_helpers.published_audit_audio(root, 1, 4.0, project=project)
 
     assert result is not None and result.trimmed is True
     assert result.audio_path.read_bytes() == wav_src.read_bytes()
@@ -167,7 +167,7 @@ def test_a_mirror_never_serves_a_wav_older_than_the_rendition(tmp_path: Path) ->
     storage.write_bytes(f"{scope}/trimmed/{stem}_web.mp4", tiny_mp4())
     _age(storage, f"{scope}/audio/{stem}_audit.wav", 60)
 
-    assert audio_helpers.published_audit_audio(root, 1, 4.0, project=project, mirror=True) is None
+    assert audio_helpers.published_audit_audio(root, 1, 4.0, project=project) is None
     assert not any((root / "audio").glob("*.wav")) if (root / "audio").exists() else True
 
 
@@ -175,7 +175,7 @@ def test_a_mirror_with_no_wav_is_pending_and_downloads_nothing(tmp_path: Path) -
     root, project, storage, stem = _mirror(tmp_path)
     storage.write_bytes(f"matches/m1/shooters/me/trimmed/{stem}_web.mp4", tiny_mp4())
 
-    assert audio_helpers.published_audit_audio(root, 1, 4.0, project=project, mirror=True) is None
+    assert audio_helpers.published_audit_audio(root, 1, 4.0, project=project) is None
     assert not (root / "trimmed").exists() or not any((root / "trimmed").iterdir())
 
 

@@ -535,7 +535,7 @@ def _hosted_scrub(
     if audio_helpers.fresh_rendition(
         _server._storage_fact(trim_obj),
         _server._storage_fact(web_obj),
-        trim_required=not _server._is_mirror(),
+        trim_required=not audio_helpers.stores_web_only(project),
     ):
         return _server.serve_media(storage, web_key, web_local, content_type="video/mp4")
     if trim_obj is not None:
@@ -2257,10 +2257,10 @@ def stream_video(
             trim_key = audio_helpers._storage_trim_key(project, local_mp4)
             if trim_key is not None and storage.exists(trim_key):  # type: ignore[union-attr]
                 return _server.serve_media(storage, trim_key, local_mp4, content_type="video/mp4")
-            if _server._is_mirror():
-                # Web-only mirror (spec 2026-09-27 v1.1): the rendition
-                # is the trim. Native matches keep "trim never
-                # substitutes": their audit scrubbing needs the real GOP.
+            if audio_helpers.stores_web_only(project):
+                # Web-only (a mirror by spec 2026-09-27 v1.1, a hosted-native
+                # match since #1683): the rendition is the trim. A legacy
+                # full trim still in storage was served above.
                 web_resp = _server._hosted_web_redirect(storage, project, root, stage, video)  # type: ignore[arg-type]
                 if web_resp is not None:
                     return web_resp
@@ -2289,8 +2289,8 @@ def stream_video(
                 web = audio_helpers.fresh_web_trim(trimmed)
                 if web is not None:
                     served_path = web.resolve()
-        elif _server._is_mirror():
-            # Web-only mirror on a storage without presigned GET
+        elif audio_helpers.stores_web_only(project):
+            # Web-only project on a storage without presigned GET
             # (#1078; FilesystemStorage in dev and tests): the anchor
             # reports "trim" measured on the pushed params, so serve
             # the rendition those params describe, as the presigned
