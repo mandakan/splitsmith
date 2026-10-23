@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { driftLabel, worthPromoting, type AuditDrift } from "./promoteDrift";
+import { driftLabel, labelCarryLabel, worthPromoting, type AuditDrift, type LabelCarry } from "./promoteDrift";
 
 const d = (over: Partial<AuditDrift>): AuditDrift => ({
   state: "same",
@@ -32,5 +32,39 @@ describe("worthPromoting", () => {
     expect(worthPromoting(true, d({}))).toBe(false);
     expect(worthPromoting(true, null)).toBe(false);
     expect(worthPromoting(true, undefined)).toBe(false);
+  });
+});
+
+describe("labelCarryLabel", () => {
+  const carry = (over: Partial<LabelCarry>): LabelCarry => ({
+    reasons_carried: 0,
+    subclasses_carried: 0,
+    walk_decisions_carried: 0,
+    reasons_dropped: [],
+    subclasses_dropped: [],
+    ...over,
+  });
+
+  it("says nothing for a first promote", () => {
+    expect(labelCarryLabel(null)).toBeNull();
+    expect(labelCarryLabel(undefined)).toBeNull();
+  });
+
+  it("counts what was kept", () => {
+    expect(labelCarryLabel(carry({ reasons_carried: 1, subclasses_carried: 3 }))).toBe(
+      "kept 1 reason, 3 subclasses",
+    );
+  });
+
+  it("lists every dropped label by time", () => {
+    expect(
+      labelCarryLabel(
+        carry({
+          reasons_carried: 2,
+          reasons_dropped: [{ time: 4.5, label: "echo", why: "no candidate" }],
+          subclasses_dropped: [{ time: 2.25, label: "steel", why: "no shot" }],
+        }),
+      ),
+    ).toBe("kept 2 reasons, 0 subclasses; dropped 2.250 s steel (no shot), 4.500 s echo (no candidate)");
   });
 });

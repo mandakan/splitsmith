@@ -35,7 +35,7 @@ import {
   type RecentProject,
   type StageExportStatus,
 } from "@/lib/api";
-import { driftLabel, worthPromoting, type AuditDrift } from "@/lib/promoteDrift";
+import { driftLabel, labelCarryLabel, worthPromoting, type AuditDrift } from "@/lib/promoteDrift";
 import { exportSlugify } from "@/lib/slugify";
 import { cn } from "@/lib/utils";
 
@@ -329,7 +329,9 @@ export function PromoteStagesPanel({
         });
         setRows((prev) =>
           prev.map((r) =>
-            sameRow(r, row) ? { ...r, status: "ok", message: rec.audit_path } : r,
+            sameRow(r, row)
+              ? { ...r, status: "ok", message: labelCarryLabel(rec.label_carry) ?? rec.audit_path }
+              : r,
           ),
         );
       } catch (err) {
