@@ -78,6 +78,7 @@ def _dispatcher(store: Any, marker: _Marker, calls: list[httpx.Request]) -> Work
         wake_marker=marker,  # type: ignore[arg-type]
         cloud_run=CloudRunJobConfig(job=JOB),
         transport=_gcp_transport(calls),
+        watch_seconds=None,  # the after-wake watch has its own tests
     )
 
 
@@ -238,6 +239,27 @@ def test_stale_self_hosted_row_is_skipped_for_the_next_tier() -> None:
         await _cloud_run_row(store)
         marker = _Marker({dead: _stale()})
         assert await _dispatcher(store, marker, calls).trigger() is True
+        return marker
+
+    marker = asyncio.run(scenario())
+    assert marker.touches == 0
+    assert _cloud_run_started(calls)
+
+
+def test_the_watch_re_wake_skips_a_stale_row_too() -> None:
+    """The after-wake watch re-wakes through the same tier walk, so a dead box
+    above Cloud Run never takes a re-wake either (#1677 with #1672)."""
+    store = _fresh_store()
+    calls: list[httpx.Request] = []
+
+    async def scenario() -> _Marker:
+        dead = await _add_home(store, "gaspode-old")
+        await _cloud_run_row(store)
+        marker = _Marker({dead: _stale()})
+        dispatcher = _dispatcher(store, marker, calls)
+        dispatcher._cooldown_seconds = 0.0
+        await dispatcher._rewake()
+        await _drain_tasks(dispatcher)
         return marker
 
     marker = asyncio.run(scenario())
