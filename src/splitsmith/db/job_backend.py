@@ -44,7 +44,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker
 from .. import __version__
 from ..access import Feature, FeatureRequiredError
 from ..async_bridge import run_sync
-from ..observability import PhaseTimer, capture_job_exception, emit_job_event
+from ..observability import PhaseTimer, WorkerProbe, capture_job_exception, emit_job_event
 from ..ui.job_journal import rehydrate_args, to_wire_args
 from ..ui.jobs import (
     Job,
@@ -686,18 +686,22 @@ class PostgresJobBackend:
             )
             handle = JobHandle(self, job_id, timer=timer)  # type: ignore[arg-type]
             kind = row_snapshot.kind
+            probe = WorkerProbe.start()
             try:
                 fn(handle)
             except JobCancelled:
+                timer.set_worker(probe.finish())
                 self._finalize_with_timings(job_id, kind, JobStatus.CANCELLED, timer, error=None)
                 return
             except Exception as exc:  # noqa: BLE001 -- surface as FAILED
+                timer.set_worker(probe.finish())
                 # An account refusal is policy, not a crash: it fails the
                 # row but is not reported to Sentry.
                 if not isinstance(exc, FeatureRequiredError):
                     capture_job_exception(exc, kind=kind, user_id=self._user_id)
                 self._finalize_with_timings(job_id, kind, JobStatus.FAILED, timer, error=str(exc))
                 return
+            timer.set_worker(probe.finish())
             self._finalize_with_timings(job_id, kind, JobStatus.SUCCEEDED, timer, error=None)
         finally:
             with self._lock:
