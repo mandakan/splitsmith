@@ -21,13 +21,17 @@ uv run python scripts/match_bench.py report result.json [more.json ...]
   a match only refers to it. Idempotent by name and size; its log is the
   upload throughput measurement.
 - `seed` creates a fresh match per run and attaches the clips; no bytes move.
-- `run` detects every clip's beep (on a primary, trim and shot detection
-  chain from a trusted result), confirms each beep as a user would (a beep
-  within `--beep-tolerance` of the manifest's is confirmed, any other is
-  corrected, which re-cuts and re-detects), waits until the match's jobs are
-  quiet, renders the grid, and writes every job created during the run with
-  its `timings` plus the beep corrections. `--phases` reruns part of the
-  pipeline on a match an earlier run took further.
+- `run` drives the seeded match through its phases, in order: `settle`
+  (assigning a clip already queues its beep detection), `detect` (any clip
+  left without a beep), `beeps` (each beep within `--beep-tolerance` of the
+  manifest's is confirmed, any other corrected; trim and shot detection
+  chain from that), `export` (each shooter's stage export, which writes the
+  trims the grid reads) and `grid`. It writes every job created during the
+  run with its `timings`, the beep corrections, and any orphans: a running
+  job with no update for `--stale` seconds lost its worker and is recorded,
+  not waited on. `--phases` reruns part of the pipeline on a match an
+  earlier run took further; a failing phase still writes what was
+  collected.
 - `report` prints per-phase, per-kind and per-worker figures for one or more
   results and a cost estimate. A worker's billed span runs from its process
   start to its last job's end; prices are flags (`--vcpu-s`, `--gib-s`,
@@ -59,5 +63,11 @@ they are the job's own only when `ran_alone` is true.
   clear it between `--phases grid` runs that compare workers.
 - Cloud Run writes to R2 leave GCP as internet egress, which is billed per
   GB; reads are free. Include `storage_written_bytes` in any cost figure.
+- Each one-shot Cloud Run execution exits once the queue is momentarily
+  empty, so executions started by hand for a fan-out are gone by the next
+  phase; start them again per phase (`gcloud run jobs execute ... --async`).
+- A killed execution leaves its job `running` for good and cancel cannot
+  clear it (#1677); a new submit of that kind and stage is deduplicated
+  against it. Mark the row failed before resubmitting.
 - Deleting a bench match leaves the raw pool alone unless
   `delete_raw_uploads` is passed, and then only unreferenced objects.
