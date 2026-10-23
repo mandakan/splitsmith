@@ -42,6 +42,7 @@ import socket
 import time
 from collections.abc import Awaitable, Callable, Iterable
 from pathlib import Path
+from typing import Any
 
 import httpx
 from pydantic import BaseModel
@@ -369,6 +370,9 @@ async def _marker_poll_loop(
     *,
     interval: float,
     max_polls: int | None = None,
+    beat: Callable[[], Awaitable[None]] | None = None,
+    beat_interval: float = 0.0,
+    clock: Callable[[], float] = time.monotonic,
 ) -> None:
     """The "r2" wake channel's box half: poll the bucket marker, wake on change.
 
@@ -378,14 +382,28 @@ async def _marker_poll_loop(
     whenever the ETag differs from the last one seen. A failed poll is logged
     and leaves the last ETag in place, so the next good poll still sees a
     change made in between. ``max_polls`` caps the loop for tests.
+
+    ``beat`` writes this box's heartbeat (#1672): on the first poll, then on
+    the first poll at least ``beat_interval`` after the last good one, so a
+    failed write is retried on the next poll. It is the only way serve
+    learns the box is alive on this channel.
     """
     last: object = _MARKER_MISSING
+    last_beat: float | None = None
     polls = 0
     logger.info("polling the wake marker every %.0fs", interval)
     while not stop_event.is_set():
         if max_polls is not None and polls >= max_polls:
             return
         polls += 1
+        if beat is not None and (last_beat is None or clock() - last_beat >= beat_interval):
+            started = clock()
+            try:
+                await beat()
+            except Exception as exc:  # noqa: BLE001 - a missed beat is retried next poll
+                logger.warning("heartbeat write failed (%s); retrying on the next poll", exc)
+            else:
+                last_beat = started
         try:
             etag: object = await head()
         except Exception as exc:  # noqa: BLE001 - storage hiccups must not kill the agent
@@ -400,18 +418,22 @@ async def _marker_poll_loop(
             pass
 
 
-def _marker_head(s3: dict, key: str) -> Callable[[], Awaitable[str | None]]:
-    """An async HEAD of ``key`` in the bundle's bucket, returning its ETag."""
+def _bucket_client(s3: dict) -> Any:
+    """A boto3 S3 client for the bundle's bucket."""
     import boto3
-    from botocore.exceptions import ClientError
 
-    client = boto3.client(
+    return boto3.client(
         "s3",
         endpoint_url=s3.get("endpoint_url") or None,
         region_name=s3.get("region") or "auto",
         aws_access_key_id=s3["access_key_id"],
         aws_secret_access_key=s3["secret_access_key"],
     )
+
+
+def _marker_head(client: Any, s3: dict, key: str) -> Callable[[], Awaitable[str | None]]:
+    """An async HEAD of ``key`` in the bundle's bucket, returning its ETag."""
+    from botocore.exceptions import ClientError
 
     def _head() -> str | None:
         try:
@@ -612,11 +634,23 @@ async def run_agent(
 
     async with httpx.AsyncClient(transport=transport) as client:
         if use_marker:
+            from .worker_trigger import HEARTBEAT_SECONDS, WakeMarker
+
+            s3 = state.credentials["s3"]
+            bucket = _bucket_client(s3)
+            board = WakeMarker(bucket, s3["bucket"])
+            worker_id = state.worker_id
+
+            async def _beat() -> None:
+                await board.beat(worker_id, version=_agent_version())
+
             reader = _marker_poll_loop(
-                _marker_head(state.credentials["s3"], str(wake["key"])),
+                _marker_head(bucket, s3, str(wake["key"])),
                 coordinator,
                 stop_event,
                 interval=float(wake.get("interval_seconds", 30.0)),
+                beat=_beat,
+                beat_interval=HEARTBEAT_SECONDS,
             )
         else:
             reader = _reader_loop(client, server_url, state.worker_token, coordinator, stop_event)

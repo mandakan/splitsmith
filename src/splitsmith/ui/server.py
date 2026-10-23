@@ -5629,6 +5629,7 @@ def _apply_hosted_mode_wiring(
         if s3_client is None or s3_bucket is None:
             raise RuntimeError(f"{ENV_WAKE_CHANNEL}=r2 needs the storage bucket ({SPLITSMITH_S3_BUCKET_ENV})")
         wake_marker = WakeMarker(s3_client, s3_bucket)
+        state.wake_marker = wake_marker
     if not worker:
         # Wakes a worker through the priority dispatcher after each defer,
         # gated on the procrastinate_workers heartbeat so a live drain is
@@ -5981,8 +5982,36 @@ def _derive_worker_status(record: Any, connected_ids: frozenset[str]) -> str:
     return "offline"
 
 
-def _to_worker_view(record: Any, connected_ids: frozenset[str]) -> WorkerView:
-    """Convert a WorkerRecord to the admin-facing WorkerView shape."""
+async def _worker_liveness(state: Any, records: list[Any]) -> tuple[frozenset[str], dict[str, Any]]:
+    """The ids the admin view shows online, and each box's heartbeat.
+
+    A box on the SSE channel is online while connected. On the "r2" channel
+    no box connects, so a fresh bucket heartbeat counts instead (#1672). An
+    unreadable bucket leaves the heartbeats out; it never fails the page.
+    """
+    registry = state.wake_channels
+    live = set(registry.connected_ids() if registry is not None else ())
+    beats: dict[str, Any] = {}
+    marker = state.wake_marker
+    boxes = [r.id for r in records if r.kind == "self_hosted"]
+    if marker is not None and boxes:
+        try:
+            beats = {i: b for i, b in (await marker.read_heartbeats(boxes)).items() if b is not None}
+        except Exception:  # noqa: BLE001 - liveness is display-only here
+            logger.warning("admin workers: heartbeat read failed", exc_info=True)
+        live.update(i for i, beat in beats.items() if beat.fresh())
+    return frozenset(live), beats
+
+
+def _to_worker_view(record: Any, connected_ids: frozenset[str], beat: Any = None) -> WorkerView:
+    """Convert a WorkerRecord to the admin-facing WorkerView shape.
+
+    ``beat`` is the box's bucket heartbeat ("r2" channel): when newer than
+    the row's ``last_seen_at`` it is what the view shows, with its version.
+    """
+    last_seen_at, version = record.last_seen_at, record.version
+    if beat is not None and (last_seen_at is None or _aware_utc(last_seen_at) < beat.at):
+        last_seen_at, version = beat.at, beat.version or version
     return WorkerView(
         id=record.id,
         name=record.name,
@@ -5991,11 +6020,16 @@ def _to_worker_view(record: Any, connected_ids: frozenset[str]) -> WorkerView:
         priority=record.priority,
         status=_derive_worker_status(record, connected_ids),
         registered=record.registered,
-        last_seen_at=record.last_seen_at,
+        last_seen_at=last_seen_at,
         last_wake_at=record.last_wake_at,
-        version=record.version,
+        version=version,
         info=record.info,
     )
+
+
+def _aware_utc(value: datetime) -> datetime:
+    """SQLite drops tzinfo; compare stored timestamps as UTC."""
+    return value if value.tzinfo is not None else value.replace(tzinfo=UTC)
 
 
 def _hosted_boot_lifespan(state: Any) -> Any | None:
@@ -9167,11 +9201,10 @@ def create_app(
         """List all workers ordered by priority asc, name asc."""
         store = state.workers_store
         assert store is not None  # gate guarantees this
-        registry = state.wake_channels
-        connected = registry.connected_ids() if registry is not None else frozenset()
         records = await store.list()
+        live, beats = await _worker_liveness(state, records)
         return AdminWorkerListResponse(
-            workers=[_to_worker_view(r, connected) for r in records],
+            workers=[_to_worker_view(r, live, beats.get(r.id)) for r in records],
             server_version=splitsmith_version,
         )
 
@@ -9239,8 +9272,8 @@ def create_app(
         if registry is not None and body.enabled is not None and body.enabled != current.enabled:
             event = "enabled" if body.enabled else "disabled"
             registry.push(worker_id, event)  # best-effort; returns False if not connected
-        connected = registry.connected_ids() if registry is not None else frozenset()
-        return _to_worker_view(updated, connected)
+        live, beats = await _worker_liveness(state, [updated])
+        return _to_worker_view(updated, live, beats.get(updated.id))
 
     @app.delete("/api/admin/workers/{worker_id}", status_code=204)
     async def _admin_delete_worker(

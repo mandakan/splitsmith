@@ -502,7 +502,17 @@ each with its own `agent.json` volume and registration token.
 3. Confirm the Cloud Run worker job did not start:
    `gcloud run jobs executions list --job splitsmith-worker-production --region europe-west1 --project splitsmith-hosting --limit 3`.
 4. In **Admin > Workers**, the home worker row shows an updated "last wake" time. On the
-   bucket-marker wake channel the server cannot see the box, so it does not show "online".
+   bucket-marker wake channel the box never connects to the server; instead it writes a
+   heartbeat object to the bucket every 2 minutes (`_splitsmith/heartbeat/<worker id>`,
+   with its version). The row shows "online" while that heartbeat is under 10 minutes old,
+   and "last seen" and the version come from it.
+
+**A box whose heartbeat is older than 10 minutes, or that never wrote one, is skipped.**
+On the bucket-marker channel the dispatcher only counts a self-hosted worker as a wake
+target while its heartbeat is fresh; otherwise it goes straight to the next tier (Cloud
+Run). A stale row no longer holds back the jobs, so a dead box needs no disabling. An
+agent older than the heartbeat writes none, so the server sends every job to Cloud Run
+until that agent is upgraded.
 
 To test the Cloud Run fallback:
 

@@ -47,6 +47,7 @@ import logging
 import os
 import time
 from collections.abc import Awaitable, Callable, Coroutine
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, Protocol
 
 import httpx
@@ -83,6 +84,34 @@ ENV_WAKE_CHANNEL = "SPLITSMITH_WAKE_CHANNEL"
 WAKE_MARKER_KEY = "_splitsmith/wake/self-hosted"
 #: How often a box polls the marker in "r2" mode.
 WAKE_POLL_SECONDS = 30.0
+#: Bucket key prefix of each box's heartbeat in "r2" mode; the worker id
+#: follows. A box polling the marker never talks to serve, so this object is
+#: its only sign of life. It goes to the bucket rather than through a serve
+#: route because a request every few minutes would keep serve and its Neon
+#: compute awake around the clock, which is what "r2" mode exists to avoid.
+HEARTBEAT_KEY_PREFIX = "_splitsmith/heartbeat/"
+#: How often a box rewrites its heartbeat (checked on each marker poll).
+HEARTBEAT_SECONDS = 120.0
+#: A heartbeat older than this, or none at all, means the box is gone: the
+#: dispatcher skips its row and the admin view shows it offline. Five beats,
+#: so a failed bucket write or two never hands a live box's jobs to the platform.
+HEARTBEAT_STALE_SECONDS = 600.0
+
+
+def heartbeat_key(worker_id: str) -> str:
+    """The bucket key of ``worker_id``'s heartbeat."""
+    return f"{HEARTBEAT_KEY_PREFIX}{worker_id}"
+
+
+class Heartbeat(BaseModel):
+    """A box's last heartbeat: the bucket's write time and the agent's version."""
+
+    at: datetime
+    version: str | None = None
+
+    def fresh(self, now: datetime | None = None) -> bool:
+        current = now if now is not None else datetime.now(UTC)
+        return (current - self.at).total_seconds() <= HEARTBEAT_STALE_SECONDS
 
 
 class CloudRunJobConfig(BaseModel):
@@ -129,10 +158,13 @@ class WakeMarker:
     object's ETag; each box HEADs the key every ``WAKE_POLL_SECONDS`` and
     drains when the ETag moves (``agent._marker_poll_loop``). No connection
     to serve and no database read, so serve and Neon stay asleep between
-    jobs. The cost is pickup latency up to the poll interval, and a box
-    cannot be checked for liveness: the dispatcher counts the marker as a
-    wake of every enabled self-hosted worker and relies on the grace
-    escalation if none drains.
+    jobs. The cost is pickup latency up to the poll interval.
+
+    Liveness comes from each box's heartbeat object (:meth:`beat`, written
+    by the agent on its poll cycle; :meth:`read_heartbeats`, read by the
+    dispatcher and the admin view). The marker still wakes every box that
+    polls it; the dispatcher only decides whether a tier has a live box to
+    count, and relies on the grace escalation if none drains.
     """
 
     def __init__(self, client: Any, bucket: str, key: str = WAKE_MARKER_KEY) -> None:
@@ -145,6 +177,49 @@ class WakeMarker:
         await asyncio.to_thread(
             self._client.put_object, Bucket=self._bucket, Key=self._key, Body=body, ContentType="text/plain"
         )
+
+    async def beat(self, worker_id: str, *, version: str) -> None:
+        """Write ``worker_id``'s heartbeat; the bucket's write time is its time."""
+        await asyncio.to_thread(
+            self._client.put_object,
+            Bucket=self._bucket,
+            Key=heartbeat_key(worker_id),
+            Body=version.encode(),
+            ContentType="text/plain",
+            Metadata={"version": version},
+        )
+
+    async def read_heartbeats(self, worker_ids: list[str]) -> dict[str, Heartbeat | None]:
+        """Each worker's last heartbeat, ``None`` when it has none.
+
+        A worker whose read failed is left out: not knowing is not evidence
+        the box is dead.
+        """
+
+        def _head(worker_id: str) -> Heartbeat | None:
+            from botocore.exceptions import ClientError
+
+            try:
+                head = self._client.head_object(Bucket=self._bucket, Key=heartbeat_key(worker_id))
+            except ClientError as exc:
+                if exc.response.get("Error", {}).get("Code") in ("404", "NoSuchKey", "NotFound"):
+                    return None
+                raise
+            at = head["LastModified"]
+            if at.tzinfo is None:
+                at = at.replace(tzinfo=UTC)
+            return Heartbeat(at=at, version=(head.get("Metadata") or {}).get("version"))
+
+        results = await asyncio.gather(
+            *(asyncio.to_thread(_head, worker_id) for worker_id in worker_ids), return_exceptions=True
+        )
+        beats: dict[str, Heartbeat | None] = {}
+        for worker_id, result in zip(worker_ids, results, strict=True):
+            if isinstance(result, BaseException):
+                logger.warning("heartbeat read for worker %s failed: %s", worker_id, result)
+                continue
+            beats[worker_id] = result
+        return beats
 
 
 class WorkerLauncher(Protocol):
@@ -271,6 +346,8 @@ class WorkerDispatcher:
         workers = await self._store.list_enabled()
         if max_priority_exclusive is not None:
             workers = [w for w in workers if w.priority < max_priority_exclusive]
+        if self._wake_marker is not None:
+            workers = await self._without_dead_boxes(workers)
         for priority, tier in itertools.groupby(workers, key=lambda w: w.priority):
             woken_ids: list[str] = []
             woke_self_hosted = False
@@ -327,6 +404,34 @@ class WorkerDispatcher:
                     self._spawn(self._grace_escalate(priority, anchor=anchor, delay=delay))
                 return True
         return False
+
+    async def _without_dead_boxes(self, workers: list[Any]) -> list[Any]:
+        """Drop the self-hosted rows whose heartbeat is stale or missing ("r2" mode).
+
+        A marker write wakes whatever box is polling, so a dead row cannot be
+        told from a live one by the wake itself; without this a long-gone row
+        at the top priority took every wake and the platform tier only ran
+        after the grace window. An unreadable heartbeat keeps its row.
+        """
+        assert self._wake_marker is not None
+        boxes = [w.id for w in workers if w.kind != "cloud_run"]
+        if not boxes:
+            return workers
+        try:
+            beats = await self._wake_marker.read_heartbeats(boxes)
+        except Exception:
+            logger.warning("worker dispatcher: heartbeat read failed; waking every box", exc_info=True)
+            return workers
+        now = datetime.now(UTC)
+        live: list[Any] = []
+        for worker in workers:
+            if worker.id in beats:
+                beat = beats[worker.id]
+                if beat is None or not beat.fresh(now):
+                    logger.info("worker dispatcher: skipping %s, no recent heartbeat", worker.name)
+                    continue
+            live.append(worker)
+        return live
 
     async def _grace_escalate(self, woken_priority: int, *, anchor: float, delay: float) -> None:
         """After ``delay`` (the rest of the grace window counted from

@@ -55,6 +55,15 @@ class _FakeMarker:
         if self.fail:
             raise OSError("bucket unreachable")
 
+    async def read_heartbeats(self, worker_ids: list[str]) -> dict[str, Any]:
+        # Every box here is alive; stale and missing heartbeats are
+        # ``tests/test_worker_heartbeat.py``.
+        from datetime import UTC, datetime
+
+        from splitsmith.worker_trigger import Heartbeat
+
+        return {i: Heartbeat(at=datetime.now(UTC)) for i in worker_ids}
+
 
 def _dispatcher(store: Any, registry: WakeChannelRegistry, **kwargs: Any) -> WorkerDispatcher:
     kwargs.setdefault("worker_active", None)
