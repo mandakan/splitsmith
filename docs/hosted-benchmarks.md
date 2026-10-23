@@ -12,6 +12,7 @@ uv run python scripts/match_bench.py manifest <match-dir> -o m.json [--stages 1]
 uv run python scripts/match_bench.py upload m.json --server <url> --log upload.json
 uv run python scripts/match_bench.py seed m.json --server <url> -o run.json --label 4cpu
 uv run python scripts/match_bench.py run run.json -o result.json [--phases grid] [--grid-options g.json]
+uv run python scripts/match_bench.py report result.json [more.json ...]
 ```
 
 - `manifest` is media-free: clip to shooter, stages, role, camera, reviewed
@@ -20,10 +21,18 @@ uv run python scripts/match_bench.py run run.json -o result.json [--phases grid]
   a match only refers to it. Idempotent by name and size; its log is the
   upload throughput measurement.
 - `seed` creates a fresh match per run and attaches the clips; no bytes move.
-- `run` confirms the beeps (trim and shot detection chain from that), waits
-  until the match's jobs are quiet, renders the grid, and writes every job
-  created during the run with its `timings`. `--phases` reruns part of the
+- `run` detects every clip's beep (on a primary, trim and shot detection
+  chain from a trusted result), confirms each beep as a user would (a beep
+  within `--beep-tolerance` of the manifest's is confirmed, any other is
+  corrected, which re-cuts and re-detects), waits until the match's jobs are
+  quiet, renders the grid, and writes every job created during the run with
+  its `timings` plus the beep corrections. `--phases` reruns part of the
   pipeline on a match an earlier run took further.
+- `report` prints per-phase, per-kind and per-worker figures for one or more
+  results and a cost estimate. A worker's billed span runs from its process
+  start to its last job's end; prices are flags (`--vcpu-s`, `--gib-s`,
+  `--egress-gb`) with approximate Cloud Run defaults; pass zeros for a
+  self-hosted worker.
 
 Authenticate with a hosted session: `--cookie` or `SPLITSMITH_BENCH_COOKIE`
 (the `splitsmith_session` value). Use staging and a dedicated account with

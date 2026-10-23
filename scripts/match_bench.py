@@ -10,6 +10,7 @@ whose, which stage, the confirmed beeps) as if it were a new hosted match:
     run       confirm the manifest's beeps (which chains trim and shot
               detection), wait for quiet, render the compare grid, and write
               every job of the match with its timings
+    report    per-phase, per-kind and per-worker figures and a cost estimate
 
 Raw uploads live in the account-level ``raw/`` pool and a match only refers
 to them, so every run seeds a new match over the same objects. Proxies
@@ -329,7 +330,7 @@ def cmd_seed(args: argparse.Namespace) -> None:
 
 
 TERMINAL = {"succeeded", "failed", "cancelled"}
-RUN_PHASES = ("settle", "beeps", "grid")
+RUN_PHASES = ("settle", "detect", "beeps", "grid")
 
 
 class _JobWatch:
@@ -379,9 +380,11 @@ class _JobWatch:
 def cmd_run(args: argparse.Namespace) -> None:
     """Drive a seeded match through the selected phases, in pipeline order.
 
-    Phases: ``settle`` (wait out what attaching started), ``beeps`` (confirm
-    the manifest's beeps; trim and shot detection chain from that) and
-    ``grid`` (render the compare grid). Running only some of them reruns that
+    Phases: ``settle`` (wait out what attaching started), ``detect`` (beep
+    detection on every clip; on a primary, trim and shot detection chain
+    from a trusted result), ``beeps`` (confirm or correct each beep against
+    the manifest; a correction re-cuts and re-detects) and ``grid`` (render
+    the compare grid). Running only some of them reruns that
     part on a match an earlier run already took further, e.g. ``--phases
     grid`` to compare renders across workers; only jobs created during this
     run are reported.
@@ -408,23 +411,53 @@ def cmd_run(args: argparse.Namespace) -> None:
         if "settle" in args.phases:
             phase("settle", lambda: None)
 
-        def confirm_beeps() -> None:
+        def videos() -> list[tuple[str, BenchClip, int, dict]]:
+            """(slug, clip, stage, the hosted video view) for every manifest clip-stage."""
+            found = []
             for shooter in manifest.shooters:
                 slug = slugs[shooter.key]
                 view = client.get(f"{base}/shooters/{slug}/project")
                 view.raise_for_status()
-                ids = {
-                    (stage["stage_number"], Path(video["path"]).name): video["video_id"]
+                by_key = {
+                    (stage["stage_number"], Path(video["path"]).name): video
                     for stage in view.json()["stages"]
                     for video in stage.get("videos", [])
                 }
                 for clip in (c for c in manifest.clips if c.shooter == shooter.key):
-                    for number, beep in sorted(clip.beeps.items()):
-                        video_id = ids[(number, clip.filename)]
-                        path = f"{base}/shooters/{slug}/stages/{number}/videos/{video_id}"
-                        _post(client, f"{path}/beep", {"beep_time": beep})
-                        _post(client, f"{path}/beep/review", {"reviewed": True})
+                    for number in clip.stages:
+                        found.append((slug, clip, number, by_key[(number, clip.filename)]))
+            return found
 
+        def video_path(slug: str, number: int, video: dict) -> str:
+            return f"{base}/shooters/{slug}/stages/{number}/videos/{video['video_id']}"
+
+        def detect_beeps() -> None:
+            for slug, _clip, number, video in videos():
+                _post(client, f"{video_path(slug, number, video)}/detect-beep", {})
+
+        corrections: list[dict] = []
+
+        def confirm_beeps() -> None:
+            # As a user would: confirm a detected beep that matches the ground
+            # truth, correct one that does not. Re-setting a matching beep would
+            # re-cut the trim and re-run detection the detect phase already ran.
+            for slug, clip, number, video in videos():
+                truth = clip.beeps.get(number)
+                if truth is None:
+                    continue
+                path = video_path(slug, number, video)
+                detected = video.get("beep_time")
+                wrong = detected is None or abs(detected - truth) > args.beep_tolerance
+                if wrong:
+                    corrections.append(
+                        {"clip": clip.filename, "stage": number, "detected": detected, "truth": truth}
+                    )
+                    _post(client, f"{path}/beep", {"beep_time": truth})
+                if wrong or not video.get("beep_reviewed"):
+                    _post(client, f"{path}/beep/review", {"reviewed": True})
+
+        if "detect" in args.phases:
+            phase("detect", detect_beeps)
         if "beeps" in args.phases:
             phase("beeps", confirm_beeps)
 
@@ -439,12 +472,108 @@ def cmd_run(args: argparse.Namespace) -> None:
     since = datetime.fromisoformat(ran_at)
     jobs = [j for j in watch.jobs.values() if datetime.fromisoformat(j["created_at"]) >= since]
     failed = [j for j in jobs if j["status"] == "failed"]
-    result = {**record, "ran_at": ran_at, "phases": phases, "jobs": jobs}
+    result = {**record, "ran_at": ran_at, "phases": phases, "beep_corrections": corrections, "jobs": jobs}
     args.output.write_text(json.dumps(result, indent=2))
     print(f"{len(jobs)} jobs, {len(failed)} failed -> {args.output}")
     for job in failed:
         where = f"{job.get('shooter_slug')} stage {job.get('stage_number')}"
         print(f"  FAILED {job['kind']} {where}: {job['error']}")
+
+
+def summarize(result: dict, *, vcpu_s: float, gib_s: float, egress_gb: float) -> dict:
+    """Per-kind and per-worker figures from a run result, plus a cost estimate.
+
+    A worker's billed span runs from its process start (first job's start
+    minus its ``uptime_at_start_ms``) to its last job's end: that is what a
+    one-shot Cloud Run execution pays for, idle tail excluded. Egress counts
+    every byte a worker wrote to storage; on the self-hosted agent the rates
+    should be zero.
+    """
+    jobs = [j for j in result["jobs"] if j.get("timings")]
+    kinds: dict[str, dict] = {}
+    for job in jobs:
+        k = kinds.setdefault(job["kind"], {"jobs": 0, "busy_s": 0.0, "max_s": 0.0, "queue_s": 0.0})
+        seconds = job["timings"]["total_ms"] / 1000.0
+        k["jobs"] += 1
+        k["busy_s"] += seconds
+        k["max_s"] = max(k["max_s"], seconds)
+        k["queue_s"] += (job["timings"].get("queue_wait_ms") or 0.0) / 1000.0
+    workers: dict[str, dict] = {}
+    for job in sorted(jobs, key=lambda j: j["started_at"] or ""):
+        facts = job["timings"].get("worker")
+        if not facts or not job.get("started_at") or not job.get("finished_at"):
+            continue
+        started = datetime.fromisoformat(job["started_at"]).timestamp()
+        finished = datetime.fromisoformat(job["finished_at"]).timestamp()
+        w = workers.get(facts["name"])
+        if w is None:
+            w = workers[facts["name"]] = {
+                "vcpu": facts.get("vcpu"),
+                "memory_mb": facts.get("memory_mb"),
+                "startup_s": facts["uptime_at_start_ms"] / 1000.0,
+                "process_start": started - facts["uptime_at_start_ms"] / 1000.0,
+                "last_end": finished,
+                "jobs": 0,
+                "busy_s": 0.0,
+                "read_bytes": 0,
+                "written_bytes": 0,
+                "peak_rss_mb": 0.0,
+                "peak_child_rss_mb": 0.0,
+                "overlapped_jobs": 0,
+            }
+        w["last_end"] = max(w["last_end"], finished)
+        w["jobs"] += 1
+        w["busy_s"] += job["timings"]["total_ms"] / 1000.0
+        w["read_bytes"] += facts.get("storage_read_bytes") or 0
+        w["written_bytes"] += facts.get("storage_written_bytes") or 0
+        w["peak_rss_mb"] = max(w["peak_rss_mb"], facts.get("peak_rss_mb") or 0.0)
+        w["peak_child_rss_mb"] = max(w["peak_child_rss_mb"], facts.get("peak_child_rss_mb") or 0.0)
+        w["overlapped_jobs"] += 0 if facts.get("ran_alone") else 1
+    total_cost = 0.0
+    for w in workers.values():
+        w["span_s"] = w.pop("last_end") - w.pop("process_start")
+        compute = w["span_s"] * ((w["vcpu"] or 0) * vcpu_s + (w["memory_mb"] or 0) / 1024 * gib_s)
+        egress = w["written_bytes"] / 1e9 * egress_gb
+        w["cost_compute"] = round(compute, 4)
+        w["cost_egress"] = round(egress, 4)
+        total_cost += compute + egress
+    return {
+        "label": result.get("label"),
+        "match_id": result["match_id"],
+        "phases": result["phases"],
+        "kinds": kinds,
+        "workers": workers,
+        "cost_total": round(total_cost, 4),
+        "failed": sum(1 for j in result["jobs"] if j["status"] == "failed"),
+    }
+
+
+def cmd_report(args: argparse.Namespace) -> None:
+    summaries = [
+        summarize(
+            json.loads(path.read_text()), vcpu_s=args.vcpu_s, gib_s=args.gib_s, egress_gb=args.egress_gb
+        )
+        for path in args.results
+    ]
+    for s in summaries:
+        title = s["label"] or s["match_id"]
+        print(f"== {title}  (failed jobs: {s['failed']}, est. cost ${s['cost_total']:.2f})")
+        for phase in s["phases"]:
+            print(f"   phase {phase['name']:<8} {phase['busy_s']:8.0f} s until quiet")
+        print(f"   {'kind':<16} {'jobs':>5} {'busy s':>9} {'max s':>8} {'queued s':>9}")
+        for kind, k in sorted(s["kinds"].items(), key=lambda kv: -kv[1]["busy_s"]):
+            print(f"   {kind:<16} {k['jobs']:>5} {k['busy_s']:>9.0f} {k['max_s']:>8.1f} {k['queue_s']:>9.0f}")
+        for name, w in s["workers"].items():
+            print(
+                f"   worker {name}: {w['vcpu']} vCPU / {w['memory_mb']} MB, {w['jobs']} jobs, "
+                f"span {w['span_s']:.0f} s (startup {w['startup_s']:.0f} s, busy {w['busy_s']:.0f} s), "
+                f"read {w['read_bytes'] / 1e9:.2f} GB, wrote {w['written_bytes'] / 1e9:.2f} GB, "
+                f"peak {w['peak_rss_mb']:.0f} MB (+child {w['peak_child_rss_mb']:.0f}), "
+                f"overlapped {w['overlapped_jobs']}, "
+                f"${w['cost_compute']:.3f} + ${w['cost_egress']:.3f} egress"
+            )
+    if args.json:
+        args.json.write_text(json.dumps(summaries, indent=2))
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -459,6 +588,16 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("--stages", type=int, nargs="+", help="keep only these stages (a dry run)")
     p.set_defaults(func=cmd_manifest)
 
+    p = sub.add_parser("report", help="per-phase, per-kind and per-worker figures with a cost estimate")
+    p.add_argument("results", type=Path, nargs="+", help="result files run wrote")
+    # Defaults are approximate Cloud Run (europe-west1) and internet-egress list prices; pass
+    # current ones, and zeros for a self-hosted worker.
+    p.add_argument("--vcpu-s", type=float, default=0.000018, help="price per vCPU-second")
+    p.add_argument("--gib-s", type=float, default=0.000002, help="price per GiB-second")
+    p.add_argument("--egress-gb", type=float, default=0.12, help="price per GB written to storage")
+    p.add_argument("--json", type=Path, help="also write the summaries here")
+    p.set_defaults(func=cmd_report)
+
     p = sub.add_parser("run", help="confirm beeps, wait for trim and detection, render the grid")
     p.add_argument("run", type=Path, help="the run record seed wrote")
     p.add_argument("-o", "--output", type=Path, required=True)
@@ -470,6 +609,12 @@ def main(argv: list[str] | None = None) -> None:
         "--phases", nargs="+", choices=RUN_PHASES, default=list(RUN_PHASES), help="which phases to run"
     )
     p.add_argument("--grid-options", type=Path, help="JSON merged into the compare-export body")
+    p.add_argument(
+        "--beep-tolerance",
+        type=float,
+        default=0.02,
+        help="seconds a detected beep may be off and still confirm",
+    )
     p.set_defaults(func=cmd_run)
 
     for name, func, help_text in (

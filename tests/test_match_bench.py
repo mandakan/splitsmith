@@ -149,3 +149,46 @@ def test_subset_keeps_only_the_named_stages(bench, tmp_path: Path) -> None:
     assert [s.stage_number for s in cut.stages] == [2]
     assert [(c.filename, c.stages, c.beeps) for c in cut.clips] == [("two.mp4", [2], {2: 5.0})]
     assert cut.shooters[0].stage_times == {2: 20.0}
+
+
+def _job(kind: str, start: str, end: str, total_ms: float, worker: dict) -> dict:
+    return {
+        "kind": kind,
+        "status": "succeeded",
+        "started_at": f"2026-10-23T10:{start}+00:00",
+        "finished_at": f"2026-10-23T10:{end}+00:00",
+        "timings": {"total_ms": total_ms, "queue_wait_ms": 500.0, "phases": [], "meta": {}, "worker": worker},
+    }
+
+
+def test_summarize_spans_a_worker_from_process_start_to_last_job(bench) -> None:
+    cloud = {
+        "name": "cloudrun:x#0",
+        "vcpu": 4.0,
+        "memory_mb": 8192,
+        "uptime_at_start_ms": 30_000.0,
+        "storage_read_bytes": 2_000_000_000,
+        "storage_written_bytes": 1_000_000_000,
+        "peak_rss_mb": 900.0,
+        "peak_child_rss_mb": 300.0,
+        "ran_alone": True,
+    }
+    result = {
+        "label": "4cpu",
+        "match_id": "m1",
+        "phases": [],
+        "jobs": [
+            _job("trim", "00:30", "01:30", 60_000.0, cloud),
+            _job("shot_detect", "01:30", "02:30", 60_000.0, {**cloud, "uptime_at_start_ms": 90_000.0}),
+        ],
+    }
+    summary = bench.summarize(result, vcpu_s=0.00002, gib_s=0.000002, egress_gb=0.1)
+
+    worker = summary["workers"]["cloudrun:x#0"]
+    # process start 10:00:00 (first job 10:00:30 minus 30 s uptime) to 10:02:30
+    assert worker["span_s"] == 150.0
+    assert worker["startup_s"] == 30.0
+    assert (worker["jobs"], worker["busy_s"], worker["written_bytes"]) == (2, 120.0, 2_000_000_000)
+    assert worker["cost_compute"] == round(150 * (4 * 0.00002 + 8 * 0.000002), 4)
+    assert worker["cost_egress"] == 0.2
+    assert summary["kinds"]["trim"] == {"jobs": 1, "busy_s": 60.0, "max_s": 60.0, "queue_s": 0.5}
