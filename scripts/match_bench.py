@@ -334,18 +334,24 @@ RUN_PHASES = ("settle", "detect", "beeps", "grid")
 
 
 class _JobWatch:
-    """Polls the account's jobs and keeps the last snapshot of each of this match's."""
+    """Polls the account's jobs and keeps the last snapshot of each of this match's.
 
-    def __init__(self, client: httpx.Client, match_id: str, interval: float) -> None:
+    A job is this match's by its shooter: hosted job rows do not carry the
+    match id in the list payload, and a seeded match's slugs are random, so
+    no other match shares them. Account-level jobs (proxies) have no shooter
+    and are not counted.
+    """
+
+    def __init__(self, client: httpx.Client, slugs: set[str], interval: float) -> None:
         self._client = client
-        self._match_id = match_id
+        self._slugs = slugs
         self._interval = interval
         self.jobs: dict[str, dict] = {}
 
     def poll(self) -> list[dict]:
         resp = self._client.get("/api/me/jobs")
         resp.raise_for_status()
-        mine = [j for j in resp.json() if j.get("match_id") == self._match_id]
+        mine = [j for j in resp.json() if j.get("shooter_slug") in self._slugs]
         for job in mine:
             self.jobs[job["id"]] = job
         return [j for j in mine if j["status"] not in TERMINAL]
@@ -396,20 +402,26 @@ def cmd_run(args: argparse.Namespace) -> None:
     phases: list[dict] = []
     ran_at = datetime.now(UTC).isoformat()
     with _client(record["server"], args.cookie) as client:
-        watch = _JobWatch(client, record["match_id"], args.interval)
+        watch = _JobWatch(client, set(slugs.values()), args.interval)
 
         def phase(name: str, action) -> None:
+            """Run ``action`` (returns how many requests it posted), wait for quiet."""
             t0 = time.monotonic()
             began = datetime.now(UTC).isoformat()
-            action()
+            seen_before = len(watch.jobs)
+            posted = action()
             busy = watch.wait_quiet(name, settle=args.settle, timeout=args.timeout)
+            if posted and len(watch.jobs) == seen_before:
+                # Quiet without one new job means the watch cannot see this
+                # match's jobs, not that the work is done.
+                raise RuntimeError(f"{name}: no job of this match appeared; refusing to call it done")
             phases.append(
                 {"name": name, "began": began, "wall_s": round(time.monotonic() - t0, 1), "busy_s": busy}
             )
             print(f"{name}: {busy:.0f} s until quiet", flush=True)
 
         if "settle" in args.phases:
-            phase("settle", lambda: None)
+            phase("settle", lambda: 0)
 
         def videos() -> list[tuple[str, BenchClip, int, dict]]:
             """(slug, clip, stage, the hosted video view) for every manifest clip-stage."""
@@ -431,16 +443,19 @@ def cmd_run(args: argparse.Namespace) -> None:
         def video_path(slug: str, number: int, video: dict) -> str:
             return f"{base}/shooters/{slug}/stages/{number}/videos/{video['video_id']}"
 
-        def detect_beeps() -> None:
-            for slug, _clip, number, video in videos():
+        def detect_beeps() -> int:
+            found = videos()
+            for slug, _clip, number, video in found:
                 _post(client, f"{video_path(slug, number, video)}/detect-beep", {})
+            return len(found)
 
         corrections: list[dict] = []
 
-        def confirm_beeps() -> None:
+        def confirm_beeps() -> int:
             # As a user would: confirm a detected beep that matches the ground
             # truth, correct one that does not. Re-setting a matching beep would
             # re-cut the trim and re-run detection the detect phase already ran.
+            posted = 0
             for slug, clip, number, video in videos():
                 truth = clip.beeps.get(number)
                 if truth is None:
@@ -453,8 +468,11 @@ def cmd_run(args: argparse.Namespace) -> None:
                         {"clip": clip.filename, "stage": number, "detected": detected, "truth": truth}
                     )
                     _post(client, f"{path}/beep", {"beep_time": truth})
+                    posted += 1
                 if wrong or not video.get("beep_reviewed"):
                     _post(client, f"{path}/beep/review", {"reviewed": True})
+                    posted += 1
+            return posted
 
         if "detect" in args.phases:
             phase("detect", detect_beeps)
@@ -467,7 +485,7 @@ def cmd_run(args: argparse.Namespace) -> None:
                 "audio_from": slugs[manifest.shooters[0].key],
                 **(json.loads(args.grid_options.read_text()) if args.grid_options else {}),
             }
-            phase("grid", lambda: _post(client, f"{base}/match/compare-export", body))
+            phase("grid", lambda: bool(_post(client, f"{base}/match/compare-export", body)))
         watch.poll()
     since = datetime.fromisoformat(ran_at)
     jobs = [j for j in watch.jobs.values() if datetime.fromisoformat(j["created_at"]) >= since]
