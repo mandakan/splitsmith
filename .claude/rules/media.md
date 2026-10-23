@@ -5,6 +5,7 @@ paths:
   - "src/splitsmith/derived.py"
   - "src/splitsmith/storage.py"
   - "src/splitsmith/media_check.py"
+  - "src/splitsmith/proxy.py"
   - "src/splitsmith/match_trims.py"
   - "src/splitsmith/sync/plan.py"
   - "src/splitsmith/sync/push.py"
@@ -29,6 +30,21 @@ paths:
   trimmed before renditions existed is fixed by its next sync; don't add a
   re-trim path for it.
 - The GOP stays 30: GOP 15 cost 35-47 % more bytes for ~10 ms of seek.
+
+## Streaming a source to ffmpeg
+
+- The hosted `generate_proxy` job hands ffmpeg a presigned GET URL for the raw
+  object (`_proxy_source_url`, six-hour expiry) instead of downloading it
+  first; a trailing `moov` costs one small range read, not a full pass.
+- **A URL read is trusted only when ffmpeg's stderr is empty.** A connection
+  that drops and cannot resume, or a range request that reads EOF, exits 0
+  with a truncated or damaged output; `transcode_proxy` raises
+  `ProxySourceReadError` and the job transcodes from a download instead
+  (`test_transcode_proxy_from_url_raises_when_the_stream_cannot_resume`).
+- `HTTP_INPUT_ARGS` carries `-multiple_requests 1`: without it ffmpeg may
+  reuse a socket the server is closing and read EOF on the next seek
+  (`test_transcode_proxy_from_url_matches_the_local_file` fails without it).
+- A presigned URL is a credential: it never reaches an error message or log.
 
 ## Stream kinds
 
