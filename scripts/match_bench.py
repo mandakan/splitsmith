@@ -330,7 +330,7 @@ def cmd_seed(args: argparse.Namespace) -> None:
 
 
 TERMINAL = {"succeeded", "failed", "cancelled"}
-RUN_PHASES = ("settle", "detect", "beeps", "grid")
+RUN_PHASES = ("settle", "detect", "beeps", "export", "grid")
 
 
 class _JobWatch:
@@ -386,11 +386,12 @@ class _JobWatch:
 def cmd_run(args: argparse.Namespace) -> None:
     """Drive a seeded match through the selected phases, in pipeline order.
 
-    Phases: ``settle`` (wait out what attaching started), ``detect`` (beep
-    detection on every clip; on a primary, trim and shot detection chain
-    from a trusted result), ``beeps`` (confirm or correct each beep against
-    the manifest; a correction re-cuts and re-detects) and ``grid`` (render
-    the compare grid). Running only some of them reruns that
+    Phases: ``settle`` (wait out what attaching started: assigning a clip
+    queues its beep detection), ``detect`` (beep detection on any clip
+    nothing detected yet), ``beeps`` (confirm or correct each beep against
+    the manifest; trim and shot detection chain from that), ``export`` (each
+    shooter's stage export, which writes the trim the grid reads) and
+    ``grid`` (render the compare grid). Running only some of them reruns that
     part on a match an earlier run already took further, e.g. ``--phases
     grid`` to compare renders across workers; only jobs created during this
     run are reported.
@@ -444,10 +445,12 @@ def cmd_run(args: argparse.Namespace) -> None:
             return f"{base}/shooters/{slug}/stages/{number}/videos/{video['video_id']}"
 
         def detect_beeps() -> int:
-            found = videos()
-            for slug, _clip, number, video in found:
+            # Assigning a clip already queued its detection (settle waits it
+            # out); detect only what that left without a beep.
+            missing = [v for v in videos() if v[3].get("beep_time") is None]
+            for slug, _clip, number, video in missing:
                 _post(client, f"{video_path(slug, number, video)}/detect-beep", {})
-            return len(found)
+            return len(missing)
 
         corrections: list[dict] = []
 
@@ -474,18 +477,40 @@ def cmd_run(args: argparse.Namespace) -> None:
                     posted += 1
             return posted
 
-        if "detect" in args.phases:
-            phase("detect", detect_beeps)
-        if "beeps" in args.phases:
-            phase("beeps", confirm_beeps)
+        def export_stages() -> int:
+            # The stage export's defaults: the trim the grid reads, plus the
+            # CSV, FCPXML and report a user's export writes alongside it.
+            posted = 0
+            for shooter in manifest.shooters:
+                slug = slugs[shooter.key]
+                covered = sorted({n for c in manifest.clips if c.shooter == shooter.key for n in c.stages})
+                for number in covered:
+                    _post(client, f"{base}/shooters/{slug}/stages/{number}/export", {})
+                    posted += 1
+            return posted
 
-        if "grid" in args.phases:
+        def render_grid() -> int:
             body = {
                 "stage_numbers": [s.stage_number for s in manifest.stages],
                 "audio_from": slugs[manifest.shooters[0].key],
                 **(json.loads(args.grid_options.read_text()) if args.grid_options else {}),
             }
-            phase("grid", lambda: bool(_post(client, f"{base}/match/compare-export", body)))
+            _post(client, f"{base}/match/compare-export", body)
+            return 1
+
+        error: str | None = None
+        try:
+            for name, action in (
+                ("detect", detect_beeps),
+                ("beeps", confirm_beeps),
+                ("export", export_stages),
+                ("grid", render_grid),
+            ):
+                if name in args.phases:
+                    phase(name, action)
+        except Exception as exc:  # noqa: BLE001 - keep what the run collected, then report it
+            error = f"{type(exc).__name__}: {exc}"
+            print(f"run stopped: {error}", flush=True)
         watch.poll()
         # The list payload is slim (no timings); the per-job route has them.
         for job_id in list(watch.jobs):
@@ -495,12 +520,21 @@ def cmd_run(args: argparse.Namespace) -> None:
     since = datetime.fromisoformat(ran_at)
     jobs = [j for j in watch.jobs.values() if datetime.fromisoformat(j["created_at"]) >= since]
     failed = [j for j in jobs if j["status"] == "failed"]
-    result = {**record, "ran_at": ran_at, "phases": phases, "beep_corrections": corrections, "jobs": jobs}
+    result = {
+        **record,
+        "ran_at": ran_at,
+        "phases": phases,
+        "error": error,
+        "beep_corrections": corrections,
+        "jobs": jobs,
+    }
     args.output.write_text(json.dumps(result, indent=2))
     print(f"{len(jobs)} jobs, {len(failed)} failed -> {args.output}")
     for job in failed:
         where = f"{job.get('shooter_slug')} stage {job.get('stage_number')}"
         print(f"  FAILED {job['kind']} {where}: {job['error']}")
+    if error is not None:
+        sys.exit(1)
 
 
 def summarize(result: dict, *, vcpu_s: float, gib_s: float, egress_gb: float) -> dict:
