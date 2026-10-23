@@ -161,6 +161,21 @@ def _choose_video(
     return chosen, False
 
 
+def _trim_present(
+    trim: Path,
+    ensure_trim: Callable[[Path], object] | None,
+    trim_exists: Callable[[Path], bool] | None,
+) -> bool:
+    """Whether ``trim`` is there: ``trim_exists`` answers when given (a
+    presence check that reads no bytes), else ``ensure_trim`` may mirror it
+    down first and the disk answers."""
+    if trim_exists is not None:
+        return trim_exists(trim)
+    if ensure_trim is not None:
+        ensure_trim(trim)
+    return trim.exists()
+
+
 def _inset_for(
     stage_videos: list[StageVideo],
     chosen: StageVideo,
@@ -170,6 +185,7 @@ def _inset_for(
     pre_buffer: float,
     probe: ProbeFn,
     ensure_trim: Callable[[Path], object] | None = None,
+    trim_exists: Callable[[Path], bool] | None = None,
 ) -> InsetClip | None:
     """The inset camera on this stage, chosen among the shooter's *other*
     cameras the way the tile's camera is (``camera_select``: mount, then
@@ -187,9 +203,7 @@ def _inset_for(
     if video is None or video.beep_time is None:
         return None
     trim = trim_for(video)
-    if ensure_trim is not None:
-        ensure_trim(trim)
-    if not trim.exists():
+    if not _trim_present(trim, ensure_trim, trim_exists):
         return None
     return InsetClip(
         trim_path=trim,
@@ -291,6 +305,7 @@ def load_shooter_from_match(
     match: Match | None = None,
     project: MatchProject | None = None,
     ensure_trim: Callable[[Path], object] | None = None,
+    trim_exists: Callable[[Path], bool] | None = None,
 ) -> CompareShooterBundle:
     """Build a :class:`CompareShooterBundle` from one shooter inside a merged Match.
 
@@ -308,7 +323,10 @@ def load_shooter_from_match(
     stage's expected trim path *before* its existence is checked, so a
     hosted caller can mirror the trim down from object storage; a local
     caller leaves it ``None`` and the check reads the disk as it always
-    has.
+    has. ``trim_exists`` replaces both for a caller that only needs to
+    know which stages have a trim (a request validating before it queues
+    the render): it answers without the file, so pass a ``probe`` that does
+    not open it either.
     """
     if probe is None:
         probe = fcpxml_gen.probe_video
@@ -345,9 +363,7 @@ def load_shooter_from_match(
             continue
         stage_label = stage_names.get(stage.stage_number, stage.stage_name)
         trim = trim_path_for_video(project, shooter_root, stage.stage_number, stage.stage_name, chosen)
-        if ensure_trim is not None:
-            ensure_trim(trim)
-        if not trim.exists():
+        if not _trim_present(trim, ensure_trim, trim_exists):
             missing.append(
                 MissingTrim(
                     stage_number=stage.stage_number,
@@ -381,6 +397,7 @@ def load_shooter_from_match(
                 pre_buffer=pre_buffer,
                 probe=probe,
                 ensure_trim=ensure_trim,
+                trim_exists=trim_exists,
             ),
         )
 

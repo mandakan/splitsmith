@@ -173,6 +173,7 @@ from ..config import (
     IntervalClassSource,
     Shot,
     StageEvent,
+    VideoMetadata,
 )
 from ..detection_merge import candidate_dict as _candidate_dict
 from ..detection_merge import candidate_high_water as _candidate_high_water  # noqa: F401  (tests import it)
@@ -1540,6 +1541,7 @@ def _load_compare_bundles(
     cameras: dict[str, str] | None = None,
     inset: str | None = None,
     state: AppState | None = None,
+    presence: StoragePresence | None = None,
 ) -> list[project_loader.CompareShooterBundle]:
     """Load every shooter on ``match`` as a compare-grid bundle.
 
@@ -1552,6 +1554,12 @@ def _load_compare_bundles(
     :class:`splitsmith.camera_select.CameraResolutionError` when a
     requested camera resolves on no stage of that shooter's project --
     callers map that to a 400.
+
+    ``presence`` is the endpoint's: with it the trims are checked against
+    the request's storage listing and never pulled or probed, so a bundle
+    carries which stages have a trim and nothing measured from the file
+    (a request must not pull media; a full match's trims are gigabytes).
+    The worker passes none and pulls each trim to render it.
     """
     cameras = cameras or {}
     bundles: list[project_loader.CompareShooterBundle] = []
@@ -1563,15 +1571,24 @@ def _load_compare_bundles(
         # disk and ``ensure_trim=None`` checks the disk, as always.
         project: MatchProject | None = None
         ensure_trim: Callable[[Path], object] | None = None
+        trim_exists: Callable[[Path], bool] | None = None
         if state is not None:
             project = state.shooter_project(slug)
             bound_project = project
 
-            def _pull(trim: Path, _project: MatchProject = bound_project) -> bool:
-                # A no-op when the project has no storage scope bound.
-                return export_storage.pull_export_file(_project, trim)
+            if presence is not None:
 
-            ensure_trim = _pull
+                def _listed(trim: Path, _project: MatchProject = bound_project) -> bool:
+                    return export_storage.export_listed(_project, trim, presence)
+
+                trim_exists = _listed
+            else:
+
+                def _pull(trim: Path, _project: MatchProject = bound_project) -> bool:
+                    # A no-op when the project has no storage scope bound.
+                    return export_storage.pull_export_file(_project, trim)
+
+                ensure_trim = _pull
         label = _shooter_label(match, match_root, slug, project=project)
         camera = cameras.get(slug, cameras.get(label))
         bundles.append(
@@ -1584,9 +1601,16 @@ def _load_compare_bundles(
                 match=match,
                 project=project,
                 ensure_trim=ensure_trim,
+                trim_exists=trim_exists,
+                probe=_unprobed if trim_exists is not None else None,
             )
         )
     return bundles
+
+
+def _unprobed(_trim: Path) -> VideoMetadata:
+    """The probe for a presence-only bundle: the file is not here to open."""
+    return VideoMetadata(width=0, height=0, duration_seconds=0.0, frame_rate_num=0, frame_rate_den=1)
 
 
 def _filter_bundles_to_stages(

@@ -1793,8 +1793,14 @@ async def export_compare_grid(request: Request, req: CompareGridRequest) -> JSON
         )
 
     try:
+        # Presence only: the render job pulls the trims; a request must not.
         bundles = _server._load_compare_bundles(
-            match_root, match, cameras=req.cameras, inset=req.inset_camera, state=state
+            match_root,
+            match,
+            cameras=req.cameras,
+            inset=req.inset_camera,
+            state=state,
+            presence=StoragePresence(state.storage) if state.storage is not None else None,
         )
     except camera_select.CameraResolutionError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc

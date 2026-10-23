@@ -93,6 +93,9 @@ def inline_deferrer(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
         async def _defer(
             *, job_id: str, user_id: str, kind: str, args: dict[str, Any], match_id: str | None
         ) -> None:
+            if holder.get("hold"):  # leave the job queued: only the request runs
+                holder.setdefault("held", []).append(job_id)
+                return
             state = holder["state"]
             await state.jobs.run_job(job_id=job_id, kind=kind, args=rehydrate_args(kind, args))
 
@@ -191,6 +194,27 @@ def test_hosted_validation_sees_the_storage_trims(hosted_grid) -> None:
         json={"stage_numbers": [1], "audio_from": slug},
     )
     assert resp.status_code == 200, resp.text
+
+
+def test_the_request_reads_no_trim_bytes(hosted_grid, inline_deferrer) -> None:
+    """Validation answers from a storage listing; the trims are the render
+    job's to pull. Pulling every exported trim in the request ran serve
+    (2 GiB, in-memory disk) out of memory on a 48-trim match."""
+    from splitsmith.observability import STORAGE_IO
+
+    client, _storage, match_id, slug, _rendered = hosted_grid
+    inline_deferrer["hold"] = True
+    read_before, _ = STORAGE_IO.snapshot()
+    resp = client.post(
+        f"/api/matches/{match_id}/match/compare-export",
+        json={"stage_numbers": [1], "audio_from": slug},
+    )
+    read_after, _ = STORAGE_IO.snapshot()
+    assert resp.status_code == 200, resp.text
+    assert inline_deferrer["held"] == [resp.json()["id"]]
+    # The documents the request reads are small; the trim alone is
+    # len(TRIM_BYTES), and none of it moved.
+    assert read_after - read_before < len(TRIM_BYTES)
 
 
 def test_compare_grid_args_rehydrate_for_the_worker() -> None:

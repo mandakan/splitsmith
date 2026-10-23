@@ -31,6 +31,7 @@ from ..storage import Storage
 
 if TYPE_CHECKING:
     from .exports import StageExportResult
+    from .presence import StoragePresence
 
 logger = logging.getLogger(__name__)
 
@@ -51,6 +52,25 @@ def _storage_export_key(project: MatchProject | None, local_file: Path) -> str |
     if project is None or project._storage is None or project._storage_scope is None:
         return None
     return f"{project._storage_scope}/exports/{local_file.name}"
+
+
+def export_listed(project: MatchProject | None, local_file: Path, presence: StoragePresence) -> bool:
+    """Is this deliverable available, answered from a request's listing.
+
+    The request-path twin of :func:`export_present`: on disk, or listed in
+    storage under the project's export key, with one listing per exports
+    prefix for the whole request instead of a HEAD per file. A listing
+    that fails falls back to that HEAD.
+    """
+    if local_file.exists() and local_file.stat().st_size > 0:
+        return True
+    key = _storage_export_key(project, local_file)
+    if key is None:
+        return False
+    try:
+        return presence.has_key(key)
+    except Exception:  # noqa: BLE001 - a failed listing is answered per key
+        return export_present(project, local_file)
 
 
 def export_present(project: MatchProject | None, local_file: Path) -> bool:
