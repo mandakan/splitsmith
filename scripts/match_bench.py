@@ -339,22 +339,29 @@ class _JobWatch:
     A job is this match's by its shooter: hosted job rows do not carry the
     match id in the list payload, and a seeded match's slugs are random, so
     no other match shares them. Account-level jobs (proxies) have no shooter
-    and are not counted.
+    and are not counted; a match-level job (the grid) has none either, so a
+    phase that submits one tracks the id its POST returned.
     """
 
     def __init__(self, client: httpx.Client, slugs: set[str], interval: float) -> None:
         self._client = client
         self._slugs = slugs
+        self._ids: set[str] = set()
         self._interval = interval
         self.jobs: dict[str, dict] = {}
 
     def poll(self) -> list[dict]:
         resp = self._client.get("/api/me/jobs")
         resp.raise_for_status()
-        mine = [j for j in resp.json() if j.get("shooter_slug") in self._slugs]
+        mine = [j for j in resp.json() if j.get("shooter_slug") in self._slugs or j["id"] in self._ids]
         for job in mine:
             self.jobs[job["id"]] = job
         return [j for j in mine if j["status"] not in TERMINAL]
+
+    def track(self, job: dict) -> None:
+        """Count a submitted job as this match's even when it has no shooter."""
+        if isinstance(job, dict) and job.get("id"):
+            self._ids.add(job["id"])
 
     def wait_quiet(self, label: str, *, settle: float, timeout: float) -> float:
         """Block until no job of this match is active for ``settle`` seconds.
@@ -495,7 +502,7 @@ def cmd_run(args: argparse.Namespace) -> None:
                 "audio_from": slugs[manifest.shooters[0].key],
                 **(json.loads(args.grid_options.read_text()) if args.grid_options else {}),
             }
-            _post(client, f"{base}/match/compare-export", body)
+            watch.track(_post(client, f"{base}/match/compare-export", body))
             return 1
 
         error: str | None = None
