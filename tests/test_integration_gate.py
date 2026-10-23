@@ -26,9 +26,10 @@ from tests import conftest as gate
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
-# One file, one integration test, no other dependencies -- keeps the
-# nested pytest run to a couple of seconds.
-_TARGET = "tests/test_proxy.py"
+# One integration test, no other dependencies -- keeps the nested pytest run
+# to a couple of seconds. A node id, not the file: new integration tests in
+# test_proxy.py must not change the count this gate asserts on.
+_TARGET = "tests/test_proxy.py::test_transcode_proxy_produces_smaller_valid_mp4"
 
 
 def _path_without_ffmpeg() -> str:

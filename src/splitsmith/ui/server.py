@@ -466,6 +466,27 @@ def _cancellable_runner(handle: JobHandle):
 logger = logging.getLogger(__name__)
 
 
+#: Lifetime of the presigned URL ffmpeg streams a proxy's source from
+#: (#1674). The store checks the signature on every range request, and a
+#: reconnect after a dropped connection is a new request, so the URL must
+#: outlive the whole transcode: a 52 s 4K60 HEVC clip takes about 30 s on
+#: four threads, and six hours covers a clip hundreds of times longer. A
+#: read that still fails falls back to the download path.
+_PROXY_SOURCE_URL_TTL_S = 6 * 3600
+
+
+def _proxy_source_url(storage: Storage, raw_path: str) -> str | None:
+    """A presigned GET URL ffmpeg can read ``raw_path`` from, or ``None``
+    when the store has none or presigning fails (the caller downloads)."""
+    if not storage.supports_presigned_get:
+        return None
+    try:
+        return storage.presign_get_url(raw_path, expires_in=_PROXY_SOURCE_URL_TTL_S)
+    except Exception:  # noqa: BLE001 -- any presign failure means "download instead"
+        logger.warning("proxy for %s: could not presign the source, downloading", raw_path, exc_info=True)
+        return None
+
+
 async def _dispatch_proxy_job(state: AppState, raw_key: str) -> None:
     """Enqueue a ``generate_proxy`` job for a freshly uploaded raw video.
 
@@ -3782,9 +3803,12 @@ def register_job_bodies(state: AppState) -> None:
     def _run_generate_proxy(handle: JobHandle, *, raw_path: str) -> None:
         """Worker that builds a low-res scrub proxy for a raw upload.
 
-        Hosted-only: fetches the ``raw/<name>`` object from storage,
-        transcodes a dense-GOP preview via ``transcode_proxy``, and
-        uploads it under ``raw_proxy/<name>.mp4``. The proxy is a fast-
+        Hosted-only: transcodes a dense-GOP preview of the ``raw/<name>``
+        object via ``transcode_proxy`` and uploads it under
+        ``raw_proxy/<name>.mp4``. ffmpeg reads the source from a presigned
+        URL (phase ``stream_transcode``); without one, or when that read
+        reports an error, it downloads the object first (``download`` then
+        ``transcode``), and ``meta.source_read`` says which ran. The proxy is a fast-
         scrub optimization for the Ingest UI, so both the no-storage
         (local mode) and already-present cases short-circuit as clean
         no-ops rather than erroring.
@@ -3792,7 +3816,7 @@ def register_job_bodies(state: AppState) -> None:
         import shutil
         import tempfile
 
-        from ..proxy import ProxyConfig, proxy_key_for, transcode_proxy
+        from ..proxy import ProxyConfig, ProxyError, proxy_key_for, transcode_proxy
 
         storage = state.storage
         if storage is None:
@@ -3806,23 +3830,53 @@ def register_job_bodies(state: AppState) -> None:
             handle.update(progress=1.0, message="Proxy already present")
             return
 
-        handle.update(progress=0.1, message="Fetching source...")
+        ffmpeg_binary = process_runtime().ffmpeg_binary
         with tempfile.TemporaryDirectory() as td:
             tmp_in = Path(td) / "src"
             tmp_out = Path(td) / "proxy.mp4"
-            with handle.timer.phase("download"):
-                with storage.open_stream(raw_path) as src, tmp_in.open("wb") as dst:
-                    shutil.copyfileobj(src, dst)
-            handle.check_cancel()
-            handle.update(progress=0.4, message="Transcoding preview...")
-            with handle.timer.phase("transcode"):
-                transcode_proxy(
-                    tmp_in,
-                    tmp_out,
-                    ProxyConfig(),
-                    ffmpeg_binary=process_runtime().ffmpeg_binary,
-                    runner=_cancellable_runner(handle),
-                )
+            # #1674: ffmpeg reads the source from a presigned URL, so decoding
+            # starts with the first bytes; the download path is the fallback
+            # for a store without presigned URLs or a stream that went wrong.
+            streamed = False
+            source_url = _proxy_source_url(storage, raw_path)
+            if source_url is not None:
+                handle.update(progress=0.1, message="Transcoding preview...")
+                try:
+                    with handle.timer.phase("stream_transcode"):
+                        transcode_proxy(
+                            source_url,
+                            tmp_out,
+                            ProxyConfig(),
+                            ffmpeg_binary=ffmpeg_binary,
+                            runner=_cancellable_runner(handle),
+                        )
+                    streamed = True
+                except ProxyError as exc:
+                    # The message carries no URL (``transcode_proxy`` redacts it).
+                    logger.warning(
+                        "proxy for %s: streamed read failed, downloading instead: %s", raw_path, exc
+                    )
+                    tmp_out.unlink(missing_ok=True)
+            # ``url``: streamed; ``url_failed``: streamed, discarded, downloaded;
+            # ``download``: no URL to stream from.
+            handle.timer.set_meta(
+                source_read="url" if streamed else ("url_failed" if source_url is not None else "download")
+            )
+            if not streamed:
+                handle.update(progress=0.1, message="Fetching source...")
+                with handle.timer.phase("download"):
+                    with storage.open_stream(raw_path) as src, tmp_in.open("wb") as dst:
+                        shutil.copyfileobj(src, dst)
+                handle.check_cancel()
+                handle.update(progress=0.4, message="Transcoding preview...")
+                with handle.timer.phase("transcode"):
+                    transcode_proxy(
+                        tmp_in,
+                        tmp_out,
+                        ProxyConfig(),
+                        ffmpeg_binary=ffmpeg_binary,
+                        runner=_cancellable_runner(handle),
+                    )
             handle.update(progress=0.85, message="Uploading preview...")
             with handle.timer.phase("upload"):
                 with tmp_out.open("rb") as fh:
