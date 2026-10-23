@@ -29,6 +29,7 @@ from tests.ui._helpers import (
     _three_candidates,
     _video_id_for,
     _wait_for_job,
+    _wait_for_jobs_to_drain,
 )
 
 
@@ -754,8 +755,9 @@ def test_peaks_endpoint_404_when_no_primary(tmp_path: Path) -> None:
 
 
 def test_detect_beep_auto_trims(tmp_path: Path, monkeypatch) -> None:
-    """After a successful beep detect, the production UI runs the audit-mode
-    trim inline so the audit screen lands with frame-accurate scrubbing."""
+    """After a successful beep detect, the production UI chains the audit-mode
+    trim (a ``trim`` job since #1680) so the audit screen lands with
+    frame-accurate scrubbing."""
     client, _ = _seed_project_with_primary(tmp_path)
     project_root = tmp_path / "match"
     _shooter_root = project_root / "shooters" / "me"
@@ -799,6 +801,8 @@ def test_detect_beep_auto_trims(tmp_path: Path, monkeypatch) -> None:
     assert resp.status_code == 200
     final = _wait_for_job(client, resp.json()["id"])
     assert final["status"] == "succeeded", final
+    jobs = _wait_for_jobs_to_drain(client)
+    assert [j["status"] for j in jobs if j["kind"] == "trim"] == ["succeeded"]
     project_after = client.get("/api/shooters/me/project").json()
     assert project_after["stages"][0]["videos"][0]["beep_time"] == pytest.approx(6.5)
     assert project_after["stages"][0]["videos"][0]["processed"]["trim"] is True
@@ -3960,6 +3964,7 @@ def test_marking_reviewed_kicks_off_shot_detect(tmp_path: Path, monkeypatch) -> 
     _stub_detect(monkeypatch, beep_time=12.453)
     job = client.post("/api/shooters/me/stages/1/detect-beep").json()
     _wait_for_job(client, job["id"])
+    _wait_for_jobs_to_drain(client)  # the chained trim
 
     primary = client.get("/api/shooters/me/project").json()["stages"][0]["videos"][0]
     assert primary["processed"]["trim"] is True  # trim cached

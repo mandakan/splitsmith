@@ -30,6 +30,7 @@ import logging
 import os
 import shutil
 import tempfile
+import time
 from datetime import UTC, date, datetime
 from enum import StrEnum
 from pathlib import Path
@@ -1022,6 +1023,19 @@ def _raw_holds_source(dest: Path, source: Path) -> bool:
     except OSError:
         return False
     return d.st_size == s.st_size and int(d.st_mtime) == int(s.st_mtime)
+
+
+def _object_mtime(storage: Storage, key: str) -> float | None:
+    """The storage object's last-modified time as a POSIX timestamp, or None
+    when the backend reports none (or cannot be asked)."""
+    try:
+        meta = storage.stat(key)
+    except Exception as exc:  # noqa: BLE001 - a version hint never fails the download
+        logger.info("mirror: stat(%s) failed: %s", key, exc)
+        return None
+    if meta is None or meta.last_modified is None:
+        return None
+    return meta.last_modified.timestamp()
 
 
 class MatchProject(BaseModel):
@@ -2335,11 +2349,15 @@ class MatchProject(BaseModel):
             if not local.exists():
                 self._mirror_from_storage(self._storage, str(video_path), local)
             else:
-                # Cache hit: bump mtime so the source-cache LRU sweep sees
-                # last-use, not download time. Best-effort - a read-only
-                # mount must not fail the job over a cache-recency hint.
+                # Cache hit: bump the atime so the source-cache LRU sweep sees
+                # last use. Never the mtime: it stands for the storage
+                # object's version, and every derived cache (the audit trim,
+                # the WAVs, the probe) is current only while it is not older
+                # than its source -- a bumped mtime re-cut the trim on every
+                # later job of the worker (#1678). Best-effort: a read-only
+                # mount must not fail the job over a recency hint.
                 try:
-                    os.utime(local, None)
+                    os.utime(local, (time.time(), local.stat().st_mtime))
                 except OSError:
                     pass
         return local
@@ -2399,6 +2417,13 @@ class MatchProject(BaseModel):
         try:
             with storage.open_stream(key) as src, os.fdopen(fd, "wb") as out:
                 shutil.copyfileobj(src, out)
+            # The mirror's mtime is the object's: a trim this worker cut
+            # before the source cache evicted the source stays current
+            # when the source comes down again (#1678). The atime is the
+            # download, which is the LRU sweep's last use.
+            version = _object_mtime(storage, key)
+            if version is not None:
+                os.utime(tmp_name, (time.time(), version))
             Path(tmp_name).replace(dest)
         except Exception:
             try:

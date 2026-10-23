@@ -2215,6 +2215,14 @@ def _fetch_remote_manifest(prefs: user_config.GlobalPrefs, match_id: str) -> lis
         return client.get_doc_manifest(match_id)
 
 
+def _same_beep(a: float | None, b: float | None) -> bool:
+    """Whether two beep times cut the same trim: equal at the precision the
+    trim's params sidecar records (``audio._current_trim_params``)."""
+    if a is None or b is None:
+        return a is None and b is None
+    return round(float(a), 4) == round(float(b), 4)
+
+
 def register_job_bodies(state: AppState) -> None:
     """Register the production job-body closures on ``state.jobs.bodies``.
 
@@ -2363,15 +2371,17 @@ def register_job_bodies(state: AppState) -> None:
         return beep_windows.sequential_window(anchor, duration, cfg), "sequential"
 
     def _run_detect_beep_for_video(handle: JobHandle, slug: str, stage_number: int, video_id: str) -> None:
-        """Worker: detect ``video``'s beep, then auto-chain trim.
+        """Worker: detect ``video``'s beep, save it, then queue its trim.
 
         Generic over role:
-          - primary: detect -> trim -> shot_detect (existing pipeline).
-          - secondary: detect -> trim (no shot_detect; the audit timeline
-            is anchored to the primary's beep).
+          - primary: detect -> (trim job) -> shot_detect.
+          - secondary: detect -> (trim job); no shot_detect, the audit
+            timeline is anchored to the primary's beep.
 
-        Trim is treated as a soft failure: the beep is valuable on its
-        own and the SPA can re-trim later.
+        The beep is saved before any trim work (#1680), and the trim is a
+        chained ``trim`` job, skipped when the beep did not move and its
+        trim is in place. A failed trim fails that job, never this one: the
+        beep is valuable on its own.
         """
         handle.update(progress=0.05, message="Loading project...")
         with handle.timer.phase("load_project"):
@@ -2559,50 +2569,31 @@ def register_job_bodies(state: AppState) -> None:
             video.beep_window = None
             video.beep_window_source = None
 
-        trimmed_ok = False
-        if beep is not None and stg.time_seconds > 0:
-            handle.check_cancel()
-            handle.update(progress=0.55, message=f"Trimming audit clip ({role_label})...")
-            try:
-                with handle.timer.phase("trim"):
-                    audio_helpers.ensure_video_audit_trim(
-                        state.shooter_root(slug),
-                        stage_number,
-                        video,
-                        source,
-                        video.beep_time,
-                        stg.time_seconds,
-                        project=proj,
-                        runner=_cancellable_runner(handle),
-                        ffmpeg_binary=process_runtime().ffmpeg_binary,
-                    )
-                video.processed["trim"] = True
-                trimmed_ok = True
-            except (FileNotFoundError, audio_helpers.AudioExtractionError) as exc:
-                # Soft failure: beep alone is still useful, especially for
-                # secondaries (audit alignment works without a trim cache).
-                logger.warning(
-                    "auto-trim failed for stage %d video %s: %s",
-                    stage_number,
-                    video.video_id,
-                    exc,
-                )
-                handle.update(message=f"beep saved; trim failed: {exc}")
-        handle.update(progress=0.85, message="Saving project...")
+        # Persist the beep the moment it is known (#1680): the trim is
+        # minutes of 4K decode, and the beep is the user's next step. A
+        # read-modify-write (``_update_project``): the user may have toggled
+        # ``beep_reviewed`` on other stages while detection ran, or another
+        # job of this shooter saved. Copying only our targeted fields onto
+        # the current project preserves those edits.
+        handle.update(progress=0.85, message="Saving beep...")
+        # Whether the beep moved from the one the stored trim was cut for. The
+        # merge may run again on a concurrent writer's document; the last run
+        # is the one that was saved.
+        moved: list[bool] = [False]
 
-        # Read-modify-write the project (``_update_project``): extract /
-        # detection / ffmpeg trim can take 30+ s during which the user may
-        # have toggled ``beep_reviewed`` on other stages, or another job of
-        # this shooter saved. Copying only our targeted fields onto the
-        # current project preserves those edits instead of stomping them
-        # with the snapshot we loaded at job start.
         def _apply_beep(fresh: MatchProject) -> None:
+            moved[0] = False
             try:
                 stg_fresh = fresh.stage(stage_number)
             except KeyError:
                 stg_fresh = None
             v_fresh = stg_fresh.find_video_by_id(video_id) if stg_fresh is not None else None
             if v_fresh is not None:
+                # The trim on disk was cut for the beep the project held: it
+                # stays current only while that beep does.
+                moved[0] = not _same_beep(v_fresh.beep_time, video.beep_time)
+                if moved[0]:
+                    v_fresh.processed["trim"] = False
                 v_fresh.beep_time = video.beep_time
                 v_fresh.beep_source = video.beep_source
                 v_fresh.beep_peak_amplitude = video.beep_peak_amplitude
@@ -2618,8 +2609,6 @@ def register_job_bodies(state: AppState) -> None:
                 v_fresh.beep_window = video.beep_window
                 v_fresh.beep_window_source = video.beep_window_source
                 v_fresh.processed["beep"] = True
-                if trimmed_ok:
-                    v_fresh.processed["trim"] = True
                 # Backfill raw video wall-clock metadata derived during this run so
                 # subsequent jobs on the same take don't need to re-probe.
                 raw_working = proj.find_raw_video(str(video.path))
@@ -2631,6 +2620,7 @@ def register_job_bodies(state: AppState) -> None:
                         if raw_working.recorded_start is not None and raw_fresh.recorded_start is None:
                             raw_fresh.recorded_start = raw_working.recorded_start
 
+        trim_current = False
         with handle.timer.phase("persist"):
             _update_project(state, slug, _apply_beep)
             # The project as saved, for the chaining below.
@@ -2640,43 +2630,75 @@ def register_job_bodies(state: AppState) -> None:
             except KeyError:
                 stg_fresh = None
             v_fresh = stg_fresh.find_video_by_id(video_id) if stg_fresh is not None else None
-        handle.timer.set_meta(trimmed=trimmed_ok)
-        if trimmed_ok and video.role == "primary" and video.beep_reviewed:
-            # Shot detection is primary-only AND gated on
-            # ``beep_reviewed`` (#71). That flag is True either because
-            # the user explicitly clicked "Mark reviewed" (which
-            # re-triggers chaining via ``set_beep_reviewed``) or because
-            # the auto-trust gate cleared (#219 layer 3b: confidence at
-            # or above ``beep_low_confidence_threshold``). Saves the
-            # heavy CLAP / GBDT / PANN ensemble work when the beep
-            # timestamp is wrong, since everything downstream of it
-            # would be garbage anyway.
-            #
-            # Layered automation gate (#215): users can disable the
-            # auto-trigger globally or per project. ``cli_override`` is
-            # always None for the server -- the daemon doesn't take
-            # CLI flags at this entry point.
-            resolved = automation_settings.resolve_automation(
-                project_override=fresh.automation,
-            )
-            # Worker callback runs in a ThreadPoolExecutor thread with
-            # no event loop; bridge to the async JobBackend via
-            # ``run_sync``.
-            if (
-                resolved.settings.shot_detect_on_beep_verified
-                and run_sync(
-                    state.jobs.find_active(kind="shot_detect", stage_number=stage_number, shooter_slug=slug)
+            if v_fresh is not None:
+                trim_path = audio_helpers.trimmed_video_path(
+                    state.shooter_root(slug), stage_number, v_fresh, project=fresh
                 )
-                is None
-            ):
-                run_sync(
-                    state.jobs.submit(
-                        kind="shot_detect",
-                        stage_number=stage_number,
-                        shooter_slug=slug,
-                        args={"slug": slug, "stage_number": stage_number},
+                if moved[0]:
+                    audio_helpers.invalidate_video_audit_trim(
+                        state.shooter_root(slug), stage_number, v_fresh, project=fresh
                     )
+                trim_current = (
+                    not moved[0]
+                    and bool(v_fresh.processed.get("trim"))
+                    and audio_helpers.trim_available(fresh, trim_path)
                 )
+        # Then the trim, as its own job (#1680): a confirm that lands while it
+        # runs adopts it (``_maybe_chain_trim`` dedupes on the trim kind, which
+        # it could not do against a trim inside this job), it also cuts the
+        # audit WAV, it runs behind the queue's other beep detections, and it
+        # chains shot detection itself for a reviewed primary, reading the
+        # flag fresh. A beep that did not move keeps its trim (#1678).
+        trim_queued = False
+        if v_fresh is not None and video.beep_time is not None and stg.time_seconds > 0:
+            if not trim_current:
+                if (
+                    run_sync(
+                        state.jobs.find_active(
+                            kind="trim", stage_number=stage_number, shooter_slug=slug, video_id=video_id
+                        )
+                    )
+                    is None
+                ):
+                    run_sync(
+                        state.jobs.submit(
+                            kind="trim",
+                            stage_number=stage_number,
+                            shooter_slug=slug,
+                            video_id=video_id,
+                            args={"slug": slug, "stage_number": stage_number, "video_id": video_id},
+                        )
+                    )
+                trim_queued = True
+            elif video.role == "primary" and v_fresh.beep_reviewed:
+                # Shot detection is primary-only AND gated on ``beep_reviewed``
+                # (#71): the flag is True because the user confirmed it or the
+                # auto-trust gate cleared (#219 layer 3b). Saves the CLAP /
+                # GBDT / PANN ensemble work when the beep is wrong. Layered
+                # automation gate (#215): users can disable the auto-trigger
+                # globally or per project. Worker callbacks run with no event
+                # loop; ``run_sync`` bridges to the async JobBackend.
+                resolved = automation_settings.resolve_automation(
+                    project_override=fresh.automation,
+                )
+                if (
+                    resolved.settings.shot_detect_on_beep_verified
+                    and run_sync(
+                        state.jobs.find_active(
+                            kind="shot_detect", stage_number=stage_number, shooter_slug=slug
+                        )
+                    )
+                    is None
+                ):
+                    run_sync(
+                        state.jobs.submit(
+                            kind="shot_detect",
+                            stage_number=stage_number,
+                            shooter_slug=slug,
+                            args={"slug": slug, "stage_number": stage_number},
+                        )
+                    )
+        handle.timer.set_meta(trim_queued=trim_queued)
         # Take chaining: after any windowed detect succeeds, submit detect_beep
         # for the next uncovered stage. The helper self-guards for scoreboard mode
         # (independent windows, no chain) and non-takes.
@@ -2779,7 +2801,14 @@ def register_job_bodies(state: AppState) -> None:
             fresh = state.shooter_project(slug)
             stg_fresh = fresh.stage(stage_number)
             v_fresh = stg_fresh.find_video_by_id(video_id)
-            if v_fresh is not None:
+            # A beep moved while ffmpeg ran (a re-detection or an override,
+            # now that the beep is saved before its trim, #1680) leaves this
+            # cut for the old beep: it is not the video's trim, and nothing
+            # downstream of it runs.
+            beep_moved = v_fresh is not None and not _same_beep(v_fresh.beep_time, video.beep_time)
+            if beep_moved:
+                logger.info("trim: stage %s %s beep moved during the cut; not marked", stage_number, video_id)
+            elif v_fresh is not None:
                 v_fresh.processed["trim"] = True
                 fresh.save(root)
         # Worker callback runs in a ThreadPoolExecutor thread with no
@@ -2794,6 +2823,7 @@ def register_job_bodies(state: AppState) -> None:
         beep_reviewed_now = v_fresh.beep_reviewed if v_fresh is not None else video.beep_reviewed
         if (
             chain_shot_detect
+            and not beep_moved
             and video.role == "primary"
             and beep_reviewed_now
             and run_sync(

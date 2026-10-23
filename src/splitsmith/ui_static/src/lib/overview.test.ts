@@ -198,6 +198,26 @@ describe("rowAction", () => {
     // No job left and still no beep: now it is the user's to place.
     expect(rowAction({ ...waiting, running: false }, 0.5).kind).toBe("confirm_beep");
   });
+
+  it("a saved beep is there to confirm while its trim cuts, not while it is being detected", () => {
+    const base = buildOverviewRows({ triage: STOCKHOLM, shooters: ONE, leadSlug: "s1", jobs: [] })[2].lead!;
+    const saved = { ...base, beepTime: 4.2, beepReviewed: false };
+    expect(rowAction({ ...saved, running: true, detecting: false }, 0.5).kind).toBe("confirm_beep");
+    expect(rowAction({ ...saved, running: true, detecting: true }, 0.5).kind).toBe("running");
+    // Confirmed: the trim, then detection, is what the stage waits for.
+    expect(rowAction({ ...saved, beepReviewed: true, running: true, detecting: false }, 0.5).kind).toBe(
+      "running",
+    );
+  });
+
+  it("tells a beep detection from the stage's other pipeline jobs", () => {
+    const stage = STOCKHOLM.cells[2].stage_number;
+    const job = (kind: string) =>
+      ({ id: kind, kind, status: "running", shooter_slug: STOCKHOLM.cells[2].slug, stage_number: stage }) as Job;
+    const lead = (jobs: Job[]) => buildOverviewRows({ triage: STOCKHOLM, shooters: ONE, leadSlug: "s1", jobs })[2].lead!;
+    expect(lead([job("trim")])).toMatchObject({ running: true, detecting: false });
+    expect(lead([job("detect_beep")])).toMatchObject({ running: true, detecting: true });
+  });
 });
 
 describe("formatClock", () => {

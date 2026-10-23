@@ -1,6 +1,12 @@
 {
   "entries": [
     {
+      "id": "beep-ready-before-trim",
+      "date": "2026-10-23",
+      "title": "Confirm beeps sooner",
+      "body": "A detected beep shows up for review within seconds of adding a clip, while the clip is still being prepared for Audit. Confirm it from the Overview or the Audit page right away."
+    },
+    {
       "id": "compare-grid-names-missing-trims",
       "date": "2026-10-23",
       "title": "Compare grid says which trims are missing",

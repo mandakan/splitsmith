@@ -50,6 +50,8 @@ export interface OverviewCell {
   provisional: boolean;
   /** A detect / trim / shot-detect job for this shooter and stage is in flight. */
   running: boolean;
+  /** Of those, a beep detection: the beep is not there to confirm yet. */
+  detecting: boolean;
   /** The beep's distance from its tone, ms, when at or past the server's
    *  threshold (spec 2026-10-17): Overview's Check beep. Else null. */
   checkBeep: number | null;
@@ -76,24 +78,29 @@ const PIPELINE_KINDS = new Set(["detect_beep", "trim", "shot_detect"]);
 export function rowAction(cell: Omit<OverviewCell, "action" | "checkBeep">, _threshold: number): RowAction {
   if (cell.status === "skipped") return { kind: "none" };
   if (cell.videoCount === 0) return { kind: "add_footage" };
-  // A detect / trim / shot-detect job queued or running comes first: right
-  // after an import every stage is waiting for its beep, and a "Confirm
-  // beep" call to action there led to a picker with nothing to confirm.
-  if (cell.running) return { kind: "running" };
+  // A job queued or running comes first: right after an import every stage
+  // is waiting for its beep, and a "Confirm beep" call to action there led
+  // to a picker with nothing to confirm. Except a beep already saved: it is
+  // the user's to confirm while its trim still cuts (the trim takes minutes
+  // on 4K, the beep seconds), and a confirm then adopts that trim.
+  if (cell.detecting || (cell.running && cell.beepTime == null)) return { kind: "running" };
   if (cell.beepTime == null || !cell.beepReviewed) return { kind: "confirm_beep" };
+  if (cell.running) return { kind: "running" };
   if (cell.audited) return { kind: "splits" };
   return { kind: "audit", accept: cell.shotCount > 0 };
 }
 
 function toCell(raw: TriageCell, jobs: Job[], threshold: number, toneFlag: number): OverviewCell {
   const audited = countsAsDone(raw.status);
-  const running = jobs.some(
+  const active = jobs.filter(
     (j) =>
       isJobActive(j) &&
       PIPELINE_KINDS.has(j.kind) &&
       j.shooter_slug === raw.slug &&
       j.stage_number === raw.stage_number,
   );
+  const running = active.length > 0;
+  const detecting = active.some((j) => j.kind === "detect_beep");
   const base: Omit<OverviewCell, "action" | "checkBeep"> = {
     slug: raw.slug,
     shooterName: raw.shooter_name,
@@ -110,6 +117,7 @@ function toCell(raw: TriageCell, jobs: Job[], threshold: number, toneFlag: numbe
     audited,
     provisional: !audited && (raw.draw != null || raw.avg_split != null || raw.shot_count > 0),
     running,
+    detecting,
   };
   const tone = raw.beep_tone_offset_ms ?? null;
   const checkBeep = tone != null && Math.abs(tone) >= toneFlag ? tone : null;
