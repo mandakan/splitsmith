@@ -2545,6 +2545,36 @@ class MatchProject(BaseModel):
         shots = data.get("shots") if isinstance(data, dict) else None
         return bool(shots)
 
+    def pre_swap_backup(self, root: Path, stage_number: int, *, keep: bool) -> Path | None:
+        """Back up the stage's audit file before a change of primary; the
+        backup's path, or ``None`` when there is no file (hosted keeps
+        audits in ``state_docs``) or it could not be written.
+
+        Under a name of its own: every audit save rewrites stage<N>.json.bak,
+        so a backup there was gone after the first save on the new primary.
+        Never overwritten. ``keep`` copies, for a swap that carries the
+        audit across; otherwise the audit is moved aside and the stage is
+        detected again."""
+        audit_file = self.audit_path(root) / f"stage{stage_number}.json"
+        if not audit_file.exists():
+            return None
+        stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%S%f")
+        backup = audit_file.with_name(f"stage{stage_number}.pre-swap-{stamp}.json")
+        n = 1
+        while backup.exists():
+            backup = audit_file.with_name(f"stage{stage_number}.pre-swap-{stamp}-{n}.json")
+            n += 1
+        try:
+            if keep:
+                shutil.copy2(audit_file, backup)
+            else:
+                audit_file.rename(backup)
+        except OSError:
+            # Leave the audit in place rather than lose it; the caller can
+            # decide what to do.
+            return None
+        return backup
+
     def swap_primary(
         self,
         path: Path,
@@ -2600,23 +2630,7 @@ class MatchProject(BaseModel):
         new_primary.beep_alignment_delta_ms = None
 
         if backup_audit:
-            audit_file = self.audit_path(root) / f"stage{stage_number}.json"
-            if audit_file.exists():
-                # Under a name of its own: every audit save rewrites
-                # stage<N>.json.bak, so a backup there was gone after the
-                # first save on the new primary. Never overwritten.
-                stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%S%f")
-                backup = audit_file.with_name(f"stage{stage_number}.pre-swap-{stamp}.json")
-                n = 1
-                while backup.exists():
-                    backup = audit_file.with_name(f"stage{stage_number}.pre-swap-{stamp}-{n}.json")
-                    n += 1
-                try:
-                    audit_file.rename(backup)
-                except OSError:
-                    # Leave the audit in place rather than lose it; the
-                    # caller can decide what to do.
-                    pass
+            self.pre_swap_backup(root, stage_number, keep=False)
 
         # The fresh primary needs a re-trim too (audio source changed). The
         # caller's job is to nudge the worker; here we just clear the flags

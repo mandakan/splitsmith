@@ -236,3 +236,14 @@ export function identityTarget<T extends { slug: string }>(search: string, shoot
   if (!slug) return null;
   return shooters.find((s) => s.slug === slug) ?? null;
 }
+
+/** The server's sentence for a primary it will not take: a camera with no
+ *  confirmed beep made primary over audit work (409 ``primary_without_beep``,
+ *  from a move or Make primary). The detail is structured, which
+ *  ``apiErrorText`` reads as no message at all; ``null`` for anything else. */
+export function primaryRefusal(body: unknown): string | null {
+  const detail = (body as { detail?: unknown } | null)?.detail;
+  if (typeof detail !== "object" || detail === null) return null;
+  const { code, message } = detail as { code?: unknown; message?: unknown };
+  return code === "primary_without_beep" && typeof message === "string" ? message : null;
+}

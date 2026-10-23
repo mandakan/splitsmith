@@ -18,6 +18,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from . import events as events_module
+from .audit_clock import CLIP_VIDEO_FIELD
 from .match_project import STUB_AUDIT_DETECTION
 from .shot_id import has_usable_id
 
@@ -284,6 +285,9 @@ def merge_detection_into(
             for i, c in enumerate(kept, start=1)
         ]
         seeded_shots = True
+        # The seeded shots are on the clip this run read (#1496).
+        if base.get(CLIP_VIDEO_FIELD):
+            doc[CLIP_VIDEO_FIELD] = base[CLIP_VIDEO_FIELD]
     events = list(doc.get("audit_events") or [])
     # Deletions first: they describe the state this run superseded,
     # and the merge orders a shot's verdicts by ``ts``.

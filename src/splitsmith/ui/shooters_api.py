@@ -25,9 +25,9 @@ from pydantic import AwareDatetime, BaseModel, Field, ValidationError
 from starlette.background import BackgroundTask
 from starlette.concurrency import run_in_threadpool
 
+from .. import audit_clock, camera_select, match_model, video_probe
 from .. import automation as automation_settings
 from .. import backup as backup_mod
-from .. import camera_select, match_model, video_probe
 from .. import cleanup as cleanup_module
 from .. import coach as coach_module
 from .. import coach_distributions as coach_distributions_module
@@ -39,6 +39,7 @@ from ..async_bridge import run_sync
 from ..auth import User
 from ..beep import windows as beep_windows
 from ..config import BeepWindowConfig
+from ..detection_merge import new_event_id, now_iso
 from ..fingerprint import clip_fingerprint
 from ..identity import LOGO_DIR, LOGO_MAX_BYTES, ShooterIdentity, logo_name, sniff_logo
 from ..match_project import (
@@ -2663,8 +2664,18 @@ async def move_assignment(
     state = request.app.state.splitsmith_state
     root = state.shooter_root(slug)
     project = await state.shooter_project_async(slug)
+    carry_from: tuple[float | None, str | None] | None = None
     if req.role == "primary" and req.to_stage_number is not None:
-        _refuse_unready_primary(project, root, req.to_stage_number, Path(req.video_path))
+        _refuse_unready_primary(state, slug, project, req.to_stage_number, Path(req.video_path))
+        try:
+            outgoing = project.stage(req.to_stage_number).primary()
+        except KeyError:
+            outgoing = None
+        if outgoing is not None and outgoing.path != Path(req.video_path):
+            carry_from = (
+                _server._video_beep_in_clip(state, slug, project, req.to_stage_number, outgoing),
+                outgoing.video_id,
+            )
     try:
         moved = project.assign_video(
             Path(req.video_path),
@@ -2677,6 +2688,18 @@ async def move_assignment(
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     await project.save_async(root)
+    if carry_from is not None and req.to_stage_number is not None:
+        # The same carry as "Make primary", for an audit stamped with the
+        # camera moved out (#1496); an unstamped one stays where it is.
+        _carry_audit_to_primary(
+            state,
+            slug,
+            project,
+            req.to_stage_number,
+            from_clip_beep=carry_from[0],
+            from_video_id=carry_from[1],
+            only_when_stamped=True,
+        )
 
     # Auto-queue beep on assignment to a real stage (#67). Skip when
     # unassigning (to_stage_number=None) or marking ignored -- those
@@ -2692,15 +2715,41 @@ async def move_assignment(
     return JSONResponse(project.model_dump(mode="json"))
 
 
-def _refuse_unready_primary(project: MatchProject, root: Path, stage_number: int, video_path: Path) -> None:
+def _audit_has_work(state: AppState, slug: str, stage_number: int) -> bool:
+    """Whether the stage's audit records a shot, read through the storage
+    port so hosted (``state_docs``) answers as local does. A bare candidate
+    block from a detection run is not audit work."""
+    doc, _version = state.load_audit(slug, stage_number)
+    return isinstance(doc, dict) and bool(doc.get("shots"))
+
+
+def _beep_confirmed(video: StageVideo) -> bool:
+    return video.beep_reviewed and video.beep_time is not None
+
+
+def _primary_without_beep(stage_number: int, video_path: Path) -> HTTPException:
+    return HTTPException(
+        status_code=409,
+        detail={
+            "code": "primary_without_beep",
+            "message": (
+                f"Stage {stage_number} has audit work, and {video_path.name} has no confirmed beep, "
+                "so its shots could not be moved onto its clip. Confirm its beep first, then make it "
+                "primary."
+            ),
+            "stage_number": stage_number,
+        },
+    )
+
+
+def _refuse_unready_primary(
+    state: AppState, slug: str, project: MatchProject, stage_number: int, video_path: Path
+) -> None:
     """409 ``primary_without_beep`` for a move that would make a camera with
     no confirmed beep the primary of a stage with audit work (#1496).
 
     Such a primary has no trim, so Audit cannot load the stage, and the
-    audit stays on the previous camera's clock with nothing to say so. A
-    camera with a confirmed beep may still be moved in as primary (that is
-    how a stage audited on it is put back); "Make primary" (swap-primary)
-    is the path that backs the audit up and detects again."""
+    audit's shots cannot be moved onto its clip without its beep."""
     try:
         stage = project.stage(stage_number)
     except KeyError:
@@ -2711,23 +2760,64 @@ def _refuse_unready_primary(project: MatchProject, root: Path, stage_number: int
     located = project.find_video(video_path, stage_number=stage_number) or project.find_video(video_path)
     if located is None:
         return
-    video = located[1]
-    if video.beep_reviewed and video.beep_time is not None:
+    if _beep_confirmed(located[1]):
         return
-    if not project.primary_swap_warns(root, stage_number=stage_number):
+    if not _audit_has_work(state, slug, stage_number):
         return
-    raise HTTPException(
-        status_code=409,
-        detail={
-            "code": "primary_without_beep",
-            "message": (
-                f"Stage {stage_number} has audit work, and {video_path.name} has no confirmed beep, "
-                "so it could not be trimmed as the primary. Confirm its beep first, or use Make primary, "
-                "which keeps the audit as a backup and detects the shots again."
-            ),
-            "stage_number": stage_number,
-        },
-    )
+    raise _primary_without_beep(stage_number, video_path)
+
+
+def _carry_audit_to_primary(
+    state: AppState,
+    slug: str,
+    project: MatchProject,
+    stage_number: int,
+    *,
+    from_clip_beep: float | None,
+    from_video_id: str | None,
+    only_when_stamped: bool,
+) -> None:
+    """Move the stage's audit onto its (new) primary's clip (#1496).
+
+    A change of primary is a change of timebase: the audit's shots are on
+    the camera it was made on. ``from_clip_beep`` is that camera's beep in
+    the clip Audit played (read before the change). An audit already
+    stamped with the new primary is left alone, which is how a stage is put
+    back on the camera it was audited on. ``only_when_stamped`` leaves an
+    unstamped audit alone too: a plain move cannot tell which camera an
+    audit from before the stamp was made on, while "Make primary" has
+    always treated it as the outgoing primary's."""
+    stage = project.stage(stage_number)
+    new_primary = stage.primary()
+    if new_primary is None or not _beep_confirmed(new_primary):
+        return
+    to_clip_beep = _server._video_beep_in_clip(state, slug, project, stage_number, new_primary)
+    if to_clip_beep is None:
+        return
+
+    def merge(doc: dict[str, Any] | None, _version: int) -> dict[str, Any]:
+        if not isinstance(doc, dict) or not doc.get("shots"):
+            raise _server._AuditUnchanged
+        stamped = doc.get(audit_clock.CLIP_VIDEO_FIELD)
+        if stamped == new_primary.video_id:
+            raise _server._AuditUnchanged
+        if stamped is None and only_when_stamped:
+            raise _server._AuditUnchanged
+        source = doc if stamped is not None else {**doc, audit_clock.CLIP_VIDEO_FIELD: from_video_id}
+        carried, _shift = audit_clock.carry_to_clip(
+            source,
+            from_clip_beep=from_clip_beep,
+            to_clip_beep=to_clip_beep,
+            to_video_id=new_primary.video_id,
+            event_id=new_event_id(),
+            ts=now_iso(),
+        )
+        return carried
+
+    try:
+        state.update_audit_at(slug, stage_number, merge)
+    except _server._AuditUnchanged:
+        pass
 
 
 @router.post("/api/shooters/{slug}/assignments/swap-primary")
@@ -2736,12 +2826,15 @@ async def swap_primary(
 ) -> JSONResponse:
     """Promote ``video_path`` to primary on ``stage_number``.
 
-    Audit-safe: when the stage has shots in its audit JSON, refuses with
-    a 409 response unless ``confirm=True`` is passed. On confirm, the
-    audit JSON is kept as ``stage<N>.pre-swap-<time>.json`` so a bad
-    swap is recoverable, and the stage's trim and shots are redone on
-    the new primary. A beep the user confirmed on it is kept, and the
-    trim is chained at once; an unconfirmed one is detected again.
+    A stage with audit work keeps it (#1496): the shots move onto the new
+    primary's clip by the difference of the two cameras' beeps, a copy of
+    the audit is kept as ``stage<N>.pre-swap-<time>.json`` where audits are
+    files, and the stage is trimmed on the new primary. That needs the new
+    primary's beep confirmed (409 ``primary_without_beep`` otherwise), and
+    the user's confirmation (409 ``audit_exists`` until ``confirm=True``).
+    A stage without audit work swaps at once: a confirmed beep on the new
+    primary is kept and the trim chained, an unconfirmed one is detected
+    again.
     """
     state = request.app.state.splitsmith_state
     root = state.shooter_root(slug)
@@ -2755,35 +2848,52 @@ async def swap_primary(
     if current is not None and str(current.path) == req.video_path:
         # Already the primary: nothing to swap, back up or redo.
         return JSONResponse(project.model_dump(mode="json"))
-    warns = project.primary_swap_warns(root, stage_number=req.stage_number)
-    if warns and not req.confirm:
-        existing = stage.primary()
+    video_path = Path(req.video_path)
+    located = project.find_video(video_path, stage_number=req.stage_number) or project.find_video(video_path)
+    if located is None:
+        raise HTTPException(status_code=404, detail=f"video {video_path} not registered with project")
+    has_work = _audit_has_work(state, slug, req.stage_number)
+    if has_work and not _beep_confirmed(located[1]):
+        raise _primary_without_beep(req.stage_number, video_path)
+    if has_work and not req.confirm:
         raise HTTPException(
             status_code=409,
             detail={
                 "code": "audit_exists",
                 "message": (
-                    f"Stage {req.stage_number} has audit work on its current "
-                    "primary. Confirm the swap to keep the audit as a backup "
-                    "and run detection again on the new primary."
+                    f"Stage {req.stage_number} has audit work on its current primary. Confirm the "
+                    "swap to move its shots onto the new primary's clip."
                 ),
                 "stage_number": req.stage_number,
-                "current_primary": str(existing.path) if existing else None,
+                "current_primary": str(current.path) if current else None,
                 "new_primary": req.video_path,
             },
         )
+    # Read before the swap: the clip the audit's shots are on now.
+    from_clip_beep = (
+        _server._video_beep_in_clip(state, slug, project, req.stage_number, current)
+        if current is not None
+        else None
+    )
+    if has_work:
+        project.pre_swap_backup(root, req.stage_number, keep=True)
     try:
-        project.swap_primary(
-            Path(req.video_path),
-            root=root,
-            stage_number=req.stage_number,
-            backup_audit=warns,
-        )
+        project.swap_primary(video_path, root=root, stage_number=req.stage_number, backup_audit=False)
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     await project.save_async(root)
+    if has_work:
+        _carry_audit_to_primary(
+            state,
+            slug,
+            project,
+            req.stage_number,
+            from_clip_beep=from_clip_beep,
+            from_video_id=current.video_id if current is not None else None,
+            only_when_stamped=False,
+        )
 
     # Auto-queue beep for the new primary (#67). swap_primary may
     # clear ``processed.beep`` to force re-detection on the new
@@ -2793,10 +2903,12 @@ async def swap_primary(
     # response path; the media mirror it used to pay for is gone (#638).
     new_primary = project.stage(req.stage_number).primary()
     if new_primary is not None:
-        if new_primary.beep_reviewed and new_primary.beep_time is not None:
+        if _beep_confirmed(new_primary):
             # A confirmed beep was kept (2026-10-16): go straight to the
             # trim, which chains detection. Queuing a beep detection here
-            # raced the confirmed beep and could leave it unreviewed.
+            # raced the confirmed beep and could leave it unreviewed. The
+            # detection that follows rewrites the candidates only: a
+            # carried audit keeps its shots.
             if current_match_origin.get() != "desktop":
                 await _server._maybe_chain_trim(state, slug, project.stage(req.stage_number), new_primary)
         else:

@@ -3703,12 +3703,15 @@ export interface paths {
          * Swap Primary
          * @description Promote ``video_path`` to primary on ``stage_number``.
          *
-         *     Audit-safe: when the stage has shots in its audit JSON, refuses with
-         *     a 409 response unless ``confirm=True`` is passed. On confirm, the
-         *     audit JSON is kept as ``stage<N>.pre-swap-<time>.json`` so a bad
-         *     swap is recoverable, and the stage's trim and shots are redone on
-         *     the new primary. A beep the user confirmed on it is kept, and the
-         *     trim is chained at once; an unconfirmed one is detected again.
+         *     A stage with audit work keeps it (#1496): the shots move onto the new
+         *     primary's clip by the difference of the two cameras' beeps, a copy of
+         *     the audit is kept as ``stage<N>.pre-swap-<time>.json`` where audits are
+         *     files, and the stage is trimmed on the new primary. That needs the new
+         *     primary's beep confirmed (409 ``primary_without_beep`` otherwise), and
+         *     the user's confirmation (409 ``audit_exists`` until ``confirm=True``).
+         *     A stage without audit work swaps at once: a confirmed beep on the new
+         *     primary is kept and the trim chained, an unconfirmed one is detected
+         *     again.
          */
         post: operations["swap_primary_api_shooters__slug__assignments_swap_primary_post"];
         delete?: never;

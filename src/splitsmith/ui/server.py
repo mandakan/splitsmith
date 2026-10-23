@@ -149,6 +149,7 @@ from .. import trim as trim_module
 from .. import waveform as waveform_helpers
 from ..access import Feature, FeatureRequiredError, access_config, features_for
 from ..async_bridge import DbRunner, get_runner, install_runner, run_sync
+from ..audit_clock import CLIP_VIDEO_FIELD
 from ..audit_data import StageExportError, audit_shots_to_engine_shots
 from ..audit_revision import REVISION_FIELD, AuditRevisionConflictError, audit_revision
 from ..auth import CompositeAuth, User
@@ -2985,6 +2986,7 @@ def register_job_bodies(state: AppState) -> None:
                 "stage_name": stg.stage_name,
                 "stage_time_seconds": stg.time_seconds,
                 "beep_time": round(beep_in_clip, 4),
+                CLIP_VIDEO_FIELD: prim.video_id,
                 "shots": [],
             }
 

@@ -3,7 +3,14 @@ Handgun Open 2026, shooter s_ce10fa76."""
 
 from __future__ import annotations
 
-from splitsmith.audit_clock import classify, rebase_to_clip, stamp_clip_beep
+from splitsmith.audit_clock import (
+    carry_to_clip,
+    classify,
+    clip_camera_problem,
+    rebase_to_clip,
+    stamp_clip_beep,
+    stamp_clip_video,
+)
 
 
 def _doc(beep: float, times: list[float], cands: list[float] | None = None) -> dict:
@@ -62,3 +69,83 @@ def test_the_save_stamps_the_clip_beep_whatever_the_page_fell_back_to() -> None:
     assert [s["ms_after_beep"] for s in doc["shots"]] == [1900, 2600]
     assert stamp_clip_beep(doc, 5.0) is False, "already on the clip: nothing changes"
     assert stamp_clip_beep(doc, None) is False
+
+
+def _carry(doc: dict, *, from_clip_beep: float | None, to_clip_beep: float) -> tuple[dict, float]:
+    return carry_to_clip(
+        doc,
+        from_clip_beep=from_clip_beep,
+        to_clip_beep=to_clip_beep,
+        to_video_id="head",
+        event_id="e1",
+        ts="t",
+    )
+
+
+def test_a_carry_keeps_each_shot_its_time_from_the_beep() -> None:
+    doc = {**_doc(5.0, [6.0, 6.4], cands=[5.8]), "clip_video_id": "phone"}
+    out, shift = _carry(doc, from_clip_beep=5.0, to_clip_beep=3.25)
+    assert shift == -1.75
+    assert out["beep_time"] == 3.25
+    assert [s["time"] for s in out["shots"]] == [4.25, 4.65]
+    assert [c["time"] for c in out["_candidates_pending_audit"]["candidates"]] == [4.05]
+    assert [s["ms_after_beep"] for s in out["shots"]] == [1000, 1400]
+    assert out["events"] == doc["events"]
+    assert out["clip_video_id"] == "head"
+    assert out["audit_events"][-1] == {
+        "id": "e1",
+        "ts": "t",
+        "kind": "clip_camera_changed",
+        "payload": {"from_video_id": "phone", "to_video_id": "head", "shift_ms": -1750.0},
+    }
+    assert doc["beep_time"] == 5.0 and "audit_events" not in doc, "the input is never changed"
+
+
+def test_a_carry_moves_a_source_clock_audit_from_where_audit_drew_it() -> None:
+    # Saved before the old primary had a trim: source beep 19.244, clip beep 5.0.
+    out, _shift = _carry(_doc(19.244, [21.0]), from_clip_beep=5.0, to_clip_beep=5.0)
+    assert out["beep_time"] == 5.0
+    assert [s["time"] for s in out["shots"]] == [6.756]
+
+
+def test_a_carry_moves_a_shot_before_the_beep_with_the_rest() -> None:
+    """rebase_to_clip reads a shot before the beep as a mixed document and
+    moves only the beep; a carry is a plain shift whatever the shots are."""
+    out, _shift = _carry(_doc(5.0, [4.9, 6.0]), from_clip_beep=5.0, to_clip_beep=8.0)
+    assert [s["time"] for s in out["shots"]] == [7.9, 9.0]
+
+
+def test_stamp_clip_video_says_whether_it_changed() -> None:
+    doc: dict = {}
+    assert stamp_clip_video(doc, "v1") is True
+    assert stamp_clip_video(doc, "v1") is False
+    assert stamp_clip_video(doc, None) is False
+    assert doc == {"clip_video_id": "v1"}
+
+
+def test_clip_camera_problem_names_a_stamped_other_camera() -> None:
+    doc = {"shots": [{"time": 6.0}], "clip_video_id": "phone"}
+    kw = {"primary_beep_confirmed": True, "confirmed_others": []}
+    assert clip_camera_problem(doc, primary_video_id="phone", **kw) is None
+    assert clip_camera_problem(doc, primary_video_id="head", **kw) == ("other_camera", "phone")
+
+
+def test_clip_camera_problem_flags_the_stranded_shape_before_the_stamp() -> None:
+    # Blacksmith stages 5 to 8: head cam primary, beep never confirmed; the
+    # phone's confirmed, and the audit made on it.
+    doc = {"shots": [{"time": 6.0}]}
+    assert clip_camera_problem(
+        doc, primary_video_id="head", primary_beep_confirmed=False, confirmed_others=["phone"]
+    ) == ("suspect", "phone")
+    assert (
+        clip_camera_problem(
+            doc, primary_video_id="head", primary_beep_confirmed=True, confirmed_others=["phone"]
+        )
+        is None
+    )
+    assert (
+        clip_camera_problem(
+            {"shots": []}, primary_video_id="head", primary_beep_confirmed=False, confirmed_others=["p"]
+        )
+        is None
+    )
