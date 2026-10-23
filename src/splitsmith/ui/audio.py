@@ -690,20 +690,24 @@ def published_audit_audio(
     primary_beep_time: float | None,
     *,
     project: MatchProject,
-    mirror: bool = False,
 ) -> AuditAudioResult | None:
     """The audit WAV :func:`ensure_audit_audio` would serve, if a job has
-    published it; None when it still has to be made."""
+    published it; None when it still has to be made. On a web-only project
+    (:func:`stores_web_only`) the stored rendition dates the WAV when there
+    is no stored trim."""
     trimmed_video = trimmed_primary_path(project_root, stage_number, project=project)
     audio_path = audit_audio_path(project_root, stage_number, project=project)
     from .. import trim as trim_module
 
     web = trim_module.web_trim_path(trimmed_video)
+    web_only = stores_web_only(project)
     if _usable_mp4(trimmed_video):
         clip: StorageObject | None = None
         if _not_older(audio_path, trimmed_video) and derived.wav_problem(audio_path) is None:
             return _trimmed_result(audio_path, primary_beep_time, project.trim_pre_buffer_seconds)
         clip = _storage_stat(project, _storage_trim_key(project, trimmed_video))
+        if clip is None and web_only:
+            clip = _storage_stat(project, _storage_trim_key(project, web))
         if clip is not None and _published_wav(project, audio_path, cut_from=clip):
             return _trimmed_result(audio_path, primary_beep_time, project.trim_pre_buffer_seconds)
         return None
@@ -712,17 +716,22 @@ def published_audit_audio(
         if _published_wav(project, audio_path, cut_from=trim_stored):
             return _trimmed_result(audio_path, primary_beep_time, project.trim_pre_buffer_seconds)
         return None
-    if mirror:
-        web_stored = _storage_stat(project, _storage_trim_key(project, web))
-        if web_stored is None and not _usable_mp4(web):
-            return None
+    web_stored = _storage_stat(project, _storage_trim_key(project, web)) if web_only else None
+    if web_only and (web_stored is not None or _usable_mp4(web)):
         if _published_wav(project, audio_path, cut_from=web_stored):
-            # The anchor is the trim's, from the pushed params sidecar: the
-            # trim may have been cut with a different pre-buffer than the
+            if current_match_origin.get() != "desktop":
+                # A hosted-native trim is cut with the project's buffers, as
+                # a stored trim's anchor above assumes: no params read.
+                return _trimmed_result(audio_path, primary_beep_time, project.trim_pre_buffer_seconds)
+            # A mirror's anchor is the trim's, from the pushed params sidecar:
+            # the desktop may have cut it with a different pre-buffer than the
             # project's current setting.
             refresh_trim_params(project, trimmed_video)
             pre_buffer = trim_pre_buffer_seconds_for(trimmed_video, default=project.trim_pre_buffer_seconds)
             return _trimmed_result(audio_path, primary_beep_time, pre_buffer)
+        return None
+    if current_match_origin.get() == "desktop":
+        # A mirror has no source WAV to fall back to.
         return None
     # No trim anywhere: the primary's full source WAV, as ensure_audit_audio
     # falls back to.
@@ -972,13 +981,19 @@ def trim_params_current(
             return json.loads(params_file.read_text(encoding="utf-8")) == current
     except (OSError, ValueError):
         return False
+    from .. import trim as trim_module
+
     mp4_key = _storage_trim_key(project, output)
     params_key = _storage_trim_key(project, params_file)
     if mp4_key is None or params_key is None:
         return False
     storage = project._storage  # type: ignore[union-attr]
     try:
-        meta = storage.stat(mp4_key)
+        # A web-only project stores the rendition in the trim's place (#1683);
+        # a legacy full trim still counts while it is there.
+        meta = storage.stat(mp4_key) or storage.stat(
+            _storage_trim_key(project, trim_module.web_trim_path(output))
+        )
         if meta is None:
             return False
         if source_mtime is not None and (
@@ -989,6 +1004,32 @@ def trim_params_current(
     except Exception as exc:  # noqa: BLE001 - a miss only costs a cache-hit trim job
         logger.info("trim cache: params check for %s failed: %s", output.name, exc)
         return False
+
+
+def stored_trim_current(
+    project_root: Path,
+    stage_number: int,
+    video: StageVideo,
+    stage_time_seconds: float,
+    *,
+    project: MatchProject,
+) -> bool:
+    """Whether a web-only project's storage holds everything the trim job
+    publishes for ``video``, cut for its current beep, stage time and buffers
+    (#1683): the params sidecar, the rendition, and the audit WAV not older
+    than the rendition. A job that finds them needs neither the source nor a
+    cut; with no full trim in storage, the cut is all it would otherwise do."""
+    from .. import trim as trim_module
+
+    if not stores_web_only(project):
+        return False
+    if not trim_params_current(project_root, stage_number, video, stage_time_seconds, project=project):
+        return False
+    output = trimmed_video_path(project_root, stage_number, video, project=project)
+    web = _stored_at(_storage_stat(project, _storage_trim_key(project, trim_module.web_trim_path(output))))
+    wav_path = video_audit_audio_path(project_root, stage_number, video, project=project)
+    wav = _stored_at(_storage_stat(project, _storage_audio_key(project, wav_path)))
+    return web is not None and wav is not None and wav >= web
 
 
 class TrimSuperseded(Exception):  # noqa: N818 - a state, not a failure
@@ -1019,6 +1060,36 @@ def _storage_trim_key(project: MatchProject | None, local_mp4: Path) -> str | No
     if project is None or project._storage is None or project._storage_scope is None:
         return None
     return f"{project._storage_scope}/trimmed/{local_mp4.name}"
+
+
+def stores_web_only(project: MatchProject | None) -> bool:
+    """Whether ``project``'s trims live in storage as the web rendition and
+    its params sidecar alone, with no full-resolution trim (#1683).
+
+    True for every storage-backed project: a desktop mirror by design (spec
+    2026-09-27 v1.1), a hosted-native match because its full trim (about
+    three times its source on 4K footage) is read by nothing but the job
+    that cut it, and costs egress on every write from the worker. A legacy
+    full trim already in storage is still served while it is there."""
+    return _storage_trim_key(project, Path("probe.mp4")) is not None
+
+
+def release_local_trim(
+    project_root: Path, stage_number: int, video: StageVideo, *, project: MatchProject
+) -> None:
+    """Delete ``video``'s full trim from this worker once its products are
+    published, when the worker's disk is memory (Cloud Run). A web-only
+    project's storage never holds the trim (#1683) and every later job reads
+    the stored rendition and WAV, so the about 1 GB a 4K trim takes would only
+    crowd the next job until the per-job sweep reached it. A box with a real
+    disk keeps it: a later job there reuses it instead of cutting again."""
+    from ..source_cache import memory_backed_disk
+
+    if not stores_web_only(project) or not memory_backed_disk():
+        return
+    output = trimmed_video_path(project_root, stage_number, video, project=project)
+    with derived.locked(output, "cut"):
+        output.unlink(missing_ok=True)
 
 
 def _try_pull_trim_from_storage(project: MatchProject | None, local_mp4: Path) -> bool:
@@ -1114,9 +1185,9 @@ def try_pull_web_trim(project: MatchProject | None, trim_path: Path) -> Path | N
 
 
 def _try_push_trim_to_storage(project: MatchProject | None, local_mp4: Path) -> None:
-    """Push a freshly-cut audit trim (+ its params sidecar) to the
-    project's storage cache so the API process can serve the scrub clip
-    and the next worker can skip the ffmpeg re-cut.
+    """Push a freshly-cut audit trim to the project's storage cache (its
+    params sidecar went up before it). Only when its web rendition could not
+    be cut (#1683): the full trim is then the stage's one playable clip.
 
     Best-effort: a push failure logs and returns; the local trim is the
     source of truth for the current job.
@@ -1128,12 +1199,23 @@ def _try_push_trim_to_storage(project: MatchProject | None, local_mp4: Path) -> 
     try:
         with local_mp4.open("rb") as f:
             storage.upload_stream(key, f)
-        params_local = trim_params_path(local_mp4)
-        if params_local.exists():
-            params_key = f"{key.rsplit('/', 1)[0]}/{params_local.name}"
-            storage.write_bytes(params_key, params_local.read_bytes())
     except Exception as exc:
         logger.info("trim cache: push to %s failed: %s", key, exc)
+
+
+def _push_trim_params(project: MatchProject | None, local_mp4: Path) -> None:
+    """Push the params sidecar of a freshly-cut trim: with the rendition, it
+    is what a web-only project's storage holds of the trim (#1683), the
+    window and beep anchor every reader and the next job's reuse check go
+    by. Best-effort like the trim push."""
+    params_local = trim_params_path(local_mp4)
+    key = _storage_trim_key(project, params_local)
+    if key is None or not params_local.exists():
+        return
+    try:
+        project._storage.write_bytes(key, params_local.read_bytes())  # type: ignore[union-attr]
+    except Exception as exc:
+        logger.info("trim cache: params push to %s failed: %s", key, exc)
 
 
 def _web_partials(web: Path) -> list[Path]:
@@ -1174,19 +1256,20 @@ def fresh_rendition(
     """Whether a trim's web rendition is current (#1192, #1209).
 
     Each fact is ``(size_bytes, mtime_seconds)`` or ``None`` when absent.
-    Current means present, non-empty and -- when ``trim_required`` -- the
-    trim present and the rendition not older than it: a re-cut writes the
-    trim first and the rendition after it, so an older rendition covers
-    the previous window. Equal mtimes are current (R2 timestamps have
-    one-second resolution). ``trim_required`` is false only on a mirror,
-    which has no trim on R2 by design. The one rule local files,
-    ``storage.stat`` and the presence listing all go through.
+    Current means present, non-empty and not older than the trim when there
+    is one: a re-cut writes the trim first and the rendition after it, so an
+    older rendition covers the previous window. Equal mtimes are current (R2
+    timestamps have one-second resolution). With no trim, the rendition is
+    current only when the trim is not ``trim_required``: false on a web-only
+    project (:func:`stores_web_only`), whose storage holds no trim by design
+    and whose re-cut deletes the rendition before it cuts. The one rule
+    local files, ``storage.stat`` and the presence listing all go through.
     """
     if web is None or web[0] == 0:
         return False
-    if not trim_required:
-        return True
-    return trim is not None and web[1] >= trim[1]
+    if trim is None:
+        return not trim_required
+    return web[1] >= trim[1]
 
 
 def fresh_web_trim(trimmed: Path) -> Path | None:
@@ -1473,7 +1556,7 @@ def ensure_video_audit_trim(
                         leftover.unlink(missing_ok=True)
                     # A trim cut before the web rendition existed (#1031) gets
                     # one now, from the trim itself -- no re-cut of the source.
-                    _ensure_web_trim(project, output, ffmpeg_binary=ffmpeg_binary, runner=runner)
+                    _publish_web_trim(project, output, ffmpeg_binary=ffmpeg_binary, runner=runner)
                     return output
             except (OSError, ValueError):
                 # Treat unreadable sidecar as cache miss.
@@ -1485,6 +1568,11 @@ def ensure_video_audit_trim(
         for p in (output, partial, params_file, web, *_web_partials(web)):
             if p.exists():
                 p.unlink()
+        # And storage's copies (#1683): a web-only reader takes a stored
+        # rendition as current with no trim to date it against, and the
+        # rendition step below would pull the old one back as this cut's.
+        if stores_web_only(project) and current_match_origin.get() != "desktop":
+            _drop_stored_trim(project, project_root, stage_number, video)
 
         encoder = trim_module.select_audit_encoder(project.trim_audit_encoder, ffmpeg_binary=ffmpeg_binary)
         trim_kwargs: dict[str, object] = {
@@ -1524,11 +1612,26 @@ def ensure_video_audit_trim(
             fresh=lambda: False,
             make=lambda p: p.write_text(json.dumps(current_params, indent=2) + "\n", encoding="utf-8"),
         )
-        # Push the freshly-cut trim up so the API can serve the scrub clip and
-        # the next worker can skip the re-cut. Best-effort; local mode no-ops.
-        _try_push_trim_to_storage(project, output)
-        _ensure_web_trim(project, output, ffmpeg_binary=ffmpeg_binary, runner=runner)
+        # Storage gets the params and the rendition, not the full trim
+        # (#1683). Best-effort; local mode no-ops.
+        _push_trim_params(project, output)
+        _publish_web_trim(project, output, ffmpeg_binary=ffmpeg_binary, runner=runner)
         return output
+
+
+def _publish_web_trim(
+    project: MatchProject,
+    trimmed: Path,
+    *,
+    ffmpeg_binary: str,
+    runner: object | None,
+) -> None:
+    """Cut ``trimmed``'s rendition, which a web-only project's storage holds
+    in place of the trim (#1683). When it cannot be cut, the full trim goes
+    up instead, so the stage still has a clip to play; the readers fall back
+    to it as they did before the rendition existed."""
+    if _ensure_web_trim(project, trimmed, ffmpeg_binary=ffmpeg_binary, runner=runner) is None:
+        _try_push_trim_to_storage(project, trimmed)
 
 
 def ensure_audit_trim(

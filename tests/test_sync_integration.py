@@ -535,12 +535,12 @@ def test_web_only_mirror_without_a_pushed_wav_is_pending(
     assert [(j["kind"], j["args"]["target"]) for j in submitted] == [("derive_audio", "audit")]
 
 
-def test_hosted_native_match_without_a_trim_still_404s_kind_trim(
+def test_hosted_native_match_without_a_trim_serves_the_rendition_for_kind_trim(
     hosted_app_with_storage: tuple[TestClient, _CapturingSender, dict],
 ) -> None:
-    """The rendition fallback is for mirrors only. A native match's audit
-    scrubbing needs the real GOP, so kind=trim never substitutes there,
-    even with a rendition sitting in storage."""
+    """A hosted-native match is web-only like a mirror (#1683): its storage
+    holds the rendition in the trim's place, so kind=trim redirects to it
+    rather than 404 a stage that was trimmed."""
     import asyncio
 
     from sqlalchemy import select as _select
@@ -582,8 +582,10 @@ def test_hosted_native_match_without_a_trim_still_404s_kind_trim(
     resp = client.get(
         f"/api/matches/{match_id}/shooters/{SLUG}/videos/stream",
         params={"path": "raw/stage1_cam1.mp4", "kind": "trim"},
+        follow_redirects=False,
     )
-    assert resp.status_code == 404, resp.text
+    assert resp.status_code == 307, resp.text
+    assert f"stage1_cam_{video_id}_web.mp4" in resp.headers["location"]
 
 
 def test_web_only_mirror_anchor_does_not_download_the_rendition(

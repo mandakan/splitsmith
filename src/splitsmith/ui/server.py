@@ -371,7 +371,12 @@ def _audit_trim_targets(
             _skip(video, "source_missing")
             continue
         cache = audio_helpers.trimmed_video_path(shooter_root, stage.stage_number, video, project=project)
-        if presence.trim_available(project, cache):
+        if presence.trim_available(project, cache) or (
+            audio_helpers.stores_web_only(project)
+            and presence.trim_available(project, trim_module.web_trim_path(cache))
+        ):
+            # A web-only project's storage holds the rendition in the
+            # trim's place (#1683).
             _skip(video, "already_cached")
             continue
         targets.append(video)
@@ -2775,8 +2780,16 @@ def register_job_bodies(state: AppState) -> None:
             video = stg.find_video_by_id(video_id)
             if video is None or video.beep_time is None:
                 raise RuntimeError("video or beep disappeared mid-flight")
-            source = proj.resolve_video_path(root, video.path)
-        handle.timer.set_meta(role=video.role)
+            # A web-only project's storage may already hold this trim's
+            # products for the current beep (#1683): a confirm chains a trim
+            # job over a cut that is still current. With no full trim in
+            # storage to pull, the cut is all the job would do, so it skips
+            # the source download too.
+            reused = not force and audio_helpers.stored_trim_current(
+                root, stage_number, video, stg.time_seconds, project=proj
+            )
+            source = None if reused else proj.resolve_video_path(root, video.path)
+        handle.timer.set_meta(role=video.role, trim_reused=reused)
         handle.check_cancel()
         role_label = "primary" if video.role == "primary" else f"cam {video.video_id[:6]}"
         handle.update(progress=0.3, message=f"Encoding short-GOP MP4 ({role_label})...")
@@ -2827,34 +2840,44 @@ def register_job_bodies(state: AppState) -> None:
         superseded = False
         with handle.timer.phase("trim"):
             try:
-                audio_helpers.ensure_video_audit_trim(
-                    root,
-                    stage_number,
-                    video,
-                    source,
-                    video.beep_time,
-                    stg.time_seconds,
-                    project=proj,
-                    runner=_cancellable_runner(handle),
-                    ffmpeg_binary=process_runtime().ffmpeg_binary,
-                    force=force,
-                    still_current=_still_current,
-                )
+                if source is not None:
+                    audio_helpers.ensure_video_audit_trim(
+                        root,
+                        stage_number,
+                        video,
+                        source,
+                        video.beep_time,
+                        stg.time_seconds,
+                        project=proj,
+                        runner=_cancellable_runner(handle),
+                        ffmpeg_binary=process_runtime().ffmpeg_binary,
+                        force=force,
+                        still_current=_still_current,
+                    )
             except audio_helpers.TrimSuperseded:
                 superseded = True
         outcome: dict[str, bool] = {"reviewed": False, "moved": False}
         if not superseded:
             # The audit WAV is the trim's second product (spec 2026-10-14): the
             # audit screen reads it and never cuts it. Best-effort: a failure
-            # here leaves it to a derive_audio job on first read.
+            # here leaves it to a derive_audio job on first read. A reused
+            # trim's WAV is already stored.
             handle.update(progress=0.75, message="Cutting audit audio...")
             with handle.timer.phase("audit_wav"):
                 try:
-                    audio_helpers.ensure_video_audit_wav(
-                        root, stage_number, video, project=proj, ffmpeg_binary=process_runtime().ffmpeg_binary
-                    )
+                    if source is not None:
+                        audio_helpers.ensure_video_audit_wav(
+                            root,
+                            stage_number,
+                            video,
+                            project=proj,
+                            ffmpeg_binary=process_runtime().ffmpeg_binary,
+                        )
                 except (audio_helpers.AudioExtractionError, FileNotFoundError) as exc:
                     logger.warning("trim: audit WAV for stage %s %s not cut: %s", stage_number, video_id, exc)
+            # Its products are published; on a memory-backed worker the full
+            # trim would only crowd the next job.
+            audio_helpers.release_local_trim(root, stage_number, video, project=proj)
             handle.update(progress=0.85, message="Saving project...")
 
             # Read-modify-write (``_update_project``): mark the trim on the
@@ -2973,6 +2996,27 @@ def register_job_bodies(state: AppState) -> None:
             # The trim's cut lock: never read a trim a re-cut is replacing
             # on this disk (review, 2026-10-14).
             trimmed = audio_helpers.trimmed_primary_path(root, stage_number, project=proj)
+            if (
+                not _is_mirror()
+                and primary.beep_time is not None
+                and proj.stage(stage_number).time_seconds > 0
+                and not trimmed.exists()
+                and audio_helpers.web_trim_available(proj, trimmed)
+            ):
+                # A hosted-native stage whose storage holds the rendition but
+                # no trim (#1683): cut the trim again from the source, so the
+                # WAV keeps the source's audio. Shot detection reads it, and
+                # the rendition's is re-encoded (the mirror's fallback below).
+                audio_helpers.ensure_video_audit_trim(
+                    root,
+                    stage_number,
+                    primary,
+                    proj.resolve_video_path(root, primary.path),
+                    primary.beep_time,
+                    proj.stage(stage_number).time_seconds,
+                    project=proj,
+                    ffmpeg_binary=ffmpeg,
+                )
             with derived.locked(trimmed, "cut"):
                 audio_helpers.ensure_audit_audio(
                     root,
@@ -2983,6 +3027,7 @@ def register_job_bodies(state: AppState) -> None:
                     ffmpeg_binary=ffmpeg,
                     web_fallback=_is_mirror(),
                 )
+            audio_helpers.release_local_trim(root, stage_number, primary, project=proj)
         else:
             raise RuntimeError(f"unknown audio target {target!r}")
         handle.update(progress=1.0, message="Done")
@@ -3019,7 +3064,24 @@ def register_job_bodies(state: AppState) -> None:
                     f"stage {stage_number} has time_seconds=0; import a "
                     "scoreboard before running shot detection"
                 )
-            source = proj.resolve_video_path(state.shooter_root(slug), prim.path)
+            # A web-only project whose storage holds the trim's products for
+            # the current beep (#1683) is detected from the published audit
+            # WAV: there is no full trim in storage to pull, and cutting one
+            # again from the source would cost the whole trim job. Voter E
+            # (opt-in) reads the source video, so it keeps the old path.
+            stored = None
+            if os.environ.get("SPLITSMITH_ENABLE_VOTER_E") != "1" and audio_helpers.stored_trim_current(
+                state.shooter_root(slug), stage_number, prim, stg.time_seconds, project=proj
+            ):
+                stored = audio_helpers.published_audit_audio(
+                    state.shooter_root(slug), stage_number, prim.beep_time, project=proj
+                )
+            if stored is not None and not stored.trimmed:
+                stored = None
+            source = (
+                None if stored is not None else proj.resolve_video_path(state.shooter_root(slug), prim.path)
+            )
+        handle.timer.set_meta(trim_reused=stored is not None)
 
         # Re-detect-all on an old project (and the v1->v2 cache migration in
         # #298) leaves stages with no trimmed MP4 cached. Without that file,
@@ -3028,51 +3090,57 @@ def register_job_bodies(state: AppState) -> None:
         # source clip into <video>, where long-GOP 4K MOVs wedge in buffering
         # on first play. Force the trim here so every shot-detect run leaves
         # the audit cache in the same state the beep-detect path would have.
-        handle.update(progress=0.05, message="Ensuring audit trim...")
-        try:
-            with handle.timer.phase("ensure_trim"):
-                audio_helpers.ensure_video_audit_trim(
+        if stored is not None:
+            audit = stored
+        else:
+            handle.update(progress=0.05, message="Ensuring audit trim...")
+            try:
+                with handle.timer.phase("ensure_trim"):
+                    audio_helpers.ensure_video_audit_trim(
+                        state.shooter_root(slug),
+                        stage_number,
+                        prim,
+                        source,
+                        prim.beep_time,
+                        stg.time_seconds,
+                        project=proj,
+                        runner=_cancellable_runner(handle),
+                        ffmpeg_binary=process_runtime().ffmpeg_binary,
+                    )
+                    trim_fresh = state.shooter_project(slug)
+                    try:
+                        v_fresh = trim_fresh.stage(stage_number).find_video_by_id(prim.video_id)
+                    except KeyError:
+                        v_fresh = None
+                    if v_fresh is not None and not v_fresh.processed.get("trim"):
+                        v_fresh.processed["trim"] = True
+                        trim_fresh.save(state.shooter_root(slug))
+            except (FileNotFoundError, audio_helpers.AudioExtractionError) as exc:
+                # Soft failure: detection can still proceed against the source
+                # WAV. ensure_audit_audio's fallback handles the missing trim,
+                # so we log and continue rather than abort the whole job.
+                logger.warning(
+                    "shot_detect could not (re)build trim for stage %d: %s",
+                    stage_number,
+                    exc,
+                )
+
+            handle.update(progress=0.1, message="Preparing audio...")
+            with handle.timer.phase("prepare_audio"):
+                # ``source`` is already resolved above (the trim needs it), so the
+                # thunk is a no-op here; ensure_audit_audio only calls it on the
+                # no-trim fallback (#592).
+                audit = audio_helpers.ensure_audit_audio(
                     state.shooter_root(slug),
                     stage_number,
-                    prim,
-                    source,
+                    lambda: source,
                     prim.beep_time,
-                    stg.time_seconds,
                     project=proj,
-                    runner=_cancellable_runner(handle),
                     ffmpeg_binary=process_runtime().ffmpeg_binary,
                 )
-                trim_fresh = state.shooter_project(slug)
-                try:
-                    v_fresh = trim_fresh.stage(stage_number).find_video_by_id(prim.video_id)
-                except KeyError:
-                    v_fresh = None
-                if v_fresh is not None and not v_fresh.processed.get("trim"):
-                    v_fresh.processed["trim"] = True
-                    trim_fresh.save(state.shooter_root(slug))
-        except (FileNotFoundError, audio_helpers.AudioExtractionError) as exc:
-            # Soft failure: detection can still proceed against the source
-            # WAV. ensure_audit_audio's fallback handles the missing trim,
-            # so we log and continue rather than abort the whole job.
-            logger.warning(
-                "shot_detect could not (re)build trim for stage %d: %s",
-                stage_number,
-                exc,
-            )
+            # The WAV is what detection reads from here on.
+            audio_helpers.release_local_trim(state.shooter_root(slug), stage_number, prim, project=proj)
 
-        handle.update(progress=0.1, message="Preparing audio...")
-        with handle.timer.phase("prepare_audio"):
-            # ``source`` is already resolved above (the trim needs it), so the
-            # thunk is a no-op here; ensure_audit_audio only calls it on the
-            # no-trim fallback (#592).
-            audit = audio_helpers.ensure_audit_audio(
-                state.shooter_root(slug),
-                stage_number,
-                lambda: source,
-                prim.beep_time,
-                project=proj,
-                ffmpeg_binary=process_runtime().ffmpeg_binary,
-            )
         beep_in_clip = audit.beep_in_clip if audit.beep_in_clip is not None else prim.beep_time
 
         # Read existing audit JSON up-front: we need ``stage_rounds.expected``
@@ -6444,7 +6512,9 @@ def _hosted_scrub_version_for(
     if web_obj is None or web_obj.last_modified is None:
         return None
     if not audio_helpers.fresh_rendition(
-        _storage_fact(trim_obj), _storage_fact(web_obj), trim_required=not _is_mirror()
+        _storage_fact(trim_obj),
+        _storage_fact(web_obj),
+        trim_required=not audio_helpers.stores_web_only(project),
     ):
         return None
     return f"{int(web_obj.last_modified.timestamp() * 1e9):x}-{web_obj.size:x}"
@@ -7213,7 +7283,6 @@ def _resolve_audit_audio(
         stage_number,
         primary.beep_time,
         project=project,
-        mirror=_is_mirror(),
     )
     if published is not None:
         return published
@@ -7345,7 +7414,15 @@ def _video_trim_anchor(
     # bytes and anchor degrade consistently to the source path, and
     # the next worker trim job re-cuts under the new key.
     trimmed = audio_helpers.trimmed_video_path(root, stage_number, video, project=project)
-    if audio_helpers.trim_available(project, trimmed):
+    # A hosted-native match stores the rendition in the trim's place (#1683),
+    # cut with this project's buffers like a stored trim: one existence check,
+    # no params read. A legacy trim with no rendition is the next check's.
+    native_web = (
+        not _is_mirror()
+        and audio_helpers.stores_web_only(project)
+        and audio_helpers.web_trim_available(project, trimmed)
+    )
+    if native_web or audio_helpers.trim_available(project, trimmed):
         if video.beep_time is None:
             return (None, "trim", trimmed)
         return (min(video.beep_time, project.trim_pre_buffer_seconds), "trim", trimmed)

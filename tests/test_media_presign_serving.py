@@ -723,12 +723,25 @@ def test_scrub_kind_serves_the_trim_over_a_stale_rendition(
     assert "_trimmed.mp4" in resp.headers["location"]
 
 
-def test_scrub_kind_404s_without_a_trim_on_a_native_match(
+def test_scrub_kind_serves_a_native_matchs_rendition_with_no_trim(
     s3_stream_client: tuple[TestClient, S3Storage],
 ) -> None:
-    """Mid re-cut: no trim yet. The pin errors; it never plays the source."""
+    """A hosted-native match stores the rendition in the trim's place
+    (#1683); a re-cut deletes it before it encodes, so one alone is current."""
     client, storage = s3_stream_client
-    storage.write_bytes(_WEB_KEY, b"ORPHAN")
+    storage.write_bytes(_WEB_KEY, b"WEB ONLY")
+
+    resp = client.get(_stream_url(SLUG), params={"path": "raw/clip.mp4", "kind": "scrub"})
+
+    assert resp.status_code == 307
+    assert f"stage1_cam_{_VIDEO_ID}_web.mp4" in resp.headers["location"]
+
+
+def test_scrub_kind_404s_with_neither_trim_nor_rendition(
+    s3_stream_client: tuple[TestClient, S3Storage],
+) -> None:
+    """Mid re-cut: both gone. The pin errors; it never plays the source."""
+    client, _storage = s3_stream_client
 
     resp = client.get(_stream_url(SLUG), params={"path": "raw/clip.mp4", "kind": "scrub"})
 

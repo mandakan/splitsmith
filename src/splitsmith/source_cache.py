@@ -66,6 +66,12 @@ def configured_cache_max_bytes(env: Mapping[str, str] = os.environ) -> int | Non
 _WORKER_MEMORY_MB_ENV = "SPLITSMITH_WORKER_MEMORY_MB"
 
 
+def memory_backed_disk(env: Mapping[str, str] = os.environ) -> bool:
+    """Whether this worker's filesystem is memory: Cloud Run's is, so every
+    file a job leaves behind competes with the next job for the container."""
+    return bool(env.get("CLOUD_RUN_EXECUTION"))
+
+
 def per_job_cache_max_bytes(env: Mapping[str, str] = os.environ) -> int | None:
     """The cap a worker sweeps to after every job, or ``None`` for no per-job sweep.
 
@@ -76,7 +82,7 @@ def per_job_cache_max_bytes(env: Mapping[str, str] = os.environ) -> int | None:
     stated memory, leaving the rest to the job (the ensemble models take about
     3 GB and ffmpeg up to 3 GB on a 4K trim); otherwise 1 GiB.
     """
-    if not env.get("CLOUD_RUN_EXECUTION"):
+    if not memory_backed_disk(env):
         return None
     if env.get(ENV_MAX_GB, "").strip():
         return configured_cache_max_bytes(env)

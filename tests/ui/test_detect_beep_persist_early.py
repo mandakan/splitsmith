@@ -176,18 +176,19 @@ def _trim_params(tmp_path: Path) -> dict:
 
 
 def _record_publishes(monkeypatch: pytest.MonkeyPatch) -> list[float]:
-    """The beep each published trim was cut for (its params at the push)."""
+    """The beep each published trim was cut for (its params at the push: a
+    hosted trim's storage copy is its params sidecar and rendition, #1683)."""
     from splitsmith.ui import audio as audio_helpers
 
     published: list[float] = []
-    real_push = audio_helpers._try_push_trim_to_storage
+    real_push = audio_helpers._push_trim_params
 
     def push(project, local_mp4):  # type: ignore[no-untyped-def]
         params = audio_helpers.trim_params_path(local_mp4)
         published.append(json.loads(params.read_text(encoding="utf-8"))["beep_time"])
         real_push(project, local_mp4)
 
-    monkeypatch.setattr(audio_helpers, "_try_push_trim_to_storage", push)
+    monkeypatch.setattr(audio_helpers, "_push_trim_params", push)
     return published
 
 

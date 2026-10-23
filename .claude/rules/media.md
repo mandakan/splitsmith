@@ -32,6 +32,43 @@ paths:
   re-trim path for it.
 - The GOP stays 30: GOP 15 cost 35-47 % more bytes for ~10 ms of seek.
 
+## Storage holds no full trim (web-only)
+
+- **Every storage-backed project is web-only** (`audio.stores_web_only`): its
+  storage holds a trim's params sidecar, rendition and audit WAV, never the
+  full trim. A desktop mirror by design; a hosted-native match because on 4K
+  footage the trim is about five times the source's bytes for its window,
+  nothing but the job that cut it reads it, and every byte a worker writes to
+  R2 is billed GCP egress. A legacy full trim already
+  in storage is still served while it is there.
+- The cut pushes the params, then the rendition (`_publish_web_trim`); only a
+  rendition that fails to cut puts the full trim up instead, so the stage
+  keeps a playable clip (`test_a_failed_rendition_pushes_the_trim_instead`).
+- **A re-cut drops storage's copies before it encodes** (`_drop_stored_trim`
+  in `ensure_video_audit_trim`): with no trim to date it against, a stored
+  rendition reads as current, and the rendition step would pull the old one
+  back as the new cut's
+  (`test_a_re_cut_drops_the_stored_rendition_before_it_encodes`).
+- `fresh_rendition` dates the rendition against a trim whenever one is
+  there, and takes it alone only when there is none and the project is
+  web-only.
+- A job that finds the products current in storage
+  (`audio.stored_trim_current`: params for the current beep, the rendition,
+  the WAV not older than it) needs neither the source nor a cut: the trim job
+  skips both (a confirm chains one over a current cut), and shot detection
+  reads the published WAV (`tests/test_hosted_web_only_trims.py`). Voter E
+  reads the source, so it keeps the old path.
+- **A memory-backed worker drops the full trim once its products are
+  published** (`audio.release_local_trim`, Cloud Run by
+  `source_cache.memory_backed_disk`): the trim job after its WAV, shot
+  detection after it prepared its audio, the audit-audio job after its cut.
+  Its disk is memory, and no later job reads the trim. A box with a real disk
+  keeps it to reuse (`test_a_memory_backed_worker_keeps_no_full_trim_after_the_job`).
+- **A hosted-native WAV is never cut from the rendition**: shot detection
+  reads it, and the rendition's audio is re-encoded. A `derive_audio` job
+  that finds the rendition but no trim cuts the trim again from the source;
+  only a mirror, which has no source, extracts from the rendition.
+
 ## Streaming a source to ffmpeg
 
 - The hosted `generate_proxy` job hands ffmpeg a presigned GET URL for the raw
@@ -56,7 +93,8 @@ paths:
 - On `stream_video` the kinds mean one thing in both modes:
   - `web`: the rendition, else the trim, else the source, **never a 404** (what
     Results, Coach and Compare rely on);
-  - `trim`: never substitutes the rendition;
+  - `trim`: never substitutes the rendition, except on a web-only project
+    with no trim in storage, where the rendition is the trim;
   - `scrub` (the Audit players' pin): the fresh rendition, else the trim, else
     404, **never the source**. A re-cut deletes both while it encodes, and a
     pinned player must error and remount, not play the source under trim
@@ -71,16 +109,16 @@ paths:
   software decode in Chromium's low-end mode).
 - Hosted Compare prefers `trimmed/<...>_web.mp4` over the lossless export.
 
-## Web-only mirrors (spec 2026-09-27 v1.1)
+## Web-only mirrors and native matches (spec 2026-09-27 v1.1)
 
 A desktop mirror has no `_trimmed.mp4` on R2 by default, only `_web.mp4` and
-`.params.json`. On a mirror only (`_is_mirror()`, origin `desktop`): `kind=trim`
-and `kind=auto` redirect to the rendition when the full trim is absent; the
-clip anchor comes from the pushed params (`try_pull_web_trim` +
-`trim_pre_buffer_seconds_for`); the audit WAV is the one the desktop pushed,
-else cut from the rendition by a job. **A hosted-native match keeps "`kind=trim`
-never substitutes"**
-(`test_hosted_native_match_without_a_trim_still_404s_kind_trim`).
+`.params.json`; a hosted-native match is the same since the web-only change
+above. On either (`stores_web_only`): `kind=trim` and `kind=auto` redirect to
+the rendition when the full trim is absent, and the clip anchor comes from the
+stored params (`try_pull_web_trim` + `trim_pre_buffer_seconds_for`)
+(`test_hosted_native_match_without_a_trim_serves_the_rendition_for_kind_trim`).
+A mirror's audit WAV is the one the desktop pushed, else cut from the rendition
+by a job; that fallback is the mirror's alone (`_is_mirror()`).
 
 ## Requests read derived media; jobs make it
 
