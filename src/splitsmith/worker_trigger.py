@@ -25,10 +25,13 @@ outranks the platform fallback at 100):
 The first tier with at least one successful wake wins; lower tiers stay
 asleep. Because a self-hosted wake is best-effort (the box may be
 connected but wedged), a successful self-hosted wake arms a grace timer:
-if jobs are still pending and no worker heartbeat has appeared after
-``grace_seconds``, the dispatcher escalates to the tiers below the one
-it woke - bypassing the cooldown, since the escalation is part of the
-same logical trigger.
+if jobs are still pending and no worker heartbeat has appeared
+``grace_seconds`` after the FIRST unanswered self-hosted wake, the
+dispatcher escalates to the tiers below the one it woke - bypassing the
+cooldown, since the escalation is part of the same logical trigger. A
+later trigger that re-wakes the same dead tier does not move that
+deadline; anchoring it to the latest attempt starved the queue for as
+long as submits kept arriving faster than the grace window.
 
 Configuration comes from env vars (:func:`build_worker_dispatcher`);
 ``SPLITSMITH_WORKER_LAUNCHER=none`` disables the dispatcher entirely so
@@ -206,6 +209,10 @@ class WorkerDispatcher:
         self._grace_seconds = grace_seconds
         self._lock = asyncio.Lock()
         self._last_attempt: float | None = None
+        # When the oldest self-hosted wake that no drain has answered yet
+        # went out; the grace deadline counts from here. Reset when a drain
+        # is seen, the queue is empty, or the dispatcher escalates.
+        self._unanswered_since: float | None = None
         self._tasks: set[asyncio.Task[Any]] = set()
 
     def schedule(self) -> None:
@@ -241,6 +248,7 @@ class WorkerDispatcher:
             try:
                 if self._worker_active is not None and await self._worker_active():
                     logger.info("worker dispatcher: skipped, a live worker heartbeat exists")
+                    self._unanswered_since = None
                     return False
                 return await self._wake_from(max_priority_exclusive=None)
             except Exception:
@@ -311,34 +319,41 @@ class WorkerDispatcher:
                     # Self-hosted wakes are best-effort (a connected box may
                     # be wedged, a marker reader may be gone); a platform-only
                     # wake needs no faster net than the existing ones.
-                    self._spawn(self._grace_escalate(priority, armed_stamp=self._last_attempt))
+                    now = time.monotonic()
+                    if self._unanswered_since is None:
+                        self._unanswered_since = now
+                    anchor = self._unanswered_since
+                    delay = max(0.0, self._grace_seconds - (now - anchor))
+                    self._spawn(self._grace_escalate(priority, anchor=anchor, delay=delay))
                 return True
         return False
 
-    async def _grace_escalate(self, woken_priority: int, armed_stamp: float | None) -> None:
-        """After ``grace_seconds``: if jobs are still pending and no worker
-        heartbeat appeared, wake the tiers below the one already woken.
+    async def _grace_escalate(self, woken_priority: int, *, anchor: float, delay: float) -> None:
+        """After ``delay`` (the rest of the grace window counted from
+        ``anchor``, the first unanswered wake): if jobs are still pending and
+        no worker heartbeat appeared, wake the tiers below the one woken.
 
-        ``armed_stamp`` is ``self._last_attempt`` as of the wake that armed
-        this window. Before escalating, the stamp is re-checked and moved
-        under ``self._lock``: if another wake attempt (a trigger or a racing
-        escalation) has moved it since, this window stands down - the newer
-        attempt's own grace window (or the nets) covers it. That keeps
-        overlapping grace windows from starting the platform worker twice, while the
-        escalation still bypasses the cooldown its own trigger stamped.
+        Every re-wake of a dead tier spawns one of these with the same
+        ``anchor``; the first to get here escalates and clears
+        ``_unanswered_since`` under ``self._lock``, so the others (and any
+        whose anchor a seen drain or an empty queue cleared) stand down.
+        That keeps overlapping windows from starting the platform worker
+        twice, while the escalation still bypasses the cooldown.
 
         Never raises: it runs as a detached task and a failure is
         covered by the nets. A failing heartbeat check aborts the
         escalation (same fail-safe as :meth:`trigger`).
         """
         try:
-            await asyncio.sleep(self._grace_seconds)
-            if await self._pending_jobs() <= 0:
-                return
-            if self._worker_active is not None and await self._worker_active():
-                return
+            await asyncio.sleep(delay)
+            answered = await self._pending_jobs() <= 0 or (
+                self._worker_active is not None and await self._worker_active()
+            )
             async with self._lock:
-                if self._last_attempt != armed_stamp:
+                if self._unanswered_since != anchor:
+                    return
+                self._unanswered_since = None
+                if answered:
                     return
                 self._last_attempt = time.monotonic()
             logger.info(

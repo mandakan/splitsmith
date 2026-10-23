@@ -442,9 +442,9 @@ def test_grace_escalation_skipped_when_queue_drained() -> None:
 
 
 def test_grace_escalations_racing_fire_exactly_one_redeploy() -> None:
-    """Two overlapping grace windows must not start the Cloud Run job twice: the first
-    escalation moves the attempt stamp under the lock; the second sees the
-    stamp changed and stands down."""
+    """Two overlapping grace windows on the same unanswered wake must not
+    start the Cloud Run job twice: the first clears the anchor under the
+    lock; the second finds it cleared and stands down."""
     store = _fresh_store()
     requests: list[dict[str, Any]] = []
 
@@ -458,19 +458,20 @@ def test_grace_escalations_racing_fire_exactly_one_redeploy() -> None:
             worker_active=_inactive,
             pending_jobs=_pending(1),
         )
+        dispatcher._unanswered_since = 1.0
         await asyncio.gather(
-            dispatcher._grace_escalate(1000, armed_stamp=None),
-            dispatcher._grace_escalate(1000, armed_stamp=None),
+            dispatcher._grace_escalate(1000, anchor=1.0, delay=0.0),
+            dispatcher._grace_escalate(1000, anchor=1.0, delay=0.0),
         )
 
     asyncio.run(scenario())
     assert len(requests) == 1
 
 
-def test_grace_escalation_stands_down_after_newer_wake_attempt() -> None:
-    """A grace window armed by an older trigger must not escalate once a
-    newer wake attempt has moved the stamp - the newer attempt's own grace
-    window (or the nets) covers it."""
+def test_grace_escalation_stands_down_once_its_wake_was_answered() -> None:
+    """A window whose anchor was cleared (a drain was seen, or another
+    window already escalated) must not escalate. A newer attempt alone does
+    not clear it: see test_grace_escalation_survives_triggers_faster_than_the_window."""
     store = _fresh_store()
     requests: list[dict[str, Any]] = []
 
@@ -484,11 +485,89 @@ def test_grace_escalation_stands_down_after_newer_wake_attempt() -> None:
             worker_active=_inactive,
             pending_jobs=_pending(1),
         )
-        dispatcher._last_attempt = 12345.0  # a newer attempt moved the stamp
-        await dispatcher._grace_escalate(1000, armed_stamp=1.0)
+        dispatcher._unanswered_since = None  # answered since this window was armed
+        await dispatcher._grace_escalate(1000, anchor=1.0, delay=0.0)
 
     asyncio.run(scenario())
     assert requests == []
+
+
+def test_grace_escalation_survives_triggers_faster_than_the_window() -> None:
+    """A dead home worker under a steady stream of submits: every trigger
+    re-wakes the home tier, but the escalation is due ``grace_seconds`` after
+    the FIRST unanswered wake, so the platform worker still starts. Anchoring
+    the window to the latest attempt instead starved the queue for as long
+    as submits kept coming more often than the grace window."""
+    store = _fresh_store()
+    requests: list[dict[str, Any]] = []
+
+    async def scenario() -> int:
+        home_id = await _add_home(store)
+        await _platform_row_id(store)
+        registry = WakeChannelRegistry()
+        registry.connect(home_id)  # takes every wake, never drains
+        dispatcher = WorkerDispatcher(
+            store,
+            registry,
+            cloud_run=_config(),
+            worker_active=_inactive,
+            pending_jobs=_pending(5),
+            cooldown_seconds=0.0,
+            grace_seconds=0.2,
+            transport=_transport(requests),
+        )
+        for _ in range(12):  # a trigger every 50 ms for 600 ms
+            await dispatcher.trigger()
+            await asyncio.sleep(0.05)
+        # Checked while submits are still arriving: the escalation was due
+        # 200 ms after the first wake, not 200 ms after they stop.
+        started_while_busy = len(requests)
+        await _drain_tasks(dispatcher)
+        return started_while_busy
+
+    assert asyncio.run(scenario()) >= 1
+
+
+def test_a_seen_drain_gives_the_next_wake_a_fresh_window() -> None:
+    """The home worker answered (a heartbeat was seen), then a new job was
+    woken for: that wake's window starts over rather than inheriting the
+    first wake's deadline."""
+    store = _fresh_store()
+    requests: list[dict[str, Any]] = []
+    state = {"active": False}
+
+    async def _worker_active() -> bool:
+        return state["active"]
+
+    async def scenario() -> int:
+        home_id = await _add_home(store)
+        await _platform_row_id(store)
+        registry = WakeChannelRegistry()
+        registry.connect(home_id)
+        dispatcher = WorkerDispatcher(
+            store,
+            registry,
+            cloud_run=_config(),
+            worker_active=_worker_active,
+            pending_jobs=_pending(5),
+            cooldown_seconds=0.0,
+            grace_seconds=0.3,
+            transport=_transport(requests),
+        )
+        await dispatcher.trigger()  # t=0: first wake
+        await asyncio.sleep(0.1)
+        state["active"] = True
+        await dispatcher.trigger()  # t=0.1: a drain is seen
+        state["active"] = False
+        await asyncio.sleep(0.1)
+        await dispatcher.trigger()  # t=0.2: a new wake, deadline t=0.5
+        await asyncio.sleep(0.2)  # t=0.4: past the first wake's deadline
+        started_early = len(requests)
+        await _drain_tasks(dispatcher)
+        return started_early
+
+    assert asyncio.run(scenario()) == 0
+    assert len(requests) == 1  # the fresh window escalates once, on time
 
 
 def test_touch_wake_failure_does_not_cancel_wake_or_grace() -> None:
