@@ -188,7 +188,7 @@ def test_hosted_validation_sees_the_storage_trims(hosted_grid) -> None:
     )
     # Stage 2 has no beep and no trim: still refused, for the right reason.
     assert resp.status_code == 400
-    assert "no trim" in resp.json()["detail"] or "exported trim" in resp.json()["detail"]
+    assert "confirmed beep" in resp.json()["detail"]
     resp = client.post(
         f"/api/matches/{match_id}/match/compare-export",
         json={"stage_numbers": [1], "audio_from": slug},
