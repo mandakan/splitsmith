@@ -49,6 +49,7 @@ from ..rise_foot import peak_envelope, rise_foot
 from .core import (
     DEFAULT_SHOOTER_KEY,
     build_event_id,
+    carry_lab_labels,
     event_id_from_payload,
     match_stage_from_slug,
 )
@@ -396,6 +397,16 @@ def write_promoted_fixture(
         data["_candidates_pending_audit"] = {**pending, "candidates": rebase(pending["candidates"])}
     if source_video is not None:
         data["source_video"] = source_video
+
+    if target_json.exists():
+        # A re-snap starts with no reasons; keep the lab's (#1459).
+        try:
+            old = json.loads(target_json.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            old = None
+        if isinstance(old, dict):
+            carry = carry_lab_labels(old, data)
+            promotion_report = {**promotion_report, "label_carry": carry.model_dump(mode="json")}
 
     tmp = target_json.with_suffix(".json.tmp")
     tmp.write_text(json.dumps(data, indent=2, ensure_ascii=True) + "\n", encoding="utf-8")

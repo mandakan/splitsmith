@@ -2588,6 +2588,9 @@ export interface LabFixtureRecord {
    *  ``calibration_fixtures`` -- i.e. the shipped model was trained on
    *  this fixture. False means it's waiting on a retrain. */
   in_calibration: boolean;
+  /** What a re-promote carried from the fixture it overwrote; only on a
+   *  promote's answer, never in the catalog (lib/promoteDrift). */
+  label_carry?: import("@/lib/promoteDrift").LabelCarry | null;
 }
 
 export interface LabEvalConfig {

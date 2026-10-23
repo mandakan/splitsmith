@@ -138,6 +138,24 @@ def event_id_from_payload(slug: str, payload: dict[str, Any]) -> str | None:
 # ---------------------------------------------------------------------------
 
 
+class DroppedLabel(BaseModel):
+    """A lab label a re-promote could not place on the new fixture."""
+
+    time: float  # on the old fixture's clip
+    label: str  # the reason or the subclass
+    why: str  # "no candidate", "now a kept shot", "no shot"
+
+
+class LabelCarry(BaseModel):
+    """What a re-promote carried from the fixture it overwrote (#1459)."""
+
+    reasons_carried: int = 0
+    subclasses_carried: int = 0
+    walk_decisions_carried: int = 0
+    reasons_dropped: list[DroppedLabel] = []
+    subclasses_dropped: list[DroppedLabel] = []
+
+
 class FixtureRecord(BaseModel):
     """One audited fixture, as surfaced to the Lab UI / CLI."""
 
@@ -190,6 +208,9 @@ class FixtureRecord(BaseModel):
     # corpus (``ensemble.fixtures.Fixture.superseded_by``): kept for the
     # tests that load it by name, never trained on, never queued.
     superseded_by: str | None = None
+    # Set only on the record ``promote_stage_to_fixture`` returns after an
+    # overwrite; the catalog never fills it.
+    label_carry: LabelCarry | None = None
 
     @property
     def needs_review(self) -> bool:
@@ -1235,6 +1256,17 @@ def promote_stage_to_fixture(req: PromoteRequest) -> FixtureRecord:
                 "promotes."
             )
 
+    carry: LabelCarry | None = None
+    if target_json.exists():
+        # The lab is the only place these labels live: the match audit has
+        # none, so writing it over the fixture would erase them.
+        try:
+            old = json.loads(target_json.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            old = None
+        if isinstance(old, dict):
+            carry = carry_lab_labels(old, payload)
+
     # Shooter identity + event_id stamping. Caller-supplied shooter wins
     # over whatever's in the source audit JSON (project-promote provides
     # this from ``selected_shooter_id``); falls back to existing data on
@@ -1255,8 +1287,158 @@ def promote_stage_to_fixture(req: PromoteRequest) -> FixtureRecord:
     catalog = list_fixtures(root)
     for rec in catalog:
         if rec.slug == req.fixture_slug:
+            rec.label_carry = carry
             return rec
     raise RuntimeError("fixture promote completed but record not found in catalog")
+
+
+# The build's own tolerance for matching a label to a candidate
+# (``build_ensemble_artifacts._resolve_subclass``).
+LABEL_CARRY_TOLERANCE_MS = 25.0
+
+
+def _window_start(payload: dict[str, Any]) -> float | None:
+    window = payload.get("fixture_window_in_source")
+    if isinstance(window, (list, tuple)) and len(window) == 2:
+        try:
+            return float(window[0])
+        except (TypeError, ValueError):
+            return None
+    return None
+
+
+def _nearest(times: list[float], t: float, tolerance_ms: float) -> int | None:
+    best: tuple[float, int] | None = None
+    for i, ti in enumerate(times):
+        d_ms = abs(ti - t) * 1000.0
+        if d_ms <= tolerance_ms and (best is None or d_ms < best[0]):
+            best = (d_ms, i)
+    return best[1] if best is not None else None
+
+
+def carry_lab_labels(old: dict[str, Any], new: dict[str, Any]) -> LabelCarry:
+    """Carry an overwritten fixture's lab labels onto its replacement, in place.
+
+    A re-promote writes the match audit over the fixture, and the audit
+    holds none of the lab's work (#1459). Times are matched on the new
+    clip: when both fixtures name their window in the source, the old
+    times move by the difference of the window starts, so a re-reviewed
+    beep that shifted the trim does not shift every label off its shot.
+
+    - A false-positive reason moves to the new rejected candidate nearest
+      in time within ``LABEL_CARRY_TOLERANCE_MS``. It is dropped when that
+      time is now a kept shot or no candidate is close enough. A fixture
+      with no candidate list keeps the reason at its own time, which is
+      how the build resolves it anyway.
+    - A kept shot's subclass moves to the nearest new kept shot within the
+      tolerance, each new shot taking at most one; it is dropped when the
+      re-audit removed the shot.
+    - ``walk_decided`` audit events carry over. The walk matches a decision
+      by state and time, never by key, so one only counts where a shot is
+      still exactly where it was decided.
+    - ``history`` keeps the old entries ahead of the new ones and gains a
+      ``re-promoted`` entry with the counts.
+
+    The old ``review`` block is not carried: a re-audit in match mode is a
+    fresh hand audit, and a sign-off on the old shots does not cover new ones.
+    """
+    carry = LabelCarry()
+    old_start, new_start = _window_start(old), _window_start(new)
+    shift = old_start - new_start if old_start is not None and new_start is not None else 0.0
+    tol = LABEL_CARRY_TOLERANCE_MS
+
+    new_shots = [s for s in new.get("shots") or [] if isinstance(s, dict) and s.get("time") is not None]
+    shot_times = [float(s["time"]) for s in new_shots]
+
+    old_pending = old.get("_candidates_pending_audit")
+    old_labels = old_pending.get("labels_by_time") if isinstance(old_pending, dict) else None
+    if isinstance(old_labels, dict) and old_labels:
+        pending = new.get("_candidates_pending_audit")
+        if not isinstance(pending, dict):
+            pending = {}
+            new["_candidates_pending_audit"] = pending
+        raw_candidates = pending.get("candidates")
+        cand_times = (
+            [float(c["time"]) for c in raw_candidates if isinstance(c, dict) and c.get("time") is not None]
+            if isinstance(raw_candidates, list)
+            else None
+        )
+        labels = pending.get("labels_by_time")
+        if not isinstance(labels, dict):
+            labels = {}
+        for key, reason in sorted(old_labels.items()):
+            try:
+                old_t = float(key)
+            except (TypeError, ValueError):
+                continue
+            t = old_t + shift
+            dropped = DroppedLabel(time=old_t, label=str(reason), why="")
+            if _nearest(shot_times, t, tol) is not None:
+                carry.reasons_dropped.append(dropped.model_copy(update={"why": "now a kept shot"}))
+                continue
+            if cand_times is not None:
+                idx = _nearest(cand_times, t, tol)
+                if idx is None:
+                    carry.reasons_dropped.append(dropped.model_copy(update={"why": "no candidate"}))
+                    continue
+                t = cand_times[idx]
+            labels[f"{round(t, 3):.3f}"] = reason
+            carry.reasons_carried += 1
+        pending["labels_by_time"] = labels
+
+    taken: set[int] = set()
+    for shot in old.get("shots") or []:
+        if not isinstance(shot, dict) or not shot.get("subclass") or shot.get("time") is None:
+            continue
+        old_t = float(shot["time"])
+        free = [ti if i not in taken else float("inf") for i, ti in enumerate(shot_times)]
+        idx = _nearest(free, old_t + shift, tol)
+        if idx is None:
+            carry.subclasses_dropped.append(
+                DroppedLabel(time=old_t, label=str(shot["subclass"]), why="no shot")
+            )
+            continue
+        taken.add(idx)
+        new_shots[idx]["subclass"] = shot["subclass"]
+        carry.subclasses_carried += 1
+
+    old_events = old.get("audit_events")
+    if isinstance(old_events, list):
+        events = new.get("audit_events")
+        if not isinstance(events, list):
+            events = []
+        for event in old_events:
+            if not isinstance(event, dict) or event.get("kind") != "walk_decided":
+                continue
+            event = dict(event)
+            body = event.get("payload")
+            if shift and isinstance(body, dict) and isinstance(body.get("time"), (int, float)):
+                event["payload"] = {**body, "time": round(float(body["time"]) + shift, 4)}
+            if event not in events:
+                events.append(event)
+                carry.walk_decisions_carried += 1
+        if events:
+            new["audit_events"] = events
+
+    old_history = [h for h in old.get("history") or [] if isinstance(h, dict)]
+    new_history = [h for h in new.get("history") or [] if isinstance(h, dict)]
+    new["history"] = [
+        *old_history,
+        *new_history,
+        {
+            "at": datetime.now(UTC).isoformat(),
+            "action": "re-promoted",
+            "tool_version": "0.1.0",
+            "details": {
+                "reasons_carried": carry.reasons_carried,
+                "reasons_dropped": len(carry.reasons_dropped),
+                "subclasses_carried": carry.subclasses_carried,
+                "subclasses_dropped": len(carry.subclasses_dropped),
+                "walk_decisions_carried": carry.walk_decisions_carried,
+            },
+        },
+    ]
+    return carry
 
 
 # ---------------------------------------------------------------------------
