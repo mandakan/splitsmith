@@ -12,9 +12,13 @@ byte budget, evicting least-recently-used files first. The Cloud Run worker
 mirrors into the same layout on an in-memory filesystem and sweeps after every
 job instead (:func:`per_job_cache_max_bytes`).
 
-Recency is the file mtime. ``resolve_video_path`` bumps it on every cache hit
-(``os.utime``), so mtime tracks last-use even on ``noatime`` mounts where atime
-never advances. Eviction is keyed on total bytes, not file count: one stale
+Recency is the later of the file's atime and mtime. ``resolve_video_path``
+sets the atime on every cache hit and download (``os.utime``, which a
+``noatime`` mount honours), and leaves a mirror's mtime at the storage object's
+version: the derived caches compare against it (#1678). A file a job wrote
+(a trim) is recent by its mtime.
+
+Eviction is keyed on total bytes, not file count: one stale
 multi-GB raw is a better thing to drop than a hundred small fresh artifacts.
 """
 
@@ -97,14 +101,14 @@ class SweepResult:
 class _Entry:
     path: Path
     size: int
-    mtime: float
+    last_used: float
 
 
 def sweep_source_cache(cache_root: Path, max_bytes: int) -> SweepResult:
     """Evict least-recently-used files under ``cache_root`` down to ``max_bytes``.
 
     Walks every regular file below ``cache_root``, and while the total exceeds
-    ``max_bytes`` deletes files oldest-mtime-first until the budget is met.
+    ``max_bytes`` deletes files least-recently-used first until the budget is met.
     Directories left empty by eviction are pruned. A missing ``cache_root`` is a
     no-op. Deletion errors are logged and skipped - a single unlink failure
     must not abort the sweep or fail the drain that triggered it.
@@ -126,7 +130,7 @@ def sweep_source_cache(cache_root: Path, max_bytes: int) -> SweepResult:
         )
 
     # Oldest first: the least-recently-used file is the first to go.
-    entries.sort(key=lambda e: e.mtime)
+    entries.sort(key=lambda e: e.last_used)
     total = total_before
     evicted_files = 0
     evicted_bytes = 0
@@ -154,7 +158,7 @@ def sweep_source_cache(cache_root: Path, max_bytes: int) -> SweepResult:
 
 
 def _scan(root: Path) -> list[_Entry]:
-    """Collect every regular file under ``root`` with its size and mtime.
+    """Collect every regular file under ``root`` with its size and last use.
 
     Symlinks are skipped (``lstat`` + ``is_symlink``) so the cache can never be
     tricked into unlinking a target outside itself. Files that vanish mid-scan
@@ -170,7 +174,7 @@ def _scan(root: Path) -> list[_Entry]:
                 continue
             if path.is_symlink():
                 continue
-            entries.append(_Entry(path=path, size=stat.st_size, mtime=stat.st_mtime))
+            entries.append(_Entry(path=path, size=stat.st_size, last_used=max(stat.st_atime, stat.st_mtime)))
     return entries
 
 

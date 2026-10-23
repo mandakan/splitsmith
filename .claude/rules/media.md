@@ -4,6 +4,7 @@ paths:
   - "src/splitsmith/trim.py"
   - "src/splitsmith/derived.py"
   - "src/splitsmith/storage.py"
+  - "src/splitsmith/source_cache.py"
   - "src/splitsmith/media_check.py"
   - "src/splitsmith/proxy.py"
   - "src/splitsmith/match_trims.py"
@@ -115,5 +116,21 @@ a phone a short WAV.
   Advanced "Re-cut trim" (`POST .../trim?force=true`, `force` through
   `ensure_video_audit_trim`). The cache otherwise keys on the source's mtime
   and params only.
+- **A storage mirror's mtime is the object's version, never the time this disk
+  fetched or used it.** `resolve_video_path` stamps a download with the
+  object's `last_modified` (only when a stat before and after the stream
+  agree; else the download time stands) and a cache hit bumps only the atime
+  (the LRU sweep reads the later of the two). Every derived cache is "not older than its
+  source", so a bumped mtime made each later job on a worker re-cut its trim
+  (`tests/test_hosted_trim_reuse.py`).
+- Beep detection saves the beep before any trim work and chains the trim as a
+  `trim` job, skipped only when the trim's params sidecar matches the current
+  beep, stage time and buffers (`audio.trim_params_current`). Overrides,
+  confirms and re-detections adopt a running trim (they dedupe on the trim
+  kind), so a trim whose beep moved while it cut never publishes the cut
+  (`ensure_video_audit_trim(still_current=)`) and queues a trim for the current
+  beep itself. A moved beep drops the old trim locally and, from a job body,
+  in storage (`invalidate_video_audit_trim(stored=True)`); a hosted reader
+  keys on existence. `tests/ui/test_detect_beep_persist_early.py`.
 - The beep preview clip stays synchronous (one clip per scrubbed `t`) but
   publishes whole.
