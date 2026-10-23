@@ -27,6 +27,7 @@ from .. import camera_select, match_model, user_config
 from .. import coach as coach_module
 from ..access import Feature
 from ..audit_revision import audit_revision
+from ..compare.project_loader import CompareShooterBundle
 from ..config import StageRounds
 from ..identity import EVENT_LOGO_DIR, LOGO_MAX_BYTES, event_logo_name, sniff_logo
 from ..match_project import MatchProject, ScoreboardImportConflictError, StageEntry
@@ -1752,6 +1753,44 @@ def get_stage_compare(request: Request, stage_number: int) -> CompareStageRespon
     )
 
 
+def _stage_list(numbers: list[int]) -> str:
+    ordered = sorted(set(numbers))
+    word = "stage" if len(ordered) == 1 else "stages"
+    return f"{word} {', '.join(str(n) for n in ordered)}"
+
+
+def no_trims_refusal(bundles: list[CompareShooterBundle], stage_numbers: list[int], *, hosted: bool) -> str:
+    """The compare-grid 400 when no selected stage has a trim to cut from.
+
+    Read in the app (the Export page renders ``detail`` as its error line),
+    so it names who is missing what and the in-app action that fixes it
+    (Export, the Quick trims preset), not a CLI. The terminal command is
+    offered only on a local install, where one exists; a hosted user has none. A
+    selection where nobody even has a confirmed beep is not an export
+    problem, so it points at Audit instead.
+    """
+    wanted = set(stage_numbers)
+    missing: dict[str, list[int]] = {}
+    for bundle in bundles:
+        for miss in bundle.missing_trims:
+            if miss.stage_number in wanted:
+                missing.setdefault(bundle.label, []).append(miss.stage_number)
+    if not missing:
+        return (
+            f"Nothing to put in the grid: no shooter has a confirmed beep on {_stage_list(stage_numbers)}. "
+            "Confirm each shooter's beep in Audit, export their trims, then render the grid again."
+        )
+    who = "; ".join(f"{label} ({_stage_list(numbers)})" for label, numbers in sorted(missing.items()))
+    text = (
+        f"The grid is cut from each shooter's exported trims, and none of the selected stages has one yet. "
+        f"Missing: {who}. Export them first: on Export, for each of those shooters, pick the Quick trims "
+        "preset and press Export trims, then render the grid again."
+    )
+    if not hosted:
+        text += ' From a terminal, run "splitsmith match trims" to export every shooter\'s trims at once.'
+    return text
+
+
 @router.post("/api/match/compare-export")
 async def export_compare_grid(request: Request, req: CompareGridRequest) -> JSONResponse:
     """Render the match's shooters as one grid MP4 (phase 0).
@@ -1811,10 +1850,7 @@ async def export_compare_grid(request: Request, req: CompareGridRequest) -> JSON
     if present == 0:
         raise HTTPException(
             status_code=400,
-            detail=(
-                "no shooter has an exported trim for the selected stages. "
-                "Run `splitsmith match trims` (or export trims per shooter) first."
-            ),
+            detail=no_trims_refusal(bundles, req.stage_numbers, hosted=_hosted_mode_active()),
         )
 
     # A shooter other than the audio source can cover the selection --

@@ -29,6 +29,7 @@ from splitsmith.export_naming import stage_file_base
 from splitsmith.fcpxml_gen import VideoMetadata
 from splitsmith.match_model import Match, MatchStageDefinition, Shooter
 from splitsmith.match_project import MatchProject, StageEntry, StageVideo
+from splitsmith.ui import match_api as match_api_mod
 from splitsmith.ui import server as server_mod
 from tests.ui._helpers import _match_create_app, _MatchClient
 
@@ -174,6 +175,43 @@ def test_reports_missing_trims_rather_than_rendering_filler_for_everyone(
     assert response.status_code == 400
     detail = response.json()["detail"]
     assert "trim" in detail.lower()
+
+
+def test_no_trims_refusal_names_shooters_stages_and_the_in_app_action(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Every selected stage lacks a trim: the 400 says who is missing which
+    stage and where in the app to export them (the Export page's Quick
+    trims preset), and offers the CLI only on a local install (#1681)."""
+    monkeypatch.setattr(pl_mod.fcpxml_gen, "probe_video", _fake_probe)
+    match_root = _seed_match(tmp_path, shooters=["mathias", "anna"], stage_numbers=[1, 2, 3])
+    client = _MatchClient(_match_create_app(project_root=match_root, project_name="Compare Match"))
+
+    response = client.post(
+        "/api/match/compare-export",
+        json={"stage_numbers": [1, 2], "audio_from": "mathias"},
+    )
+    assert response.status_code == 400
+    detail = response.json()["detail"]
+    assert "Missing: Anna (stages 1, 2); Mathias (stages 1, 2)." in detail
+    assert "Quick trims" in detail and "Export trims" in detail
+    assert 'run "splitsmith match trims"' in detail
+
+    monkeypatch.setattr(match_api_mod, "_hosted_mode_active", lambda: True)
+    hosted = client.post("/api/match/compare-export", json={"stage_numbers": [1], "audio_from": "mathias"})
+    assert hosted.status_code == 400
+    hosted_detail = hosted.json()["detail"]
+    assert "Missing: Anna (stage 1); Mathias (stage 1)." in hosted_detail
+    assert "Quick trims" in hosted_detail
+    assert "splitsmith match" not in hosted_detail
+
+
+def test_no_trims_refusal_points_at_audit_when_no_stage_has_a_beep() -> None:
+    """A selection where no shooter has a confirmed beep has no trim to
+    export yet: the refusal sends the user to Audit, not to Export."""
+    bundle = pl_mod.CompareShooterBundle(label="Anna", project_root=Path("x"))
+    detail = match_api_mod.no_trims_refusal([bundle], [2], hosted=True)
+    assert "confirmed beep on stage 2" in detail and "Audit" in detail
 
 
 def test_rejects_an_unresolvable_camera_selector(match_client: _MatchClient) -> None:

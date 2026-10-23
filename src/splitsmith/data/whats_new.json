@@ -1,6 +1,12 @@
 {
   "entries": [
     {
+      "id": "compare-grid-names-missing-trims",
+      "date": "2026-10-23",
+      "title": "Compare grid says which trims are missing",
+      "body": "When a compare grid has no trims to cut from, the Export page now names each shooter and stage that needs one and how to make it: the Quick trims preset, then Export trims."
+    },
+    {
       "id": "beeps-before-previews",
       "date": "2026-10-23",
       "title": "Beeps and shots arrive sooner after upload",
