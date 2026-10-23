@@ -8,7 +8,9 @@ cache*: every byte is reconstructable from Postgres + R2, so it can be evicted
 freely. Left uncapped it grows until the box's disk fills - raw head-cam files
 run tens of MB to multi-GB and a match has many - which has produced I/O
 errors before. This module runs a post-drain sweep that keeps the cache under a
-byte budget, evicting least-recently-used files first.
+byte budget, evicting least-recently-used files first. The Cloud Run worker
+mirrors into the same layout on an in-memory filesystem and sweeps after every
+job instead (:func:`per_job_cache_max_bytes`).
 
 Recency is the file mtime. ``resolve_video_path`` bumps it on every cache hit
 (``os.utime``), so mtime tracks last-use even on ``noatime`` mounts where atime
@@ -54,6 +56,30 @@ def configured_cache_max_bytes(env: Mapping[str, str] = os.environ) -> int | Non
     if gb <= 0:
         return None
     return int(gb * _BYTES_PER_GB)
+
+
+#: The worker's stated memory (see ``observability.WORKER_MEMORY_MB_ENV``).
+_WORKER_MEMORY_MB_ENV = "SPLITSMITH_WORKER_MEMORY_MB"
+
+
+def per_job_cache_max_bytes(env: Mapping[str, str] = os.environ) -> int | None:
+    """The cap a worker sweeps to after every job, or ``None`` for no per-job sweep.
+
+    Only on Cloud Run: its filesystem is in memory, so the cache competes with
+    the running job for the container's memory, and a drain that sweeps only
+    at its end (the agent's way) is killed part-way through a match. An
+    explicit ``SPLITSMITH_SOURCE_CACHE_MAX_GB`` wins; otherwise a quarter of the
+    stated memory, leaving the rest to the job (the ensemble models take about
+    3 GB and ffmpeg up to 3 GB on a 4K trim); otherwise 1 GiB.
+    """
+    if not env.get("CLOUD_RUN_EXECUTION"):
+        return None
+    if env.get(ENV_MAX_GB, "").strip():
+        return configured_cache_max_bytes(env)
+    try:
+        return int(env[_WORKER_MEMORY_MB_ENV]) * 1024 * 1024 // 4
+    except (KeyError, ValueError):
+        return _BYTES_PER_GB
 
 
 @dataclass(frozen=True)

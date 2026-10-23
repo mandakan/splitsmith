@@ -374,7 +374,12 @@ def make_deferrer(
     return _defer
 
 
-def register_compute_task(app: procrastinate.App, state: Any) -> None:
+def register_compute_task(
+    app: procrastinate.App,
+    state: Any,
+    *,
+    after_job: Callable[[], Awaitable[None]] | None = None,
+) -> None:
     """Register the worker-side :data:`RUN_COMPUTE_JOB_TASK` on ``app``.
 
     Bound to a worker ``state`` (built by
@@ -384,6 +389,9 @@ def register_compute_task(app: procrastinate.App, state: Any) -> None:
     body via :meth:`PostgresJobBackend.run_job` -- the same ``kind`` ->
     body mapping the local registry uses. Must be registered before
     :meth:`procrastinate.App.run_worker_async`.
+
+    ``after_job`` runs once each job ends, however it ended (the Cloud Run
+    worker's cache sweep, see :func:`_job_sweep`); it must not raise.
     """
     from . import looks
     from .match_registry import MatchNotRegisteredError
@@ -458,6 +466,8 @@ def register_compute_task(app: procrastinate.App, state: Any) -> None:
         finally:
             looks.reset_user_looks_provider(looks_token)
             current_tenant.reset(tenant_token)
+            if after_job is not None:
+                await after_job()
 
 
 def _rehydrate_args(kind: str, args: dict[str, Any]) -> dict[str, Any]:
@@ -592,7 +602,9 @@ async def run_worker(
         except Exception:  # noqa: BLE001 - warmup is best-effort; cold load is re-timed at job time
             logger.warning("ensemble warmup failed on worker boot; first shot_detect will cold-load")
         _attach_procrastinate_logging()
-        app = await _open_app_with_retry(database_url, state, application_name=f"{process_name}-queue")
+        app = await _open_app_with_retry(
+            database_url, state, application_name=f"{process_name}-queue", after_job=_job_sweep()
+        )
         options: dict[str, Any] = {
             "queues": queues,
             "concurrency": concurrency,
@@ -656,11 +668,38 @@ async def _run_worker_until(app: Any, stop_event: asyncio.Event, options: dict[s
 _RETRYABLE_OPEN_ERRORS = (psycopg_pool.PoolTimeout, psycopg.OperationalError, OSError)
 
 
+def _job_sweep() -> Callable[[], Awaitable[None]] | None:
+    """The per-job source-cache sweep for a worker on an in-memory filesystem.
+
+    ``None`` off Cloud Run (the agent sweeps once per drain on its own disk).
+    On Cloud Run every mirrored source and written trim counts against the
+    container's memory, so a drain that only grows its cache is killed
+    part-way through a match. The sweep is skipped while another job runs in
+    this process, so it never evicts a file a running job holds open.
+    """
+    from .agent import _resolve_cache_root, _run_cache_sweep
+    from .observability import jobs_running
+    from .source_cache import per_job_cache_max_bytes
+
+    cap = per_job_cache_max_bytes()
+    if cap is None:
+        return None
+    cache_root = _resolve_cache_root()
+
+    async def sweep() -> None:
+        if jobs_running():
+            return
+        await _run_cache_sweep(cache_root, cap)
+
+    return sweep
+
+
 async def _open_app_with_retry(
     database_url: str,
     state: Any,
     *,
     application_name: str | None = None,
+    after_job: Callable[[], Awaitable[None]] | None = None,
     attempts: int = 5,
     base_delay: float = 3.0,
 ) -> procrastinate.App:
@@ -678,7 +717,7 @@ async def _open_app_with_retry(
     last_exc: Exception | None = None
     for attempt in range(1, attempts + 1):
         app = build_app(database_url, application_name=application_name)
-        register_compute_task(app, state)
+        register_compute_task(app, state, after_job=after_job)
         try:
             await app.connector.open_async()
             return app
