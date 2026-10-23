@@ -71,11 +71,13 @@ class FileDocStore:
         *,
         audit_lock: AbstractContextManager[object] | None = None,
         export_run_lock: AbstractContextManager[object] | None = None,
+        project_lock: AbstractContextManager[object] | None = None,
         shooter_root: Callable[[str], Path] | None = None,
     ) -> None:
         self._root = match_root
         self._audit_lock = audit_lock if audit_lock is not None else nullcontext()
         self._export_run_lock = export_run_lock if export_run_lock is not None else nullcontext()
+        self._project_lock = project_lock if project_lock is not None else nullcontext()
         self._shooter_root = shooter_root or (lambda slug: Match.shooter_root(match_root, slug))
 
     # -- match -------------------------------------------------------------
@@ -101,6 +103,15 @@ class FileDocStore:
 
     def save_project(self, slug: str, doc: Doc, *, version: int) -> int:
         _write(self._shooter_root(slug) / PROJECT_FILE, doc, backup=False)
+        return 0
+
+    def update_project(self, slug: str, merge: Callable[[Doc], Doc]) -> int:
+        path = self._shooter_root(slug) / PROJECT_FILE
+        with self._project_lock:
+            current, _ = _read(path)
+            if current is None:
+                raise LookupError(f"shooter {slug!r} has no project document")
+            _write(path, merge(current), backup=False)
         return 0
 
     def delete_match_docs(self) -> int:

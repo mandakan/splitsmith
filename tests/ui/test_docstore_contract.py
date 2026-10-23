@@ -30,7 +30,12 @@ def store(request: pytest.FixtureRequest, tmp_path: Path) -> Iterator[DocStore]:
     if request.param == "files":
         root = tmp_path / "match"
         root.mkdir()
-        s: DocStore = FileDocStore(root, audit_lock=threading.Lock(), export_run_lock=threading.Lock())
+        s: DocStore = FileDocStore(
+            root,
+            audit_lock=threading.Lock(),
+            export_run_lock=threading.Lock(),
+            project_lock=threading.Lock(),
+        )
         s.save_match(MATCH, version=0)
         yield s
         return
@@ -305,3 +310,51 @@ def test_the_two_worlds_say_which_one_they_are(store: DocStore) -> None:
     files under the match root. Everything else goes through the methods."""
     assert store.documents_on_disk is not _is_db(store)
     assert store.confines_paths is _is_db(store)
+
+
+def test_update_project_keeps_every_concurrent_edit(store: DocStore) -> None:
+    """Eight jobs of one shooter each set their own field through
+    ``update_project``; the document ends with all eight (#1686: saved at
+    the version each had loaded, all but the first failed hosted)."""
+    store.save_project("anna", {"name": "anna", "n": 0}, version=0)
+    errors: list[BaseException] = []
+
+    def writer(key: str) -> None:
+        try:
+            store.update_project("anna", lambda doc: {**doc, key: True, "n": doc["n"] + 1})
+        except BaseException as exc:  # noqa: BLE001 - surfaced below
+            errors.append(exc)
+
+    threads = [threading.Thread(target=writer, args=(f"k{i}",)) for i in range(8)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(timeout=30)
+    assert not errors, errors
+    doc, _ = store.load_project("anna")
+    assert doc is not None and doc["n"] == 8 and all(doc.get(f"k{i}") for i in range(8))
+
+
+def test_update_project_re_merges_onto_the_winner(store: DocStore) -> None:
+    if not _is_db(store):
+        pytest.skip("files serialize on the lock; there is no race to lose")
+    store.save_project("anna", {"name": "anna"}, version=0)
+    calls = 0
+
+    def merge(doc: dict) -> dict:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            _current, version = store.load_project("anna")
+            store.save_project("anna", {**doc, "other": True}, version=version)
+        return {**doc, "mine": True}
+
+    store.update_project("anna", merge)
+    doc, _ = store.load_project("anna")
+    assert calls == 2
+    assert doc == {"name": "anna", "other": True, "mine": True}
+
+
+def test_update_project_refuses_a_missing_document(store: DocStore) -> None:
+    with pytest.raises(LookupError):
+        store.update_project("nobody", lambda doc: doc)
