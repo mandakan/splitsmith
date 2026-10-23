@@ -316,6 +316,11 @@ class _RunningJobs:
 _RUNNING = _RunningJobs()
 
 
+def jobs_running() -> int:
+    """How many jobs this process is running right now."""
+    return _RUNNING.active
+
+
 class WorkerProbe:
     """Samples the worker at a job's start and reports the facts at its end.
 

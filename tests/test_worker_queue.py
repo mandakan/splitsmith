@@ -123,7 +123,7 @@ def test_run_worker_warms_ensemble_and_inits_sentry(monkeypatch: pytest.MonkeyPa
             calls.append("drain")
 
     monkeypatch.setattr(queue_mod, "build_app", lambda _url, **_k: _FakeApp())
-    monkeypatch.setattr(queue_mod, "register_compute_task", lambda _app, _state: None)
+    monkeypatch.setattr(queue_mod, "register_compute_task", lambda _app, _state, **_kw: None)
 
     asyncio.run(run_worker(_FAKE_PG_URL))
 
@@ -167,7 +167,7 @@ def test_run_worker_warmup_failure_is_non_fatal(monkeypatch: pytest.MonkeyPatch)
             calls.append("drain")
 
     monkeypatch.setattr(queue_mod, "build_app", lambda _url, **_k: _FakeApp())
-    monkeypatch.setattr(queue_mod, "register_compute_task", lambda _app, _state: None)
+    monkeypatch.setattr(queue_mod, "register_compute_task", lambda _app, _state, **_kw: None)
 
     asyncio.run(run_worker(_FAKE_PG_URL))
 
@@ -208,7 +208,7 @@ def test_run_worker_defaults_to_blocking_drain(monkeypatch: pytest.MonkeyPatch) 
             captured.update(kwargs)
 
     monkeypatch.setattr(queue_mod, "build_app", lambda _url, **_k: _FakeApp())
-    monkeypatch.setattr(queue_mod, "register_compute_task", lambda _app, _state: None)
+    monkeypatch.setattr(queue_mod, "register_compute_task", lambda _app, _state, **_kw: None)
 
     asyncio.run(run_worker(_FAKE_PG_URL))
 
@@ -251,7 +251,7 @@ def test_run_worker_one_shot_drains_and_exits(monkeypatch: pytest.MonkeyPatch) -
             captured.update(kwargs)
 
     monkeypatch.setattr(queue_mod, "build_app", lambda _url, **_k: _FakeApp())
-    monkeypatch.setattr(queue_mod, "register_compute_task", lambda _app, _state: None)
+    monkeypatch.setattr(queue_mod, "register_compute_task", lambda _app, _state, **_kw: None)
 
     asyncio.run(run_worker(_FAKE_PG_URL, wait=False))
 
@@ -306,7 +306,7 @@ def test_run_worker_retries_db_connect_then_drains(monkeypatch: pytest.MonkeyPat
     import splitsmith.queue as queue_mod
 
     monkeypatch.setattr(queue_mod, "init_sentry", lambda **_k: None)
-    monkeypatch.setattr(queue_mod, "register_compute_task", lambda _app, _state: None)
+    monkeypatch.setattr(queue_mod, "register_compute_task", lambda _app, _state, **_kw: None)
 
     seen: dict[str, object] = {"opens": 0, "drained": False, "sleeps": []}
 
@@ -463,7 +463,8 @@ def test_run_worker_adopts_its_loop_and_disposes_it_after_close(monkeypatch: pyt
     assert calls == ["adopt", "drain", "close", "dispose"]
     assert engines.loops == [worker_loops[0], worker_loops[0]]
     # #1198: the queue pool is named after the process.
-    assert open_kwargs == [{"application_name": "splitsmith-worker-queue"}]
+    # Off Cloud Run there is no per-job cache sweep (the agent sweeps per drain).
+    assert open_kwargs == [{"application_name": "splitsmith-worker-queue", "after_job": None}]
 
 
 def test_run_worker_disposes_its_engine_when_the_queue_open_fails(monkeypatch: pytest.MonkeyPatch) -> None:
