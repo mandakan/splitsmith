@@ -487,6 +487,11 @@ def cmd_run(args: argparse.Namespace) -> None:
             }
             phase("grid", lambda: bool(_post(client, f"{base}/match/compare-export", body)))
         watch.poll()
+        # The list payload is slim (no timings); the per-job route has them.
+        for job_id in list(watch.jobs):
+            detail = client.get(f"/api/me/jobs/{job_id}")
+            if detail.status_code == 200:
+                watch.jobs[job_id] = detail.json()
     since = datetime.fromisoformat(ran_at)
     jobs = [j for j in watch.jobs.values() if datetime.fromisoformat(j["created_at"]) >= since]
     failed = [j for j in jobs if j["status"] == "failed"]
