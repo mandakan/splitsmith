@@ -1,6 +1,12 @@
 {
   "entries": [
     {
+      "id": "beeps-before-previews",
+      "date": "2026-10-23",
+      "title": "Beeps and shots arrive sooner after upload",
+      "body": "On splitsmith.app, beep detection, trims and shot detection now run before the scrub previews Ingest uses, so you can start auditing while the previews finish in the background."
+    },
+    {
       "id": "make-primary-keeps-audit",
       "date": "2026-10-23",
       "title": "Make primary keeps your audit",

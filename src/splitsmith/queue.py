@@ -76,6 +76,20 @@ _ASYNCPG_ONLY_QUERY_KEYS = frozenset(
 # implementation via :func:`register_compute_task`.
 RUN_COMPUTE_JOB_TASK = "run_compute_job"
 
+#: Job kinds nobody is waiting on, deferred below every other kind (#1670).
+#: ``generate_proxy`` runs on every raw upload and only serves Ingest's
+#: scrubber; queued in arrival order it held beep detection, trims and shot
+#: detection behind about 90 s of transcode per clip. Every worker fetches by
+#: ``priority DESC, id ASC`` across all the queues it serves, so these still
+#: drain, in arrival order, once nothing else is waiting.
+BACKGROUND_JOB_KINDS = frozenset({"generate_proxy"})
+BACKGROUND_JOB_PRIORITY = -100
+
+
+def job_priority(kind: str) -> int:
+    """The Procrastinate priority a job of ``kind`` is deferred with."""
+    return BACKGROUND_JOB_PRIORITY if kind in BACKGROUND_JOB_KINDS else 0
+
 
 def _to_psycopg_dsn(sqlalchemy_url: str) -> str:
     """Translate a SQLAlchemy async URL to a psycopg3 DSN.
@@ -330,7 +344,9 @@ async def _defer_on(
     args: dict[str, Any],
     match_id: str | None,
 ) -> None:
-    await app.configure_task(name=RUN_COMPUTE_JOB_TASK, queue=queue_name_for_user(user_id)).defer_async(
+    await app.configure_task(
+        name=RUN_COMPUTE_JOB_TASK, queue=queue_name_for_user(user_id), priority=job_priority(kind)
+    ).defer_async(
         job_id=job_id,
         user_id=user_id,
         kind=kind,
