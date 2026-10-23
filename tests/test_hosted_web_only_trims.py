@@ -149,7 +149,7 @@ def test_a_trim_job_cuts_when_the_stored_wav_is_older_than_the_rendition(
     assert len(cuts) == 1
 
 
-class _Stop(Exception):
+class _StopError(Exception):
     pass
 
 
@@ -165,7 +165,7 @@ def test_shot_detection_reads_the_published_wav_without_the_source(
 
     def detect_stage(**kwargs: object) -> None:
         seen.append(len(kwargs["audio"]))  # type: ignore[arg-type]
-        raise _Stop("stop before the ensemble")
+        raise _StopError("stop before the ensemble")
 
     monkeypatch.setattr(server_mod, "_ensemble_runtime_is_warm", lambda: True)
     monkeypatch.setattr(state.compute, "detect_stage", detect_stage)
@@ -188,7 +188,7 @@ def test_shot_detection_cuts_from_the_source_when_nothing_is_stored(
 
     def detect_stage(**kwargs: object) -> None:
         seen.append(len(kwargs["audio"]))  # type: ignore[arg-type]
-        raise _Stop("stop before the ensemble")
+        raise _StopError("stop before the ensemble")
 
     monkeypatch.setattr(server_mod, "_ensemble_runtime_is_warm", lambda: True)
     monkeypatch.setattr(state.compute, "detect_stage", detect_stage)
@@ -273,7 +273,7 @@ def test_shot_detection_on_a_memory_backed_worker_drops_the_trim_it_cut(
 
     def detect_stage(**kwargs: object) -> None:
         seen.append(len(kwargs["audio"]))  # type: ignore[arg-type]
-        raise _Stop("stop before the ensemble")
+        raise _StopError("stop before the ensemble")
 
     monkeypatch.setattr(server_mod, "_ensemble_runtime_is_warm", lambda: True)
     monkeypatch.setattr(state.compute, "detect_stage", detect_stage)
