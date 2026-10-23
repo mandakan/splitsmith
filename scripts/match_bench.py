@@ -542,7 +542,9 @@ def cmd_run(args: argparse.Namespace) -> None:
             detail = client.get(f"/api/me/jobs/{job_id}")
             if detail.status_code == 200:
                 watch.jobs[job_id] = detail.json()
-    since = datetime.fromisoformat(ran_at)
+    # With settle in the run, the jobs seeding queued (attaching a clip
+    # queues its beep detection) belong to it too.
+    since = datetime.fromisoformat(record["seeded_at"] if "settle" in args.phases else ran_at)
     jobs = [j for j in watch.jobs.values() if datetime.fromisoformat(j["created_at"]) >= since]
     failed = [j for j in jobs if j["status"] == "failed"]
     result = {
