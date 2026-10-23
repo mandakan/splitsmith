@@ -207,6 +207,11 @@ Deploy facts (worker env, `FORWARDED_ALLOW_IPS`, the waitlist cut-over) are in
   with the id and root. Without it a desktop mirror's audio job looks for a
   raw source no mirror has. `tests/test_worker_match_origin.py` and the retry
   test in `tests/test_jobs.py` pin both.
+- Every worker fetches by Procrastinate priority, then arrival, across all
+  queues. A job kind nobody waits on (`generate_proxy`) joins
+  `queue.BACKGROUND_JOB_KINDS` and is deferred below every pipeline job;
+  in arrival order a match's proxies held its beep detection back for tens
+  of minutes. `tests/test_queue_priority.py` pins the drain order.
 
 ## Request-path cost: batch, don't loop
 
