@@ -163,10 +163,16 @@ Deploy facts (worker env, `FORWARDED_ALLOW_IPS`, the waitlist cut-over) are in
   (`SPLITSMITH_WAKE_CHANNEL=r2`): serve writes `WAKE_MARKER_KEY` and each box
   polls its ETag every 30 s. An open SSE channel counts as an active request,
   so it would keep serve (and its billing) awake around the clock. The marker
-  cannot see whether a box is there, so the dispatcher counts it as a wake of
-  every enabled self-hosted worker and relies on the grace escalation to the
-  job; the admin view cannot show a box online in this mode.
-  `tests/test_worker_cloud_run.py` pins the launcher, the marker and the poll.
+  cannot see whether a box is there, so each box also writes a heartbeat
+  object (`HEARTBEAT_KEY_PREFIX` + worker id, every `HEARTBEAT_SECONDS`, its
+  version in the metadata) from its poll loop. The dispatcher skips a row
+  whose heartbeat is missing or older than `HEARTBEAT_STALE_SECONDS` and
+  goes to the next tier (an unreadable one keeps the row; the grace
+  escalation is still the net), and the admin view shows a fresh one online.
+  Never move the heartbeat onto a serve route: a request every few minutes
+  keeps serve and Neon awake, the thing this mode avoids.
+  `tests/test_worker_cloud_run.py` pins the launcher, the marker and the poll;
+  `tests/test_worker_heartbeat.py` the heartbeat.
 
 ## Database connections
 

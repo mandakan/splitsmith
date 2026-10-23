@@ -58,6 +58,7 @@ if TYPE_CHECKING:
     from ..db.share_tokens import ResolvedShare, ShareTokenStore
     from ..db.workers import WorkersStore
     from ..worker_channel import WakeChannelRegistry
+    from ..worker_trigger import WakeMarker
 
 
 logger = logging.getLogger(__name__)
@@ -357,6 +358,9 @@ class AppState:
     # (which must never hold launcher capabilities); set by the non-worker
     # hosted wiring together with the dispatcher that pushes into it.
     wake_channels: WakeChannelRegistry | None = None
+    # The bucket wake marker (``SPLITSMITH_WAKE_CHANNEL=r2``); the admin view
+    # reads each box's heartbeat through it, as no box holds a channel then.
+    wake_marker: WakeMarker | None = None
     # Connection material returned by ``POST /api/workers/register``:
     # database_url + public_url, plus the S3 sub-dict when the bucket is
     # configured (``None`` otherwise). ``None`` in local mode.
