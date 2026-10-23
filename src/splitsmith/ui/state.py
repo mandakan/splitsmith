@@ -328,6 +328,9 @@ class AppState:
     # far more than this file. Hosted never takes it; its optimistic
     # locking is the real mechanism there.
     export_run_lock: threading.Lock = field(default_factory=threading.Lock)
+    #: Serialises a job's project read-modify-write (``DocStore.update_project``)
+    #: on the desktop, where the file store has no version to conflict on.
+    project_lock: threading.Lock = field(default_factory=threading.Lock)
     # The same guard for DESKTOP audit docs (#931): ``save_audit`` holds it
     # across the write and the ``.bak`` rotation, and
     # ``_save_audit_with_remerge`` across its re-load/merge/save. A sibling
@@ -642,7 +645,12 @@ class AppState:
             return DbDocStore(store, match_id)
         if root is None:
             raise _no_project_error()
-        return FileDocStore(root, audit_lock=self.audit_lock, export_run_lock=self.export_run_lock)
+        return FileDocStore(
+            root,
+            audit_lock=self.audit_lock,
+            export_run_lock=self.export_run_lock,
+            project_lock=self.project_lock,
+        )
 
     def docstore(self) -> DocStore:
         """The storage port bound to the current request's match (spec
@@ -660,7 +668,12 @@ class AppState:
         # The pure path, not :meth:`shooter_root`: the file accessors never
         # checked the roster (an unknown slug reads as "no document"), and
         # the routes that must 404 resolve the project first.
-        return FileDocStore(root, audit_lock=self.audit_lock, export_run_lock=self.export_run_lock)
+        return FileDocStore(
+            root,
+            audit_lock=self.audit_lock,
+            export_run_lock=self.export_run_lock,
+            project_lock=self.project_lock,
+        )
 
     def load_audit(self, slug: str, stage_number: int) -> tuple[dict | None, int]:
         """Load a stage's audit doc + its version through the storage port:

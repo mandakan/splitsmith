@@ -694,6 +694,27 @@ def _save_audit_with_remerge(
     return state.docstore().update_audit(slug, stage_number, merge, default)
 
 
+def _update_project(state: AppState, slug: str, apply: Callable[[MatchProject], None]) -> int:
+    """Apply ``apply`` to the shooter's current project and save it, through
+    the storage port's read-modify-write; return the new version.
+
+    For a job that writes a few fields after minutes of work. Saving the
+    project it loaded at its start would overwrite every edit made since,
+    and hosted, where another job of the same shooter commonly saves in
+    between, it fails the job with a version conflict. Here ``apply`` runs
+    on the document as it is now, again on the winner's when a concurrent
+    save got there first, so it must set the job's own fields and nothing
+    else, and be safe to run more than once.
+    """
+
+    def merge(doc: dict) -> dict:
+        project = MatchProject.model_validate(doc)
+        apply(project)
+        return project.model_dump(mode="json")
+
+    return state.docstore().update_project(slug, merge)
+
+
 def _record_export_run(state: AppState, slug: str, run: export_runs.ExportRun) -> None:
     """Append one run to the shooter's export history. Never raises.
 
@@ -2547,14 +2568,14 @@ def register_job_bodies(state: AppState) -> None:
                 )
                 handle.update(message=f"beep saved; trim failed: {exc}")
         handle.update(progress=0.85, message="Saving project...")
-        # Read-modify-write the project file: extract / detection /
-        # ffmpeg trim can take 30+ s during which the user may have
-        # toggled ``beep_reviewed`` on other stages. Reloading and
-        # copying our targeted fields onto the fresh project preserves
-        # those concurrent edits instead of stomping them with the
-        # snapshot we loaded at job start.
-        with handle.timer.phase("persist"):
-            fresh = state.shooter_project(slug)
+
+        # Read-modify-write the project (``_update_project``): extract /
+        # detection / ffmpeg trim can take 30+ s during which the user may
+        # have toggled ``beep_reviewed`` on other stages, or another job of
+        # this shooter saved. Copying only our targeted fields onto the
+        # current project preserves those edits instead of stomping them
+        # with the snapshot we loaded at job start.
+        def _apply_beep(fresh: MatchProject) -> None:
             try:
                 stg_fresh = fresh.stage(stage_number)
             except KeyError:
@@ -2588,7 +2609,16 @@ def register_job_bodies(state: AppState) -> None:
                             raw_fresh.duration_seconds = raw_working.duration_seconds
                         if raw_working.recorded_start is not None and raw_fresh.recorded_start is None:
                             raw_fresh.recorded_start = raw_working.recorded_start
-                fresh.save(state.shooter_root(slug))
+
+        with handle.timer.phase("persist"):
+            _update_project(state, slug, _apply_beep)
+            # The project as saved, for the chaining below.
+            fresh = state.shooter_project(slug)
+            try:
+                stg_fresh = fresh.stage(stage_number)
+            except KeyError:
+                stg_fresh = None
+            v_fresh = stg_fresh.find_video_by_id(video_id) if stg_fresh is not None else None
         handle.timer.set_meta(trimmed=trimmed_ok)
         if trimmed_ok and video.role == "primary" and video.beep_reviewed:
             # Shot detection is primary-only AND gated on
@@ -3056,12 +3086,12 @@ def register_job_bodies(state: AppState) -> None:
             # interim (the review action kicks shot_detect, so concurrent
             # bursts are the common case). Reloading from disk and mutating
             # only the targeted field preserves those concurrent edits.
-            fresh = state.shooter_project(slug)
-            stg_fresh = fresh.stage(stage_number)
-            prim_fresh = stg_fresh.primary()
-            if prim_fresh is not None:
-                prim_fresh.processed["shot_detect"] = True
-                fresh.save(state.shooter_root(slug))
+            def _apply_shots(fresh: MatchProject) -> None:
+                prim_fresh = fresh.stage(stage_number).primary()
+                if prim_fresh is not None:
+                    prim_fresh.processed["shot_detect"] = True
+
+            _update_project(state, slug, _apply_shots)
         handle.timer.set_meta(
             candidate_count=len(candidates),
             kept_count=sum(1 for c in result.candidates if c.kept),
@@ -3185,8 +3215,12 @@ def register_job_bodies(state: AppState) -> None:
 
         handle.update(progress=0.95, message="Saving project...")
         with handle.timer.phase("persist_project"):
-            proj.updated_at = datetime.now(UTC)
-            proj.save(state.shooter_root(slug))
+            exported_at = datetime.now(UTC)
+
+            def _apply_export(fresh: MatchProject) -> None:
+                fresh.updated_at = exported_at
+
+            _update_project(state, slug, _apply_export)
 
         # Hosted: push every produced deliverable to storage so the API
         # container can serve the download. No-op in local mode.
