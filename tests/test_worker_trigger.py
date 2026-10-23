@@ -728,31 +728,38 @@ def _fan_out_starts(
     max_executions: int,
     active: Any = _active,
     triggers: int = 1,
+    instances: int = 1,
 ) -> list[int]:
-    """Trigger ``triggers`` times on a platform-only fleet; return the job starts after each."""
+    """Trigger ``triggers`` times on a platform-only fleet, round-robin over
+    ``instances`` serve processes sharing one database; return the job
+    starts after each."""
     store = _fresh_store()
     requests: list[dict[str, Any]] = []
     starts: list[int] = []
 
     async def scenario() -> None:
         await _platform_row_id(store)
-        dispatcher = WorkerDispatcher(
-            store,
-            WakeChannelRegistry(),
-            cloud_run=_config(),
-            worker_active=active,
-            pending_jobs=_pending(pending),
-            cooldown_seconds=0.0,
-            transport=_transport(requests),
-            watch_seconds=None,
-            live_workers=_count(live),
-            max_executions=max_executions,
-            jobs_per_execution=4,
-        )
-        for _ in range(triggers):
-            await dispatcher.trigger()
+        dispatchers = [
+            WorkerDispatcher(
+                store,
+                WakeChannelRegistry(),
+                cloud_run=_config(),
+                worker_active=active,
+                pending_jobs=_pending(pending),
+                cooldown_seconds=0.0,
+                transport=_transport(requests),
+                watch_seconds=None,
+                live_workers=_count(live),
+                max_executions=max_executions,
+                jobs_per_execution=4,
+            )
+            for _ in range(instances)
+        ]
+        for n in range(triggers):
+            await dispatchers[n % instances].trigger()
             starts.append(len(requests))
-        await _drain_tasks(dispatcher)
+        for dispatcher in dispatchers:
+            await _drain_tasks(dispatcher)
 
     asyncio.run(scenario())
     return starts
@@ -790,6 +797,48 @@ def test_a_second_cold_wake_while_the_first_boots_starts_only_one() -> None:
     """No heartbeat yet at either trigger: the second counts the three still
     booting and starts one (a booting one may have died), not three more."""
     assert _fan_out_starts(pending=12, live=0, max_executions=3, active=_inactive, triggers=2) == [3, 4]
+
+
+def test_the_cap_holds_across_serve_instances() -> None:
+    """Serve runs several instances. One cold-wakes four executions for
+    sixteen jobs; the others, triggered while those four boot without a
+    heartbeat, see them through the database and add none."""
+    assert _fan_out_starts(
+        pending=16, live=0, max_executions=4, active=_sequence(False, True), triggers=3, instances=3
+    ) == [4, 4, 4]
+
+
+def test_a_refused_start_releases_its_claim() -> None:
+    """Claims the platform refused are not counted as booting: the next
+    trigger may start them."""
+    store = _fresh_store()
+    attempts: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if str(request.url) == GCP_METADATA_TOKEN_URL:
+            return httpx.Response(200, json={"access_token": "t", "expires_in": 3600})
+        attempts.append(str(request.url))
+        if len(attempts) == 2:
+            return httpx.Response(429, json={"error": "quota"})
+        return httpx.Response(200, json={"name": "operations/op"})
+
+    async def scenario() -> int:
+        row_id = await _platform_row_id(store)
+        dispatcher = WorkerDispatcher(
+            store,
+            WakeChannelRegistry(),
+            cloud_run=_config(),
+            worker_active=_inactive,
+            pending_jobs=_pending(16),
+            transport=httpx.MockTransport(handler),
+            watch_seconds=None,
+            max_executions=4,
+        )
+        assert await dispatcher.trigger() is True  # one started, the second refused
+        await _drain_tasks(dispatcher)
+        return await store.claim_starts(row_id, wanted=4, live=0, grace_seconds=120, at_least_one=False)
+
+    assert asyncio.run(scenario()) == 3
 
 
 def test_a_watch_re_wake_inside_the_cooldown_starts_nothing() -> None:

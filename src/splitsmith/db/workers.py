@@ -50,6 +50,15 @@ from .models import WorkerRow
 PLATFORM_KINDS: tuple[str, ...] = ("cloud_run",)
 
 
+def _within(stamp: object, now: datetime, seconds: float) -> bool:
+    """Whether the ISO ``stamp`` is less than ``seconds`` old; False if unreadable."""
+    try:
+        at = _aware(datetime.fromisoformat(str(stamp)))
+    except ValueError:
+        return False
+    return (now - at).total_seconds() < seconds
+
+
 def _aware(value: datetime) -> datetime:
     """Coerce a possibly-naive timestamp (SQLite drops tzinfo) to UTC-aware
     so comparisons against datetime.now(UTC) don't raise."""
@@ -286,6 +295,50 @@ class WorkersStore:
             await session.execute(
                 update(WorkerRow).where(WorkerRow.id.in_(worker_ids)).values(last_wake_at=now)
             )
+            await session.commit()
+
+    async def claim_starts(
+        self, worker_id: str, *, wanted: int, live: int, grace_seconds: float, at_least_one: bool
+    ) -> int:
+        """Claim how many executions of a platform worker to start; return the count.
+
+        The executions started within ``grace_seconds`` (booting, so not yet
+        in ``live``) are kept on the row as ``info["recent_starts"]``, so the
+        count is the same for every serve instance: the row is locked for
+        the read-modify-write, and two instances deciding at once each see
+        the other's claims (#1671). Grants ``wanted`` less ``live`` less the
+        booting ones, never below zero, or below one with ``at_least_one``
+        (a cold wake: a booting one may have died), and records the grants.
+        """
+        now = datetime.now(UTC)
+        async with self._session_factory() as session:
+            row = (
+                await session.execute(select(WorkerRow).where(WorkerRow.id == worker_id).with_for_update())
+            ).scalar_one_or_none()
+            if row is None:
+                return 0
+            info = dict(row.info or {})
+            starts = [stamp for stamp in info.get("recent_starts", []) if _within(stamp, now, grace_seconds)]
+            granted = max(1 if at_least_one else 0, wanted - live - len(starts))
+            info["recent_starts"] = starts + [now.isoformat()] * granted
+            row.info = info
+            await session.commit()
+            return granted
+
+    async def release_starts(self, worker_id: str, count: int) -> None:
+        """Drop ``count`` of the newest claims (starts the platform refused)."""
+        if count <= 0:
+            return
+        async with self._session_factory() as session:
+            row = (
+                await session.execute(select(WorkerRow).where(WorkerRow.id == worker_id).with_for_update())
+            ).scalar_one_or_none()
+            if row is None:
+                return
+            info = dict(row.info or {})
+            starts = sorted(info.get("recent_starts", []))
+            info["recent_starts"] = starts[: max(0, len(starts) - count)]
+            row.info = info
             await session.commit()
 
     async def ensure_platform_row(self, kind: str, *, version: str | None = None) -> None:

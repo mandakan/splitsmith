@@ -134,14 +134,14 @@ WATCH_SECONDS = 120.0
 #: watch gives up and leaves the rest to the nets.
 WATCH_MAX_FRUITLESS_WAKES = 3
 # Fan-out (#1671): the most Cloud Run executions a backlog may run at once
-# (``SPLITSMITH_WORKER_MAX_EXECUTIONS``, default 2) and the queued jobs one
+# (``SPLITSMITH_WORKER_MAX_EXECUTIONS``, default 4) and the queued jobs one
 # execution is expected to clear in a few minutes
 # (``SPLITSMITH_WORKER_JOBS_PER_EXECUTION``, default 4: a proxy takes 48 to
 # 151 s on 4 vCPU). N executions bill about what one does for N times as
 # long, plus a startup each.
 ENV_WORKER_MAX_EXECUTIONS = "SPLITSMITH_WORKER_MAX_EXECUTIONS"
 ENV_WORKER_JOBS_PER_EXECUTION = "SPLITSMITH_WORKER_JOBS_PER_EXECUTION"
-DEFAULT_MAX_EXECUTIONS = 2
+DEFAULT_MAX_EXECUTIONS = 4
 DEFAULT_JOBS_PER_EXECUTION = 4
 #: How long a started execution counts as live before its heartbeat shows
 #: (measured: 28 s from start to the first job).
@@ -340,9 +340,9 @@ class WorkerDispatcher:
         self._live_workers = live_workers
         self._max_executions = max_executions
         self._jobs_per_execution = jobs_per_execution
-        # When each recent execution was started: one still booting has no
-        # heartbeat yet, so it counts as live for STARTUP_GRACE_SECONDS.
-        self._recent_starts: list[float] = []
+        # Executions still booting have no heartbeat yet; they are counted
+        # through the platform row (``WorkersStore.claim_starts``), so every
+        # serve instance sees every instance's starts.
 
     def schedule(self) -> None:
         """Run :meth:`trigger` as a background task; never blocks the caller.
@@ -418,10 +418,8 @@ class WorkerDispatcher:
                     # No drain is live on this path: start as many as the
                     # backlog wants, up to the cap (#1671), less those still
                     # booting, and always one (a booting one may have died).
-                    now = time.monotonic()
-                    self._recent_starts = [t for t in self._recent_starts if now - t < STARTUP_GRACE_SECONDS]
-                    count = max(1, await self._executions_wanted() - len(self._recent_starts))
-                    if await self._start_executions(count) == 0:
+                    count = await self._claim(worker.id, live=0, at_least_one=True)
+                    if await self._start_executions(worker.id, count) == 0:
                         continue
                     woken_ids.append(worker.id)
                 elif self._wake_marker is not None:
@@ -507,12 +505,31 @@ class WorkerDispatcher:
             return 1
         return min(self._max_executions, max(1, math.ceil(pending / self._jobs_per_execution)))
 
-    async def _start_executions(self, count: int) -> int:
-        """Start ``count`` executions of the worker job; return how many started.
+    async def _claim(self, worker_id: str, *, live: int, at_least_one: bool) -> int:
+        """How many executions to start: what the backlog wants, less the
+        ``live`` drains and the ones booting on any serve instance
+        (``WorkersStore.claim_starts``). A failed claim starts one on a cold
+        wake (the wake must not be lost) and none beside a live drain."""
+        wanted = await self._executions_wanted()
+        try:
+            return await self._store.claim_starts(
+                worker_id,
+                wanted=wanted,
+                live=live,
+                grace_seconds=STARTUP_GRACE_SECONDS,
+                at_least_one=at_least_one,
+            )
+        except Exception:
+            logger.warning("worker dispatcher: start claim failed", exc_info=True)
+            return 1 if at_least_one else 0
+
+    async def _start_executions(self, worker_id: str, count: int) -> int:
+        """Start ``count`` claimed executions of the worker job; return how many started.
 
         Separate executions rather than one with several tasks: each drains
         and exits on its own, and Procrastinate's locking hands every job to
-        one of them. Stops at the first refused start.
+        one of them. Stops at the first refused start and releases the
+        claims it did not use.
         """
         started = 0
         for _ in range(count):
@@ -522,7 +539,11 @@ class WorkerDispatcher:
                 logger.warning("worker dispatcher: cloud run job start failed", exc_info=True)
                 break
             started += 1
-            self._recent_starts.append(time.monotonic())
+        if started < count:
+            try:
+                await self._store.release_starts(worker_id, count - started)
+            except Exception:
+                logger.warning("worker dispatcher: releasing unused start claims failed", exc_info=True)
         if started:
             logger.info("worker dispatcher: cloud run job started (%s execution(s))", started)
         return started
@@ -531,26 +552,25 @@ class WorkerDispatcher:
         """Add Cloud Run executions beside a live drain when the backlog outgrows it (#1671).
 
         The live heartbeats plus executions started within
-        :data:`STARTUP_GRACE_SECONDS` (booting, no heartbeat yet) are the
-        capacity; a backlog that wants more than that, up to the cap, gets
-        the difference. An execution counted both ways (started recently
-        and already beating) only makes this start fewer. Off unless a
-        cap above one, a live-worker count and the platform leg are all
-        configured, and the platform row is enabled. Runs under the lock.
+        :data:`STARTUP_GRACE_SECONDS` by any serve instance (booting, no
+        heartbeat yet) are the capacity; a backlog that wants more than
+        that, up to the cap, gets the difference. An execution counted both
+        ways (started recently and already beating) only makes this start
+        fewer. Off unless a cap above one, a live-worker count and the
+        platform leg are all configured, and the platform row is enabled.
+        Runs under the lock.
         """
         if self._max_executions == 1 or self._live_workers is None or self._cloud_run is None:
             return False
-        now = time.monotonic()
-        self._recent_starts = [t for t in self._recent_starts if now - t < STARTUP_GRACE_SECONDS]
         platform = [w for w in await self._store.list_enabled() if w.kind == "cloud_run"]
         if not platform:
             return False
-        capacity = await self._live_workers() + len(self._recent_starts)
-        extra = await self._executions_wanted() - capacity
+        live = await self._live_workers()
+        extra = await self._claim(platform[0].id, live=live, at_least_one=False)
         if extra <= 0:
             return False
-        logger.info("worker dispatcher: backlog outgrows %s live drain(s); adding %s", capacity, extra)
-        if await self._start_executions(extra) == 0:
+        logger.info("worker dispatcher: backlog outgrows %s live drain(s); adding %s", live, extra)
+        if await self._start_executions(platform[0].id, extra) == 0:
             return False
         try:
             await self._store.touch_wake([w.id for w in platform])

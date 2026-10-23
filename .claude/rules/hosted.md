@@ -195,11 +195,12 @@ Deploy facts (worker env, `FORWARDED_ALLOW_IPS`, the waitlist cut-over) are in
   with no live heartbeat is woken again, and the watch gives up after three
   re-wakes that cleared nothing. A backlog beside a live drain gets more
   executions, one per `SPLITSMITH_WORKER_JOBS_PER_EXECUTION` queued jobs, up to
-  `SPLITSMITH_WORKER_MAX_EXECUTIONS` (default 2). The cap and the count of
-  booting executions live in one serve process, so with serve at
-  `--max-instances 3` the bound is the cap times the instances (6 at the
-  defaults), and an execution is invisible to other instances for its ~28 s
-  boot. `tests/test_worker_trigger.py`
+  `SPLITSMITH_WORKER_MAX_EXECUTIONS` (default 4). Executions still booting
+  (no heartbeat yet) are claimed on the platform row under a row lock
+  (`WorkersStore.claim_starts`, `info["recent_starts"]`, 120 s), so the cap
+  holds across serve's instances; never count them in process memory, which
+  let each of the three instances start a full cap. A cold wake with no live
+  drain still starts at least one, as before fan-out. `tests/test_worker_trigger.py`
   and `tests/test_worker_drain_lifecycle.py` pin all three.
 
 ## Database connections
