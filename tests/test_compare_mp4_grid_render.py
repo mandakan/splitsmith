@@ -550,6 +550,77 @@ def test_renders_each_stage_then_concats(tmp_path: Path):
     assert result.output_path == tmp_path / "grid.mp4"
 
 
+def test_a_tile_cut_from_an_audit_trim_is_a_degradation(tmp_path: Path):
+    """A stage with no exported trim renders from the audit trim (#1681);
+    the result says so, once, naming each such tile, and the caller hears
+    it before the encode starts."""
+    _calls, runner = _recorder()
+    notices: list[str] = []
+    shooters = _shooters(
+        {
+            "Mathias": {1: replace(_bundle(1), trim_source="audit"), 2: _bundle(2)},
+            "Anders": {1: _bundle(1), 2: replace(_bundle(2), trim_source="audit")},
+        }
+    )
+
+    result = mp4_grid.render_grid_mp4(
+        shooters,
+        audio_label="Mathias",
+        output_path=tmp_path / "grid.mp4",
+        canvas=CANVAS,
+        ffmpeg_binary="/bin/ffmpeg",
+        runner=runner,
+        work_dir=tmp_path / "work",
+        on_notice=notices.append,
+    )
+
+    (degradation,) = result.degradations
+    assert "audit trim" in degradation.summary
+    assert "Mathias stage 1" in degradation.summary and "Anders stage 2" in degradation.summary
+    assert "Mathias stage 2" not in degradation.summary
+    assert notices == [degradation.detail]
+
+
+def test_tiles_cut_from_source_are_their_own_degradation(tmp_path: Path):
+    """Hosted, a tile with no export is cut from the source by the job
+    (#1681): said as "cut from source", apart from any audit-trim tiles."""
+    _calls, runner = _recorder()
+    shooters = _shooters(
+        {
+            "Mathias": {1: replace(_bundle(1), trim_source="source"), 2: _bundle(2)},
+            "Anders": {1: replace(_bundle(1), trim_source="audit"), 2: _bundle(2)},
+        }
+    )
+
+    result = mp4_grid.render_grid_mp4(
+        shooters,
+        audio_label="Mathias",
+        output_path=tmp_path / "grid.mp4",
+        canvas=CANVAS,
+        ffmpeg_binary="/bin/ffmpeg",
+        runner=runner,
+        work_dir=tmp_path / "work",
+    )
+
+    audit, source = result.degradations
+    assert audit.summary == "cut from the audit trim (no exported trim): Anders stage 1"
+    assert source.summary == "cut from source (no exported trim): Mathias stage 1"
+
+
+def test_no_audit_trim_tile_means_no_degradation(tmp_path: Path):
+    _calls, runner = _recorder()
+    result = mp4_grid.render_grid_mp4(
+        _shooters(),
+        audio_label="Mathias",
+        output_path=tmp_path / "grid.mp4",
+        canvas=CANVAS,
+        ffmpeg_binary="/bin/ffmpeg",
+        runner=runner,
+        work_dir=tmp_path / "work",
+    )
+    assert result.degradations == ()
+
+
 def test_the_stitch_keeps_every_audio_track_and_the_chosen_default(tmp_path: Path):
     # Stream copy drops the track names and re-derives the default flag,
     # so the stitch has to restate both. Get the offset wrong here and

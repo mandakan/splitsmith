@@ -1768,6 +1768,10 @@ def no_trims_refusal(bundles: list[CompareShooterBundle], stage_numbers: list[in
     offered only on a local install, where one exists; a hosted user has none. A
     selection where nobody even has a confirmed beep is not an export
     problem, so it points at Audit instead.
+
+    Hosted needs no export (#1681): the render job cuts a missing stage
+    trim from the source, so a stage is missing there only for want of a
+    confirmed beep, a stage time or the source, and that is what it says.
     """
     wanted = set(stage_numbers)
     missing: dict[str, list[int]] = {}
@@ -1776,19 +1780,29 @@ def no_trims_refusal(bundles: list[CompareShooterBundle], stage_numbers: list[in
             if miss.stage_number in wanted:
                 missing.setdefault(bundle.label, []).append(miss.stage_number)
     if not missing:
+        then = "" if hosted else " export their trims,"
         return (
             f"Nothing to put in the grid: no shooter has a confirmed beep on {_stage_list(stage_numbers)}. "
-            "Confirm each shooter's beep in Audit, export their trims, then render the grid again."
+            f"Confirm each shooter's beep in Audit,{then} then render the grid again."
         )
     who = "; ".join(f"{label} ({_stage_list(numbers)})" for label, numbers in sorted(missing.items()))
+    if hosted:
+        # Hosted needs no exported trim (#1681): the render cuts a missing
+        # one from the footage, given a confirmed beep, a stage time and the
+        # footage itself. Only those can be missing here.
+        return (
+            "The grid cuts a stage from each shooter's footage when it has no exported trim, which needs "
+            "a confirmed beep, the stage time and the footage itself, and none of the selected stages has "
+            f"all three. Missing: {who}. Confirm each of those beeps in Audit and check the stage time and "
+            "footage on Footage, then render the grid again."
+        )
     text = (
-        f"The grid is cut from each shooter's exported trims, and none of the selected stages has one yet. "
+        "The grid is cut from each shooter's exported trims, or from their audit trims when those were "
+        "cut for the current beep and stage time, and none of the selected stages has either. "
         f"Missing: {who}. Export them first: on Export, for each of those shooters, pick the Quick trims "
         "preset and press Export trims, then render the grid again."
     )
-    if not hosted:
-        text += ' From a terminal, run "splitsmith match trims" to export every shooter\'s trims at once.'
-    return text
+    return text + ' From a terminal, run "splitsmith match trims" to export every shooter\'s trims at once.'
 
 
 @router.post("/api/match/compare-export")
@@ -1840,6 +1854,7 @@ async def export_compare_grid(request: Request, req: CompareGridRequest) -> JSON
             inset=req.inset_camera,
             state=state,
             presence=StoragePresence(state.storage) if state.storage is not None else None,
+            stage_numbers=req.stage_numbers,
         )
     except camera_select.CameraResolutionError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc

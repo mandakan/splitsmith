@@ -27,6 +27,7 @@ shelling out.
 from __future__ import annotations
 
 import fcntl
+import json
 import os
 import platform
 import subprocess
@@ -433,6 +434,68 @@ def transcode_web_trim(
 #: ``trimmed/stage<N>_cam_<video_id>_trimmed.mp4`` -- the audit trims a
 #: ``trimmed/`` dir holds, the same shape ``sync.plan`` pushes.
 TRIMMED_CLIP_GLOB = "stage*_cam_*_trimmed.mp4"
+
+
+def audit_trim_name(stage_number: int, video_id: str) -> str:
+    """Basename of a video's audit trim under ``trimmed/`` (see
+    :data:`TRIMMED_CLIP_GLOB`)."""
+    return f"stage{stage_number}_cam_{video_id}_trimmed.mp4"
+
+
+def trim_params_path(output: Path) -> Path:
+    """Sidecar JSON next to a trimmed MP4 recording the inputs that
+    produced it. Used to invalidate the cache when beep_time, stage_time,
+    or the buffer settings change without the source file moving."""
+    return output.with_name(f"{output.stem}.params.json")
+
+
+def audit_trim_params(
+    *,
+    beep_time: float,
+    stage_time_seconds: float,
+    pre_buffer_seconds: float,
+    post_buffer_seconds: float,
+) -> dict[str, float]:
+    """What the params sidecar of an audit trim cut now would record: the
+    one spelling the trim job writes and every reader that asks "is this
+    trim current" compares against."""
+    return {
+        "beep_time": round(float(beep_time), 4),
+        "stage_time_seconds": round(float(stage_time_seconds), 4),
+        "pre_buffer_seconds": float(pre_buffer_seconds),
+        "post_buffer_seconds": float(post_buffer_seconds),
+    }
+
+
+def source_mtime(source: Path | None) -> float | None:
+    """``source``'s mtime when it is on this disk, else ``None`` (no source
+    named, an unplugged drive, a hosted container without the raw file)."""
+    if source is None:
+        return None
+    try:
+        return source.stat().st_mtime
+    except OSError:
+        return None
+
+
+def audit_trim_matches(trim: Path, params: dict[str, float], *, source: Path | None = None) -> bool:
+    """Whether the audit trim at ``trim`` is current on this disk: non-empty,
+    its params sidecar records exactly ``params`` (:func:`audit_trim_params`),
+    and it is not older than ``source`` when that is on this disk. The rule
+    the trim job reuses a cut by (``ui.audio.ensure_video_audit_trim``); a
+    missing or unreadable sidecar is a mismatch, since nothing says what the
+    trim was cut for."""
+    try:
+        stat = trim.stat()
+        if stat.st_size == 0:
+            return False
+        newer_source = source_mtime(source)
+        if newer_source is not None and stat.st_mtime < newer_source:
+            return False
+        recorded = json.loads(trim_params_path(trim).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return False
+    return recorded == params
 
 
 def backfill_web_trims(

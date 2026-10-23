@@ -271,6 +271,54 @@ def test_missing_per_cam_trim_warns_instead_of_silently_emptying(
     assert "_cam_" in out  # names the file it looked for
 
 
+def test_match_export_uses_a_current_audit_trim_and_says_so(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``compare export <match>`` shares the loader, so a stage with only
+    a current audit trim is cut from it (#1681); the run names the tile and
+    the file (the FCPXML stage marker is pinned in ``test_compare_emitter``)."""
+    import json
+
+    import splitsmith.compare.emitter as em_mod
+    import splitsmith.compare.project_loader as pl_mod
+
+    match_root = _seed_match_with_two_cams(tmp_path / "match")
+    shooter_root = Match.shooter_root(match_root, "mathias")
+    project = MatchProject.load(shooter_root)
+    (project.exports_path(shooter_root) / f"{stage_file_base(1, 'Skipper')}_trimmed.mp4").unlink()
+    primary = project.stage(1).primary()
+    assert primary is not None
+    audit = project.trimmed_path(shooter_root) / f"stage1_cam_{primary.video_id}_trimmed.mp4"
+    audit.parent.mkdir(parents=True, exist_ok=True)
+    audit.write_bytes(b"audit trim")
+    audit.with_name(f"{audit.stem}.params.json").write_text(
+        json.dumps(
+            {
+                "beep_time": 5.0,
+                "stage_time_seconds": 10.0,
+                "pre_buffer_seconds": 5.0,
+                "post_buffer_seconds": 5.0,
+            }
+        ),
+        encoding="utf-8",
+    )
+    real = pl_mod.load_shooter_from_match
+    monkeypatch.setattr(
+        pl_mod, "load_shooter_from_match", lambda *a, **kw: real(*a, **{**kw, "probe": _fake_probe})
+    )
+    monkeypatch.setattr(em_mod.subprocess, "run", _ffmpeg_stub_factory())
+    output = tmp_path / "out.fcpxml"
+
+    result = CliRunner().invoke(
+        app, ["compare", "export", str(match_root), "--audio-from", "mathias", "--output", str(output)]
+    )
+
+    out = " ".join(result.output.split())
+    assert result.exit_code == 0, result.output
+    assert "Mathias stage 1 (Skipper): no exported trim, so the clip is the audit trim" in out
+    assert "black filler" not in out
+
+
 def test_camera_flag_rejects_malformed_pair(tmp_path: Path) -> None:
     match_root = _seed_match_with_two_cams(tmp_path / "match")
     runner = CliRunner()

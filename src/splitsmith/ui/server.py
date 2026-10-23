@@ -1589,6 +1589,8 @@ def _load_compare_bundles(
     inset: str | None = None,
     state: AppState | None = None,
     presence: StoragePresence | None = None,
+    stage_numbers: list[int] | None = None,
+    cut_dir: Path | None = None,
 ) -> list[project_loader.CompareShooterBundle]:
     """Load every shooter on ``match`` as a compare-grid bundle.
 
@@ -1607,8 +1609,16 @@ def _load_compare_bundles(
     carries which stages have a trim and nothing measured from the file
     (a request must not pull media; a full match's trims are gigabytes).
     The worker passes none and pulls each trim to render it.
+
+    A selected stage (``stage_numbers``) with no exported trim (#1681):
+    locally the loader falls back to a current audit trim on disk. A
+    storage-backed project keeps no full-resolution trim (#1683), so there
+    the render job cuts the stage trim from the source into ``cut_dir``
+    (:func:`_cut_stage_from_source`), and the request only checks that it
+    could: a confirmed beep, a stage time and the source in the listing.
     """
     cameras = cameras or {}
+    wanted = set(stage_numbers) if stage_numbers is not None else None
     bundles: list[project_loader.CompareShooterBundle] = []
     for slug in match.shooters:
         # Hosted (#755): the project document is in the state store and
@@ -1619,9 +1629,11 @@ def _load_compare_bundles(
         project: MatchProject | None = None
         ensure_trim: Callable[[Path], object] | None = None
         trim_exists: Callable[[Path], bool] | None = None
+        cut_from_source: project_loader.SourceCut | None = None
         if state is not None:
             project = state.shooter_project(slug)
             bound_project = project
+            root = state.shooter_root(slug)
 
             if presence is not None:
 
@@ -1636,6 +1648,30 @@ def _load_compare_bundles(
                     return export_storage.pull_export_file(_project, trim)
 
                 ensure_trim = _pull
+
+            if audio_helpers.stores_web_only(project):
+
+                def _source_cut(
+                    stage: StageEntry,
+                    video: StageVideo,
+                    _project: MatchProject = bound_project,
+                    _root: Path = root,
+                    _slug: str = slug,
+                ) -> Path | None:
+                    if wanted is not None and stage.stage_number not in wanted:
+                        return None
+                    if not _source_cut_allowed(stage, video):
+                        return None
+                    if presence is not None or cut_dir is None:
+                        # The request: plan it, never fetch it.
+                        if not _source_listed(_project, _root, video, presence):
+                            return None
+                        return _root / "compare-grid-cut" / _source_cut_name(_slug, stage, video)
+                    return _cut_stage_from_source(
+                        _project, _root, cut_dir / _source_cut_name(_slug, stage, video), stage, video
+                    )
+
+                cut_from_source = _source_cut
         label = _shooter_label(match, match_root, slug, project=project)
         camera = cameras.get(slug, cameras.get(label))
         bundles.append(
@@ -1649,10 +1685,91 @@ def _load_compare_bundles(
                 project=project,
                 ensure_trim=ensure_trim,
                 trim_exists=trim_exists,
+                cut_from_source=cut_from_source,
                 probe=_unprobed if trim_exists is not None else None,
             )
         )
     return bundles
+
+
+def _source_cut_allowed(stage: StageEntry, video: StageVideo) -> bool:
+    """A stage trim is cut from the source only for a confirmed beep and a
+    stage time: the window the exporter would cut. An unreviewed beep may
+    be wrong, and a tile cut around it would be a different stage."""
+    return video.beep_reviewed and video.beep_time is not None and stage.time_seconds > 0
+
+
+def _source_cut_name(slug: str, stage: StageEntry, video: StageVideo) -> str:
+    return f"{slug}-stage{stage.stage_number}_cam_{video.video_id}_cut.mp4"
+
+
+def _source_listed(
+    project: MatchProject, root: Path, video: StageVideo, presence: StoragePresence | None
+) -> bool:
+    """Whether the source is there, from the request's listing (a HEAD
+    when the listing failed), never by fetching it."""
+    if presence is None:
+        return project.source_present(root, video.path)
+    try:
+        return presence.source_present(project, root, video.path)
+    except OSError:
+        return project.source_present(root, video.path)
+
+
+def _cut_stage_from_source(
+    project: MatchProject, root: Path, out: Path, stage: StageEntry, video: StageVideo
+) -> Path | None:
+    """Cut one grid tile's stage trim from the source in the render job
+    (#1681): the export's own window and stream copy
+    (``trim.trim_video(mode="lossless")`` with the project's beep, stage
+    time and buffers), no re-encode. One source read per tile. On a
+    memory-backed disk (Cloud Run) the source is dropped as soon as the cut
+    is done, so tiles are cut one at a time and a match's sources never sit
+    in memory together; the cut itself lives in the job's scratch dir and
+    goes with it. ``None`` (logged) when the source is missing or the cut
+    fails: the stage is then a missing tile like any other."""
+    assert video.beep_time is not None  # _source_cut_allowed
+    source: Path | None = None
+    try:
+        source = project.resolve_video_path(root, video.path)
+        if not source.exists():
+            logger.warning("compare grid: no source for %s stage %d", root.name, stage.stage_number)
+            return None
+        out.parent.mkdir(parents=True, exist_ok=True)
+        trim_module.trim_video(
+            source,
+            out,
+            beep_time=video.beep_time,
+            stage_time=stage.time_seconds,
+            pre_buffer_seconds=project.trim_pre_buffer_seconds,
+            post_buffer_seconds=project.trim_post_buffer_seconds,
+            mode="lossless",
+            ffmpeg_binary=process_runtime().ffmpeg_binary,
+            overwrite=True,
+        )
+    except Exception as exc:  # noqa: BLE001 - one tile's failure is a missing tile, not a failed grid
+        logger.warning("compare grid: could not cut %s from its source: %s", out.name, exc)
+        out.unlink(missing_ok=True)
+        return None
+    finally:
+        if source is not None:
+            _release_local_source(project, root, video, source)
+    return out
+
+
+def _release_local_source(project: MatchProject, root: Path, video: StageVideo, source: Path) -> None:
+    """Drop a source mirrored down for one cut, on a memory-backed disk
+    only (Cloud Run, ``source_cache.memory_backed_disk``): the raw file
+    would otherwise sit in the container's memory beside the next tile's
+    until the per-job sweep. A box with a real disk keeps its cache."""
+    from ..source_cache import memory_backed_disk
+
+    if project._storage is None or video.path.is_absolute() or not memory_backed_disk():
+        return
+    try:
+        source.unlink(missing_ok=True)
+    except OSError as exc:
+        logger.info("compare grid: could not drop %s: %s", source, exc)
 
 
 def _unprobed(_trim: Path) -> VideoMetadata:
@@ -1781,181 +1898,201 @@ def _run_compare_grid(
     stem = _compare_output_stem(req.output_name)
     requested = sorted(set(req.stage_numbers))
 
-    handle.update(progress=0.02, message="Loading shooters...")
-    with handle.timer.phase("load_shooters"):
-        if state is not None:
-            # The overlay reads each stage's audit off disk; materialize
-            # the selected stages' docs before the loader builds paths (a
-            # no-op where the documents are the files).
-            for slug in match.shooters:
-                for number in requested:
-                    state.materialize_audit(slug, number)
-        bundles = _load_compare_bundles(root, match, cameras=req.cameras, inset=req.inset_camera, state=state)
-        filtered = _filter_bundles_to_stages(bundles, requested)
-        audio_project = state.shooter_project(req.audio_from) if state is not None else None
-        audio_label = _shooter_label(match, root, req.audio_from, project=audio_project)
-
     output_dir = root / "exports"
     output_dir.mkdir(parents=True, exist_ok=True)
-    output_path = output_dir / f"{stem}.mp4"
+    # Hosted: stage trims the job cuts from the source for tiles with no
+    # exported trim (#1681) live here for the render and go with it.
+    cuts = tempfile.TemporaryDirectory(dir=output_dir, prefix=".compare-grid-cuts-")
+    try:
+        handle.update(progress=0.02, message="Loading shooters...")
+        with handle.timer.phase("load_shooters"):
+            if state is not None:
+                # The overlay reads each stage's audit off disk; materialize
+                # the selected stages' docs before the loader builds paths (a
+                # no-op where the documents are the files).
+                for slug in match.shooters:
+                    for number in requested:
+                        state.materialize_audit(slug, number)
+            bundles = _load_compare_bundles(
+                root,
+                match,
+                cameras=req.cameras,
+                inset=req.inset_camera,
+                state=state,
+                stage_numbers=requested,
+                cut_dir=Path(cuts.name),
+            )
+            filtered = _filter_bundles_to_stages(bundles, requested)
+            audio_project = state.shooter_project(req.audio_from) if state is not None else None
+            audio_label = _shooter_label(match, root, req.audio_from, project=audio_project)
 
-    # Planned up front purely for the progress messages and the skipped
-    # count -- pure planning, no ffmpeg. ``render_grid_mp4`` plans again
-    # internally from the same inputs and so sees the same stages.
-    plans = mp4_grid.build_stage_plans(
-        filtered,
-        audio_label=audio_label,
-        head_pad_seconds=1.0,
-        tail_pad_seconds=0.5,
-        layout_2up="horizontal",
-    )
-    skipped = [number for number in requested if number not in {p.stage_number for p in plans}]
+        output_path = output_dir / f"{stem}.mp4"
 
-    def _notice(text: str) -> None:
-        # Said as it is decided, before any stage encodes: the message is
-        # what the job shows while the render runs, and the same text
-        # lands on the result as ``degradations`` for the viewer who only
-        # reads the end.
-        handle.update(message=text)
-
-    handle.update(progress=0.05, message=f"Rendering {len(plans)} stage(s)...")
-    with (
-        handle.timer.phase("render"),
-        tempfile.TemporaryDirectory(dir=output_dir, prefix=".compare-grid-work-") as tmp,
-    ):
-        account_brand = account_profile_module.load_brand(
-            state.account_profile if state is not None else account_profile_module.JsonAccountProfileStore()
-        )
-        event_logo = ensure_local_event_logo(
-            match.branding,
-            root,
-            storage=state.storage if state is not None else None,
-            match_id=match.match_id,
-        )
-        identities = grid_identities(
-            filtered,
-            look=load_look(req.overlay_theme),
-            book=shooter_book_module.load_snapshot(
-                state.shooter_book if state is not None else shooter_book_module.JsonShooterBookStore()
-            ),
-        )
-        title_page, closing = compare_cards.title_cards(
-            match,
-            compare_cards.CardOptions(
-                stage_titles=req.stage_titles,
-                title_duration_seconds=req.title_duration_seconds,
-                title_page=req.title_page,
-                title_info=req.title_info,
-                title_division=req.title_division,
-                title_page_duration_seconds=req.title_page_duration_seconds,
-                closing_card=req.closing_card,
-                made_with=req.made_with,
-                account_brand=req.account_brand,
-                card_variant=req.card_variant,
-                title_page_variant=req.title_page_variant,
-                closing_card_variant=req.closing_card_variant,
-            ),
-            divisions=compare_cards.bundle_divisions(filtered),
-            brand=account_brand,
-            event_logo=event_logo,
-        )
-        result = mp4_grid.render_grid_mp4(
+        # Planned up front purely for the progress messages and the skipped
+        # count -- pure planning, no ffmpeg. ``render_grid_mp4`` plans again
+        # internally from the same inputs and so sees the same stages.
+        plans = mp4_grid.build_stage_plans(
             filtered,
             audio_label=audio_label,
-            output_path=output_path,
-            canvas=mp4_grid.GridCanvas(width=req.canvas_width, height=req.canvas_height),
-            work_dir=Path(tmp),
-            progress=_compare_grid_progress(handle),
-            segment_cache=match_export_helpers.render_segment_cache(Config().output),
-            title_page=title_page,
-            closing=closing,
-            stage_titles=req.stage_titles,
-            title_duration_seconds=req.title_duration_seconds,
-            card_variant=req.stage_card_variant or req.card_variant,
-            identities=identities,
-            transitions=uniform_transitions(req.transition_kind, req.transition_duration_seconds, len(plans)),
-            overlay=req.overlay,
-            overlay_theme=req.overlay_theme,
-            summary_hold_seconds=req.summary_hold_seconds,
-            on_notice=_notice,
-            inset=mp4_grid.GridInset(corner=req.inset_corner, scale=GRID_INSET_SCALE[req.inset_size]),
-            free_cell=req.free_cell,
-            match_name=match.name or "",
-            match_date=match.match_date.isoformat() if match.match_date else None,
-            match_summary_seconds=req.match_summary_seconds if req.match_summary else 0.0,
-            logo_spots=frozenset(req.logo_spots),
-            breakdown=req.breakdown,
-            brand=account_brand if req.account_brand else None,
+            head_pad_seconds=1.0,
+            tail_pad_seconds=0.5,
+            layout_2up="horizontal",
         )
+        skipped = [number for number in requested if number not in {p.stage_number for p in plans}]
 
-    youtube_files: list[Path] = []
-    if req.youtube_sidecar:
-        youtube_files = _write_grid_youtube_sidecar(
-            match,
-            req,
-            result,
-            plans,
-            thumbnail_data=_grid_thumbnail_data(
+        def _notice(text: str) -> None:
+            # Said as it is decided, before any stage encodes: the message is
+            # what the job shows while the render runs, and the same text
+            # lands on the result as ``degradations`` for the viewer who only
+            # reads the end.
+            handle.update(message=text)
+
+        handle.update(progress=0.05, message=f"Rendering {len(plans)} stage(s)...")
+        with (
+            handle.timer.phase("render"),
+            tempfile.TemporaryDirectory(dir=output_dir, prefix=".compare-grid-work-") as tmp,
+        ):
+            account_brand = account_profile_module.load_brand(
+                state.account_profile
+                if state is not None
+                else account_profile_module.JsonAccountProfileStore()
+            )
+            event_logo = ensure_local_event_logo(
+                match.branding,
+                root,
+                storage=state.storage if state is not None else None,
+                match_id=match.match_id,
+            )
+            identities = grid_identities(
+                filtered,
+                look=load_look(req.overlay_theme),
+                book=shooter_book_module.load_snapshot(
+                    state.shooter_book if state is not None else shooter_book_module.JsonShooterBookStore()
+                ),
+            )
+            title_page, closing = compare_cards.title_cards(
+                match,
+                compare_cards.CardOptions(
+                    stage_titles=req.stage_titles,
+                    title_duration_seconds=req.title_duration_seconds,
+                    title_page=req.title_page,
+                    title_info=req.title_info,
+                    title_division=req.title_division,
+                    title_page_duration_seconds=req.title_page_duration_seconds,
+                    closing_card=req.closing_card,
+                    made_with=req.made_with,
+                    account_brand=req.account_brand,
+                    card_variant=req.card_variant,
+                    title_page_variant=req.title_page_variant,
+                    closing_card_variant=req.closing_card_variant,
+                ),
+                divisions=compare_cards.bundle_divisions(filtered),
+                brand=account_brand,
+                event_logo=event_logo,
+            )
+            result = mp4_grid.render_grid_mp4(
+                filtered,
+                audio_label=audio_label,
+                output_path=output_path,
+                canvas=mp4_grid.GridCanvas(width=req.canvas_width, height=req.canvas_height),
+                work_dir=Path(tmp),
+                progress=_compare_grid_progress(handle),
+                segment_cache=match_export_helpers.render_segment_cache(Config().output),
+                title_page=title_page,
+                closing=closing,
+                stage_titles=req.stage_titles,
+                title_duration_seconds=req.title_duration_seconds,
+                card_variant=req.stage_card_variant or req.card_variant,
+                identities=identities,
+                transitions=uniform_transitions(
+                    req.transition_kind, req.transition_duration_seconds, len(plans)
+                ),
+                overlay=req.overlay,
+                overlay_theme=req.overlay_theme,
+                summary_hold_seconds=req.summary_hold_seconds,
+                on_notice=_notice,
+                inset=mp4_grid.GridInset(corner=req.inset_corner, scale=GRID_INSET_SCALE[req.inset_size]),
+                free_cell=req.free_cell,
+                match_name=match.name or "",
+                match_date=match.match_date.isoformat() if match.match_date else None,
+                match_summary_seconds=req.match_summary_seconds if req.match_summary else 0.0,
+                logo_spots=frozenset(req.logo_spots),
+                breakdown=req.breakdown,
+                brand=account_brand if req.account_brand else None,
+            )
+
+        youtube_files: list[Path] = []
+        if req.youtube_sidecar:
+            youtube_files = _write_grid_youtube_sidecar(
                 match,
                 req,
-                identities=[identities[label] for label in sorted(identities)],
-                brand=account_brand if req.account_brand else None,
-                event_logo=event_logo,
-            ),
-        )
-
-    if state is not None and state.storage is not None:
-        # A no-op without a match id (local mode has no match-scoped store).
-        handle.update(progress=0.98, message="Uploading the grid...")
-        with handle.timer.phase("push"):
-            export_storage.push_match_export_file(state.storage, current_match_id.get(), result.output_path)
-            for extra in youtube_files:
-                export_storage.push_match_export_file(state.storage, current_match_id.get(), extra)
-
-    handle.update(progress=1.0, message=f"Wrote {output_path.name}")
-    handle.set_result(
-        {
-            "output_path": str(result.output_path),
-            # The deliverable's name, resolvable in either mode through
-            # ``GET /api/match/exports/file/{name}`` (#755). An absolute
-            # ``output_path`` means nothing to a hosted API container.
-            "output_name": result.output_path.name,
-            "stages_rendered": len(result.stages) - len(result.failed),
-            "stages_total": len(requested),
-            "skipped_stages": skipped,
-            "missing_trims": _compare_missing_trims(bundles, requested),
-            "failed": [
-                {"stage_number": s.stage_number, "stage_name": s.stage_name, "error": s.error}
-                for s in result.failed
-            ],
-            # What the render did *not* do (#705): a host with no usable
-            # browser or a drawtext-less ffmpeg still renders, and this is
-            # how the viewer learns the hold or the clock was skipped.
-            "degradations": [{"summary": d.summary, "detail": d.detail} for d in result.degradations],
-        }
-    )
-
-    # The upload is its own job, as for one shooter (#1000): its own
-    # progress and cancel, and a failed upload never fails the render.
-    # ``again=True``: the render just rewrote the sidecar.
-    if req.youtube_upload and state is not None:
-        run_sync(
-            state.jobs.submit(
-                kind="youtube_upload",
-                args={
-                    "slug": None,
-                    "match_scope": True,
-                    "match_root": str(root),
-                    "filename": result.output_path.name,
-                    "privacy": req.youtube_privacy,
-                    "again": True,
-                    "playlist": req.youtube_playlist,
-                    "playlist_id": req.youtube_playlist_id,
-                    "publish_at": req.youtube_publish_at.isoformat() if req.youtube_publish_at else None,
-                    "notify_subscribers": req.youtube_notify_subscribers,
-                },
+                result,
+                plans,
+                thumbnail_data=_grid_thumbnail_data(
+                    match,
+                    req,
+                    identities=[identities[label] for label in sorted(identities)],
+                    brand=account_brand if req.account_brand else None,
+                    event_logo=event_logo,
+                ),
             )
+
+        if state is not None and state.storage is not None:
+            # A no-op without a match id (local mode has no match-scoped store).
+            handle.update(progress=0.98, message="Uploading the grid...")
+            with handle.timer.phase("push"):
+                export_storage.push_match_export_file(
+                    state.storage, current_match_id.get(), result.output_path
+                )
+                for extra in youtube_files:
+                    export_storage.push_match_export_file(state.storage, current_match_id.get(), extra)
+
+        handle.update(progress=1.0, message=f"Wrote {output_path.name}")
+        handle.set_result(
+            {
+                "output_path": str(result.output_path),
+                # The deliverable's name, resolvable in either mode through
+                # ``GET /api/match/exports/file/{name}`` (#755). An absolute
+                # ``output_path`` means nothing to a hosted API container.
+                "output_name": result.output_path.name,
+                "stages_rendered": len(result.stages) - len(result.failed),
+                "stages_total": len(requested),
+                "skipped_stages": skipped,
+                "missing_trims": _compare_missing_trims(bundles, requested),
+                "failed": [
+                    {"stage_number": s.stage_number, "stage_name": s.stage_name, "error": s.error}
+                    for s in result.failed
+                ],
+                # What the render did *not* do (#705): a host with no usable
+                # browser or a drawtext-less ffmpeg still renders, and this is
+                # how the viewer learns the hold or the clock was skipped.
+                "degradations": [{"summary": d.summary, "detail": d.detail} for d in result.degradations],
+            }
         )
+
+        # The upload is its own job, as for one shooter (#1000): its own
+        # progress and cancel, and a failed upload never fails the render.
+        # ``again=True``: the render just rewrote the sidecar.
+        if req.youtube_upload and state is not None:
+            run_sync(
+                state.jobs.submit(
+                    kind="youtube_upload",
+                    args={
+                        "slug": None,
+                        "match_scope": True,
+                        "match_root": str(root),
+                        "filename": result.output_path.name,
+                        "privacy": req.youtube_privacy,
+                        "again": True,
+                        "playlist": req.youtube_playlist,
+                        "playlist_id": req.youtube_playlist_id,
+                        "publish_at": req.youtube_publish_at.isoformat() if req.youtube_publish_at else None,
+                        "notify_subscribers": req.youtube_notify_subscribers,
+                    },
+                )
+            )
+    finally:
+        cuts.cleanup()
 
 
 def _grid_thumbnail_card(video: Path, at: float, out: Path, data: Any, look_name: str) -> bool:

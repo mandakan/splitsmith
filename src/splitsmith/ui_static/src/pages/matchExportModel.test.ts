@@ -265,6 +265,28 @@ describe("summarizeGridResult", () => {
     expect(summary.partial).toBe(false);
     expect(summary.skippedStages).toEqual([]);
     expect(summary.missingTrims).toEqual([]);
+    expect(summary.notes).toEqual([]);
+  });
+
+  it("shows what the render did differently as notes, not as a partial render", () => {
+    // A tile cut from the audit trim rendered fine; the viewer is told, and
+    // the headline still says everything rendered.
+    const summary = summarizeGridResult({
+      output_path: "/m/exports/compare-grid.mp4",
+      stages_rendered: 1,
+      stages_total: 1,
+      failed: [],
+      degradations: [
+        {
+          summary: "cut from the audit trim (no exported trim): Anna stage 1",
+          detail: "No exported trim for Anna stage 1, so ...",
+        },
+      ],
+    });
+
+    expect(summary.partial).toBe(false);
+    expect(summary.headline).toBe("Rendered all 1 stages");
+    expect(summary.notes).toEqual(["cut from the audit trim (no exported trim): Anna stage 1"]);
   });
 
   it("names the failed stages without calling the whole render a failure", () => {

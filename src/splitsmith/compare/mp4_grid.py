@@ -285,6 +285,57 @@ def _drawtext_degradation(capabilities: FFmpegCapabilities) -> OverlayDegradatio
     )
 
 
+def _stand_in_degradations(shooters: Sequence[CompareShooterBundle]) -> tuple[OverlayDegradation, ...]:
+    """One degradation per kind of stand-in, naming every tile whose footage
+    was not an exported trim (#1681), audit first; none when every tile was.
+
+    * ``audit`` (local, desktop, CLI): the full-resolution audit trim. The
+      right window around the right beep, but its picture went through the
+      audit re-encode before the grid's own; exporting that stage's trim
+      and rendering again gives the camera's own stream.
+    * ``source`` (hosted): the render job cut the stage trim from the
+      source itself, the export's own window and stream copy, so the
+      picture is the export's. It is said because the render read the
+      footage once per such tile and nothing kept the cut.
+    """
+
+    def named(kind: str) -> str:
+        return ", ".join(
+            f"{bundle.label} stage {number}"
+            for bundle in shooters
+            for number, stage in sorted(bundle.stages_by_number.items())
+            if stage.trim_source == kind
+        )
+
+    out: list[OverlayDegradation] = []
+    audit = named("audit")
+    if audit:
+        out.append(
+            OverlayDegradation(
+                summary=f"cut from the audit trim (no exported trim): {audit}",
+                detail=(
+                    f"No exported trim for {audit}, so those tiles are cut from the full-resolution "
+                    "audit trim: the same window around the same beep, re-encoded once more than an "
+                    "exported trim would be. Export those stages' trims and render again for the "
+                    "camera's own stream."
+                ),
+            )
+        )
+    source = named("source")
+    if source:
+        out.append(
+            OverlayDegradation(
+                summary=f"cut from source (no exported trim): {source}",
+                detail=(
+                    f"No exported trim for {source}, so the render cut those stages from the footage "
+                    "itself: the same window and stream as an exported trim. Nothing was kept, so "
+                    "the next render cuts them again unless their trims are exported."
+                ),
+            )
+        )
+    return tuple(out)
+
+
 def _concat_option_refusal(capabilities: FFmpegCapabilities) -> str:
     """Why ``--overlay`` is refused outright on this ffmpeg.
 
@@ -3543,7 +3594,9 @@ def render_grid_mp4(
         hold_seconds=summary_hold_seconds,
     )
     if not plans:
-        raise GridRenderError("no stages to render -- no shooter has an exported trim")
+        raise GridRenderError(
+            "no stages to render -- no shooter has an exported trim or a current audit trim"
+        )
 
     # The concat demuxer rejects segments whose stream layout differs, and
     # skipping a failed stage means the stitch list is not simply "all of
@@ -3652,6 +3705,14 @@ def render_grid_mp4(
                 on_notice(exc.detail)
             else:
                 logger.warning("%s", exc.detail)
+
+    for stand_in in _stand_in_degradations(shooters):
+        degradations = degradations + (stand_in,)
+        if on_notice is not None:
+            logger.info("%s", stand_in.detail)
+            on_notice(stand_in.detail)
+        else:
+            logger.warning("%s", stand_in.detail)
 
     outcomes: list[StageOutcome] = []
     segments: list[Path] = []

@@ -8,6 +8,7 @@ paths:
   - "src/splitsmith/media_check.py"
   - "src/splitsmith/proxy.py"
   - "src/splitsmith/match_trims.py"
+  - "src/splitsmith/compare/project_loader.py"
   - "src/splitsmith/sync/plan.py"
   - "src/splitsmith/sync/push.py"
   - "src/splitsmith/sync/run.py"
@@ -31,6 +32,25 @@ paths:
   trimmed before renditions existed is fixed by its next sync; don't add a
   re-trim path for it.
 - The GOP stays 30: GOP 15 cost 35-47 % more bytes for ~10 ms of seek.
+- **"This cut is current" has one definition**, `trim.audit_trim_matches`
+  (on disk) and `audio.audit_trim_current` (on disk or stored, where a
+  web-only project's rendition stands in the trim's place): the `.params.json`
+  equals `trim.audit_trim_params` for the beep, stage time and buffers, and the
+  cut is not older than the source when the source is on this disk. The trim
+  job's cache hit, `trim_params_current`, `stored_trim_current` and the compare
+  grid all read it, so a grid tile never uses a trim the trim job would re-cut.
+- **A compare-grid tile with no exported trim** (`project_loader`, #1681):
+  locally (desktop, CLI) it is cut from the audit trim on disk while that is
+  current (`_current_audit_trim`); a stale one, or one with no sidecar, counts
+  as missing. A storage-backed project keeps no full trim, so the hosted grid
+  **job** cuts the stage trim from the source (`server._cut_stage_from_source`:
+  `trim.trim_video` lossless, the export's window), one tile at a time, and on
+  a memory-backed disk drops each source after its cut; only for a confirmed
+  beep and a stage time. The request checks those and the source's listing and
+  downloads nothing. The `_web.mp4` is never a render input. Pinned by
+  `test_a_stale_audit_trim_counts_as_missing`,
+  `test_hosted_grid_cuts_a_tile_with_no_export_from_its_source` and
+  `test_compare_audit_trim_integration.py`.
 
 ## Storage holds no full trim (web-only)
 

@@ -37,6 +37,8 @@ from ..config import BeepDetectConfig, BeepDetection
 from ..match_project import MatchProject, StageVideo
 from ..media_check import valid_mp4, valid_mp4_cached
 from ..storage import StorageObject
+from ..trim import audit_trim_matches, audit_trim_name, audit_trim_params, trim_params_path
+from ..trim import source_mtime as trim_source_mtime
 from .context import current_match_origin
 
 logger = logging.getLogger(__name__)
@@ -365,7 +367,7 @@ def trimmed_video_path(
     Keyed by ``video_id`` for every role so each angle has its own scrub
     clip cut around its own beep.
     """
-    return project.trimmed_path(project_root) / f"stage{stage_number}_cam_{video.video_id}_trimmed.mp4"
+    return project.trimmed_path(project_root) / audit_trim_name(stage_number, video.video_id)
 
 
 def trimmed_primary_path(project_root: Path, stage_number: int, *, project: MatchProject) -> Path:
@@ -853,25 +855,18 @@ def _try_push_audio_to_storage(project: MatchProject | None, local_wav: Path) ->
         logger.info("audio cache: push to %s failed: %s", key, exc)
 
 
-def trim_params_path(output: Path) -> Path:
-    """Sidecar JSON next to the trimmed MP4 recording the inputs that
-    produced it. Used to invalidate the cache when beep_time, stage_time,
-    or the buffer settings change without the source file moving."""
-    return output.with_name(f"{output.stem}.params.json")
-
-
 def _current_trim_params(
     *,
     primary_beep_time: float,
     stage_time_seconds: float,
     project: MatchProject,
 ) -> dict[str, float]:
-    return {
-        "beep_time": round(float(primary_beep_time), 4),
-        "stage_time_seconds": round(float(stage_time_seconds), 4),
-        "pre_buffer_seconds": float(project.trim_pre_buffer_seconds),
-        "post_buffer_seconds": float(project.trim_post_buffer_seconds),
-    }
+    return audit_trim_params(
+        beep_time=primary_beep_time,
+        stage_time_seconds=stage_time_seconds,
+        pre_buffer_seconds=project.trim_pre_buffer_seconds,
+        post_buffer_seconds=project.trim_post_buffer_seconds,
+    )
 
 
 def invalidate_video_audit_trim(
@@ -946,6 +941,52 @@ def _drop_stored_trim(
             logger.info("trim cache: delete %s failed: %s", key, exc)
 
 
+def audit_trim_current(
+    project: MatchProject | None,
+    trim: Path,
+    params: dict[str, float],
+    *,
+    source: Path | None = None,
+) -> bool:
+    """Whether the cut at ``trim`` is current, locally or in the storage
+    cache, by the one rule (:func:`splitsmith.trim.audit_trim_matches`, which
+    :func:`ensure_video_audit_trim` reuses a cut by): its params sidecar
+    records exactly ``params`` and the cut is not older than ``source`` when
+    that is on this disk. A local trim with its sidecar answers for itself;
+    otherwise the stored cut answers, by its object's time and its stored
+    sidecar (a few bytes). A web-only project stores the rendition in the
+    trim's place (#1683); a legacy full trim still counts while it is
+    there. Never downloads the trim."""
+    from .. import trim as trim_module
+
+    params_file = trim_params_path(trim)
+    try:
+        if trim.exists() and trim.stat().st_size > 0 and params_file.exists():
+            return audit_trim_matches(trim, params, source=source)
+    except OSError:
+        return False
+    mp4_key = _storage_trim_key(project, trim)
+    params_key = _storage_trim_key(project, params_file)
+    if mp4_key is None or params_key is None:
+        return False
+    storage = project._storage  # type: ignore[union-attr]
+    newer_source = trim_source_mtime(source)
+    try:
+        meta = storage.stat(mp4_key) or storage.stat(
+            _storage_trim_key(project, trim_module.web_trim_path(trim))
+        )
+        if meta is None:
+            return False
+        if newer_source is not None and (
+            meta.last_modified is None or meta.last_modified.timestamp() < newer_source
+        ):
+            return False
+        return json.loads(storage.read_bytes(params_key)) == params
+    except Exception as exc:  # noqa: BLE001 - a miss only costs a cache-hit trim job
+        logger.info("trim cache: params check for %s failed: %s", trim.name, exc)
+        return False
+
+
 def trim_params_current(
     project_root: Path,
     stage_number: int,
@@ -956,54 +997,16 @@ def trim_params_current(
     source: Path | None = None,
 ) -> bool:
     """Whether ``video``'s trim is in place (locally or in the storage cache)
-    and was cut for its current beep, stage time and buffers, by its params
-    sidecar, and is not older than ``source`` when that is on this disk: the
-    rule :func:`ensure_video_audit_trim` reuses a trim by. Never downloads
-    the trim; reads the small sidecar (and the object's time) from storage
-    when it is not on this disk."""
+    and current for its beep, stage time and buffers and ``source``: the
+    rule :func:`ensure_video_audit_trim` reuses a trim by
+    (:func:`audit_trim_current`). Never downloads the trim."""
     if video.beep_time is None:
         return False
     current = _current_trim_params(
         primary_beep_time=video.beep_time, stage_time_seconds=stage_time_seconds, project=project
     )
-    source_mtime: float | None = None
-    if source is not None:
-        try:
-            source_mtime = source.stat().st_mtime
-        except OSError:
-            source_mtime = None
     output = trimmed_video_path(project_root, stage_number, video, project=project)
-    params_file = trim_params_path(output)
-    try:
-        if output.exists() and output.stat().st_size > 0 and params_file.exists():
-            if source_mtime is not None and output.stat().st_mtime < source_mtime:
-                return False
-            return json.loads(params_file.read_text(encoding="utf-8")) == current
-    except (OSError, ValueError):
-        return False
-    from .. import trim as trim_module
-
-    mp4_key = _storage_trim_key(project, output)
-    params_key = _storage_trim_key(project, params_file)
-    if mp4_key is None or params_key is None:
-        return False
-    storage = project._storage  # type: ignore[union-attr]
-    try:
-        # A web-only project stores the rendition in the trim's place (#1683);
-        # a legacy full trim still counts while it is there.
-        meta = storage.stat(mp4_key) or storage.stat(
-            _storage_trim_key(project, trim_module.web_trim_path(output))
-        )
-        if meta is None:
-            return False
-        if source_mtime is not None and (
-            meta.last_modified is None or meta.last_modified.timestamp() < source_mtime
-        ):
-            return False
-        return json.loads(storage.read_bytes(params_key)) == current
-    except Exception as exc:  # noqa: BLE001 - a miss only costs a cache-hit trim job
-        logger.info("trim cache: params check for %s failed: %s", output.name, exc)
-        return False
+    return audit_trim_current(project, output, current, source=source)
 
 
 def stored_trim_current(
@@ -1540,27 +1543,23 @@ def ensure_video_audit_trim(
         if not output.exists():
             _try_pull_trim_from_storage(project, output)
 
+        # The one currency rule (``trim.audit_trim_matches``, which the
+        # compare grid and ``trim_params_current`` read by too): the sidecar
+        # records this beep, stage time and buffers, and the cut is not older
+        # than the source. An unreadable sidecar is a miss.
         cache_hit = (
             not force
-            and output.exists()
-            and output.stat().st_mtime >= src_resolved.stat().st_mtime
-            and params_file.exists()
+            and audit_trim_matches(output, current_params, source=src_resolved)
             and valid_mp4_cached(output).ok
         )
         if cache_hit:
-            try:
-                existing_params = json.loads(params_file.read_text(encoding="utf-8"))
-                if existing_params == current_params:
-                    # Cleanup any orphaned partial from a prior crashed run.
-                    for leftover in output.parent.glob(f"{output.stem}.*partial{output.suffix}"):
-                        leftover.unlink(missing_ok=True)
-                    # A trim cut before the web rendition existed (#1031) gets
-                    # one now, from the trim itself -- no re-cut of the source.
-                    _publish_web_trim(project, output, ffmpeg_binary=ffmpeg_binary, runner=runner)
-                    return output
-            except (OSError, ValueError):
-                # Treat unreadable sidecar as cache miss.
-                pass
+            # Cleanup any orphaned partial from a prior crashed run.
+            for leftover in output.parent.glob(f"{output.stem}.*partial{output.suffix}"):
+                leftover.unlink(missing_ok=True)
+            # A trim cut before the web rendition existed (#1031) gets
+            # one now, from the trim itself -- no re-cut of the source.
+            _publish_web_trim(project, output, ffmpeg_binary=ffmpeg_binary, runner=runner)
+            return output
 
         # Stale / missing final / params mismatch -> sweep and re-run. The web
         # rendition goes too: it covers the old window.

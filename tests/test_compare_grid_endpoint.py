@@ -16,6 +16,7 @@ shells out to ffmpeg.
 
 from __future__ import annotations
 
+import json
 import threading
 import time
 from pathlib import Path
@@ -182,7 +183,8 @@ def test_no_trims_refusal_names_shooters_stages_and_the_in_app_action(
 ) -> None:
     """Every selected stage lacks a trim: the 400 says who is missing which
     stage and where in the app to export them (the Export page's Quick
-    trims preset), and offers the CLI only on a local install (#1681)."""
+    trims preset) and offers the CLI on a local install; hosted, where
+    the job cuts from the footage, it names what that needs (#1681)."""
     monkeypatch.setattr(pl_mod.fcpxml_gen, "probe_video", _fake_probe)
     match_root = _seed_match(tmp_path, shooters=["mathias", "anna"], stage_numbers=[1, 2, 3])
     client = _MatchClient(_match_create_app(project_root=match_root, project_name="Compare Match"))
@@ -202,7 +204,10 @@ def test_no_trims_refusal_names_shooters_stages_and_the_in_app_action(
     assert hosted.status_code == 400
     hosted_detail = hosted.json()["detail"]
     assert "Missing: Anna (stage 1); Mathias (stage 1)." in hosted_detail
-    assert "Quick trims" in hosted_detail
+    # Hosted needs no export: the job cuts from the footage, so the
+    # refusal names what that needs instead (#1681).
+    assert "confirmed beep" in hosted_detail and "footage" in hosted_detail
+    assert "Quick trims" not in hosted_detail
     assert "splitsmith match" not in hosted_detail
 
 
@@ -212,6 +217,73 @@ def test_no_trims_refusal_points_at_audit_when_no_stage_has_a_beep() -> None:
     bundle = pl_mod.CompareShooterBundle(label="Anna", project_root=Path("x"))
     detail = match_api_mod.no_trims_refusal([bundle], [2], hosted=True)
     assert "confirmed beep on stage 2" in detail and "Audit" in detail
+
+
+def _write_audit_trim(match_root: Path, *, slug: str, stage_number: int, beep_time: float = 5.0) -> Path:
+    """The stage primary's audit trim and the sidecar the trim job writes,
+    recording ``beep_time`` and the stage time ``_seed_shooter`` gave it."""
+    shooter_root = Match.shooter_root(match_root, slug)
+    project = MatchProject.load(shooter_root)
+    stage = project.stage(stage_number)
+    video = stage.primary()
+    assert video is not None
+    trim = project.trimmed_path(shooter_root) / f"stage{stage_number}_cam_{video.video_id}_trimmed.mp4"
+    trim.parent.mkdir(parents=True, exist_ok=True)
+    trim.write_bytes(b"audit trim")
+    params = {
+        "beep_time": beep_time,
+        "stage_time_seconds": stage.time_seconds,
+        "pre_buffer_seconds": project.trim_pre_buffer_seconds,
+        "post_buffer_seconds": project.trim_post_buffer_seconds,
+    }
+    trim.with_name(f"{trim.stem}.params.json").write_text(json.dumps(params), encoding="utf-8")
+    return trim
+
+
+def test_a_stage_with_only_a_current_audit_trim_renders_from_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Nobody exported trims, but the stage was trimmed in Audit for the
+    current beep: the grid renders from the audit trim instead of
+    refusing (#1681), and the tile says where it came from."""
+    rendered: list[Any] = []
+
+    def _spy(shooters: Any, **kwargs: Any) -> Any:
+        rendered.append(shooters)
+        return _fake_render_grid_mp4(shooters, **kwargs)
+
+    monkeypatch.setattr(pl_mod.fcpxml_gen, "probe_video", _fake_probe)
+    monkeypatch.setattr(mp4_grid_mod, "render_grid_mp4", _spy)
+    match_root = _seed_match(tmp_path, shooters=["mathias", "anna"], stage_numbers=[1])
+    _write_trims(match_root, slug="anna", stage_numbers=[1])
+    audit = _write_audit_trim(match_root, slug="mathias", stage_number=1)
+    client = _MatchClient(_match_create_app(project_root=match_root, project_name="Compare Match"))
+
+    response = client.post("/api/match/compare-export", json={"stage_numbers": [1], "audio_from": "mathias"})
+    assert response.status_code == 200, response.text
+    job = _wait_for_job(client, response.json()["id"])
+    assert job["status"] == "succeeded", job
+    (shooters,) = rendered
+    by_label = {bundle.label: bundle for bundle in shooters}
+    assert by_label["Mathias"].stages_by_number[1].trim_path == audit
+    assert by_label["Mathias"].stages_by_number[1].trim_source == "audit"
+    assert by_label["Anna"].stages_by_number[1].trim_source == "export"
+    assert job["result"]["missing_trims"] == []
+
+
+def test_a_stale_audit_trim_is_still_refused(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The audit trim was cut for an earlier beep: it is not the stage the
+    user confirmed, so the refusal still fires and says what would do."""
+    monkeypatch.setattr(pl_mod.fcpxml_gen, "probe_video", _fake_probe)
+    match_root = _seed_match(tmp_path, shooters=["mathias"], stage_numbers=[1])
+    _write_audit_trim(match_root, slug="mathias", stage_number=1, beep_time=4.0)
+    client = _MatchClient(_match_create_app(project_root=match_root, project_name="Compare Match"))
+
+    response = client.post("/api/match/compare-export", json={"stage_numbers": [1], "audio_from": "mathias"})
+    assert response.status_code == 400
+    detail = response.json()["detail"]
+    assert "Missing: Mathias (stage 1)." in detail
+    assert "audit trim" in detail
 
 
 def test_rejects_an_unresolvable_camera_selector(match_client: _MatchClient) -> None:

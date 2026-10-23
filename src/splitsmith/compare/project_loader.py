@@ -5,14 +5,28 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Literal
 
 from .. import camera_select, fcpxml_gen
 from ..export_naming import stage_file_base
 from ..fcpxml_gen import VideoMetadata
 from ..match_model import Match
-from ..match_project import MatchProject, StageVideo
+from ..match_project import MatchProject, StageEntry, StageVideo
+from ..trim import audit_trim_matches, audit_trim_name, audit_trim_params
 
 ProbeFn = Callable[[Path], VideoMetadata]
+
+#: Where a tile's footage came from (#1681): the shooter's exported trim;
+#: the full-resolution audit trim on this disk when no export exists
+#: (local, desktop, CLI); or a stage trim the hosted grid job cut from the
+#: source itself, the export's own window and stream copy.
+TileSource = Literal["export", "audit", "source"]
+
+#: Hosted: the stage trim for this stage and camera, cut from the source
+#: (the render job) or only planned (a request validating, which must not
+#: download), or ``None`` when it cannot be made: no confirmed beep, no
+#: stage time, or no source.
+SourceCut = Callable[[StageEntry, StageVideo], Path | None]
 
 
 @dataclass(frozen=True)
@@ -46,6 +60,11 @@ class CompareStageBundle:
     #: True when the requested camera was unavailable on this stage and the
     #: primary stood in. Surfaced in the run summary and the FCPXML marker.
     substituted: bool = False
+    #: Where the tile's footage came from (see :data:`TileSource`). Anything
+    #: but ``"export"`` stood in for a missing exported trim (#1681): same
+    #: window and beep anchor. Surfaced in the grid's degradations and the
+    #: FCPXML marker.
+    trim_source: TileSource = "export"
 
     @property
     def metadata(self) -> VideoMetadata:
@@ -60,7 +79,8 @@ class CompareStageBundle:
 
 @dataclass(frozen=True)
 class MissingTrim:
-    """A stage dropped from the grid because its trim is not on disk.
+    """A stage dropped from the grid because it has no trim to cut from:
+    no exported trim, and no audit trim current for its beep and stage time.
 
     The grid renders a black filler tile for it. That is the right output
     -- the footage genuinely isn't there -- but it is indistinguishable
@@ -176,6 +196,65 @@ def _trim_present(
     return trim.exists()
 
 
+def _current_audit_trim(
+    project: MatchProject,
+    root: Path,
+    stage: StageEntry,
+    video: StageVideo,
+) -> Path | None:
+    """The audit trim on this disk to cut the tile from when the stage has
+    no exported trim (#1681), or ``None``. Local, desktop and CLI only: a
+    storage-backed project keeps no full-resolution trim (#1683), so the
+    hosted grid job cuts from the source instead (:data:`SourceCut`).
+
+    The trim job and the exporter cut the same window around the same
+    beep (``trim.trim_video``, ``[max(0, beep - pre), beep + stage_time +
+    post]``) and both stream-copy the audio; the grid re-encodes the
+    picture either way. So the audit trim stands in, but only while it is
+    current by the trim job's own reuse rule (``trim.audit_trim_matches``):
+    its sidecar equals ``trim.audit_trim_params`` for the stage's beep,
+    stage time and buffers, and the cut is not older than the source when
+    the source is on this disk. A tile never uses a trim the trim job would
+    re-cut. Never the 720p ``_web.mp4`` rendition.
+    """
+    if video.beep_time is None:  # the callers skip an unbeeped video; this narrows the type
+        return None
+    trim = project.trimmed_path(root) / audit_trim_name(stage.stage_number, video.video_id)
+    params = audit_trim_params(
+        beep_time=video.beep_time,
+        stage_time_seconds=stage.time_seconds,
+        pre_buffer_seconds=project.trim_pre_buffer_seconds,
+        post_buffer_seconds=project.trim_post_buffer_seconds,
+    )
+    # The source as it sits on this disk, never mirrored down for this: a
+    # relative path under the shooter root, or an absolute one (a drive).
+    source = video.path if video.path.is_absolute() else root / video.path
+    return trim if audit_trim_matches(trim, params, source=source) else None
+
+
+def _tile_trim(
+    project: MatchProject,
+    root: Path,
+    stage: StageEntry,
+    video: StageVideo,
+    *,
+    ensure_trim: Callable[[Path], object] | None = None,
+    trim_exists: Callable[[Path], bool] | None = None,
+    cut_from_source: SourceCut | None = None,
+) -> tuple[Path, Path | None, TileSource]:
+    """``(expected export path, the file the tile is cut from, its source)``:
+    the exported trim when it is there; else, with ``cut_from_source``
+    (hosted), a stage trim cut from the source; else a current audit trim
+    on this disk; else ``None`` (the caller records the export path as
+    missing)."""
+    exported = trim_path_for_video(project, root, stage.stage_number, stage.stage_name, video)
+    if _trim_present(exported, ensure_trim, trim_exists):
+        return exported, exported, "export"
+    if cut_from_source is not None:
+        return exported, cut_from_source(stage, video), "source"
+    return exported, _current_audit_trim(project, root, stage, video), "audit"
+
+
 def _inset_for(
     stage_videos: list[StageVideo],
     chosen: StageVideo,
@@ -225,7 +304,9 @@ def load_shooter(
     Stages are skipped (omitted from ``stages_by_number``) when:
       - the stage is marked ``skipped``;
       - there is no primary video, or the primary has no ``beep_time``;
-      - the lossless trim is not on disk.
+      - neither the lossless trim nor a current audit trim is on disk
+        (an audit trim stands in for a missing export, #1681, and the
+        bundle's ``trim_source`` says so).
 
     ``camera`` selects which of the shooter's cameras feeds the tiles;
     ``None`` falls back to the project's persisted ``compare_camera``,
@@ -249,13 +330,13 @@ def load_shooter(
         chosen, substituted = _choose_video(stage.videos, stage.primary(), effective_camera)
         if chosen is None or chosen.beep_time is None:
             continue
-        trim = trim_path_for_video(project, project_root, stage.stage_number, stage.stage_name, chosen)
-        if not trim.exists():
+        expected, trim, trim_source = _tile_trim(project, project_root, stage, chosen)
+        if trim is None:
             missing.append(
                 MissingTrim(
                     stage_number=stage.stage_number,
                     stage_name=stage.stage_name,
-                    expected_path=trim,
+                    expected_path=expected,
                     camera=effective_camera if not substituted else None,
                 )
             )
@@ -265,6 +346,7 @@ def load_shooter(
             stage_number=stage.stage_number,
             stage_name=stage.stage_name,
             trim_path=trim,
+            trim_source=trim_source,
             audit_path=audit_path_for_stage(project, project_root, stage.stage_number),
             beep_offset_in_clip=min(pre_buffer, chosen.beep_time),
             duration_seconds=meta.duration_seconds,
@@ -306,15 +388,23 @@ def load_shooter_from_match(
     project: MatchProject | None = None,
     ensure_trim: Callable[[Path], object] | None = None,
     trim_exists: Callable[[Path], bool] | None = None,
+    cut_from_source: SourceCut | None = None,
 ) -> CompareShooterBundle:
     """Build a :class:`CompareShooterBundle` from one shooter inside a merged Match.
 
     Stage definitions come from the match (shared across shooters); per-
     stage data (time + videos) comes from the shooter. Same skip rules
     as :func:`load_shooter`: a stage is omitted when it's marked skipped,
-    has no primary video with a beep time, or its lossless trim is
-    missing from the shooter's exports dir. ``camera`` selects the
-    contributing camera exactly as in :func:`load_shooter`.
+    has no primary video with a beep time, or has neither its lossless
+    trim in the shooter's exports dir nor a stand-in (a current audit
+    trim, :func:`_current_audit_trim`, or hosted a cut from the source).
+    ``camera`` selects the contributing
+    camera exactly as in :func:`load_shooter`.
+
+    ``cut_from_source`` replaces the audit-trim fallback for a hosted
+    caller, whose storage keeps no full-resolution trim (#1683): the
+    render job cuts the stage trim from the source, a request only plans
+    it (see :data:`SourceCut`). ``None`` reads the audit trim off the disk.
 
     ``match`` / ``project`` (#755) let a caller hand over documents it
     already holds instead of reading ``match.json`` / ``project.json``
@@ -362,13 +452,21 @@ def load_shooter_from_match(
         if chosen is None or chosen.beep_time is None:
             continue
         stage_label = stage_names.get(stage.stage_number, stage.stage_name)
-        trim = trim_path_for_video(project, shooter_root, stage.stage_number, stage.stage_name, chosen)
-        if not _trim_present(trim, ensure_trim, trim_exists):
+        expected, trim, trim_source = _tile_trim(
+            project,
+            shooter_root,
+            stage,
+            chosen,
+            ensure_trim=ensure_trim,
+            trim_exists=trim_exists,
+            cut_from_source=cut_from_source,
+        )
+        if trim is None:
             missing.append(
                 MissingTrim(
                     stage_number=stage.stage_number,
                     stage_name=stage_label,
-                    expected_path=trim,
+                    expected_path=expected,
                     camera=effective_camera if not substituted else None,
                 )
             )
@@ -378,6 +476,7 @@ def load_shooter_from_match(
             stage_number=stage.stage_number,
             stage_name=stage_label,
             trim_path=trim,
+            trim_source=trim_source,
             audit_path=audit_path_for_stage(project, shooter_root, stage.stage_number),
             beep_offset_in_clip=min(pre_buffer, chosen.beep_time),
             duration_seconds=meta.duration_seconds,

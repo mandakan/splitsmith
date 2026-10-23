@@ -1258,6 +1258,13 @@ function ExportInner({ slug }: { slug: string }) {
                       ))}
                     </ul>
                   ) : null}
+                  {gridSummary.notes.length > 0 ? (
+                    <ul className="mt-1 list-disc pl-4 text-muted">
+                      {gridSummary.notes.map((note) => (
+                        <li key={`note-${note}`}>{note}</li>
+                      ))}
+                    </ul>
+                  ) : null}
                   {hosted && gridResult.output_name ? (
                     <a
                       href={api.matchExportFileUrl(gridResult.output_name)}

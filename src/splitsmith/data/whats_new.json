@@ -1,6 +1,12 @@
 {
   "entries": [
     {
+      "id": "compare-grid-from-audit-trims",
+      "date": "2026-10-23",
+      "title": "Compare grid without exporting trims first",
+      "body": "A compare grid on the Export page no longer needs exported trims: it cuts each missing stage from the Audit trim or from the footage instead. The finished render lists those tiles."
+    },
+    {
       "id": "beep-ready-before-trim",
       "date": "2026-10-23",
       "title": "Confirm beeps sooner",
