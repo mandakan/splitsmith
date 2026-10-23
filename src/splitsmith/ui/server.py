@@ -8727,6 +8727,16 @@ def create_app(
             # error body which may distinguish the cases.
             if response.status_code == 404:
                 return not_found
+            # The allowlist matches the path only, so a malformed query
+            # (``videos/stream`` with no ``path``, ``stage=abc``) still
+            # reaches the route and FastAPI answers 422 - for a live token
+            # only, while a bogus one gets the 404 above. On GET no 422 is
+            # an answer a share viewer can use, so it joins the seam. The
+            # write surface keeps its body-validation 422s for the compose
+            # box: they need a comment-scoped token, which a 201 for a
+            # well-formed post would reveal just as surely.
+            if method == "GET" and response.status_code == 422:
+                return not_found
             return response
         finally:
             current_share_viewer.reset(viewer_token)

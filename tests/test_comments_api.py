@@ -677,6 +677,26 @@ def test_a_unicode_digit_stage_is_the_uniform_404_on_the_read_surface(read_token
     assert resp.json() == NOT_FOUND
 
 
+@pytest.mark.parametrize(
+    "rest",
+    [
+        "shooters/alice/videos/stream",
+        "shooters/alice/videos/stream?path=x&stage=abc",
+        "shooters/alice/videos/stream?path=x&kind=bogus",
+        "match/shooters/alice/videos/stream",
+        "shooters/alice/stages/3/coach?seed=maybe",
+    ],
+)
+def test_a_malformed_query_is_the_uniform_404_on_the_read_surface(read_token_client, rest) -> None:
+    """``_SHARE_PATH_RE`` matches the path only, so a bad query reached the
+    route and 422'd on a live token while a bogus one got the opaque 404."""
+    client, token = read_token_client
+    live = client.get(f"/api/share/{token}/{rest}")
+    bogus = client.get(f"/api/share/not-a-real-token/{rest}")
+    assert (live.status_code, live.content) == (bogus.status_code, bogus.content)
+    assert live.json() == NOT_FOUND
+
+
 def test_an_ascii_digit_stage_still_reaches_the_route(read_token_client) -> None:
     """The narrowing must not close the door on real stage numbers."""
     client, token = read_token_client
