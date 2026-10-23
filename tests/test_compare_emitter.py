@@ -9,6 +9,7 @@ FCP.
 from __future__ import annotations
 
 import subprocess
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 from xml.etree import ElementTree as ET
@@ -128,6 +129,39 @@ def test_stage_marker_names_camera_substitutions(tmp_path: Path) -> None:
     xml = _emit_with_bundles(tmp_path, substitutions={"Mathias": True})
     markers = [m.get("value") for m in xml.iter("marker")]
     assert any("Mathias: primary" in (m or "") for m in markers)
+
+
+def test_stage_marker_names_a_tile_cut_from_the_audit_trim(tmp_path: Path) -> None:
+    """No exported trim, so the clip is the audit trim (#1681): the stage
+    marker says so beside any substitution, for the editor on the timeline."""
+    labels = ["Anders", "Mathias"]
+    bundles = [
+        _bundle(
+            label,
+            [
+                replace(
+                    _stage(
+                        stage_number=1,
+                        stage_name="Skipper",
+                        trim_path=tmp_path / label.lower() / "trimmed" / "1.mp4",
+                        substituted=label == "Anders",
+                    ),
+                    trim_source="audit" if label == "Mathias" else "source",
+                )
+            ],
+            project_root=tmp_path / label.lower(),
+        )
+        for label in labels
+    ]
+    out = tmp_path / "out.fcpxml"
+    emit_compare_fcpxml(
+        manifest=_manifest(out, "Mathias", labels),
+        shooters=bundles,
+        output_path=out,
+        runner=_stub_ffmpeg_runner(),
+    )
+    markers = [m.get("value") or "" for m in ET.fromstring(out.read_bytes()).iter("marker")]
+    assert "Stage 1 -- Skipper (Anders: primary, Anders: cut from source, Mathias: audit trim)" in markers
 
 
 def test_stage_marker_unchanged_without_substitutions(tmp_path: Path) -> None:

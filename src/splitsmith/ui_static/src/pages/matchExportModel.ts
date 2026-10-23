@@ -148,6 +148,10 @@ export interface GridResultSummary {
   skippedStages: number[];
   /** One line per shooter/stage pair whose cell rendered black. */
   missingTrims: string[];
+  /** The render's ``degradations`` summaries: what it did differently
+   *  from the full render (tiles cut from an audit trim, a clock or card
+   *  it could not draw). Notes, not failures: they never make it partial. */
+  notes: string[];
 }
 
 /** Turn a finished job's ``CompareGridResult`` into display copy.
@@ -179,7 +183,8 @@ export function summarizeGridResult(result: CompareGridResult): GridResultSummar
     result.failed.length > 0 || skippedStages.length > 0 || short
       ? `Rendered ${result.stages_rendered} of ${result.stages_total} stages`
       : `Rendered all ${result.stages_rendered} stages`;
-  return { headline, partial, failedStages, skippedStages, missingTrims };
+  const notes = (result.degradations ?? []).map((d) => d.summary);
+  return { headline, partial, failedStages, skippedStages, missingTrims, notes };
 }
 
 /** Input to {@link buildMatchExportPayload}: exactly what the Export

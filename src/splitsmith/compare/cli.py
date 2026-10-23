@@ -384,6 +384,7 @@ def export(
             console.print(f"[red]Error:[/] shooter {s.label!r}: {exc}")
             raise typer.Exit(code=2) from exc
     _warn_missing_trims(shooters)
+    _note_audit_trims(shooters)
     emitter_mod.emit_compare_fcpxml(
         manifest=manifest,
         shooters=shooters,
@@ -410,8 +411,27 @@ def _warn_missing_trims(bundles: list[project_loader.CompareShooterBundle]) -> N
             console.print(
                 f"[yellow]Warning:[/] {bundle.label} stage {miss.stage_number} "
                 f"({miss.stage_name}){asked}: no trim at {miss.expected_path} "
-                "-- this stage renders as black filler."
+                "and no audit trim cut for the current beep -- this stage renders as black filler."
             )
+
+
+def _note_audit_trims(bundles: list[project_loader.CompareShooterBundle]) -> None:
+    """Name the tiles an FCPXML cuts from an audit trim (#1681).
+
+    The MP4 path says this itself (``render_grid_mp4``'s degradation,
+    through ``on_notice`` and the final line); the FCPXML has no result to
+    carry it, so the run says it here and the stage marker repeats it. The
+    FCPXML then references a file in ``trimmed/``, a cache the trim job
+    re-cuts when the beep moves and cleanup may remove.
+    """
+    for bundle in bundles:
+        for number, stage in sorted(bundle.stages_by_number.items()):
+            if stage.trim_source == "audit":
+                console.print(
+                    f"[yellow]Note:[/] {bundle.label} stage {number} ({stage.stage_name}): no exported "
+                    f"trim, so the clip is the audit trim at {stage.trim_path}. Export the stage's trim "
+                    "for the camera's own stream."
+                )
 
 
 def _apply_manifest_overrides(
@@ -576,6 +596,7 @@ def _export_from_match(
         layout_2up="horizontal",
         shooters=[manifest_mod.CompareShooter(project=match_root, label=b.label) for b in bundles],
     )
+    _note_audit_trims(bundles)
     emitter_mod.emit_compare_fcpxml(manifest=synthetic, shooters=bundles, output_path=output)
     console.print(f"[green]Wrote[/] {output}")
 

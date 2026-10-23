@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+import os
 from pathlib import Path
 
 import pytest
@@ -632,3 +634,188 @@ def test_an_inset_whose_trim_is_missing_is_simply_left_out(tmp_path: Path) -> No
         trim.unlink()
     bundle = load_shooter(root, "Mathias", inset="chest", probe=_stub_probe)
     assert all(stage.inset is None for stage in bundle.stages_by_number.values())
+
+
+# --- the audit-trim fallback (#1681) -----------------------------------------
+
+
+def _audit_trim_of(project: MatchProject, root: Path, stage_number: int) -> Path:
+    """Where the trim job writes the stage primary's audit trim."""
+    video = project.stage(stage_number).primary()
+    assert video is not None
+    return project.trimmed_path(root) / f"stage{stage_number}_cam_{video.video_id}_trimmed.mp4"
+
+
+def _write_audit_trim(
+    root: Path,
+    stage_number: int,
+    *,
+    beep_time: float,
+    stage_time: float,
+    pre: float = 5.0,
+    post: float = 5.0,
+    sidecar: bool = True,
+) -> Path:
+    """An audit trim plus the ``.params.json`` the trim job writes beside it.
+
+    The sidecar is spelled out rather than built with the writer's helper,
+    so a change to its shape on either side fails here; the writer/reader
+    seam itself is pinned by ``test_compare_audit_trim_integration.py``.
+    """
+    project = MatchProject.load(root)
+    trim = _audit_trim_of(project, root, stage_number)
+    trim.parent.mkdir(parents=True, exist_ok=True)
+    trim.write_bytes(b"audit trim")
+    if sidecar:
+        params = {
+            "beep_time": beep_time,
+            "stage_time_seconds": stage_time,
+            "pre_buffer_seconds": pre,
+            "post_buffer_seconds": post,
+        }
+        trim.with_name(f"{trim.stem}.params.json").write_text(json.dumps(params), encoding="utf-8")
+    return trim
+
+
+def _drop_export(match_root: Path) -> Path:
+    shooter_root = Match.shooter_root(match_root, "mathias")
+    project = MatchProject.load(shooter_root)
+    trim_path_for_stage(project, shooter_root, 1, "Stage One").unlink()
+    return shooter_root
+
+
+def test_load_shooter_from_match_falls_back_to_a_current_audit_trim(tmp_path: Path) -> None:
+    """No exported trim, but the audit trim was cut for this beep and stage
+    time: the tile is cut from it rather than the stage going missing, and
+    the bundle says where the footage came from."""
+    match_root = _build_two_stage_match(tmp_path)
+    shooter_root = _drop_export(match_root)
+    audit = _write_audit_trim(shooter_root, 1, beep_time=5.0, stage_time=11.0)
+
+    bundle = load_shooter_from_match(match_root, "mathias", "Mathias", probe=_stub_probe)
+
+    assert 1 in bundle.stages_by_number, bundle.missing_trims
+    stage = bundle.stages_by_number[1]
+    assert stage.trim_path == audit
+    assert stage.trim_source == "audit"
+    # Same window and anchor as the export: min(pre_buffer, beep).
+    assert stage.beep_offset_in_clip == 5.0
+    assert bundle.missing_trims == []
+
+
+def test_an_exported_trim_wins_over_the_audit_trim(tmp_path: Path) -> None:
+    match_root = _build_two_stage_match(tmp_path)
+    shooter_root = Match.shooter_root(match_root, "mathias")
+    _write_audit_trim(shooter_root, 1, beep_time=5.0, stage_time=11.0)
+
+    bundle = load_shooter_from_match(match_root, "mathias", "Mathias", probe=_stub_probe)
+
+    stage = bundle.stages_by_number[1]
+    assert stage.trim_path.parent.name == "exports"
+    assert stage.trim_source == "export"
+
+
+@pytest.mark.parametrize(
+    "stale",
+    [
+        {"beep_time": 4.5},  # the beep moved since the cut
+        {"stage_time": 12.0},  # a scoreboard re-import changed the stage time
+        {"pre": 3.0},  # the buffers changed
+        {"post": 2.0},
+        {"sidecar": False},  # no record of what it was cut for
+    ],
+    ids=["beep", "stage_time", "pre_buffer", "post_buffer", "no_sidecar"],
+)
+def test_a_stale_audit_trim_counts_as_missing(tmp_path: Path, stale: dict) -> None:
+    match_root = _build_two_stage_match(tmp_path)
+    shooter_root = _drop_export(match_root)
+    kwargs: dict = {"beep_time": 5.0, "stage_time": 11.0, **stale}
+    _write_audit_trim(shooter_root, 1, **kwargs)
+
+    bundle = load_shooter_from_match(match_root, "mathias", "Mathias", probe=_stub_probe)
+
+    assert 1 not in bundle.stages_by_number
+    assert [m.stage_number for m in bundle.missing_trims] == [1]
+
+
+@pytest.mark.parametrize("beep,stage_time", [(5.0, 11.0), (7.123456789, 12.34), (0.1 + 0.2, 1e-5)])
+def test_the_sidecar_the_trim_job_writes_reads_back_equal(
+    tmp_path: Path, beep: float, stage_time: float
+) -> None:
+    """The currency check is exact equality, so the sidecar must survive
+    the trim job's JSON write and read with no extra key and no float
+    drift; otherwise the fallback is silently off. Writes it the way
+    ``ensure_video_audit_trim`` does."""
+    from splitsmith.trim import audit_trim_matches, audit_trim_params, trim_params_path
+
+    params = audit_trim_params(
+        beep_time=beep, stage_time_seconds=stage_time, pre_buffer_seconds=5.0, post_buffer_seconds=2.5
+    )
+    trim = tmp_path / "stage1_cam_x_trimmed.mp4"
+    trim.write_bytes(b"trim")
+    trim_params_path(trim).write_text(json.dumps(params, indent=2) + "\n", encoding="utf-8")
+    assert audit_trim_matches(trim, dict(params))
+
+
+def test_an_audit_trim_older_than_its_source_counts_as_missing(tmp_path: Path) -> None:
+    """The source was replaced (repaired, re-copied) after the cut: the
+    trim job would re-cut it, so the grid must not use it either. A source
+    that is not on this disk (an unplugged drive) leaves the sidecar to
+    answer, as it does for the trim job's own reuse check."""
+    match_root = _build_two_stage_match(tmp_path)
+    shooter_root = _drop_export(match_root)
+    audit = _write_audit_trim(shooter_root, 1, beep_time=5.0, stage_time=11.0)
+    source = shooter_root / "raw" / "video_1.mov"
+    source.parent.mkdir(parents=True, exist_ok=True)
+    source.write_bytes(b"source")
+    os.utime(audit, (1_000_000, 1_000_000))
+    os.utime(source, (2_000_000, 2_000_000))
+
+    newer_source = load_shooter_from_match(match_root, "mathias", "Mathias", probe=_stub_probe)
+    assert 1 not in newer_source.stages_by_number
+
+    os.utime(audit, (3_000_000, 3_000_000))
+    older_source = load_shooter_from_match(match_root, "mathias", "Mathias", probe=_stub_probe)
+    assert older_source.stages_by_number[1].trim_source == "audit"
+
+    source.unlink()
+    os.utime(audit, (1_000_000, 1_000_000))
+    no_source = load_shooter_from_match(match_root, "mathias", "Mathias", probe=_stub_probe)
+    assert no_source.stages_by_number[1].trim_source == "audit"
+
+
+def test_the_web_rendition_is_never_a_fallback(tmp_path: Path) -> None:
+    """Only the 720p ``_web.mp4`` (and a current sidecar) is there, as on a
+    desktop mirror: the stage stays missing rather than rendering 720p."""
+    match_root = _build_two_stage_match(tmp_path)
+    shooter_root = _drop_export(match_root)
+    audit = _write_audit_trim(shooter_root, 1, beep_time=5.0, stage_time=11.0)
+    audit.rename(audit.with_name(audit.name.replace("_trimmed.mp4", "_web.mp4")))
+
+    bundle = load_shooter_from_match(match_root, "mathias", "Mathias", probe=_stub_probe)
+
+    assert 1 not in bundle.stages_by_number
+    assert [m.stage_number for m in bundle.missing_trims] == [1]
+
+
+def test_load_shooter_falls_back_to_a_current_audit_trim_too(tmp_path: Path) -> None:
+    """The manifest loader (``compare export <manifest>``) shares the rule."""
+    root = tmp_path / "shooter"
+    _build_project(
+        root,
+        stages=[
+            StageEntry(
+                stage_number=1,
+                stage_name="Only Audited",
+                time_seconds=10.0,
+                videos=[StageVideo(path=Path("raw/v1.mp4"), role="primary", beep_time=2.0)],
+            ),
+        ],
+    )
+    audit = _write_audit_trim(root, 1, beep_time=2.0, stage_time=10.0)
+
+    bundle = load_shooter(root, "M", probe=_stub_probe)
+
+    assert bundle.stages_by_number[1].trim_path == audit
+    assert bundle.stages_by_number[1].trim_source == "audit"
+    assert bundle.stages_by_number[1].beep_offset_in_clip == 2.0

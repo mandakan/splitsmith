@@ -30,6 +30,7 @@ from splitsmith.config import VideoMetadata
 from splitsmith.match_project import MatchProject, StageVideo
 from splitsmith.storage import S3Storage
 from splitsmith.ui import export_storage
+from splitsmith.ui import server as server_mod
 from tests.test_hosted_raw_upload import hosted_client, hosted_client_with_match, hosted_db
 
 __all__ = ["hosted_client", "hosted_client_with_match", "hosted_db"]  # pytest discovers fixtures by name
@@ -42,7 +43,9 @@ def _fake_probe(_path: Path) -> VideoMetadata:
     return VideoMetadata(width=1920, height=1080, duration_seconds=30.0, frame_rate_num=30, frame_rate_den=1)
 
 
-def _give_the_shooter_a_beeped_primary(db_url: str, match_id: str, slug: str) -> None:
+def _give_the_shooter_a_beeped_primary(
+    db_url: str, match_id: str, slug: str, *, reviewed: bool = False, stages: tuple[int, ...] = (1,)
+) -> None:
     """Put a primary video with a confirmed beep on stage 1 of the shooter's
     project *document* -- the state store, not the disk, which is what a
     hosted worker reads."""
@@ -59,8 +62,11 @@ def _give_the_shooter_a_beeped_primary(db_url: str, match_id: str, slug: str) ->
         store = ProjectStateStore(factory, user_id=user_id)
         doc, version = await store.load_project(match_id, slug)
         project = MatchProject.model_validate(doc)
-        project.stage(1).videos = [StageVideo(path=Path("raw/v.mp4"), role="primary", beep_time=5.0)]
-        project.stage(1).time_seconds = 10.0
+        for number in stages:
+            project.stage(number).videos = [
+                StageVideo(path=Path("raw/v.mp4"), role="primary", beep_time=5.0, beep_reviewed=reviewed)
+            ]
+            project.stage(number).time_seconds = 10.0
         await store.save_project(match_id, slug, project.model_dump(mode="json"), expected_version=version)
 
     asyncio.run(_edit())
@@ -215,6 +221,123 @@ def test_the_request_reads_no_trim_bytes(hosted_grid, inline_deferrer) -> None:
     # The documents the request reads are small; the trim alone is
     # len(TRIM_BYTES), and none of it moved.
     assert read_after - read_before < len(TRIM_BYTES)
+
+
+SOURCE_BYTES = b"the raw head-cam file, only in the bucket" * 64
+CUT_BYTES = b"a stage trim the grid job cut from the source"
+
+
+@pytest.fixture
+def hosted_source_only(hosted_grid, hosted_db, monkeypatch: pytest.MonkeyPatch):  # noqa: F811
+    """The ``hosted_grid`` match with no exported trim: a confirmed beep on
+    stage 1 and its source in the bucket, nothing else (#1681). A
+    storage-backed project keeps no full-resolution audit trim (#1683), so
+    the grid job has to cut the tile from the source. ffmpeg is faked: the
+    recorded calls are the cut."""
+    client, storage, match_id, slug, rendered = hosted_grid
+    storage.delete(f"matches/{match_id}/shooters/{slug}/exports/stage1_one_trimmed.mp4")
+    _give_the_shooter_a_beeped_primary(hosted_db, match_id, slug, reviewed=True)
+    storage.write_bytes("raw/v.mp4", SOURCE_BYTES)
+    cuts: list[dict[str, Any]] = []
+
+    def fake_trim_video(input_path: Path, output_path: Path, **kwargs: Any) -> Any:
+        # The source is local while the cut runs: the job mirrored it down.
+        cuts.append({"input": Path(input_path), "source_bytes": Path(input_path).read_bytes(), **kwargs})
+        Path(output_path).write_bytes(CUT_BYTES)
+
+    monkeypatch.setattr(server_mod.trim_module, "trim_video", fake_trim_video)
+    return client, storage, match_id, slug, rendered, cuts
+
+
+def test_hosted_grid_cuts_a_tile_with_no_export_from_its_source(
+    hosted_source_only, inline_deferrer, hosted_db, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The request checks a confirmed beep and the source's listing and
+    moves no media; the job cuts the stage trim from the source with the
+    export's window and stream copy, drops the source on a memory-backed
+    disk, and renders the tile from the cut, marked as such."""
+    from splitsmith.observability import STORAGE_IO
+
+    client, _storage, match_id, slug, rendered, cuts = hosted_source_only
+    monkeypatch.setenv("CLOUD_RUN_EXECUTION", "splitsmith-worker-abc")
+    # Stage 2 could be cut too, but only stage 1 is selected: one source read.
+    _give_the_shooter_a_beeped_primary(hosted_db, match_id, slug, reviewed=True, stages=(1, 2))
+
+    inline_deferrer["hold"] = True
+    read_before, _ = STORAGE_IO.snapshot()
+    resp = client.post(
+        f"/api/matches/{match_id}/match/compare-export",
+        json={"stage_numbers": [1], "audio_from": slug},
+    )
+    read_after, _ = STORAGE_IO.snapshot()
+    assert resp.status_code == 200, resp.text
+    assert cuts == []  # the request plans the cut; only the job makes it
+    assert read_after - read_before < len(SOURCE_BYTES)
+
+    inline_deferrer["hold"] = False
+    resp = client.post(
+        f"/api/matches/{match_id}/match/compare-export",
+        json={"stage_numbers": [1], "audio_from": slug, "output_name": "grid-cut"},
+    )
+    assert resp.status_code == 200, resp.text
+    job = _wait_for_job(client, match_id, resp.json()["id"])
+    assert job["status"] == "succeeded", job
+
+    (cut,) = cuts
+    assert cut["source_bytes"] == SOURCE_BYTES
+    assert cut["mode"] == "lossless"
+    assert cut["beep_time"] == 5.0
+    assert cut["stage_time"] == 10.0
+    assert (cut["pre_buffer_seconds"], cut["post_buffer_seconds"]) == (5.0, 5.0)
+    # Dropped once cut: Cloud Run's disk is memory.
+    assert not cut["input"].exists()
+    (call,) = rendered
+    (bundle,) = call["shooters"]
+    stage = bundle.stages_by_number[1]
+    assert stage.trim_source == "source"
+    assert stage.trim_path.name.endswith("_cut.mp4")
+    assert job["result"]["missing_trims"] == []
+
+
+def test_hosted_grid_keeps_the_source_on_a_real_disk(hosted_source_only, monkeypatch) -> None:
+    """A worker with a real disk (gaspode) keeps its source cache."""
+    client, _storage, match_id, slug, _rendered, cuts = hosted_source_only
+    monkeypatch.delenv("CLOUD_RUN_EXECUTION", raising=False)
+    resp = client.post(
+        f"/api/matches/{match_id}/match/compare-export",
+        json={"stage_numbers": [1], "audio_from": slug},
+    )
+    assert resp.status_code == 200, resp.text
+    assert _wait_for_job(client, match_id, resp.json()["id"])["status"] == "succeeded"
+    (cut,) = cuts
+    assert cut["input"].exists()
+
+
+def test_hosted_grid_refuses_an_unconfirmed_beep(hosted_source_only, hosted_db) -> None:
+    """A detected but unconfirmed beep may be wrong: no tile is cut around it."""
+    client, _storage, match_id, slug, _rendered, cuts = hosted_source_only
+    _give_the_shooter_a_beeped_primary(hosted_db, match_id, slug, reviewed=False)
+    resp = client.post(
+        f"/api/matches/{match_id}/match/compare-export",
+        json={"stage_numbers": [1], "audio_from": slug},
+    )
+    assert resp.status_code == 400, resp.text
+    detail = resp.json()["detail"]
+    assert "Missing: Me (stage 1)." in detail
+    assert "confirmed beep" in detail and "Quick trims" not in detail
+    assert cuts == []
+
+
+def test_hosted_grid_refuses_a_stage_whose_source_is_gone(hosted_source_only) -> None:
+    client, storage, match_id, slug, _rendered, cuts = hosted_source_only
+    storage.delete("raw/v.mp4")
+    resp = client.post(
+        f"/api/matches/{match_id}/match/compare-export",
+        json={"stage_numbers": [1], "audio_from": slug},
+    )
+    assert resp.status_code == 400, resp.text
+    assert "footage" in resp.json()["detail"]
+    assert cuts == []
 
 
 def test_compare_grid_args_rehydrate_for_the_worker() -> None:
