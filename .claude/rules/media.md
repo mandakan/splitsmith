@@ -123,9 +123,13 @@ a phone a short WAV.
   source", so a bumped mtime made each later job on a worker re-cut its trim
   (`tests/test_hosted_trim_reuse.py`).
 - Beep detection saves the beep before any trim work and chains the trim as a
-  `trim` job (skipped when the beep did not move and the trim is there), so a
-  confirm during the cut adopts it through `_maybe_chain_trim`'s dedupe; a trim
-  whose beep moved while it cut is not marked trimmed
-  (`tests/ui/test_detect_beep_persist_early.py`).
+  `trim` job, skipped only when the trim's params sidecar matches the current
+  beep, stage time and buffers (`audio.trim_params_current`). Overrides,
+  confirms and re-detections adopt a running trim (they dedupe on the trim
+  kind), so a trim whose beep moved while it cut never publishes the cut
+  (`ensure_video_audit_trim(still_current=)`) and queues a trim for the current
+  beep itself. A moved beep drops the old trim locally and, from a job body,
+  in storage (`invalidate_video_audit_trim(stored=True)`); a hosted reader
+  keys on existence. `tests/ui/test_detect_beep_persist_early.py`.
 - The beep preview clip stays synchronous (one clip per scrubbed `t`) but
   publishes whole.

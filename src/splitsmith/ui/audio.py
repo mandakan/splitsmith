@@ -870,13 +870,22 @@ def invalidate_video_audit_trim(
     video: StageVideo,
     *,
     project: MatchProject,
+    stored: bool = False,
 ) -> None:
     """Delete the cached trim, audit WAV, and params sidecar for ``video``.
 
     Called after beep_time changes (manual override) or stage_time changes
     (scoreboard re-import) so the next trim job runs from scratch instead
     of trusting a now-stale cache. Idempotent if any file is missing.
+
+    ``stored`` also deletes the storage cache's copies (trim, params, web
+    rendition, audit WAV): a hosted reader keys on their existence, so a
+    trim cut for the old beep would play under the new one until the next
+    cut lands. Only the job bodies of a hosted-native match pass it; a
+    desktop mirror's media belongs to the desktop. Best-effort.
     """
+    if stored:
+        _drop_stored_trim(project, project_root, stage_number, video)
     from .. import trim as trim_module
 
     output = trimmed_video_path(project_root, stage_number, video, project=project)
@@ -897,6 +906,74 @@ def invalidate_video_audit_trim(
                 p.unlink()
         except OSError:
             pass
+
+
+def _drop_stored_trim(
+    project: MatchProject, project_root: Path, stage_number: int, video: StageVideo
+) -> None:
+    """Delete ``video``'s trim, params sidecar, web rendition and audit WAV
+    from the storage cache. No-op in local mode."""
+    from .. import trim as trim_module
+
+    output = trimmed_video_path(project_root, stage_number, video, project=project)
+    wav = video_audit_audio_path(project_root, stage_number, video, project=project)
+    keys = [
+        _storage_trim_key(project, output),
+        _storage_trim_key(project, trim_params_path(output)),
+        _storage_trim_key(project, trim_module.web_trim_path(output)),
+        _storage_audio_key(project, wav),
+    ]
+    storage = project._storage
+    for key in keys:
+        if key is None or storage is None:
+            continue
+        try:
+            storage.delete(key)
+        except Exception as exc:  # noqa: BLE001 - best-effort, like the local sweep
+            logger.info("trim cache: delete %s failed: %s", key, exc)
+
+
+def trim_params_current(
+    project_root: Path,
+    stage_number: int,
+    video: StageVideo,
+    stage_time_seconds: float,
+    *,
+    project: MatchProject,
+) -> bool:
+    """Whether ``video``'s trim is in place (locally or in the storage cache)
+    and was cut for its current beep, stage time and buffers, by its params
+    sidecar: the same rule :func:`ensure_video_audit_trim` reuses a trim by.
+    Never downloads the trim; reads the small sidecar from storage when it is
+    not on this disk."""
+    if video.beep_time is None:
+        return False
+    current = _current_trim_params(
+        primary_beep_time=video.beep_time, stage_time_seconds=stage_time_seconds, project=project
+    )
+    output = trimmed_video_path(project_root, stage_number, video, project=project)
+    params_file = trim_params_path(output)
+    try:
+        if output.exists() and output.stat().st_size > 0 and params_file.exists():
+            return json.loads(params_file.read_text(encoding="utf-8")) == current
+    except (OSError, ValueError):
+        return False
+    mp4_key = _storage_trim_key(project, output)
+    params_key = _storage_trim_key(project, params_file)
+    if mp4_key is None or params_key is None:
+        return False
+    storage = project._storage  # type: ignore[union-attr]
+    try:
+        if not storage.exists(mp4_key):
+            return False
+        return json.loads(storage.read_bytes(params_key)) == current
+    except Exception as exc:  # noqa: BLE001 - a miss only costs a cache-hit trim job
+        logger.info("trim cache: params check for %s failed: %s", output.name, exc)
+        return False
+
+
+class TrimSuperseded(Exception):  # noqa: N818 - a state, not a failure
+    """The beep moved while the trim was cutting; the cut was dropped unpublished."""
 
 
 def _mp4_problem(path: Path) -> str | None:
@@ -1320,6 +1397,7 @@ def ensure_video_audit_trim(
     ffmpeg_binary: str = "ffmpeg",
     runner: object | None = None,
     force: bool = False,
+    still_current: Callable[[], bool] | None = None,
 ) -> Path:
     """Produce the audit-mode short-GOP trim for ``video`` if not cached.
 
@@ -1329,7 +1407,9 @@ def ensure_video_audit_trim(
     call sees a params mismatch and re-trims even though the source file
     is untouched. ``force`` skips the cache check and re-cuts: the Footage
     sheet's Advanced "Re-cut trim", for a source repaired in place whose
-    mtime a copy or restore did not advance.
+    mtime a copy or restore did not advance. ``still_current`` is asked
+    once the cut passed its check: False drops it unpublished and raises
+    :class:`TrimSuperseded`.
     """
     from .. import trim as trim_module
 
@@ -1414,6 +1494,11 @@ def ensure_video_audit_trim(
         if not check.ok:
             partial.unlink(missing_ok=True)
             raise AudioExtractionError(f"trim failed its check: {check.reason}")
+        # The cut took minutes; a beep moved meanwhile makes it a trim of the
+        # wrong window, which must never be published (#1694 review).
+        if still_current is not None and not still_current():
+            partial.unlink(missing_ok=True)
+            raise TrimSuperseded(f"beep moved while cutting {output.name}")
         partial.replace(output)
         derived.produce(
             params_file,

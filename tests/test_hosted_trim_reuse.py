@@ -22,6 +22,7 @@ import pytest
 from splitsmith.match_project import MatchProject, StageEntry, StageVideo
 from splitsmith.source_cache import sweep_source_cache
 from splitsmith.storage import FilesystemStorage
+from splitsmith.ui import audio
 from splitsmith.ui.audio import ensure_video_audit_trim, trimmed_video_path
 from tests.media_bytes import tiny_mp4
 
@@ -130,3 +131,45 @@ def test_a_replaced_storage_object_still_re_cuts(tmp_path: Path, cuts: list[Path
     (root / RAW).unlink()
     _job(project, video, root)
     assert len(cuts) == 2
+
+
+def _stored_keys(tmp_path: Path) -> set[str]:
+    base = tmp_path / "tenant" / SCOPE
+    return {p.relative_to(base).as_posix() for p in base.rglob("*") if p.is_file()}
+
+
+def test_a_stored_invalidation_drops_the_storage_copies(tmp_path: Path, cuts: list[Path]) -> None:
+    """A hosted reader serves a trim, its rendition and its audit WAV by
+    existence in storage: once the beep moved they go there too."""
+    project, video, root = _worker_project(tmp_path)
+    _job(project, video, root)
+    wav = audio.video_audit_audio_path(root, STAGE, video, project=project)
+    wav.parent.mkdir(parents=True, exist_ok=True)
+    wav.write_bytes(b"RIFF")
+    project._storage.write_bytes(f"{SCOPE}/audio/{wav.name}", b"RIFF")  # type: ignore[union-attr]
+    before = _stored_keys(tmp_path)
+    assert {k.split("/")[0] for k in before} == {"trimmed", "audio"}
+    assert len(before) == 4  # trim, params, web rendition, audit WAV
+
+    audio.invalidate_video_audit_trim(root, STAGE, video, project=project)
+    assert _stored_keys(tmp_path) == before, "a plain invalidation reaches into storage"
+
+    audio.invalidate_video_audit_trim(root, STAGE, video, project=project, stored=True)
+    assert _stored_keys(tmp_path) == set()
+
+
+def test_trim_params_current_reads_the_stored_sidecar(tmp_path: Path, cuts: list[Path]) -> None:
+    """The detect job's skip decides by the trim's params, from storage when
+    this worker has no copy, and never downloads the trim to decide."""
+    project, video, root = _worker_project(tmp_path)
+    video.beep_time = BEEP_TIME
+    _job(project, video, root)
+    trim = trimmed_video_path(root, STAGE, video, project=project)
+    assert audio.trim_params_current(root, STAGE, video, STAGE_TIME, project=project)
+    assert not audio.trim_params_current(root, STAGE, video, STAGE_TIME + 1, project=project)
+
+    trim.unlink()
+    audio.trim_params_path(trim).unlink()
+    assert audio.trim_params_current(root, STAGE, video, STAGE_TIME, project=project)
+    assert not audio.trim_params_current(root, STAGE, video, 25.0, project=project)
+    assert not trim.exists(), "the check downloaded the trim"

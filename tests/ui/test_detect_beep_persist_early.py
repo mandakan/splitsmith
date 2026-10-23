@@ -8,6 +8,7 @@ stand for a 4K cut that takes minutes.
 
 from __future__ import annotations
 
+import json
 import threading
 import time
 from pathlib import Path
@@ -154,29 +155,179 @@ def test_a_re_detection_that_moves_the_beep_re_cuts(tmp_path: Path, monkeypatch)
     assert _primary(tmp_path).processed["trim"] is True
 
 
-def test_a_beep_moved_during_the_cut_leaves_the_video_untrimmed(tmp_path: Path, monkeypatch) -> None:
-    """With the beep visible while its trim cuts, the user can move it then:
-    the cut for the old beep is not the video's trim, and detection does not
-    run over it."""
-    client, _ = _seed_project_with_primary(tmp_path)
-    gate = threading.Event()
-    seen = _prepare(tmp_path, monkeypatch, gate)
-    _stub_detect(monkeypatch, beep_time=BEEP, confidence=1.0)  # auto-trusted
+def _wait_for(predicate, what: str) -> None:  # type: ignore[no-untyped-def]
+    deadline = time.time() + 5.0
+    while not predicate() and time.time() < deadline:
+        time.sleep(0.02)
+    assert predicate(), what
+
+
+def _trim_file(tmp_path: Path) -> Path:
+    from splitsmith.ui.audio import trimmed_video_path
+
+    root = _shooter_root(tmp_path)
+    return trimmed_video_path(root, 1, _primary(tmp_path), project=MatchProject.load(root))
+
+
+def _trim_params(tmp_path: Path) -> dict:
+    from splitsmith.ui.audio import trim_params_path
+
+    return json.loads(trim_params_path(_trim_file(tmp_path)).read_text(encoding="utf-8"))
+
+
+def _record_publishes(monkeypatch: pytest.MonkeyPatch) -> list[float]:
+    """The beep each published trim was cut for (its params at the push)."""
+    from splitsmith.ui import audio as audio_helpers
+
+    published: list[float] = []
+    real_push = audio_helpers._try_push_trim_to_storage
+
+    def push(project, local_mp4):  # type: ignore[no-untyped-def]
+        params = audio_helpers.trim_params_path(local_mp4)
+        published.append(json.loads(params.read_text(encoding="utf-8"))["beep_time"])
+        real_push(project, local_mp4)
+
+    monkeypatch.setattr(audio_helpers, "_try_push_trim_to_storage", push)
+    return published
+
+
+def _record_shot_detects(client) -> list[dict]:  # type: ignore[no-untyped-def]
     shot_detects: list[dict] = []
     client.app.state.splitsmith_state.jobs.bodies.register(
         "shot_detect", lambda handle, **kw: shot_detects.append(kw)
     )
+    return shot_detects
+
+
+def test_an_override_during_the_cut_ends_trimmed_for_the_new_beep(tmp_path: Path, monkeypatch) -> None:
+    """The beep is visible while its trim cuts, so it can be moved then. The
+    override adopts the running trim (it dedupes on the trim kind); that trim
+    must not publish its old window and must cut again for the new beep, then
+    chain detection."""
+    client, _ = _seed_project_with_primary(tmp_path)
+    gate = threading.Event()
+    seen = _prepare(tmp_path, monkeypatch, gate)
+    published = _record_publishes(monkeypatch)
+    shot_detects = _record_shot_detects(client)
+    _stub_detect(monkeypatch, beep_time=BEEP, confidence=1.0)  # auto-trusted
 
     client.post("/api/shooters/me/stages/1/detect-beep")
-    deadline = time.time() + 5.0
-    while not seen and time.time() < deadline:
-        time.sleep(0.02)
-    assert seen, "the trim never started"
+    _wait_for(lambda: bool(seen), "the trim never started")
     primary = _primary(tmp_path)
     resp = client.post(f"/api/shooters/me/stages/1/videos/{primary.video_id}/beep", json={"beep_time": 7.0})
     assert resp.status_code == 200, resp.text
     gate.set()
     _wait_for_jobs_to_drain(client)
 
+    assert seen == [pytest.approx(BEEP), pytest.approx(7.0)]
+    assert published == [pytest.approx(7.0)], "the cut for the old beep was published"
+    assert _primary(tmp_path).processed["trim"] is True
+    assert _trim_params(tmp_path)["beep_time"] == pytest.approx(7.0)
+    assert len(shot_detects) == 1
+
+
+def test_a_re_detection_during_the_cut_ends_trimmed_for_the_new_beep(tmp_path: Path, monkeypatch) -> None:
+    """A secondary re-detected right after the primary's confirm, while its
+    first trim still cuts: the same adoption, the same outcome."""
+    client, _ = _seed_project_with_primary(tmp_path)
+    gate = threading.Event()
+    seen = _prepare(tmp_path, monkeypatch, gate)
+    published = _record_publishes(monkeypatch)
+    _stub_detect(monkeypatch, beep_time=BEEP)
+
+    client.post("/api/shooters/me/stages/1/detect-beep")
+    _wait_for(lambda: bool(seen), "the trim never started")
+    _stub_detect(monkeypatch, beep_time=BEEP + 0.25)
+    job = client.post("/api/shooters/me/stages/1/detect-beep").json()
+    assert _wait_for_job(client, job["id"])["status"] == "succeeded"
+    gate.set()
+    _wait_for_jobs_to_drain(client)
+
+    assert seen == [pytest.approx(BEEP), pytest.approx(BEEP + 0.25)]
+    assert published == [pytest.approx(BEEP + 0.25)]
+    assert _primary(tmp_path).processed["trim"] is True
+    assert _trim_params(tmp_path)["beep_time"] == pytest.approx(BEEP + 0.25)
+
+
+def test_a_re_detection_that_moves_the_beep_retires_the_old_trim_at_once(tmp_path: Path, monkeypatch) -> None:
+    """Between the saved beep and its new trim, nothing may present the old
+    cut as the video's trim: the flag is cleared, the files go, and the
+    storage copies are dropped (a hosted reader keys on their existence)."""
+    from splitsmith.ui import audio as audio_helpers
+
+    client, _ = _seed_project_with_primary(tmp_path)
+    _prepare(tmp_path, monkeypatch)
+    _stub_detect(monkeypatch, beep_time=BEEP)
+    client.post("/api/shooters/me/stages/1/detect-beep")
+    _wait_for_jobs_to_drain(client)
+    assert _trim_file(tmp_path).exists()
+
+    # Hold the follow-up trim off entirely: observe the state the re-detection leaves.
+    queued: list[dict] = []
+    client.app.state.splitsmith_state.jobs.bodies.register("trim", lambda handle, **kw: queued.append(kw))
+    invalidations: list[dict] = []
+    real_invalidate = audio_helpers.invalidate_video_audit_trim
+
+    def spy(*a, **kw):  # type: ignore[no-untyped-def]
+        invalidations.append(kw)
+        real_invalidate(*a, **kw)
+
+    monkeypatch.setattr(audio_helpers, "invalidate_video_audit_trim", spy)
+    _stub_detect(monkeypatch, beep_time=BEEP + 0.25)
+    job = client.post("/api/shooters/me/stages/1/detect-beep").json()
+    assert _wait_for_job(client, job["id"])["status"] == "succeeded"
+    _wait_for_jobs_to_drain(client)
+
+    assert len(queued) == 1
     assert _primary(tmp_path).processed["trim"] is False
-    assert shot_detects == []
+    assert not _trim_file(tmp_path).exists()
+    assert [kw.get("stored") for kw in invalidations] == [True]
+
+
+def test_a_stage_time_changed_since_the_cut_re_cuts(tmp_path: Path, monkeypatch) -> None:
+    """A trim is current by its params, not by the beep alone: a stage time
+    edited after the cut leaves ``processed.trim`` set, and a re-detection
+    finding the same beep must still cut the new window."""
+    client, _ = _seed_project_with_primary(tmp_path)
+    seen = _prepare(tmp_path, monkeypatch)
+    _stub_detect(monkeypatch, beep_time=BEEP)
+    client.post("/api/shooters/me/stages/1/detect-beep")
+    _wait_for_jobs_to_drain(client)
+    resp = client.post("/api/shooters/me/stages/1/time", json={"time_seconds": 25.0})
+    assert resp.status_code == 200, resp.text
+    assert _primary(tmp_path).processed["trim"] is True
+
+    client.post("/api/shooters/me/stages/1/detect-beep")
+    _wait_for_jobs_to_drain(client)
+
+    assert len(seen) == 2
+    assert _trim_params(tmp_path)["stage_time_seconds"] == pytest.approx(25.0)
+
+
+def test_a_confirm_saved_just_before_the_trim_saves_still_chains_detection(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """The trim job reads ``beep_reviewed`` from the document it writes, so a
+    confirm that wins the race to the store is not lost."""
+    import splitsmith.ui.server as server_mod
+
+    client, _ = _seed_project_with_primary(tmp_path)
+    _prepare(tmp_path, monkeypatch)
+    shot_detects = _record_shot_detects(client)
+    _stub_detect(monkeypatch, beep_time=BEEP)
+    real_update = server_mod._update_project
+
+    def confirm_first(state, slug, apply):  # type: ignore[no-untyped-def]
+        if apply.__name__ != "_apply_beep":  # the trim job's write
+            root = _shooter_root(tmp_path)
+            project = MatchProject.load(root)
+            project.stages[0].primary().beep_reviewed = True  # type: ignore[union-attr]
+            project.save(root)
+        return real_update(state, slug, apply)
+
+    monkeypatch.setattr(server_mod, "_update_project", confirm_first)
+    client.post("/api/shooters/me/stages/1/detect-beep")
+    _wait_for_jobs_to_drain(client)
+
+    assert _primary(tmp_path).processed["trim"] is True
+    assert len(shot_detects) == 1
