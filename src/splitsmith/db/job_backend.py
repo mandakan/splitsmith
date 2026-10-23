@@ -79,6 +79,7 @@ _to_wire_args = to_wire_args
 _ROW_TO_JOB_FIELDS = (
     "id",
     "kind",
+    "match_id",
     "stage_number",
     "shooter_slug",
     "video_id",
@@ -593,12 +594,10 @@ class PostgresJobBackend:
 
         Used by the project-delete cascade to stop in-flight compute
         before tearing a match's storage/state down, so a worker can't
-        re-write objects we're about to delete. ``compute_jobs`` carries
-        no ``match_id`` (the match link lives only in the Procrastinate
-        queue payload, not the row), so this is deliberately *coarse* --
-        it cancels the user's other in-flight jobs too. That is acceptable
-        when a user is tearing a match down; per-match scoping would need a
-        schema column we chose not to add for ephemeral, boot-swept rows.
+        re-write objects we're about to delete. This is deliberately
+        *coarse* -- it cancels the user's other in-flight jobs too, although
+        the row's ``match_id`` would allow scoping it. That is acceptable
+        when a user is tearing a match down.
         Reuses :meth:`cancel` so subprocess teardown + PENDING->CANCELLED
         semantics stay in one place.
         """
