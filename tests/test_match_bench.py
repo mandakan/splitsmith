@@ -122,3 +122,30 @@ def test_a_filename_two_shooters_use_is_refused(bench, tmp_path: Path) -> None:
     )
     with pytest.raises(ValueError, match="GOPR0001.MP4 belongs to both"):
         bench.build_manifest(root)
+
+
+def test_subset_keeps_only_the_named_stages(bench, tmp_path: Path) -> None:
+    root = _write_match(
+        tmp_path / "match",
+        {
+            "s_a": {
+                "name": "a",
+                "stages": [
+                    {
+                        "stage_number": 1,
+                        "time_seconds": 10.0,
+                        "videos": [_video("raw/one.mp4", "primary", 4.0)],
+                    },
+                    {
+                        "stage_number": 2,
+                        "time_seconds": 20.0,
+                        "videos": [_video("raw/two.mp4", "primary", 5.0)],
+                    },
+                ],
+            },
+        },
+    )
+    cut = bench.subset(bench.build_manifest(root), [2])
+    assert [s.stage_number for s in cut.stages] == [2]
+    assert [(c.filename, c.stages, c.beeps) for c in cut.clips] == [("two.mp4", [2], {2: 5.0})]
+    assert cut.shooters[0].stage_times == {2: 20.0}

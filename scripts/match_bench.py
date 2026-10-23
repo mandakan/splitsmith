@@ -7,6 +7,9 @@ whose, which stage, the confirmed beeps) as if it were a new hosted match:
     upload    put every clip in the account's raw pool once (idempotent)
     seed      create a fresh hosted match from the manifest and attach the
               already-uploaded clips; no bytes move
+    run       confirm the manifest's beeps (which chains trim and shot
+              detection), wait for quiet, render the compare grid, and write
+              every job of the match with its timings
 
 Raw uploads live in the account-level ``raw/`` pool and a match only refers
 to them, so every run seeds a new match over the same objects. Proxies
@@ -205,8 +208,35 @@ def _upload_one(client: httpx.Client, clip: BenchClip) -> dict:
     return {"filename": clip.filename, "bytes": clip.size_bytes, "seconds": round(seconds, 2)}
 
 
+def subset(manifest: BenchManifest, stages: list[int]) -> BenchManifest:
+    """The manifest cut to ``stages``; a clip covering none of them is dropped."""
+    keep = set(stages)
+    clips = []
+    for clip in manifest.clips:
+        covered = [n for n in clip.stages if n in keep]
+        if covered:
+            clips.append(
+                clip.model_copy(
+                    update={"stages": covered, "beeps": {n: b for n, b in clip.beeps.items() if n in keep}}
+                )
+            )
+    shooters = [
+        s.model_copy(update={"stage_times": {n: t for n, t in s.stage_times.items() if n in keep}})
+        for s in manifest.shooters
+    ]
+    return manifest.model_copy(
+        update={
+            "stages": [s for s in manifest.stages if s.stage_number in keep],
+            "shooters": shooters,
+            "clips": clips,
+        }
+    )
+
+
 def cmd_manifest(args: argparse.Namespace) -> None:
     manifest = build_manifest(args.match_dir)
+    if args.stages:
+        manifest = subset(manifest, args.stages)
     args.output.write_text(manifest.model_dump_json(indent=2))
     print(
         f"{len(manifest.shooters)} shooters, {len(manifest.stages)} stages, {len(manifest.clips)} clips, "
@@ -298,6 +328,125 @@ def cmd_seed(args: argparse.Namespace) -> None:
     print(f"seeded {match_id} ({len(manifest.clips)} clips) -> {args.output}")
 
 
+TERMINAL = {"succeeded", "failed", "cancelled"}
+RUN_PHASES = ("settle", "beeps", "grid")
+
+
+class _JobWatch:
+    """Polls the account's jobs and keeps the last snapshot of each of this match's."""
+
+    def __init__(self, client: httpx.Client, match_id: str, interval: float) -> None:
+        self._client = client
+        self._match_id = match_id
+        self._interval = interval
+        self.jobs: dict[str, dict] = {}
+
+    def poll(self) -> list[dict]:
+        resp = self._client.get("/api/me/jobs")
+        resp.raise_for_status()
+        mine = [j for j in resp.json() if j.get("match_id") == self._match_id]
+        for job in mine:
+            self.jobs[job["id"]] = job
+        return [j for j in mine if j["status"] not in TERMINAL]
+
+    def wait_quiet(self, label: str, *, settle: float, timeout: float) -> float:
+        """Block until no job of this match is active for ``settle`` seconds.
+
+        A beep confirm chains trim then detection, so a quiet moment between
+        two links is not the end; ``settle`` covers the gap.
+        """
+        started = time.monotonic()
+        quiet_since: float | None = None
+        while True:
+            active = self.poll()
+            now = time.monotonic()
+            if active:
+                quiet_since = None
+                kinds = sorted({j["kind"] for j in active})
+                print(
+                    f"  [{label}] {now - started:6.0f} s  {len(active)} active: {', '.join(kinds)}",
+                    flush=True,
+                )
+            elif quiet_since is None:
+                quiet_since = now
+            elif now - quiet_since >= settle:
+                return quiet_since - started
+            if now - started > timeout:
+                raise TimeoutError(f"{label}: still busy after {timeout:.0f} s")
+            time.sleep(self._interval)
+
+
+def cmd_run(args: argparse.Namespace) -> None:
+    """Drive a seeded match through the selected phases, in pipeline order.
+
+    Phases: ``settle`` (wait out what attaching started), ``beeps`` (confirm
+    the manifest's beeps; trim and shot detection chain from that) and
+    ``grid`` (render the compare grid). Running only some of them reruns that
+    part on a match an earlier run already took further, e.g. ``--phases
+    grid`` to compare renders across workers; only jobs created during this
+    run are reported.
+    """
+    record = json.loads(args.run.read_text())
+    manifest = BenchManifest.model_validate_json(Path(record["manifest"]).read_text())
+    base = f"/api/matches/{record['match_id']}"
+    slugs: dict[str, str] = record["slugs"]
+    phases: list[dict] = []
+    ran_at = datetime.now(UTC).isoformat()
+    with _client(record["server"], args.cookie) as client:
+        watch = _JobWatch(client, record["match_id"], args.interval)
+
+        def phase(name: str, action) -> None:
+            t0 = time.monotonic()
+            began = datetime.now(UTC).isoformat()
+            action()
+            busy = watch.wait_quiet(name, settle=args.settle, timeout=args.timeout)
+            phases.append(
+                {"name": name, "began": began, "wall_s": round(time.monotonic() - t0, 1), "busy_s": busy}
+            )
+            print(f"{name}: {busy:.0f} s until quiet", flush=True)
+
+        if "settle" in args.phases:
+            phase("settle", lambda: None)
+
+        def confirm_beeps() -> None:
+            for shooter in manifest.shooters:
+                slug = slugs[shooter.key]
+                view = client.get(f"{base}/shooters/{slug}/project")
+                view.raise_for_status()
+                ids = {
+                    (stage["stage_number"], Path(video["path"]).name): video["video_id"]
+                    for stage in view.json()["stages"]
+                    for video in stage.get("videos", [])
+                }
+                for clip in (c for c in manifest.clips if c.shooter == shooter.key):
+                    for number, beep in sorted(clip.beeps.items()):
+                        video_id = ids[(number, clip.filename)]
+                        path = f"{base}/shooters/{slug}/stages/{number}/videos/{video_id}"
+                        _post(client, f"{path}/beep", {"beep_time": beep})
+                        _post(client, f"{path}/beep/review", {"reviewed": True})
+
+        if "beeps" in args.phases:
+            phase("beeps", confirm_beeps)
+
+        if "grid" in args.phases:
+            body = {
+                "stage_numbers": [s.stage_number for s in manifest.stages],
+                "audio_from": slugs[manifest.shooters[0].key],
+                **(json.loads(args.grid_options.read_text()) if args.grid_options else {}),
+            }
+            phase("grid", lambda: _post(client, f"{base}/match/compare-export", body))
+        watch.poll()
+    since = datetime.fromisoformat(ran_at)
+    jobs = [j for j in watch.jobs.values() if datetime.fromisoformat(j["created_at"]) >= since]
+    failed = [j for j in jobs if j["status"] == "failed"]
+    result = {**record, "ran_at": ran_at, "phases": phases, "jobs": jobs}
+    args.output.write_text(json.dumps(result, indent=2))
+    print(f"{len(jobs)} jobs, {len(failed)} failed -> {args.output}")
+    for job in failed:
+        where = f"{job.get('shooter_slug')} stage {job.get('stage_number')}"
+        print(f"  FAILED {job['kind']} {where}: {job['error']}")
+
+
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
@@ -307,7 +456,21 @@ def main(argv: list[str] | None = None) -> None:
     p = sub.add_parser("manifest", help="build a manifest from a local match folder")
     p.add_argument("match_dir", type=Path)
     p.add_argument("-o", "--output", type=Path, required=True)
+    p.add_argument("--stages", type=int, nargs="+", help="keep only these stages (a dry run)")
     p.set_defaults(func=cmd_manifest)
+
+    p = sub.add_parser("run", help="confirm beeps, wait for trim and detection, render the grid")
+    p.add_argument("run", type=Path, help="the run record seed wrote")
+    p.add_argument("-o", "--output", type=Path, required=True)
+    p.add_argument("--cookie")
+    p.add_argument("--interval", type=float, default=5.0, help="seconds between job polls")
+    p.add_argument("--settle", type=float, default=30.0, help="quiet seconds that end a phase")
+    p.add_argument("--timeout", type=float, default=4 * 3600.0, help="seconds before a phase gives up")
+    p.add_argument(
+        "--phases", nargs="+", choices=RUN_PHASES, default=list(RUN_PHASES), help="which phases to run"
+    )
+    p.add_argument("--grid-options", type=Path, help="JSON merged into the compare-export body")
+    p.set_defaults(func=cmd_run)
 
     for name, func, help_text in (
         ("upload", cmd_upload, "upload every clip to the raw pool once"),
