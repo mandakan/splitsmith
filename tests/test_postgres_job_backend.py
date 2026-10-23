@@ -929,6 +929,56 @@ def test_find_active_scopes_by_shooter_slug(tmp_path) -> None:
     assert asyncio.run(backend.find_active(kind="shot_detect", stage_number=3)) is None
 
 
+def _in_match(match_id: str | None, coro_fn: Callable[[], object]) -> object:
+    """Run ``coro_fn()`` with ``current_match_id`` bound the way the alias
+    middleware binds it for a request."""
+    from splitsmith.ui.context import current_match_id
+
+    token = current_match_id.set(match_id)
+    try:
+        return asyncio.run(coro_fn())  # type: ignore[arg-type]
+    finally:
+        current_match_id.reset(token)
+
+
+def test_find_active_scopes_by_calling_match(tmp_path) -> None:
+    """Issue #1688: the dedupe key includes the match ``submit`` stamps.
+    The same shooter slug and stage number recur across a user's matches,
+    so match B's stage-level shot_detect must not adopt match A's."""
+    backend, _, _ = _build_backend_for_new_user(tmp_path, inline=False)
+    _register(backend, "shot_detect", lambda _h: None)
+    key = {"kind": "shot_detect", "stage_number": 1, "shooter_slug": "anders"}
+
+    def _submit_unless_active() -> object:
+        async def go() -> object:
+            existing = await backend.find_active(**key)
+            return existing if existing is not None else await backend.submit(**key)
+
+        return go
+
+    job_a = _in_match("match-a", _submit_unless_active())
+    job_b = _in_match("match-b", _submit_unless_active())
+    assert job_a.id != job_b.id
+    assert (job_a.match_id, job_b.match_id) == ("match-a", "match-b")
+    # Each match still adopts its own job.
+    assert _in_match("match-a", lambda: backend.find_active(**key)).id == job_a.id
+    assert _in_match("match-b", lambda: backend.find_active(**key)).id == job_b.id
+    # A lookup with no match bound matches only match-less rows, the same
+    # value ``submit`` would stamp from there.
+    assert _in_match(None, lambda: backend.find_active(**key)) is None
+    job_none = _in_match(None, lambda: backend.submit(**key))
+    assert _in_match(None, lambda: backend.find_active(**key)).id == job_none.id
+    assert _in_match("match-a", lambda: backend.find_active(**key)).id == job_a.id
+
+    # Per-video lookups too: a video id hashes the source path and stage,
+    # and hosted raw paths are tenant-wide, so two matches can share one.
+    vkey = {"kind": "trim", "stage_number": 1, "shooter_slug": "anders", "video_id": "abc123"}
+    _register(backend, "trim", lambda _h: None)
+    trim_a = _in_match("match-a", lambda: backend.submit(**vkey))
+    assert _in_match("match-b", lambda: backend.find_active(**vkey)) is None
+    assert _in_match("match-a", lambda: backend.find_active(**vkey)).id == trim_a.id
+
+
 def test_body_side_bridges_land_on_the_installed_runner(tmp_path) -> None:
     """``_patch`` and ``_is_cancel_requested`` are called from the job
     thread. With a DbRunner installed they must run on its loop, not on a

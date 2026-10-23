@@ -614,6 +614,19 @@ class PostgresJobBackend:
         # ``shooter_slug`` is strict like ``stage_number``: ``None``
         # compiles to IS NULL, so slug-less lookups only match slug-less
         # jobs and never adopt another shooter's work (issue #664).
+        # ``match_id`` is strict the same way, keyed on the value
+        # :meth:`submit` would stamp from this context: slugs and stage
+        # numbers repeat across a user's matches, so without it match B
+        # adopted match A's job and its own was never queued (#1688). A
+        # lookup with no match bound (``/api/me/*``, e.g. the upload's
+        # ``generate_proxy``) only matches match-less rows, which is what
+        # its submit writes. Unlike the local registry, a match-bound
+        # lookup does not also match match-less rows: hosted mode has no
+        # match-less kind a match-bound route looks up (``model_download``
+        # is local only), so such a row is a stray that must not be
+        # adopted by every match.
+        from ..ui.server import current_match_id
+
         async with self._session_factory() as session:
             stmt = (
                 select(ComputeJobRow)
@@ -622,6 +635,7 @@ class PostgresJobBackend:
                     ComputeJobRow.kind == kind,
                     ComputeJobRow.stage_number == stage_number,
                     ComputeJobRow.shooter_slug == shooter_slug,
+                    ComputeJobRow.match_id == current_match_id.get(),
                     ComputeJobRow.status.in_([JobStatus.PENDING.value, JobStatus.RUNNING.value]),
                 )
                 .order_by(ComputeJobRow.created_at)
