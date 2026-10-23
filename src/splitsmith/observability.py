@@ -191,26 +191,53 @@ def worker_name() -> str:
     return f"host:{socket.gethostname()}"
 
 
-def container_limits(cgroup_root: Path = _CGROUP_ROOT) -> dict[str, Any]:
-    """vCPU and memory limits from cgroup v2, falling back to the host.
+#: The worker's size as deployed. Cloud Run exposes neither cgroup v2 limits
+#: nor any env var for a job's --cpu / --memory (its sandbox reports the
+#: host's cores), so the deploy states them next to those flags.
+WORKER_VCPU_ENV = "SPLITSMITH_WORKER_VCPU"
+WORKER_MEMORY_MB_ENV = "SPLITSMITH_WORKER_MEMORY_MB"
+# cgroup v1 reports "no limit" as a huge page-aligned number, not "max".
+_CGROUP_V1_UNLIMITED = 1 << 60
 
-    ``os.cpu_count()`` reports the host's cores, not a container's quota,
-    which is why the quota is read first. An unlimited memory is ``None``.
+
+def _read_ints(path: Path) -> list[int] | None:
+    try:
+        return [int(v) for v in path.read_text().split() if v != "max"] or None
+    except (OSError, ValueError):
+        return None
+
+
+def container_limits(cgroup_root: Path = _CGROUP_ROOT) -> dict[str, Any]:
+    """vCPU and memory limits: the deploy's env, else cgroup v2, else v1.
+
+    The vCPU falls back to ``os.cpu_count()`` (the host's cores, not a
+    quota) and an unknown memory is ``None``.
     """
     vcpu: float | None = None
     memory_mb: int | None = None
     try:
-        quota, period = (cgroup_root / "cpu.max").read_text().split()
-        if quota != "max":
-            vcpu = int(quota) / int(period)
-    except (OSError, ValueError):
+        vcpu = float(os.environ[WORKER_VCPU_ENV])
+    except (KeyError, ValueError):
         pass
     try:
-        raw = (cgroup_root / "memory.max").read_text().strip()
-        if raw != "max":
-            memory_mb = int(raw) // (1024 * 1024)
-    except (OSError, ValueError):
+        memory_mb = int(os.environ[WORKER_MEMORY_MB_ENV])
+    except (KeyError, ValueError):
         pass
+    if vcpu is None:
+        v2 = (cgroup_root / "cpu.max").read_text().split() if (cgroup_root / "cpu.max").is_file() else []
+        if len(v2) == 2 and v2[0] != "max":
+            vcpu = int(v2[0]) / int(v2[1])
+        else:
+            quota = _read_ints(cgroup_root / "cpu" / "cpu.cfs_quota_us")
+            period = _read_ints(cgroup_root / "cpu" / "cpu.cfs_period_us")
+            if quota and period and quota[0] > 0:
+                vcpu = quota[0] / period[0]
+    if memory_mb is None:
+        raw = _read_ints(cgroup_root / "memory.max") or _read_ints(
+            cgroup_root / "memory" / "memory.limit_in_bytes"
+        )
+        if raw and raw[0] < _CGROUP_V1_UNLIMITED:
+            memory_mb = raw[0] // (1024 * 1024)
     if vcpu is None:
         cores = os.cpu_count()
         vcpu = float(cores) if cores else None

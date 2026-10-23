@@ -21,7 +21,13 @@ from splitsmith.observability import PhaseTimer
 def _fresh_worker_state(monkeypatch):
     monkeypatch.setattr(obs, "_WORKER_NAME", None)
     monkeypatch.setattr(obs, "_RUNNING", obs._RunningJobs())
-    for var in ("CLOUD_RUN_JOB", "CLOUD_RUN_EXECUTION", "CLOUD_RUN_TASK_INDEX"):
+    for var in (
+        "CLOUD_RUN_JOB",
+        "CLOUD_RUN_EXECUTION",
+        "CLOUD_RUN_TASK_INDEX",
+        obs.WORKER_VCPU_ENV,
+        obs.WORKER_MEMORY_MB_ENV,
+    ):
         monkeypatch.delenv(var, raising=False)
 
 
@@ -41,6 +47,34 @@ def test_container_limits_unlimited_falls_back_to_cpu_count(tmp_path: Path, monk
 def test_container_limits_without_cgroup_files(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setattr(obs.os, "cpu_count", lambda: 8)
     assert obs.container_limits(tmp_path / "absent") == {"vcpu": 8.0, "memory_mb": None}
+
+
+def test_container_limits_prefer_the_deployed_size(tmp_path: Path, monkeypatch) -> None:
+    """Cloud Run's sandbox shows no cgroup limits and the host's cores; the
+    deploy's stated size wins over anything read from the system."""
+    (tmp_path / "cpu.max").write_text("800000 100000\n")
+    monkeypatch.setenv(obs.WORKER_VCPU_ENV, "4")
+    monkeypatch.setenv(obs.WORKER_MEMORY_MB_ENV, "8192")
+    assert obs.container_limits(tmp_path) == {"vcpu": 4.0, "memory_mb": 8192}
+
+
+def test_container_limits_read_cgroup_v1(tmp_path: Path) -> None:
+    (tmp_path / "cpu").mkdir()
+    (tmp_path / "cpu" / "cpu.cfs_quota_us").write_text("200000\n")
+    (tmp_path / "cpu" / "cpu.cfs_period_us").write_text("100000\n")
+    (tmp_path / "memory").mkdir()
+    (tmp_path / "memory" / "memory.limit_in_bytes").write_text(f"{4 * 1024**3}\n")
+    assert obs.container_limits(tmp_path) == {"vcpu": 2.0, "memory_mb": 4096}
+
+
+def test_container_limits_v1_unlimited(tmp_path: Path, monkeypatch) -> None:
+    (tmp_path / "cpu").mkdir()
+    (tmp_path / "cpu" / "cpu.cfs_quota_us").write_text("-1\n")
+    (tmp_path / "cpu" / "cpu.cfs_period_us").write_text("100000\n")
+    (tmp_path / "memory").mkdir()
+    (tmp_path / "memory" / "memory.limit_in_bytes").write_text("9223372036854771712\n")
+    monkeypatch.setattr(obs.os, "cpu_count", lambda: 6)
+    assert obs.container_limits(tmp_path) == {"vcpu": 6.0, "memory_mb": None}
 
 
 def test_worker_name_prefers_an_explicit_name_over_cloud_run(monkeypatch) -> None:
@@ -143,3 +177,21 @@ def test_postgres_backend_persists_worker_facts(tmp_path) -> None:
     assert timings["meta"] == {"input_bytes": 5}
     assert timings["worker"]["name"] == "agent:wk_bench"
     assert timings["worker"]["storage_read_bytes"] == 123
+
+
+def test_worker_env_states_the_size_deploy_app_sets() -> None:
+    """The worker env files repeat deploy-app.yml's --cpu / --memory; a
+    resize that changes one and not the other misreports every job."""
+    import re
+
+    import yaml
+
+    root = Path(__file__).resolve().parents[1]
+    workflow = (root / ".github" / "workflows" / "deploy-app.yml").read_text()
+    match = re.search(r"--args=worker,--one-shot.*?--cpu (\d+) --memory (\d+)Gi", workflow, re.S)
+    assert match, "the worker job's --cpu / --memory flags moved"
+    cpu, gib = match.groups()
+    for env in ("staging", "production"):
+        values = yaml.safe_load((root / "deploy" / "cloudrun" / f"{env}-worker.env.yaml").read_text())
+        assert values[obs.WORKER_VCPU_ENV] == cpu
+        assert values[obs.WORKER_MEMORY_MB_ENV] == str(int(gib) * 1024)
