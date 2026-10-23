@@ -343,9 +343,11 @@ class _JobWatch:
     phase that submits one tracks the id its POST returned.
     """
 
-    def __init__(self, client: httpx.Client, slugs: set[str], interval: float) -> None:
+    def __init__(self, client: httpx.Client, slugs: set[str], interval: float, stale: float) -> None:
         self._client = client
         self._slugs = slugs
+        self._stale = stale
+        self.orphans: dict[str, dict] = {}
         self._ids: set[str] = set()
         self._interval = interval
         self.jobs: dict[str, dict] = {}
@@ -354,9 +356,25 @@ class _JobWatch:
         resp = self._client.get("/api/me/jobs")
         resp.raise_for_status()
         mine = [j for j in resp.json() if j.get("shooter_slug") in self._slugs or j["id"] in self._ids]
+        now = datetime.now(UTC)
+        active = []
         for job in mine:
             self.jobs[job["id"]] = job
-        return [j for j in mine if j["status"] not in TERMINAL]
+            if job["status"] in TERMINAL:
+                continue
+            # A running row nobody has touched for this long lost its worker
+            # (a killed execution leaves it running for good); waiting on it
+            # would hang the phase.
+            idle = (now - datetime.fromisoformat(job["updated_at"])).total_seconds()
+            if job["status"] == "running" and idle > self._stale:
+                if job["id"] not in self.orphans:
+                    print(
+                        f"  orphaned: {job['kind']} {job.get('shooter_slug')} stage {job.get('stage_number')}"
+                    )
+                self.orphans[job["id"]] = job
+                continue
+            active.append(job)
+        return active
 
     def track(self, job: dict) -> None:
         """Count a submitted job as this match's even when it has no shooter."""
@@ -410,7 +428,7 @@ def cmd_run(args: argparse.Namespace) -> None:
     phases: list[dict] = []
     ran_at = datetime.now(UTC).isoformat()
     with _client(record["server"], args.cookie) as client:
-        watch = _JobWatch(client, set(slugs.values()), args.interval)
+        watch = _JobWatch(client, set(slugs.values()), args.interval, args.stale)
 
         def phase(name: str, action) -> None:
             """Run ``action`` (returns how many requests it posted), wait for quiet."""
@@ -532,6 +550,7 @@ def cmd_run(args: argparse.Namespace) -> None:
         "ran_at": ran_at,
         "phases": phases,
         "error": error,
+        "orphans": list(watch.orphans.values()),
         "beep_corrections": corrections,
         "jobs": jobs,
     }
@@ -673,6 +692,12 @@ def main(argv: list[str] | None = None) -> None:
         "--phases", nargs="+", choices=RUN_PHASES, default=list(RUN_PHASES), help="which phases to run"
     )
     p.add_argument("--grid-options", type=Path, help="JSON merged into the compare-export body")
+    p.add_argument(
+        "--stale",
+        type=float,
+        default=900.0,
+        help="seconds without an update that make a running job orphaned",
+    )
     p.add_argument(
         "--beep-tolerance",
         type=float,
