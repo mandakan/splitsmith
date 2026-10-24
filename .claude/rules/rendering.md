@@ -90,11 +90,18 @@ argv test proves nothing about pixels.
   with `SPLITSMITH_RENDER_CACHE=0` (conftest); a cache test passes its own.
 - **A hosted grid renders one job per stage** (`compare-grid-stage`), then
   the `compare-grid` job stitches: its tiles would not fit a Cloud Run
-  worker's memory together. Every job plans from storage
-  (`ui/grid_tiles.HostedGridTiles`: ffprobe over a presigned URL, the grid
-  job's probes handed to its stage jobs as `tile_meta`) and builds its
-  options through `_grid_inputs` / `_grid_render_options`, so all build the
-  same commands. Three renderer seams, all off for a local render, so its
+  worker's memory together. **The request queues the stage jobs**, never a
+  worker: only serve's deferrer wakes executions, and a job a worker queues
+  wakes none. The grid job is claimed first (`queue.job_priority`), plans
+  from storage (`ui/grid_tiles.HostedGridTiles`: ffprobe over a presigned
+  URL), publishes its probes under `matches/<id>/render-plans/` for the
+  stage jobs, and renders every stage job still queued itself
+  (`_work_grid_stages`), so one worker alone still finishes the grid.
+  Every job builds its options through `_grid_inputs` /
+  `_grid_render_options`, so all build the same commands. The stitch names
+  stored segments by presigned URL (`SegmentCache.concat_source`,
+  `lookup(fetch=False)`) and trusts only a quiet read: a 4K match's
+  segments would not fit beside the output on a memory disk. Three renderer seams, all off for a local render, so its
   argv and keys are unchanged: `tile_identities` keys a tile by its stored
   object, never a local copy or a URL; `tile_access` pulls one stage's
   tiles around each read of them, never for a cache hit; `only_stage`

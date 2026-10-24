@@ -91,9 +91,17 @@ BACKGROUND_JOB_KINDS = frozenset({"generate_proxy"})
 BACKGROUND_JOB_PRIORITY = -100
 
 
+#: One stage of a compare grid (#1691) runs after the grid job that plans it
+#: (queued after them, claimed before them) and after other user work.
+GRID_STAGE_JOB_PRIORITY = -1
+
+
 def job_priority(kind: str) -> int:
-    """The Procrastinate priority a job of ``kind`` is deferred with."""
-    return BACKGROUND_JOB_PRIORITY if kind in BACKGROUND_JOB_KINDS else 0
+    """The Procrastinate priority a job of ``kind`` is deferred with; a
+    higher one is claimed first."""
+    if kind in BACKGROUND_JOB_KINDS:
+        return BACKGROUND_JOB_PRIORITY
+    return GRID_STAGE_JOB_PRIORITY if kind == "compare-grid-stage" else 0
 
 
 #: The worker job's task timeout as deployed (``--task-timeout``), in

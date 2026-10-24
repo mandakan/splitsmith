@@ -99,7 +99,7 @@ def inline_deferrer(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
         async def _defer(
             *, job_id: str, user_id: str, kind: str, args: dict[str, Any], match_id: str | None
         ) -> None:
-            if holder.get("hold"):  # leave the job queued: only the request runs
+            if holder.get("hold") or kind in holder.get("hold_kinds", ()):  # leave it queued
                 holder.setdefault("held", []).append(job_id)
                 return
             state = holder["state"]

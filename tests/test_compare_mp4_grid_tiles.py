@@ -304,3 +304,51 @@ def test_a_stitch_over_urls_reads_quietly_or_fails(tmp_path: Path) -> None:
     assert "s3cret" not in str(err.value)
     listed = (tmp_path / "stitch" / "concat.txt").read_text(encoding="utf-8")
     assert "https://bucket.example/" in listed
+
+
+@pytest.mark.parametrize("dressed", [False, True])
+def test_stage_segments_from_other_workers_are_found_by_the_stitch(tmp_path: Path, dressed: bool) -> None:
+    """Each stage on its own "worker": its own scratch cache root over one
+    shared store, its own work dir, and its own copy of the tiles (rewritten,
+    so a new mtime). With the tiles keyed by their stored identity, a stitch
+    from a third worker encodes no stage and reads no tile."""
+    import os
+
+    from splitsmith.storage import FilesystemStorage
+    from splitsmith.stored_segment_cache import StoredSegmentCache
+
+    store = FilesystemStorage(tmp_path / "store")
+    shooters, stage_of = _shooters(tmp_path)
+    identities = {path: f"storage:exports/{Path(path).name}:0:v1" for path in stage_of}
+
+    def worker(name: str) -> StoredSegmentCache:
+        for path in stage_of:  # this worker's own copy of every tile
+            Path(path).write_bytes(b"")
+            os.utime(path, (hash(name) % 10**6, hash(name) % 10**6))
+        return StoredSegmentCache(
+            tmp_path / f"{name}-cache", 1 << 30, storage=store, prefix="matches/m/render-segments"
+        )
+
+    for n in STAGES:
+        _render(
+            tmp_path,
+            f"stage{n}",
+            worker(f"w{n}"),
+            None,
+            dressed=dressed,
+            shooters=shooters,
+            only_stage=n,
+            tile_identities=identities,
+        )
+    runners, reads = _tile_reading_runners(stage_of)
+    _render(
+        tmp_path,
+        "stitch",
+        worker("stitcher"),
+        None,
+        dressed=dressed,
+        shooters=shooters,
+        runners=runners,
+        tile_identities=identities,
+    )
+    assert reads == []

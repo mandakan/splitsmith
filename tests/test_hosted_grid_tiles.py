@@ -52,7 +52,7 @@ def _load(  # type: ignore[no-untyped-def]
     state = client.app.state.splitsmith_state
     out: dict[str, Any] = {}
 
-    def body(handle, req, match_root: str) -> None:  # type: ignore[no-untyped-def]
+    def body(handle, req, match_root: str, **_grid_args: Any) -> None:  # type: ignore[no-untyped-def]
         out["state"] = state
         out["bundles"] = server_mod._load_compare_bundles(
             Path(match_root), state.match(), state=state, stage_numbers=stages, tiles=tiles, **kwargs
@@ -61,6 +61,9 @@ def _load(  # type: ignore[no-untyped-def]
         out["root"] = state.shooter_root(req.audio_from)
 
     state.jobs.bodies.register("compare-grid", body)
+    # Only the loader is under test here: the stage jobs a two-stage
+    # request queues do nothing.
+    state.jobs.bodies.register("compare-grid-stage", lambda handle, **_args: None)
     resp = client.post(
         f"/api/matches/{match_id}/match/compare-export", json={"stage_numbers": stages, "audio_from": slug}
     )

@@ -12,6 +12,7 @@ from __future__ import annotations
 import logging
 import re
 import shutil
+import uuid
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Literal
@@ -1890,9 +1891,29 @@ async def export_compare_grid(request: Request, req: CompareGridRequest) -> JSON
             ),
         )
 
+    # #1691: hosted, every stage is its own job, queued here so serve's
+    # wake fans them out to workers; the grid job (claimed first, by
+    # priority) plans, publishes the plan for them, renders any stage still
+    # queued itself, then stitches. Locally one process renders it all.
+    planned = sorted({n for bundle in bundles for n in bundle.stages_by_number if n in req.stage_numbers})
+    stage_jobs: dict[str, str] = {}
+    grid_run = uuid.uuid4().hex
+    if state.storage is not None and len(planned) > 1:
+        for number in planned:
+            stage_job = await state.jobs.submit(
+                kind="compare-grid-stage",
+                stage_number=number,
+                args={
+                    "req": req,
+                    "match_root": str(match_root),
+                    "stage_number": number,
+                    "grid_run": grid_run,
+                },
+            )
+            stage_jobs[str(number)] = stage_job.id
     job = await state.jobs.submit(
         kind="compare-grid",
-        args={"req": req, "match_root": str(match_root)},
+        args={"req": req, "match_root": str(match_root), "stage_jobs": stage_jobs, "grid_run": grid_run},
     )
     return JSONResponse(job.model_dump(mode="json"))
 

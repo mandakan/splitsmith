@@ -114,8 +114,11 @@ jobs store the frames the stitch needs; never by pulling the trims, which is
 the 11 GB this design exists to avoid.
 
 Stage jobs fan out through the existing dispatcher: twelve queued stage jobs
-read as a backlog and get executions up to the cap. At cap 13, twelve stages
-and the waiting parent run in one round.
+read as a backlog and get executions up to the cap. Serve starts one execution
+per two queued jobs (`SPLITSMITH_WORKER_JOBS_PER_EXECUTION`), so twelve
+stage jobs and the grid job get seven: two rounds. (Revised after review:
+the request, not the grid job, queues the stage jobs, because only serve's
+deferrer wakes executions; the grid job renders any stage still queued.)
 
 Expected for HFO at 1080p, basic (estimate, to be measured): about 1 minute
 to start and plan, one round of stage renders, under a minute to stitch.

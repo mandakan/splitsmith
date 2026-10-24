@@ -1,8 +1,10 @@
 """A hosted grid renders as one job per stage, then a stitch (#1691).
 
-The grid job plans from storage, queues a ``compare-grid-stage`` job per
-planned stage and waits for them; each stage job renders its stage into the
-stored segment cache; the grid job's own render then reuses every stage.
+The request queues a ``compare-grid-stage`` job per planned stage (so serve's
+wake fans them out) and the grid job, claimed first by priority. The grid
+job plans from storage, publishes its plan, renders any stage job still
+queued itself, waits for the rest, then stitches; each stage job renders its
+stage into the stored segment cache.
 The renderer is faked here (its split is pinned in
 ``test_compare_mp4_grid_tiles``); these pin the jobs around it.
 """
@@ -47,11 +49,17 @@ def two_stages(hosted_grid, hosted_db, monkeypatch: pytest.MonkeyPatch):  # noqa
     storage.write_bytes(f"matches/{match_id}/shooters/{slug}/exports/stage2_two_trimmed.mp4", TRIM_BYTES)
     calls: list[dict[str, Any]] = []
     failing: set[int] = set()
+    raising: set[int] = set()
+    # Inline, a stage job runs before its grid job is even queued: it
+    # would wait out the plan; plan alone at once instead.
+    monkeypatch.setattr(server_mod, "GRID_PLAN_WAIT_S", 0.0)
 
     def render(shooters: Any, *, audio_label: str, output_path: Path, **kwargs: Any) -> Any:
         calls.append({"audio_label": audio_label, **kwargs})
         numbers = sorted({n for s in shooters for n in s.stages_by_number})
         only = kwargs.get("only_stage")
+        if only is not None and only in raising:
+            raise RuntimeError("render blew up")
         if only is not None:
             ok = only not in failing
             outcome = mp4_grid_mod.StageOutcome(
@@ -67,7 +75,7 @@ def two_stages(hosted_grid, hosted_db, monkeypatch: pytest.MonkeyPatch):  # noqa
 
     monkeypatch.setattr(mp4_grid_mod, "render_grid_mp4", render)
     monkeypatch.setattr(pl_mod.fcpxml_gen, "probe_video", _probe)
-    return client, storage, match_id, slug, calls, failing
+    return client, storage, match_id, slug, calls, failing, raising
 
 
 def _grid(client, match_id: str, slug: str, stages: list[int]) -> dict:  # type: ignore[no-untyped-def]
@@ -84,7 +92,7 @@ def _stage_jobs(client, match_id: str) -> list[dict]:  # type: ignore[no-untyped
 
 
 def test_the_parent_queues_one_stage_job_per_planned_stage(two_stages) -> None:
-    client, _storage, match_id, slug, calls, _failing = two_stages
+    client, _storage, match_id, slug, calls, _failing, _raising = two_stages
     job = _grid(client, match_id, slug, [1, 2])
     assert job["status"] == "succeeded", job
     assert [c.get("only_stage") for c in calls] == [1, 2, None]
@@ -97,7 +105,7 @@ def test_the_parent_stitches_from_the_stage_jobs_cache(two_stages) -> None:
     """Every job reads and writes the same stored cache under the match and
     keys the tiles the same way, so the stitch (and a retried grid, after a
     killed one) finds what the stage jobs stored."""
-    client, _storage, match_id, slug, calls, _failing = two_stages
+    client, _storage, match_id, slug, calls, _failing, _raising = two_stages
     assert _grid(client, match_id, slug, [1, 2])["status"] == "succeeded"
     caches = [c["segment_cache"] for c in calls]
     assert all(isinstance(c, StoredSegmentCache) for c in caches)
@@ -123,16 +131,73 @@ _PER_JOB = {
 
 
 def test_a_failed_stage_job_does_not_fail_the_grid(two_stages) -> None:
-    client, _storage, match_id, slug, calls, failing = two_stages
-    failing.add(2)
+    """A stage the stage job could not render is left to the grid job, whose
+    render encodes what is missing; the stage job is no red job in the
+    drawer for a grid that succeeded."""
+    client, _storage, match_id, slug, calls, failing, raising = two_stages
+    failing.add(1)
+    raising.add(2)
     job = _grid(client, match_id, slug, [1, 2])
     assert job["status"] == "succeeded", job
-    # The parent's render ran anyway: it encodes the stage the job missed.
-    assert calls[-1].get("only_stage") is None
+    stage_jobs = {j["stage_number"]: j for j in _stage_jobs(client, match_id)}
+    assert {n: j["status"] for n, j in stage_jobs.items()} == {1: "succeeded", 2: "succeeded"}
+    results = {
+        n: client.get(f"/api/matches/{match_id}/me/jobs/{j['id']}").json()["result"]
+        for n, j in stage_jobs.items()
+    }
+    assert results[1]["ok"] is False and results[1]["error"] == "boom"
+    assert results[2]["ok"] is False and "render blew up" in results[2]["error"]
+    assert [c.get("only_stage") for c in calls] == [1, 2, None]
+
+
+def test_the_grid_job_renders_queued_stages_itself(two_stages, inline_deferrer) -> None:
+    """No worker took the stage jobs (none woke, or one worker serves the
+    queue): the grid job cancels each and renders it, from the back, then
+    stitches. The grid finishes either way."""
+    client, _storage, match_id, slug, calls, _failing, _raising = two_stages
+    inline_deferrer["hold_kinds"] = {"compare-grid-stage"}
+    job = _grid(client, match_id, slug, [1, 2])
+    assert job["status"] == "succeeded", job
+    assert [c.get("only_stage") for c in calls] == [2, 1, None]
+    assert sorted(j["status"] for j in _stage_jobs(client, match_id)) == ["cancelled", "cancelled"]
+
+
+def test_the_request_queues_the_stage_jobs_behind_the_grid_job(two_stages) -> None:
+    """Queued by the request, the stage jobs go through serve's wake, which
+    fans them out to workers; the grid job is claimed before them."""
+    from splitsmith import queue as queue_mod
+
+    client, _storage, match_id, slug, _calls, _failing, _raising = two_stages
+    _grid(client, match_id, slug, [1, 2])
+    jobs = client.get(f"/api/matches/{match_id}/me/jobs").json()
+    grid = next(j for j in jobs if j["kind"] == "compare-grid")
+    assert all(j["created_at"] <= grid["created_at"] for j in _stage_jobs(client, match_id))
+    assert queue_mod.job_priority("compare-grid-stage") < queue_mod.job_priority("compare-grid")
+
+
+def test_a_stage_job_plans_from_the_grid_jobs_published_plan(tmp_path: Path, monkeypatch) -> None:
+    from splitsmith.storage import FilesystemStorage
+
+    storage = FilesystemStorage(tmp_path / "store")
+    key = "matches/m1/render-plans/run1.json"
+    storage.write_bytes(key, b'{"tile_meta": {"/t.mp4": {"duration_seconds": 3.0}}}')
+    monkeypatch.setattr(server_mod, "_grid_plan_key", lambda run: key)
+    state = SimpleNamespace(storage=storage)
+    assert server_mod._await_grid_plan(_Handle(None), state, "run1") == {"/t.mp4": {"duration_seconds": 3.0}}  # type: ignore[arg-type]
+
+
+def test_a_stage_job_plans_alone_when_no_plan_comes(tmp_path: Path, monkeypatch) -> None:
+    from splitsmith.storage import FilesystemStorage
+
+    monkeypatch.setattr(server_mod, "GRID_PLAN_WAIT_S", 0.0)
+    monkeypatch.setattr(server_mod, "GRID_STAGE_POLL_S", 0.0)
+    monkeypatch.setattr(server_mod, "_grid_plan_key", lambda run: "matches/m1/render-plans/none.json")
+    state = SimpleNamespace(storage=FilesystemStorage(tmp_path / "store"))
+    assert server_mod._await_grid_plan(_Handle(None), state, "none") is None  # type: ignore[arg-type]
 
 
 def test_a_one_stage_grid_queues_no_stage_jobs(two_stages) -> None:
-    client, _storage, match_id, slug, calls, _failing = two_stages
+    client, _storage, match_id, slug, calls, _failing, _raising = two_stages
     assert _grid(client, match_id, slug, [1])["status"] == "succeeded"
     assert [c.get("only_stage") for c in calls] == [None]
     assert _stage_jobs(client, match_id) == []
@@ -164,11 +229,17 @@ def _jobs(status: JobStatus):  # type: ignore[no-untyped-def]
     return SimpleNamespace(jobs=SimpleNamespace(get=get, cancel=cancel)), cancelled
 
 
+def _work(state, handle, stage_jobs):  # type: ignore[no-untyped-def]
+    server_mod._work_grid_stages(
+        handle, None, None, {}, stage_jobs, state=state, scratch=Path("/nowhere")  # type: ignore[arg-type]
+    )
+
+
 def test_cancelling_the_parent_cancels_its_stage_jobs(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(server_mod, "GRID_STAGE_POLL_S", 0.0)
     state, cancelled = _jobs(JobStatus.RUNNING)
     with pytest.raises(JobCancelled):
-        server_mod._await_grid_stages(_Handle(cancel_after=2), state, ["a", "b"])  # type: ignore[arg-type]
+        _work(state, _Handle(cancel_after=2), {1: "a", 2: "b"})
     assert cancelled == ["a", "b"]
 
 
@@ -176,5 +247,5 @@ def test_the_wait_ends_at_its_deadline_without_cancelling(monkeypatch: pytest.Mo
     monkeypatch.setattr(server_mod, "GRID_STAGE_POLL_S", 0.0)
     monkeypatch.setattr(server_mod, "GRID_STAGE_WAIT_S", 0.0)
     state, cancelled = _jobs(JobStatus.RUNNING)
-    server_mod._await_grid_stages(_Handle(cancel_after=None), state, ["a"])  # type: ignore[arg-type]
+    _work(state, _Handle(cancel_after=None), {1: "a"})
     assert cancelled == []

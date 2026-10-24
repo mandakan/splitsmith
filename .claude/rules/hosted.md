@@ -196,8 +196,7 @@ Deploy facts (worker env, `FORWARDED_ALLOW_IPS`, the waitlist cut-over) are in
   re-wakes that cleared nothing. A backlog beside a live drain gets more
   executions, one per `SPLITSMITH_WORKER_JOBS_PER_EXECUTION` jobs (default 2),
   up to `SPLITSMITH_WORKER_MAX_EXECUTIONS` (default 4; 13 in
-  `deploy/cloudrun/*-serve.env.yaml`: a 12-stage grid's stage jobs plus the
-  grid job). The jobs are the
+  `deploy/cloudrun/*-serve.env.yaml`). The jobs are the
   queued ones plus one per live drain: `pending_jobs` leaves out what a drain
   is running, and without it a stage's chained trims (one running, four
   queued) never read as more than the running drain covers. Executions still booting
