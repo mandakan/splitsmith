@@ -264,6 +264,7 @@ from .context import (
     current_tenant,
 )
 from .exports_api import CompareGridRequest, ExportStageRequest, MatchExportRequest
+from .grid_tiles import HostedGridTiles
 from .http_errors import ensure_source_reachable
 from .identity_media import (
     effective_identity,
@@ -1624,6 +1625,7 @@ def _load_compare_bundles(
     presence: StoragePresence | None = None,
     stage_numbers: list[int] | None = None,
     cut_dir: Path | None = None,
+    tiles: HostedGridTiles | None = None,
 ) -> list[project_loader.CompareShooterBundle]:
     """Load every shooter on ``match`` as a compare-grid bundle.
 
@@ -1652,6 +1654,10 @@ def _load_compare_bundles(
     """
     cameras = cameras or {}
     wanted = set(stage_numbers) if stage_numbers is not None else None
+    if tiles is not None and presence is None and state is not None:
+        # #1691: plan from storage like a request does, but measure each
+        # tile (``tiles`` probes over a URL) instead of leaving it unprobed.
+        presence = StoragePresence(state.storage)
     bundles: list[project_loader.CompareShooterBundle] = []
     for slug in match.shooters:
         # Hosted (#755): the project document is in the state store and
@@ -1699,7 +1705,14 @@ def _load_compare_bundles(
                         # The request: plan it, never fetch it.
                         if not _source_listed(_project, _root, video, presence):
                             return None
-                        return _root / "compare-grid-cut" / _source_cut_name(_slug, stage, video)
+                        planned = _root / "compare-grid-cut" / _source_cut_name(_slug, stage, video)
+                        if tiles is not None:
+                            # The grid job: the same path on every worker,
+                            # cut once now to be measured, again to render.
+                            return tiles.plan_cut(
+                                planned, project=_project, root=_root, stage=stage, video=video
+                            )
+                        return planned
                     return _cut_stage_from_source(
                         _project, _root, cut_dir / _source_cut_name(_slug, stage, video), stage, video
                     )
@@ -1719,9 +1732,15 @@ def _load_compare_bundles(
                 ensure_trim=ensure_trim,
                 trim_exists=trim_exists,
                 cut_from_source=cut_from_source,
-                probe=_unprobed if trim_exists is not None else None,
+                probe=(
+                    tiles.probe_for(project)
+                    if tiles is not None and project is not None
+                    else _unprobed if trim_exists is not None else None
+                ),
             )
         )
+    if tiles is not None:
+        tiles.index(bundles)
     return bundles
 
 

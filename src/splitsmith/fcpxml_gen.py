@@ -253,7 +253,7 @@ class FFprobeError(RuntimeError):
 
 
 def probe_video(
-    path: Path,
+    path: Path | str,
     *,
     ffprobe_binary: str = "ffprobe",
     runner: Runner = subprocess.run,
@@ -261,11 +261,12 @@ def probe_video(
     """Read width / height / duration / frame rate from ``path`` via ffprobe.
 
     A bare ``ffprobe`` resolves through the runtime (the bundled one on the
-    desktop), never through PATH alone."""
+    desktop), never through PATH alone. ``path`` may be a ``str`` URL (a
+    presigned GET, #1691): ffprobe reads the header by range request."""
     from .runtime import ffprobe_path
 
     ffprobe_binary = ffprobe_path(ffprobe_binary)
-    if not path.exists():
+    if isinstance(path, Path) and not path.exists():
         raise FileNotFoundError(f"video not found: {path}")
     cmd = [
         ffprobe_binary,
