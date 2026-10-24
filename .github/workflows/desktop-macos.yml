@@ -87,7 +87,8 @@ jobs:
             echo "=== MUTATION: without $drop"
             m="$RUNNER_TEMP/mut-$drop/Splitsmith.app"
             mkdir -p "$(dirname "$m")" && ditto "$RUNNER_TEMP/installed/Splitsmith.app" "$m"
-            plutil -remove "com.apple.security.cs.$drop" -o "$RUNNER_TEMP/ent-$drop.plist" desktop/entitlements.plist
+            cp desktop/entitlements.plist "$RUNNER_TEMP/ent-$drop.plist"
+            /usr/libexec/PlistBuddy -c "Delete :com.apple.security.cs.$drop" "$RUNNER_TEMP/ent-$drop.plist"
             codesign --force --deep --sign - --options runtime --entitlements "$RUNNER_TEMP/ent-$drop.plist" "$m"
             if desktop/smoke.sh "$m" > "$RUNNER_TEMP/s.log" 2>&1; then echo "MUT smoke PASSED (bad)"; else echo "MUT smoke FAILED (good)"; tail -5 "$RUNNER_TEMP/s.log"; fi
             if desktop/launch-check.sh "$m" > "$RUNNER_TEMP/l.log" 2>&1; then echo "MUT launch PASSED (bad)"; else echo "MUT launch FAILED (good)"; tail -5 "$RUNNER_TEMP/l.log"; fi
