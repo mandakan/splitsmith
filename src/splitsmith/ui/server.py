@@ -1970,6 +1970,21 @@ def _grid_inputs(
             for number in requested:
                 state.materialize_audit(slug, number)
     tiles = HostedGridTiles(tile_meta=tile_meta) if state is not None and state.storage is not None else None
+    if tiles is not None:
+        # A dry pass to learn which tiles to measure, measured in parallel,
+        # then the real load, which finds every one measured.
+        with tiles.planning_pass():
+            _load_compare_bundles(
+                root,
+                match,
+                cameras=req.cameras,
+                inset=req.inset_camera,
+                state=state,
+                stage_numbers=requested,
+                cut_dir=cut_dir,
+                tiles=tiles,
+            )
+        tiles.measure()
     bundles = _load_compare_bundles(
         root,
         match,
