@@ -333,6 +333,8 @@ class WorkerDispatcher:
         # The after-wake watch (see :meth:`_watch`); None disables it.
         self._watch_seconds = watch_seconds
         self._watching = False
+        # One check at the end of a cooldown that dropped a trigger (#1709).
+        self._settling = False
         # Fan-out (#1671): how many Cloud Run executions a backlog may run at
         # once, and how many queued jobs one execution is expected to clear
         # in a few minutes. ``live_workers`` counts heartbeats; without it the
@@ -370,6 +372,8 @@ class WorkerDispatcher:
         async with self._lock:
             now = time.monotonic()
             if self._last_attempt is not None and now - self._last_attempt < self._cooldown_seconds:
+                # The rest of a burst: counted once the cooldown ends (#1709).
+                self._start_settle(self._last_attempt + self._cooldown_seconds - now)
                 return False
             # Stamp before the checks so a slow/failing backend is not
             # hammered by every enqueue in a burst.
@@ -377,6 +381,10 @@ class WorkerDispatcher:
             try:
                 if self._worker_active is not None and await self._worker_active():
                     self._unanswered_since = None
+                    # The live drain may chain jobs of its own (beep to trim,
+                    # trim to shots) that never reach this dispatcher; the
+                    # watch fans out for those (#1709).
+                    self._start_watch()
                     if await self._fan_out():
                         return True
                     logger.info("worker dispatcher: skipped, a live worker heartbeat exists")
@@ -618,6 +626,47 @@ class WorkerDispatcher:
         except Exception:
             logger.warning("worker dispatcher: grace escalation failed; nets will recover", exc_info=True)
 
+    async def _top_up(self) -> bool:
+        """:meth:`_fan_out` beside a live drain, under the lock and the cooldown (#1709).
+
+        A backlog a live worker builds itself (the jobs it chains) and the
+        submits a cooldown dropped never reach :meth:`trigger`; the watch
+        and the settle check call this for them. Only beside a live drain:
+        with none, the cold wake's own tier walk decides who drains, and
+        Cloud Run executions started here would jump a self-hosted box still
+        booting. Stamps the cooldown only when it started an execution, so a
+        no-op check never swallows a submit's trigger. Never raises.
+        """
+        async with self._lock:
+            now = time.monotonic()
+            if self._last_attempt is not None and now - self._last_attempt < self._cooldown_seconds:
+                return False
+            try:
+                if self._worker_active is None or not await self._worker_active():
+                    return False
+                if not await self._fan_out():
+                    return False
+            except Exception:
+                logger.warning("worker dispatcher: fan-out check failed; nets will recover", exc_info=True)
+                return False
+            self._last_attempt = now
+            return True
+
+    def _start_settle(self, delay: float) -> None:
+        """Arm one :meth:`_top_up` for when the cooldown ends, unless one is armed."""
+        if self._settling:
+            return
+        self._settling = self._spawn(self._settle(delay))
+
+    async def _settle(self, delay: float) -> None:
+        """The settle check: a burst's first submit counted one job; this counts the rest."""
+        try:
+            await asyncio.sleep(max(0.0, delay))
+            self._settling = False
+            await self._top_up()
+        finally:
+            self._settling = False
+
     def _start_watch(self) -> None:
         """Arm the after-wake watch unless one is already running."""
         if self._watch_seconds is None or self._watching:
@@ -625,7 +674,8 @@ class WorkerDispatcher:
         self._watching = self._spawn(self._watch(self._watch_seconds))
 
     async def _watch(self, interval: float) -> None:
-        """Wake again while work is outstanding and no worker is live (#1677).
+        """Wake again while work is outstanding and no worker is live (#1677),
+        and fan out beside a live one when the backlog outgrows it (#1709).
 
         A drain ends with work left when it spends its time budget (#1684),
         and a killed one leaves its job ``doing`` with nothing to clear it;
@@ -651,11 +701,15 @@ class WorkerDispatcher:
                     outstanding = await self._pending_jobs()
                     if outstanding <= 0:
                         return
-                    if self._worker_active is not None and await self._worker_active():
-                        continue
+                    live = self._worker_active is not None and await self._worker_active()
                 except Exception:
                     logger.warning("worker dispatcher: watch check failed; nets will recover", exc_info=True)
                     return
+                if live:
+                    # A busy drain with work queued behind it: add executions
+                    # if the backlog outgrows it (#1709).
+                    await self._top_up()
+                    continue
                 if woke_at is not None and outstanding >= woke_at:
                     fruitless += 1
                     if fruitless >= WATCH_MAX_FRUITLESS_WAKES:
