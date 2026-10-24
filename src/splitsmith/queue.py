@@ -91,6 +91,11 @@ BACKGROUND_JOB_KINDS = frozenset({"generate_proxy"})
 BACKGROUND_JOB_PRIORITY = -100
 
 
+#: Job kinds that want a worker each: serve starts an execution per queued
+#: one instead of one per ``SPLITSMITH_WORKER_JOBS_PER_EXECUTION`` jobs
+#: (``worker_trigger.make_solo_jobs_counter``). A compare grid's stage is
+#: minutes of encode; two on one worker are two rounds (#1691).
+SOLO_JOB_KINDS = frozenset({"compare-grid-stage"})
 #: One stage of a compare grid (#1691) runs after the grid job that plans it
 #: (queued after them, claimed before them) and after other user work.
 GRID_STAGE_JOB_PRIORITY = -1
