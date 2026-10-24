@@ -1198,3 +1198,25 @@ def test_the_grid_closing_card_says_made_with_splitsmith_unless_off(
         assert response.status_code == 200
         assert _wait_for_job(client, response.json()["id"])["status"] == "succeeded"
     assert [c["closing"].credit for c in captured[-2:]] == [True, False]
+
+
+def test_a_local_grid_queues_no_stage_jobs(match_client_with_trims: _MatchClient, monkeypatch) -> None:
+    """#1691's stage jobs are for a hosted worker's memory; a local render
+    keeps rendering every stage in one process, with the local cache."""
+    calls: list[dict] = []
+
+    def recording(shooters, *, audio_label, output_path, **kwargs):  # type: ignore[no-untyped-def]
+        calls.append(kwargs)
+        return _fake_render_grid_mp4(shooters, audio_label=audio_label, output_path=output_path, **kwargs)
+
+    monkeypatch.setattr(mp4_grid_mod, "render_grid_mp4", recording)
+    resp = match_client_with_trims.post(
+        "/api/match/compare-export", json={"stage_numbers": [1, 2], "audio_from": "mathias"}
+    )
+    assert resp.status_code == 200, resp.text
+    assert _wait_for_job(match_client_with_trims, resp.json()["id"])["status"] == "succeeded"
+    (call,) = calls
+    assert call.get("only_stage") is None
+    assert call["tile_access"] is None and call["tile_identities"] is None
+    jobs = match_client_with_trims.get("/api/me/jobs").json()
+    assert not [j for j in jobs if j["kind"] == "compare-grid-stage"]

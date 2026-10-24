@@ -87,10 +87,10 @@ import sys
 import tempfile
 import threading
 import time
-from collections.abc import AsyncIterator, Awaitable, Callable, Iterable, Sequence
+from collections.abc import AsyncIterator, Awaitable, Callable, Iterable, Mapping, Sequence
 from contextlib import AbstractContextManager, asynccontextmanager, nullcontext
 from contextvars import ContextVar
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from datetime import UTC, date, datetime, timedelta
 from math import isfinite
 from pathlib import Path
@@ -211,9 +211,11 @@ from ..mp4_render import RenderStep
 from ..observability import StructuredJsonFormatter, init_sentry
 from ..overlay.hud import overlay_data_identity, overlay_settings
 from ..runtime import runtime as process_runtime
+from ..segment_cache import SegmentCache
 from ..share_card import stage_figures
 from ..shot_id import has_usable_id
 from ..storage import Storage, StorageObject
+from ..stored_segment_cache import StoredSegmentCache
 from ..sync.auto_state import AutoRunSummary, load_auto_prefs, update_auto_prefs
 from ..sync.client import HostedSyncClient, SyncClientError
 from ..sync.reconcile import (
@@ -1918,6 +1920,270 @@ def _compare_grid_progress(handle: JobHandle) -> mp4_grid.GridProgress:
     return _report
 
 
+#: How often the grid job looks at its stage jobs, and how long it waits for
+#: them before rendering whatever is missing itself (#1691). The wait stays
+#: well inside the worker's 3600 s task timeout, with room for the stitch.
+GRID_STAGE_POLL_S = 5.0
+GRID_STAGE_WAIT_S = 2400.0
+
+
+@dataclass
+class _GridInputs:
+    """What a grid render reads, loaded the same way by the grid job and by
+    each of its stage jobs, so every job plans the same grid."""
+
+    match: match_model.Match
+    root: Path
+    requested: list[int]
+    bundles: list[project_loader.CompareShooterBundle]
+    filtered: list[project_loader.CompareShooterBundle]
+    audio_label: str
+    plans: tuple[mp4_grid.GridStagePlan, ...]
+    #: Hosted: planned from storage, pulled a stage at a time (#1691).
+    tiles: HostedGridTiles | None
+    account_brand: Any = None
+    event_logo: Path | None = None
+
+
+def _grid_inputs(
+    req: CompareGridRequest,
+    root: Path,
+    *,
+    state: AppState | None,
+    cut_dir: Path,
+    tile_meta: Mapping[str, Mapping[str, object]] | None = None,
+) -> _GridInputs:
+    """Load and plan a grid request. Hosted, nothing is pulled: the tiles
+    are probed over URLs, or read from ``tile_meta`` (the grid job's own
+    probes, handed to its stage jobs)."""
+    match = state.match() if state is not None else match_model.Match.load(root)
+    requested = sorted(set(req.stage_numbers))
+    if state is not None:
+        # The overlay reads each stage's audit off disk; materialize the
+        # selected stages' docs before the loader builds paths (a no-op
+        # where the documents are the files).
+        for slug in match.shooters:
+            for number in requested:
+                state.materialize_audit(slug, number)
+    tiles = HostedGridTiles(tile_meta=tile_meta) if state is not None and state.storage is not None else None
+    bundles = _load_compare_bundles(
+        root,
+        match,
+        cameras=req.cameras,
+        inset=req.inset_camera,
+        state=state,
+        stage_numbers=requested,
+        cut_dir=cut_dir,
+        tiles=tiles,
+    )
+    filtered = _filter_bundles_to_stages(bundles, requested)
+    audio_project = state.shooter_project(req.audio_from) if state is not None else None
+    audio_label = _shooter_label(match, root, req.audio_from, project=audio_project)
+    # Planned up front for the progress messages, the skipped count and the
+    # stage jobs -- pure planning, no ffmpeg. ``render_grid_mp4`` plans again
+    # internally from the same inputs and so sees the same stages.
+    plans = mp4_grid.build_stage_plans(
+        filtered,
+        audio_label=audio_label,
+        head_pad_seconds=1.0,
+        tail_pad_seconds=0.5,
+        layout_2up="horizontal",
+    )
+    return _GridInputs(
+        match=match,
+        root=root,
+        requested=requested,
+        bundles=bundles,
+        filtered=filtered,
+        audio_label=audio_label,
+        plans=plans,
+        tiles=tiles,
+    )
+
+
+def _grid_render_options(
+    req: CompareGridRequest, inputs: _GridInputs, *, state: AppState | None
+) -> dict[str, Any]:
+    """Every ``render_grid_mp4`` option a request decides. One builder for
+    the grid job and its stage jobs: a stage segment is reused only when
+    both built exactly the same command."""
+    match, root = inputs.match, inputs.root
+    account_brand = account_profile_module.load_brand(
+        state.account_profile if state is not None else account_profile_module.JsonAccountProfileStore()
+    )
+    event_logo = ensure_local_event_logo(
+        match.branding,
+        root,
+        storage=state.storage if state is not None else None,
+        match_id=match.match_id,
+    )
+    inputs.account_brand, inputs.event_logo = account_brand, event_logo
+    identities = grid_identities(
+        inputs.filtered,
+        look=load_look(req.overlay_theme),
+        book=shooter_book_module.load_snapshot(
+            state.shooter_book if state is not None else shooter_book_module.JsonShooterBookStore()
+        ),
+    )
+    title_page, closing = compare_cards.title_cards(
+        match,
+        compare_cards.CardOptions(
+            stage_titles=req.stage_titles,
+            title_duration_seconds=req.title_duration_seconds,
+            title_page=req.title_page,
+            title_info=req.title_info,
+            title_division=req.title_division,
+            title_page_duration_seconds=req.title_page_duration_seconds,
+            closing_card=req.closing_card,
+            made_with=req.made_with,
+            account_brand=req.account_brand,
+            card_variant=req.card_variant,
+            title_page_variant=req.title_page_variant,
+            closing_card_variant=req.closing_card_variant,
+        ),
+        divisions=compare_cards.bundle_divisions(inputs.filtered),
+        brand=account_brand,
+        event_logo=event_logo,
+    )
+    return {
+        "canvas": mp4_grid.GridCanvas(width=req.canvas_width, height=req.canvas_height),
+        "title_page": title_page,
+        "closing": closing,
+        "stage_titles": req.stage_titles,
+        "title_duration_seconds": req.title_duration_seconds,
+        "card_variant": req.stage_card_variant or req.card_variant,
+        "identities": identities,
+        "transitions": uniform_transitions(
+            req.transition_kind, req.transition_duration_seconds, len(inputs.plans)
+        ),
+        "overlay": req.overlay,
+        "overlay_theme": req.overlay_theme,
+        "summary_hold_seconds": req.summary_hold_seconds,
+        "inset": mp4_grid.GridInset(corner=req.inset_corner, scale=GRID_INSET_SCALE[req.inset_size]),
+        "free_cell": req.free_cell,
+        "match_name": match.name or "",
+        "match_date": match.match_date.isoformat() if match.match_date else None,
+        "match_summary_seconds": req.match_summary_seconds if req.match_summary else 0.0,
+        "logo_spots": frozenset(req.logo_spots),
+        "breakdown": req.breakdown,
+        "brand": account_brand if req.account_brand else None,
+    }
+
+
+def _grid_segment_cache(state: AppState | None, local_root: Path) -> SegmentCache | None:
+    """Hosted: the segments in storage under the match, so a stage job's
+    segment reaches the grid job on another worker (#1691); ``local_root``
+    is this job's scratch copy. Locally: the runtime's segment cache."""
+    match_id = current_match_id.get()
+    if state is not None and state.storage is not None and match_id is not None:
+        return StoredSegmentCache(
+            local_root, 1 << 40, storage=state.storage, prefix=f"matches/{match_id}/render-segments"
+        )
+    return match_export_helpers.render_segment_cache(Config().output)
+
+
+def _render_grid_stages(
+    handle: JobHandle,
+    req: CompareGridRequest,
+    match_root: str,
+    inputs: _GridInputs,
+    *,
+    state: AppState | None,
+) -> None:
+    """Queue one ``compare-grid-stage`` job per planned stage and wait for
+    them (#1691). The stage jobs plan from this job's probes, so all of them
+    plan the same grid. Whatever they did not render, the grid job's own
+    render encodes: a stage job that failed only costs time."""
+    assert state is not None and inputs.tiles is not None
+    tile_meta = inputs.tiles.tile_meta
+    job_ids = [
+        run_sync(
+            state.jobs.submit(
+                kind="compare-grid-stage",
+                stage_number=plan.stage_number,
+                args={
+                    "req": req,
+                    "match_root": match_root,
+                    "stage_number": plan.stage_number,
+                    "tile_meta": tile_meta,
+                },
+            )
+        ).id
+        for plan in inputs.plans
+    ]
+    _await_grid_stages(handle, state, job_ids)
+
+
+def _await_grid_stages(handle: JobHandle, state: AppState, job_ids: list[str]) -> None:
+    """Poll the stage jobs until all are done or :data:`GRID_STAGE_WAIT_S`
+    passes. A cancel of the grid job cancels every stage job it queued."""
+    terminal = {JobStatus.SUCCEEDED, JobStatus.FAILED, JobStatus.CANCELLED}
+    deadline = time.monotonic() + GRID_STAGE_WAIT_S
+    try:
+        while True:
+            handle.check_cancel()
+            jobs = [run_sync(state.jobs.get(job_id)) for job_id in job_ids]
+            done = sum(1 for job in jobs if job is None or job.status in terminal)
+            handle.update(
+                progress=0.05 + 0.6 * done / len(job_ids),
+                message=f"Rendering stages: {done} of {len(job_ids)}...",
+            )
+            if done == len(job_ids):
+                return
+            if time.monotonic() > deadline:
+                logger.warning(
+                    "compare grid: %d stage job(s) still running; rendering them here", len(job_ids) - done
+                )
+                return
+            time.sleep(GRID_STAGE_POLL_S)
+    except BaseException:
+        for job_id in job_ids:
+            try:
+                run_sync(state.jobs.cancel(job_id))
+            except Exception:  # noqa: BLE001 -- best effort; the orphan sweep ends the rest
+                logger.warning("compare grid: could not cancel stage job %s", job_id, exc_info=True)
+        raise
+
+
+def _run_compare_grid_stage(
+    handle: JobHandle,
+    req: CompareGridRequest,
+    match_root: str,
+    stage_number: int,
+    tile_meta: Mapping[str, Mapping[str, object]] | None = None,
+    *,
+    state: AppState | None = None,
+) -> None:
+    """Worker for one stage of a hosted grid (#1691): its segment and its
+    transition edges, into the stored segment cache, for the grid job to
+    stitch. Pulls only this stage's tiles. A stage that fails is reported in
+    the result, not raised: the grid job renders it again itself."""
+    root = Path(match_root)
+    output_dir = root / "exports"
+    output_dir.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(dir=output_dir, prefix=".compare-grid-stage-") as tmp:
+        handle.update(progress=0.05, message=f"Planning stage {stage_number}...")
+        with handle.timer.phase("load_shooters"):
+            inputs = _grid_inputs(req, root, state=state, cut_dir=Path(tmp) / "cuts", tile_meta=tile_meta)
+            options = _grid_render_options(req, inputs, state=state)
+        handle.update(progress=0.1, message=f"Rendering stage {stage_number}...")
+        with handle.timer.phase("render"):
+            result = mp4_grid.render_grid_mp4(
+                inputs.filtered,
+                audio_label=inputs.audio_label,
+                output_path=Path(tmp) / "unused.mp4",
+                work_dir=Path(tmp) / "work",
+                segment_cache=_grid_segment_cache(state, Path(tmp) / "segments"),
+                tile_identities=inputs.tiles.identities if inputs.tiles is not None else None,
+                tile_access=inputs.tiles,
+                only_stage=stage_number,
+                **options,
+            )
+    (outcome,) = result.stages
+    handle.update(progress=1.0, message=f"Stage {stage_number} {'rendered' if outcome.ok else 'failed'}")
+    handle.set_result({"stage_number": stage_number, "ok": outcome.ok, "error": outcome.error})
+
+
 def _run_compare_grid(
     handle: JobHandle, req: CompareGridRequest, match_root: str, *, state: AppState | None = None
 ) -> None:
@@ -1946,10 +2212,7 @@ def _run_compare_grid(
     in ``missing_trims``.
     """
     root = Path(match_root)
-    match = state.match() if state is not None else match_model.Match.load(root)
     stem = _compare_output_stem(req.output_name)
-    requested = sorted(set(req.stage_numbers))
-
     output_dir = root / "exports"
     output_dir.mkdir(parents=True, exist_ok=True)
     # Hosted: stage trims the job cuts from the source for tiles with no
@@ -1958,39 +2221,16 @@ def _run_compare_grid(
     try:
         handle.update(progress=0.02, message="Loading shooters...")
         with handle.timer.phase("load_shooters"):
-            if state is not None:
-                # The overlay reads each stage's audit off disk; materialize
-                # the selected stages' docs before the loader builds paths (a
-                # no-op where the documents are the files).
-                for slug in match.shooters:
-                    for number in requested:
-                        state.materialize_audit(slug, number)
-            bundles = _load_compare_bundles(
-                root,
-                match,
-                cameras=req.cameras,
-                inset=req.inset_camera,
-                state=state,
-                stage_numbers=requested,
-                cut_dir=Path(cuts.name),
-            )
-            filtered = _filter_bundles_to_stages(bundles, requested)
-            audio_project = state.shooter_project(req.audio_from) if state is not None else None
-            audio_label = _shooter_label(match, root, req.audio_from, project=audio_project)
-
+            inputs = _grid_inputs(req, root, state=state, cut_dir=Path(cuts.name))
+        match, requested, bundles, plans = inputs.match, inputs.requested, inputs.bundles, inputs.plans
         output_path = output_dir / f"{stem}.mp4"
-
-        # Planned up front purely for the progress messages and the skipped
-        # count -- pure planning, no ffmpeg. ``render_grid_mp4`` plans again
-        # internally from the same inputs and so sees the same stages.
-        plans = mp4_grid.build_stage_plans(
-            filtered,
-            audio_label=audio_label,
-            head_pad_seconds=1.0,
-            tail_pad_seconds=0.5,
-            layout_2up="horizontal",
-        )
         skipped = [number for number in requested if number not in {p.stage_number for p in plans}]
+
+        if inputs.tiles is not None and len(plans) > 1:
+            # #1691: one job per stage, in parallel on their own workers;
+            # the render below then finds every stage segment they stored.
+            with handle.timer.phase("stages"):
+                _render_grid_stages(handle, req, match_root, inputs, state=state)
 
         def _notice(text: str) -> None:
             # Said as it is decided, before any stage encodes: the message is
@@ -2004,74 +2244,22 @@ def _run_compare_grid(
             handle.timer.phase("render"),
             tempfile.TemporaryDirectory(dir=output_dir, prefix=".compare-grid-work-") as tmp,
         ):
-            account_brand = account_profile_module.load_brand(
-                state.account_profile
-                if state is not None
-                else account_profile_module.JsonAccountProfileStore()
-            )
-            event_logo = ensure_local_event_logo(
-                match.branding,
-                root,
-                storage=state.storage if state is not None else None,
-                match_id=match.match_id,
-            )
-            identities = grid_identities(
-                filtered,
-                look=load_look(req.overlay_theme),
-                book=shooter_book_module.load_snapshot(
-                    state.shooter_book if state is not None else shooter_book_module.JsonShooterBookStore()
-                ),
-            )
-            title_page, closing = compare_cards.title_cards(
-                match,
-                compare_cards.CardOptions(
-                    stage_titles=req.stage_titles,
-                    title_duration_seconds=req.title_duration_seconds,
-                    title_page=req.title_page,
-                    title_info=req.title_info,
-                    title_division=req.title_division,
-                    title_page_duration_seconds=req.title_page_duration_seconds,
-                    closing_card=req.closing_card,
-                    made_with=req.made_with,
-                    account_brand=req.account_brand,
-                    card_variant=req.card_variant,
-                    title_page_variant=req.title_page_variant,
-                    closing_card_variant=req.closing_card_variant,
-                ),
-                divisions=compare_cards.bundle_divisions(filtered),
-                brand=account_brand,
-                event_logo=event_logo,
-            )
+            options = _grid_render_options(req, inputs, state=state)
             result = mp4_grid.render_grid_mp4(
-                filtered,
-                audio_label=audio_label,
+                inputs.filtered,
+                audio_label=inputs.audio_label,
                 output_path=output_path,
-                canvas=mp4_grid.GridCanvas(width=req.canvas_width, height=req.canvas_height),
                 work_dir=Path(tmp),
                 progress=_compare_grid_progress(handle),
-                segment_cache=match_export_helpers.render_segment_cache(Config().output),
-                title_page=title_page,
-                closing=closing,
-                stage_titles=req.stage_titles,
-                title_duration_seconds=req.title_duration_seconds,
-                card_variant=req.stage_card_variant or req.card_variant,
-                identities=identities,
-                transitions=uniform_transitions(
-                    req.transition_kind, req.transition_duration_seconds, len(plans)
-                ),
-                overlay=req.overlay,
-                overlay_theme=req.overlay_theme,
-                summary_hold_seconds=req.summary_hold_seconds,
+                segment_cache=_grid_segment_cache(state, Path(cuts.name) / "segments"),
                 on_notice=_notice,
-                inset=mp4_grid.GridInset(corner=req.inset_corner, scale=GRID_INSET_SCALE[req.inset_size]),
-                free_cell=req.free_cell,
-                match_name=match.name or "",
-                match_date=match.match_date.isoformat() if match.match_date else None,
-                match_summary_seconds=req.match_summary_seconds if req.match_summary else 0.0,
-                logo_spots=frozenset(req.logo_spots),
-                breakdown=req.breakdown,
-                brand=account_brand if req.account_brand else None,
+                tile_identities=inputs.tiles.identities if inputs.tiles is not None else None,
+                tile_access=inputs.tiles,
+                **options,
             )
+        identities = options["identities"]
+        account_brand = inputs.account_brand
+        event_logo = inputs.event_logo
 
         youtube_files: list[Path] = []
         if req.youtube_sidecar:
@@ -4474,6 +4662,7 @@ def register_job_bodies(state: AppState) -> None:
     state.jobs.bodies.register("render_upload", _run_render_upload)
     state.jobs.bodies.register("generate_proxy", _run_generate_proxy)
     state.jobs.bodies.register("compare-grid", functools.partial(_run_compare_grid, state=state))
+    state.jobs.bodies.register("compare-grid-stage", functools.partial(_run_compare_grid_stage, state=state))
     from .youtube_api import run_youtube_upload
 
     state.jobs.bodies.register("youtube_upload", functools.partial(run_youtube_upload, state=state))

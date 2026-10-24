@@ -160,7 +160,13 @@ def test_hosted_render_pulls_the_trim_pushes_the_grid_and_serves_it(hosted_grid)
     assert bundle.label == "Me"
     assert call["audio_label"] == "Me"
     assert 1 in bundle.stages_by_number
-    assert bundle.stages_by_number[1].trim_path.read_bytes() == TRIM_BYTES
+    # #1691: nothing is pulled to plan; the renderer reads the tile inside
+    # its stage's acquire, and it is gone again after.
+    trim = bundle.stages_by_number[1].trim_path
+    assert not trim.exists()
+    with call["tile_access"].acquire(1):
+        assert trim.read_bytes() == TRIM_BYTES
+    assert not trim.exists()
 
     # The finished grid is at the match-scoped key, and the result names it.
     result = job["result"]

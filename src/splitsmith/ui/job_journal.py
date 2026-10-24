@@ -109,6 +109,8 @@ def rehydrate_args(kind: str, args: dict[str, Any]) -> dict[str, Any]:
         # a hosted worker handed the body a dict and it died on the first
         # attribute read.
         "compare-grid": CompareGridRequest,
+        # #1691: one stage of a hosted grid carries the grid's request.
+        "compare-grid-stage": CompareGridRequest,
     }
     model = models.get(kind)
     if model is None:

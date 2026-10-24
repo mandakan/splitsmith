@@ -39,7 +39,15 @@ SYNC_KINDS = frozenset({"sync_match", "auto_sync"})
 #: Job kinds that encode video. One on any match holds every automatic
 #: sync (``AutoSyncCore.pick``); a manual sync is the user's call.
 RENDER_KINDS = frozenset(
-    {"match_export", "render_upload", "export", "compare-grid", "generate_proxy", "highlight_reel"}
+    {
+        "match_export",
+        "render_upload",
+        "export",
+        "compare-grid",
+        "compare-grid-stage",
+        "generate_proxy",
+        "highlight_reel",
+    }
 )
 #: Job kinds whose success writes nothing that syncs (export history,
 #: renders, proxies, downloads), so they must not schedule a push.
@@ -51,6 +59,7 @@ _UNSYNCED_JOB_KINDS = frozenset(
         "export",
         "youtube_upload",
         "compare-grid",
+        "compare-grid-stage",
         "generate_proxy",
         "model_download",
     }

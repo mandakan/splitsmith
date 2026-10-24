@@ -17,6 +17,7 @@ export const KIND_LABEL: Record<string, string> = {
   sync_match: "Sync to hosted",
   auto_sync: "Auto-sync",
   derive_audio: "Prepare audio",
+  "compare-grid-stage": "Grid stage",
 };
 
 export function kindLabel(kind: string): string {
