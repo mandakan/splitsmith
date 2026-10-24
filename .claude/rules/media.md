@@ -115,6 +115,11 @@ paths:
   returns `None` for it. With no source on the disk, the trim's freshness
   check has nothing to date it against, as for any hosted source not
   mirrored here (`tests/test_trim_streamed_source.py`).
+- **So does a hosted export's lossless cut**, of every camera
+  (`server._export_source`: a URL plus its download fallback; the exporter's
+  `_cut_lossless` cuts again from the download on `SourceReadError`). The
+  report never names a URL as the stage's video
+  (`tests/test_export_streamed_source.py`).
 
 ## Stream kinds
 

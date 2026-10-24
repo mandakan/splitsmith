@@ -49,7 +49,9 @@ def _inputs(monkeypatch: pytest.MonkeyPatch, *, fail_url: bool = False) -> list[
     seen: list[object] = []
     fake = trim_module.trim_video
 
-    def recording(**kwargs: object) -> trim_module.TrimResult:
+    def recording(*args: object, **kwargs: object) -> trim_module.TrimResult:
+        # The exporter has called it positionally; the fake takes keywords.
+        kwargs.update(zip(("input_path", "output_path"), args, strict=False))
         seen.append(kwargs["input_path"])
         if fail_url and isinstance(kwargs["input_path"], str):
             Path(kwargs["output_path"]).write_bytes(b"partial")  # type: ignore[arg-type]
