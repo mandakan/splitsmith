@@ -26,9 +26,10 @@ def test_no_per_job_sweep_off_cloud_run() -> None:
     assert per_job_cache_max_bytes({"SPLITSMITH_WORKER_MEMORY_MB": "8192"}) is None
 
 
-def test_cloud_run_caps_the_cache_at_a_quarter_of_its_memory() -> None:
+def test_cloud_run_keeps_no_cache_by_default() -> None:
     env = {"CLOUD_RUN_EXECUTION": "x", "SPLITSMITH_WORKER_MEMORY_MB": "8192"}
-    assert per_job_cache_max_bytes(env) == 2 * GIB
+    assert per_job_cache_max_bytes(env) == 0
+    assert per_job_cache_max_bytes({"CLOUD_RUN_EXECUTION": "x"}) == 0
 
 
 def test_an_explicit_cache_cap_wins_on_cloud_run() -> None:
@@ -38,10 +39,6 @@ def test_an_explicit_cache_cap_wins_on_cloud_run() -> None:
         "SPLITSMITH_SOURCE_CACHE_MAX_GB": "0.5",
     }
     assert per_job_cache_max_bytes(env) == GIB // 2
-
-
-def test_cloud_run_without_a_stated_memory_keeps_one_gib() -> None:
-    assert per_job_cache_max_bytes({"CLOUD_RUN_EXECUTION": "x"}) == GIB
 
 
 class _App:
@@ -118,6 +115,17 @@ def test_the_cloud_run_sweep_evicts_the_least_recent_files(monkeypatch, tmp_path
     assert sweep is not None
     asyncio.run(sweep())
     assert not old.exists() and new.exists()
+
+
+def test_the_default_cloud_run_sweep_empties_the_cache(monkeypatch, tmp_path: Path) -> None:
+    _cloud_run_env(monkeypatch, tmp_path)
+    monkeypatch.delenv("SPLITSMITH_SOURCE_CACHE_MAX_GB")
+    monkeypatch.setenv("SPLITSMITH_WORKER_MEMORY_MB", "8192")
+    old, new = _cache(tmp_path)
+    sweep = queue_mod._job_sweep()
+    assert sweep is not None
+    asyncio.run(sweep())
+    assert not old.exists() and not new.exists()
 
 
 def test_the_sweep_waits_while_another_job_runs(monkeypatch, tmp_path: Path) -> None:

@@ -62,10 +62,6 @@ def configured_cache_max_bytes(env: Mapping[str, str] = os.environ) -> int | Non
     return int(gb * _BYTES_PER_GB)
 
 
-#: The worker's stated memory (see ``observability.WORKER_MEMORY_MB_ENV``).
-_WORKER_MEMORY_MB_ENV = "SPLITSMITH_WORKER_MEMORY_MB"
-
-
 def memory_backed_disk(env: Mapping[str, str] = os.environ) -> bool:
     """Whether this worker's filesystem is memory: Cloud Run's is, so every
     file a job leaves behind competes with the next job for the container."""
@@ -78,18 +74,18 @@ def per_job_cache_max_bytes(env: Mapping[str, str] = os.environ) -> int | None:
     Only on Cloud Run: its filesystem is in memory, so the cache competes with
     the running job for the container's memory, and a drain that sweeps only
     at its end (the agent's way) is killed part-way through a match. An
-    explicit ``SPLITSMITH_SOURCE_CACHE_MAX_GB`` wins; otherwise a quarter of the
-    stated memory, leaving the rest to the job (the ensemble models take about
-    3 GB and ffmpeg up to 3 GB on a 4K trim); otherwise 1 GiB.
+    explicit ``SPLITSMITH_SOURCE_CACHE_MAX_GB`` wins; otherwise nothing is
+    kept. Trims and exports read their source from a presigned URL, so only
+    beep detection still mirrors one, and with fan-out the next job on the
+    same source seldom lands on the same execution. A kept cache never paid
+    for itself there, and at a quarter of 8 GiB it pushed 4K trims (encoder
+    up to 3.6 GB) over the limit.
     """
     if not memory_backed_disk(env):
         return None
     if env.get(ENV_MAX_GB, "").strip():
         return configured_cache_max_bytes(env)
-    try:
-        return int(env[_WORKER_MEMORY_MB_ENV]) * 1024 * 1024 // 4
-    except (KeyError, ValueError):
-        return _BYTES_PER_GB
+    return 0
 
 
 @dataclass(frozen=True)
