@@ -101,10 +101,13 @@ argv test proves nothing about pixels.
   `_grid_render_options`, so all build the same commands. The stitch names
   stored segments by presigned URL (`SegmentCache.concat_source`,
   `lookup(fetch=False)`) and trusts only a quiet read: a 4K match's
-  segments would not fit beside the output on a memory disk. Three renderer seams, all off for a local render, so its
+  segments would not fit beside the output on a memory disk.
+  Each queued stage job gets a worker of its own (`queue.SOLO_JOB_KINDS`).
+  Three renderer seams, all off for a local render, so its
   argv and keys are unchanged: `tile_identities` keys a tile by its stored
-  object, never a local copy or a URL; `tile_access` pulls one stage's
-  tiles around each read of them, never for a cache hit; `only_stage`
+  object, never a local copy or a URL; `tile_access` pulls a stage's
+  tiles before a read of them and keeps them until another stage is
+  acquired (`HostedGridTiles.release` at the end), never for a cache hit; `only_stage`
   encodes one stage and its transition edges into the cache. Segments live
   in R2 under `matches/<id>/render-segments` (`StoredSegmentCache`), so the
   stitch finds what the stage jobs stored and a match delete takes them.

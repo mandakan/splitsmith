@@ -1206,6 +1206,8 @@ def _backlog_starts(
     watch_seconds: float | None = 0.01,
     live: int = 1,
     jobs_per_execution: int = 4,
+    max_executions: int = 4,
+    solo: Any = None,
 ) -> int:
     """Trigger ``triggers`` times on a platform-only fleet with ``live``
     heartbeats, let the watch and the settle check run out; return the job starts."""
@@ -1224,8 +1226,9 @@ def _backlog_starts(
             transport=_transport(requests),
             watch_seconds=watch_seconds,
             live_workers=_count(live),
-            max_executions=4,
+            max_executions=max_executions,
             jobs_per_execution=jobs_per_execution,
+            **({"solo_jobs": solo} if solo is not None else {}),
         )
         for _ in range(triggers):
             await dispatcher.trigger()
@@ -1265,6 +1268,30 @@ def test_a_stages_trims_fan_out_at_the_default_jobs_per_execution() -> None:
     assert starts == 2
 
 
+def test_a_grid_s_stage_jobs_each_get_a_worker() -> None:
+    """#1691: twelve queued grid stage jobs beside the live grid job want
+    a worker each, not one per two jobs: one round of stages, not two."""
+    starts = _backlog_starts(
+        pending=_sequence(12, 12, 12, 0),
+        active=_active,
+        jobs_per_execution=DEFAULT_JOBS_PER_EXECUTION,
+        max_executions=13,
+        solo=_sequence(12, 12, 12, 0),
+    )
+    assert starts == 12
+
+
+def test_solo_jobs_share_the_cap() -> None:
+    starts = _backlog_starts(
+        pending=_sequence(12, 12, 12, 0),
+        active=_active,
+        jobs_per_execution=DEFAULT_JOBS_PER_EXECUTION,
+        max_executions=8,
+        solo=_sequence(12, 12, 12, 0),
+    )
+    assert starts == 7
+
+
 def test_a_burst_dropped_by_the_cooldown_is_counted_when_it_ends() -> None:
     """Five submits beside a live drain: the first sees one job, the other
     four land in the cooldown. One settle check at its end counts all five."""
@@ -1282,3 +1309,36 @@ def test_the_settle_check_never_fans_out_without_a_live_drain() -> None:
         pending=_sequence(1, 5), active=_inactive, triggers=5, cooldown=0.05, watch_seconds=None, live=0
     )
     assert starts == 1  # the cold wake's own start only
+
+
+def test_make_solo_jobs_counter_counts_queued_grid_stages() -> None:
+    """#1691: only queued jobs of a solo kind count, read from the task's
+    args (JSON text on SQLite, a dict on Postgres)."""
+    import json as _json
+
+    from sqlalchemy import text
+
+    from splitsmith.worker_trigger import make_solo_jobs_counter
+
+    engine = create_engine("sqlite+aiosqlite:///:memory:")
+    factory = sessionmaker(engine)
+
+    async def scenario() -> int:
+        async with engine.begin() as conn:
+            await conn.execute(
+                text("CREATE TABLE procrastinate_jobs (id INTEGER PRIMARY KEY, status TEXT, args TEXT)")
+            )
+            for status, kind in (
+                ("todo", "compare-grid-stage"),
+                ("todo", "compare-grid-stage"),
+                ("doing", "compare-grid-stage"),
+                ("todo", "trim"),
+                ("todo", "compare-grid"),
+            ):
+                await conn.execute(
+                    text("INSERT INTO procrastinate_jobs (status, args) VALUES (:s, :a)"),
+                    {"s": status, "a": _json.dumps({"kind": kind, "job_id": "x"})},
+                )
+        return await make_solo_jobs_counter(factory)()
+
+    assert asyncio.run(scenario()) == 2

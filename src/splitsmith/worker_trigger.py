@@ -51,6 +51,7 @@ from __future__ import annotations
 
 import asyncio
 import itertools
+import json
 import logging
 import math
 import os
@@ -307,6 +308,7 @@ class WorkerDispatcher:
         live_workers: LiveWorkersCount | None = None,
         max_executions: int = 1,
         jobs_per_execution: int = DEFAULT_JOBS_PER_EXECUTION,
+        solo_jobs: PendingJobsCount | None = None,
     ) -> None:
         if max_executions < 1 or jobs_per_execution < 1:
             raise ValueError("max_executions and jobs_per_execution must be at least 1")
@@ -343,6 +345,9 @@ class WorkerDispatcher:
         self._live_workers = live_workers
         self._max_executions = max_executions
         self._jobs_per_execution = jobs_per_execution
+        # The queued jobs of a kind that wants a worker each
+        # (``queue.SOLO_JOB_KINDS``): one stage of a compare grid (#1691).
+        self._solo_jobs = solo_jobs
         # Executions still booting have no heartbeat yet; they are counted
         # through the platform row (``WorkersStore.claim_starts``), so every
         # serve instance sees every instance's starts.
@@ -509,7 +514,9 @@ class WorkerDispatcher:
         The jobs are the queued ones plus one in flight per ``live`` drain
         (#1709): ``pending_jobs`` leaves out what a live drain is running, so
         a stage's chained trims (one running, four queued) read as a backlog
-        the running drain already covers."""
+        the running drain already covers. A queued job of a solo kind (a
+        compare grid's stage, minutes of encode) wants an execution of its
+        own, so a grid's stages render in one round rather than two."""
         if self._max_executions == 1:
             return 1
         try:
@@ -517,8 +524,16 @@ class WorkerDispatcher:
         except Exception:
             logger.warning("worker dispatcher: pending count failed; starting one execution", exc_info=True)
             return 1
-        jobs = pending + live
-        return min(self._max_executions, max(1, math.ceil(jobs / self._jobs_per_execution)))
+        solo = 0
+        if self._solo_jobs is not None:
+            try:
+                solo = max(0, min(pending, await self._solo_jobs()))
+            except Exception:
+                logger.warning(
+                    "worker dispatcher: solo-job count failed; counting them as any job", exc_info=True
+                )
+        jobs = pending - solo + live
+        return min(self._max_executions, max(1, solo + math.ceil(jobs / self._jobs_per_execution)))
 
     async def _claim(self, worker_id: str, *, live: int, at_least_one: bool) -> int:
         """How many executions to start: what the backlog wants, less the
@@ -897,6 +912,30 @@ def make_pending_jobs_counter(
     return _pending_jobs
 
 
+def make_solo_jobs_counter(session_factory: Callable[[], Any]) -> PendingJobsCount:
+    """Count queued jobs of a kind that wants an execution each
+    (``queue.SOLO_JOB_KINDS``). The kind is in the task's args; they are
+    read and matched here, not in SQL, so the statement runs on SQLite too,
+    and the queue is short."""
+
+    async def _solo_jobs() -> int:
+        from sqlalchemy import text
+
+        from .queue import SOLO_JOB_KINDS
+
+        async with session_factory() as session:
+            rows = await session.execute(text("SELECT args FROM procrastinate_jobs WHERE status = 'todo'"))
+            count = 0
+            for (args,) in rows:
+                if isinstance(args, str):
+                    args = json.loads(args)
+                if isinstance(args, dict) and args.get("kind") in SOLO_JOB_KINDS:
+                    count += 1
+            return count
+
+    return _solo_jobs
+
+
 def wrap_deferrer(
     deferrer: Callable[..., Awaitable[None]], launcher: WorkerLauncher
 ) -> Callable[..., Awaitable[None]]:
@@ -969,6 +1008,7 @@ def build_worker_dispatcher(
     transport: httpx.AsyncBaseTransport | None = None,
     wake_marker: WakeMarker | None = None,
     live_workers: LiveWorkersCount | None = None,
+    solo_jobs: PendingJobsCount | None = None,
 ) -> WorkerDispatcher | None:
     """Build the dispatcher from ``SPLITSMITH_WORKER_LAUNCHER``.
 
@@ -1007,4 +1047,5 @@ def build_worker_dispatcher(
         live_workers=live_workers,
         max_executions=_positive_int_env(ENV_WORKER_MAX_EXECUTIONS, DEFAULT_MAX_EXECUTIONS),
         jobs_per_execution=_positive_int_env(ENV_WORKER_JOBS_PER_EXECUTION, DEFAULT_JOBS_PER_EXECUTION),
+        solo_jobs=solo_jobs,
     )

@@ -6217,6 +6217,7 @@ def _apply_hosted_mode_wiring(
         make_boot_retrigger,
         make_live_workers_counter,
         make_pending_jobs_counter,
+        make_solo_jobs_counter,
         make_worker_active_checker,
         wake_channel,
         wrap_deferrer,
@@ -6448,6 +6449,7 @@ def _apply_hosted_mode_wiring(
             pending_jobs=make_pending_jobs_counter(session_factory),
             wake_marker=wake_marker,
             live_workers=make_live_workers_counter(session_factory),
+            solo_jobs=make_solo_jobs_counter(session_factory),
         )
         if worker_launcher is not None:
             deferrer = wrap_deferrer(deferrer, worker_launcher)
