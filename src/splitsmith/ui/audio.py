@@ -152,7 +152,7 @@ def primary_audio_path(
 def ensure_primary_audio(
     project_root: Path,
     stage_number: int,
-    source_video: Path,
+    source_video: Path | str,
     *,
     sample_rate: int = 48000,
     ffmpeg_binary: str = "ffmpeg",
@@ -183,7 +183,7 @@ def ensure_video_audio(
     project_root: Path,
     stage_number: int,
     video: StageVideo,
-    source_video: Path,
+    source_video: Path | str,
     *,
     sample_rate: int = 48000,
     ffmpeg_binary: str = "ffmpeg",
@@ -193,6 +193,11 @@ def ensure_video_audio(
 
     Cache lands at ``<audio_dir>/stage<N>_cam_<video_id>.wav`` regardless of
     role. Re-extracts when the source mtime is newer than the cache.
+
+    ``source_video`` may be a presigned URL (``str``, #1674): ffmpeg reads it
+    over HTTP and nothing lands on this disk. A cached WAV then has no source
+    to date it against, as for a trim cut from a URL, and a read that reports
+    errors raises ``trim.SourceReadError``.
     """
     audio_path = video_audio_path(project_root, stage_number, video, project=project)
     audio_path.parent.mkdir(parents=True, exist_ok=True)
@@ -209,13 +214,13 @@ def ensure_video_audio(
         legacy_wav = audio_path.with_name(f"stage{stage_number}_cam_{legacy_video_id(video)}.wav")
         legacy = _legacy_cache_fallback(project, video, audio_path, legacy_wav)
         if legacy is not None:
+            if isinstance(source_video, str):
+                return legacy
             src_probe = source_video.resolve()
             if not src_probe.exists() or legacy.stat().st_mtime >= src_probe.stat().st_mtime:
                 return legacy
 
-    src_resolved = source_video.resolve()
-    if not src_resolved.exists():
-        raise FileNotFoundError(f"video missing on disk: {src_resolved}")
+    src_args, src_resolved = _source_input(source_video)
 
     # Storage cache (hosted mode): another worker may have already
     # extracted this WAV. Pulling 5 MB from S3 beats running ffmpeg
@@ -225,9 +230,12 @@ def ensure_video_audio(
     _publish_audio(
         project,
         audio_path,
-        fresh=lambda: _not_older(audio_path, src_resolved),
+        fresh=lambda: _cached_against(audio_path, src_resolved),
         extract=lambda out: _run_audio_ffmpeg(
-            ["-i", str(src_resolved), "-ac", "1", "-ar", str(sample_rate), "-vn"], out, ffmpeg_binary
+            [*src_args, "-ac", "1", "-ar", str(sample_rate), "-vn"],
+            out,
+            ffmpeg_binary,
+            url=src_resolved is None,
         ),
     )
     return audio_path
@@ -257,7 +265,7 @@ def ensure_video_window_audio(
     project_root: Path,
     stage_number: int,
     video: StageVideo,
-    source_video: Path,
+    source_video: Path | str,
     start_s: float,
     end_s: float,
     *,
@@ -267,27 +275,24 @@ def ensure_video_window_audio(
 ) -> Path:
     """Extract the [start_s, end_s) mono slice of source_video if not cached.
 
-    -ss before -i seeks on the demuxer (fast on long files); detection
-    adds start_s back onto every returned timestamp so results stay in
-    source-absolute seconds.
+    -ss before -i seeks on the demuxer (fast on long files, and over a
+    presigned URL a range request); detection adds start_s back onto every
+    returned timestamp so results stay in source-absolute seconds.
     """
     audio_path = video_window_audio_path(project_root, stage_number, video, start_s, end_s, project=project)
     audio_path.parent.mkdir(parents=True, exist_ok=True)
-    src_resolved = source_video.resolve()
-    if not src_resolved.exists():
-        raise FileNotFoundError(f"video missing on disk: {src_resolved}")
+    src_args, src_resolved = _source_input(source_video)
     _publish_audio(
         project,
         audio_path,
-        fresh=lambda: _not_older(audio_path, src_resolved),
+        fresh=lambda: _cached_against(audio_path, src_resolved),
         extract=lambda out: _run_audio_ffmpeg(
             [
                 "-ss",
                 str(start_s),
                 "-t",
                 str(end_s - start_s),
-                "-i",
-                str(src_resolved),
+                *src_args,
                 "-ac",
                 "1",
                 "-ar",
@@ -296,6 +301,7 @@ def ensure_video_window_audio(
             ],
             out,
             ffmpeg_binary,
+            url=src_resolved is None,
         ),
     )
     return audio_path
@@ -546,18 +552,54 @@ def _extract_audio(
         ) from exc
 
 
-def _run_audio_ffmpeg(args: list[str], out: Path, ffmpeg_binary: str) -> None:
+def _source_input(source: Path | str) -> tuple[list[str], Path | None]:
+    """ffmpeg's input arguments for a source on this disk or at a presigned
+    URL, and the file a cached WAV is dated against (``None`` for a URL)."""
+    from ..proxy import HTTP_INPUT_ARGS
+
+    if isinstance(source, str):
+        return [*HTTP_INPUT_ARGS, "-i", source], None
+    resolved = source.resolve()
+    if not resolved.exists():
+        raise FileNotFoundError(f"video missing on disk: {resolved}")
+    return ["-i", str(resolved)], resolved
+
+
+def _cached_against(path: Path, source: Path | None) -> bool:
+    """``path`` is a usable cache: not older than ``source``, or, with no
+    source on this disk to date it by, present and non-empty."""
+    if source is not None:
+        return _not_older(path, source)
+    try:
+        return path.stat().st_size > 0
+    except OSError:
+        return False
+
+
+def _run_audio_ffmpeg(args: list[str], out: Path, ffmpeg_binary: str, *, url: bool = False) -> None:
     """ffmpeg ``args`` writing a WAV to ``out`` (a partial: see
-    :func:`_publish_audio`)."""
+    :func:`_publish_audio`). With ``url`` the input is a presigned URL: a
+    failed or noisy read raises ``trim.SourceReadError`` with the URL
+    redacted, since a dropped read can exit 0 with a short WAV."""
+    from .. import trim as trim_module
+    from ..proxy import redact_urls
+
     if not shutil.which(ffmpeg_binary):
         raise AudioExtractionError(f"ffmpeg binary not found: {ffmpeg_binary}")
     cmd = [ffmpeg_binary, "-hide_banner", "-loglevel", "error", "-y", *args, str(out)]
     try:
-        subprocess.run(cmd, check=True, capture_output=True, text=True)
+        completed = subprocess.run(cmd, check=True, capture_output=True, text=True)
     except subprocess.CalledProcessError as exc:
+        if url:
+            detail = redact_urls(exc.stderr or exc.stdout)
+            raise trim_module.SourceReadError(f"ffmpeg failed (exit {exc.returncode}): {detail!r}") from None
         raise AudioExtractionError(
             f"ffmpeg failed (exit {exc.returncode}): {exc.stderr or exc.stdout!r}"
         ) from exc
+    if url and (completed.stderr or "").strip():
+        raise trim_module.SourceReadError(
+            f"ffmpeg reported errors reading the source: {redact_urls(completed.stderr).strip()!r}"
+        )
 
 
 def _not_older(path: Path, source: Path) -> bool:
@@ -1695,7 +1737,7 @@ def _offset_detection(result: BeepDetection, offset_s: float) -> BeepDetection:
 def detect_primary_beep(
     project_root: Path,
     stage_number: int,
-    source_video: Path,
+    source_video: Path | str,
     *,
     config: BeepDetectConfig | None = None,
     ffmpeg_binary: str = "ffmpeg",
@@ -1748,7 +1790,7 @@ def detect_video_beep(
     project_root: Path,
     stage_number: int,
     video: StageVideo,
-    source: Path,
+    source: Path | str,
     *,
     config: BeepDetectConfig | None = None,
     ffmpeg_binary: str = "ffmpeg",

@@ -166,6 +166,7 @@ from ..compare import mp4_grid, project_loader
 from ..composition import BrandMark, uniform_transitions
 from ..compute import LocalComputeBackend
 from ..config import (
+    BeepDetection,
     BeepWindowConfig,
     CoachAutoClassifyConfig,
     Config,
@@ -2564,27 +2565,62 @@ def register_job_bodies(state: AppState) -> None:
             video = stg.find_video_by_id(video_id)
             if video is None:
                 raise RuntimeError(f"video {video_id} disappeared from stage {stage_number} mid-flight")
-            source = proj.resolve_video_path(state.shooter_root(slug), video.path)
         # Derive a per-stage search window for multi-stage single-take videos.
         # None for single-stage videos - behavior identical to before this change.
         take_window = _derive_take_window(state.shooter_root(slug), proj, stg, video)
+        # #1674: ffmpeg reads a hosted source's audio from a presigned URL, so
+        # the source never lands on this disk (on Cloud Run, memory); a local
+        # mirror, a store without presigned URLs or a failed read take the
+        # download path, and so does a take, whose overview WAV and window
+        # read the file.
+        source_url: str | None = None
+        if take_window is None:
+            source_url = proj.source_url(
+                state.shooter_root(slug), video.path, expires_in=_TRIM_SOURCE_URL_TTL_S
+            )
+        local_source: Path | None = None
+        if source_url is None:
+            local_source = proj.resolve_video_path(state.shooter_root(slug), video.path)
         handle.timer.set_meta(role=video.role)
         role_label = "primary" if video.role == "primary" else f"cam {video.video_id[:6]}"
         handle.update(
             progress=0.15,
             message=f"Extracting audio + detecting beep ({role_label})...",
         )
+
+        def _detect(src: Path | str) -> BeepDetection:
+            return audio_helpers.detect_video_beep(
+                state.shooter_root(slug),
+                stage_number,
+                video,
+                src,
+                project=proj,
+                ffmpeg_binary=process_runtime().ffmpeg_binary,
+                window=take_window[0] if take_window is not None else None,
+            )
+
         try:
-            with handle.timer.phase("beep_detect"):
-                beep = audio_helpers.detect_video_beep(
-                    state.shooter_root(slug),
-                    stage_number,
-                    video,
-                    source,
-                    project=proj,
-                    ffmpeg_binary=process_runtime().ffmpeg_binary,
-                    window=take_window[0] if take_window is not None else None,
-                )
+            if source_url is not None:
+                try:
+                    with handle.timer.phase("beep_detect"):
+                        beep = _detect(source_url)
+                    handle.timer.set_meta(source_read="url")
+                except trim_module.SourceReadError as exc:
+                    # The message carries no URL (``_run_audio_ffmpeg`` redacts it).
+                    logger.warning(
+                        "detect_beep: stage %s %s streamed read failed, downloading instead: %s",
+                        stage_number,
+                        video_id,
+                        exc,
+                    )
+                    handle.timer.set_meta(source_read="url_failed")
+                    with handle.timer.phase("download"):
+                        local_source = proj.resolve_video_path(state.shooter_root(slug), video.path)
+            else:
+                handle.timer.set_meta(source_read="download")
+            if local_source is not None:
+                with handle.timer.phase("beep_detect"):
+                    beep = _detect(local_source)
         except beep_detect.BeepNotFoundError as exc:
             # Primary failure: fatal when no window was applied (whole-file search
             # failed - the downstream pipeline has nothing to anchor on). Windowed
@@ -2824,7 +2860,7 @@ def register_job_bodies(state: AppState) -> None:
                         v_fresh,
                         stg_fresh.time_seconds,
                         project=fresh,
-                        source=source,
+                        source=local_source,
                     )
                 )
         # Then the trim, as its own job (#1680): a confirm that lands while it
@@ -2894,13 +2930,13 @@ def register_job_bodies(state: AppState) -> None:
         # This runs on every take-windowed detect job; the WAV and peaks JSON
         # caches make repeated calls cheap (cache-hit path). Wrapped in
         # try/except so a peaks failure never aborts the detect job.
-        if take_window is not None:
+        if take_window is not None and local_source is not None:
             try:
                 root_for_peaks = state.shooter_root(slug)
                 take_wav = audio_helpers.ensure_take_audio(
                     root_for_peaks,
                     str(video.path),
-                    source,
+                    local_source,
                     project=proj,
                     ffmpeg_binary=process_runtime().ffmpeg_binary,
                 )
