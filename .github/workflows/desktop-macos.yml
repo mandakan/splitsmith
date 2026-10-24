@@ -83,6 +83,15 @@ jobs:
           codesign -d --verbose=2 "$app" 2>&1 | grep -i flags
           desktop/smoke.sh "$app"
           desktop/launch-check.sh "$app"
+          for drop in allow-unsigned-executable-memory allow-jit; do
+            echo "=== MUTATION: without $drop"
+            m="$RUNNER_TEMP/mut-$drop/Splitsmith.app"
+            mkdir -p "$(dirname "$m")" && ditto "$RUNNER_TEMP/installed/Splitsmith.app" "$m"
+            plutil -remove "com.apple.security.cs.$drop" -o "$RUNNER_TEMP/ent-$drop.plist" desktop/entitlements.plist
+            codesign --force --deep --sign - --options runtime --entitlements "$RUNNER_TEMP/ent-$drop.plist" "$m"
+            if desktop/smoke.sh "$m" > "$RUNNER_TEMP/s.log" 2>&1; then echo "MUT smoke PASSED (bad)"; else echo "MUT smoke FAILED (good)"; tail -5 "$RUNNER_TEMP/s.log"; fi
+            if desktop/launch-check.sh "$m" > "$RUNNER_TEMP/l.log" 2>&1; then echo "MUT launch PASSED (bad)"; else echo "MUT launch FAILED (good)"; tail -5 "$RUNNER_TEMP/l.log"; fi
+          done
 
       - uses: actions/upload-artifact@v4
         with:

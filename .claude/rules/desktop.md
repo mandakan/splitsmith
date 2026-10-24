@@ -64,7 +64,17 @@ must not move.
 
 - `CSC_IDENTITY_AUTO_DISCOVERY=false desktop/build.sh` is the unsigned build;
   `desktop/smoke.sh` runs the built sidecar and a detection;
-  `desktop/verify-signed.sh` is what a signed build must pass.
+  `desktop/launch-check.sh` starts Electron itself and, on a Mac, checks that
+  quitting it takes the sidecar along; `desktop/verify-signed.sh` is what a
+  signed build must pass.
+- **CI checks the DMG, never signs it.** `desktop/check-dmg.sh` opens a DMG the
+  way a user does (layout, arm64, the version, a `ditto` install) and the smoke
+  and launch checks run that installed copy, not `dist/mac-arm64`, which is
+  only what electron-builder packed. `desktop-macos.yml` runs it unsigned on
+  PRs and, chained after `publish-pypi`, from the release's PyPI wheel (red
+  there means don't start `release.sh`). `desktop-macos-verify.yml` downloads
+  the signed DMG `release.sh` uploaded, quarantines it like a browser does and
+  adds Gatekeeper, the ticket and `syspolicy_check`; `release.sh` dispatches it.
 - `desktop/release.sh [vX.Y.Z]` builds the tag (default the newest release)
   signed in a throwaway worktree, smokes it and uploads the DMG to the GitHub
   release, reading the `APPLE_API_*` notarization vars from
