@@ -1189,3 +1189,78 @@ def test_boot_retrigger_cooldown_zero_allows_every_call() -> None:
     asyncio.run(hook())
     assert stub.scheduled == 2
     assert len(session.queries) == 2
+
+
+# ---------------------------------------------------------------------------
+# Fan-out for backlogs that never reach trigger() (#1709)
+# ---------------------------------------------------------------------------
+
+
+def _backlog_starts(
+    *,
+    pending: Any,
+    active: Any,
+    triggers: int = 1,
+    cooldown: float = 0.0,
+    watch_seconds: float | None = 0.01,
+    live: int = 1,
+) -> int:
+    """Trigger ``triggers`` times on a platform-only fleet with ``live``
+    heartbeats, let the watch and the settle check run out; return the job starts."""
+    store = _fresh_store()
+    requests: list[dict[str, Any]] = []
+
+    async def scenario() -> None:
+        await _platform_row_id(store)
+        dispatcher = WorkerDispatcher(
+            store,
+            WakeChannelRegistry(),
+            cloud_run=_config(),
+            worker_active=active,
+            pending_jobs=pending,
+            cooldown_seconds=cooldown,
+            transport=_transport(requests),
+            watch_seconds=watch_seconds,
+            live_workers=_count(live),
+            max_executions=4,
+            jobs_per_execution=4,
+        )
+        for _ in range(triggers):
+            await dispatcher.trigger()
+        await asyncio.wait_for(_drain_tasks(dispatcher), 5)
+
+    asyncio.run(scenario())
+    return len(requests)
+
+
+def test_watch_fans_out_for_jobs_a_live_drain_chains() -> None:
+    """The submit finds a drain live with one job queued; that drain then
+    chains four more (beep to trim) straight into the queue, with no submit.
+    The watch adds the second execution five jobs want."""
+    assert _backlog_starts(pending=_sequence(1, 5, 5, 0), active=_active) == 1
+
+
+def test_the_bench_shape_gets_a_second_execution(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Run A3: one cold-woken execution, its five beep jobs chain five trims.
+    Once its start has aged out of the boot grace, the watch adds one."""
+    monkeypatch.setattr("splitsmith.worker_trigger.STARTUP_GRACE_SECONDS", 0.0)
+    assert _backlog_starts(pending=_sequence(1, 5, 5, 0), active=_sequence(False, True)) == 2
+
+
+def test_a_burst_dropped_by_the_cooldown_is_counted_when_it_ends() -> None:
+    """Five submits beside a live drain: the first sees one job, the other
+    four land in the cooldown. One settle check at its end counts all five."""
+    starts = _backlog_starts(
+        pending=_sequence(1, 5), active=_active, triggers=5, cooldown=0.05, watch_seconds=None
+    )
+    assert starts == 1
+
+
+def test_the_settle_check_never_fans_out_without_a_live_drain() -> None:
+    """After a cold wake nothing is live yet: the tier walk chose who drains,
+    and a settle check must not add Cloud Run executions beside a box (or an
+    execution) still booting."""
+    starts = _backlog_starts(
+        pending=_sequence(1, 5), active=_inactive, triggers=5, cooldown=0.05, watch_seconds=None, live=0
+    )
+    assert starts == 1  # the cold wake's own start only
