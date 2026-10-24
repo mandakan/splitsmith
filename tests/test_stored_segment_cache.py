@@ -82,3 +82,38 @@ def test_forget_local_keeps_the_stored_copy(tmp_path: Path) -> None:
     assert storage.exists(f"{PREFIX}/{KEY}.mov")
     found = cache.lookup(KEY, suffix=".mov")
     assert found is not None and found.read_bytes() == b"segment"
+
+
+class _Presigning(FilesystemStorage):
+    supports_presigned_get = True  # type: ignore[assignment]
+
+    def presign_get_url(self, path: str, **kwargs):  # type: ignore[no-untyped-def]
+        return f"https://bucket.example/{path}?X-Amz-Signature=s"
+
+
+def test_a_lookup_for_the_stitch_reads_the_stored_segment_by_url(tmp_path: Path) -> None:
+    """#1691: a 4K match's stage segments are gigabytes; the stitch reads
+    them from storage instead of pulling them all onto a memory disk."""
+    storage = _Presigning(tmp_path / "store")
+    _commit(_cache(tmp_path, "worker-a", storage))
+    cache = _cache(tmp_path, "worker-b", storage)
+    found = cache.lookup(KEY, suffix=".mov", fetch=False)
+    assert found is not None and not found.exists()
+    assert cache.concat_source(found) == f"https://bucket.example/{PREFIX}/{KEY}.mov?X-Amz-Signature=s"
+
+
+def test_without_presigned_urls_the_stitch_pulls_as_before(tmp_path: Path) -> None:
+    storage = FilesystemStorage(tmp_path / "store")
+    _commit(_cache(tmp_path, "worker-a", storage))
+    cache = _cache(tmp_path, "worker-b", storage)
+    found = cache.lookup(KEY, suffix=".mov", fetch=False)
+    assert found is not None and found.read_bytes() == b"segment"
+    assert cache.concat_source(found) == found.resolve().as_posix()
+
+
+def test_a_local_cache_names_its_files_in_the_concat_list(tmp_path: Path) -> None:
+    from splitsmith.segment_cache import SegmentCache
+
+    cache = SegmentCache(root=tmp_path / "c", max_bytes=1 << 30)
+    path = tmp_path / "c" / "x.mov"
+    assert cache.concat_source(path) == path.resolve().as_posix()

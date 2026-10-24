@@ -269,3 +269,38 @@ def test_only_stage_names_a_stage_in_the_grid(tmp_path: Path) -> None:
     cache = SegmentCache(root=tmp_path / "cache", max_bytes=1 << 30)
     with pytest.raises(ValueError, match="stage 9"):
         _render(tmp_path, "w", cache, None, dressed=False, only_stage=9)
+
+
+class _UrlCache(SegmentCache):
+    """A cache whose stage segments the stitch reads over a URL."""
+
+    def concat_source(self, path: Path) -> str:
+        return f"https://bucket.example/{path.name}?X-Amz-Signature=s3cret"
+
+
+def test_a_stitch_over_urls_reads_quietly_or_fails(tmp_path: Path) -> None:
+    """Reading segments over URLs, the stitch whitelists the protocols and
+    trusts only a quiet read: ffmpeg exits 0 on a dropped connection with a
+    short file. The URL never reaches the error."""
+    cache = _UrlCache(root=tmp_path / "cache", max_bytes=1 << 30)
+    _render(tmp_path, "warm", cache, None, dressed=False)
+    stitches: list[tuple[str, ...]] = []
+    base = _runners(None)
+
+    def noisy(cmd, **kwargs):  # type: ignore[no-untyped-def]
+        argv = tuple(str(c) for c in cmd)
+        if "concat" in argv:
+            stitches.append(argv)
+            Path(argv[-1]).write_bytes(b"short")
+            return subprocess.CompletedProcess(
+                cmd, 0, "", "https://bucket.example/x.mov?X-Amz-Signature=s3cret: Connection reset\n"
+            )
+        return base["runner"](cmd, **kwargs)
+
+    with pytest.raises(mp4_grid.GridRenderError) as err:
+        _render(tmp_path, "stitch", cache, None, dressed=False, runners={**base, "runner": noisy})
+    (stitch,) = stitches
+    assert "-protocol_whitelist" in stitch and stitch[stitch.index("-loglevel") + 1] == "error"
+    assert "s3cret" not in str(err.value)
+    listed = (tmp_path / "stitch" / "concat.txt").read_text(encoding="utf-8")
+    assert "https://bucket.example/" in listed

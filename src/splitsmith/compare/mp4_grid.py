@@ -73,6 +73,7 @@ from ..overlay.layout import Anchor, CellScale, anchor_ffmpeg_expr
 from ..overlay.raster import ChromiumRasterizer, Rasterizer, RasterizerUnavailableError
 from ..overlay.text import FALLBACK_BUNDLED_FONT, overlay_font_file
 from ..overlay.theme import OverlayTheme, ThemeName, load_theme, theme_for
+from ..proxy import redact_urls
 from ..runtime import FFmpegCapabilities, ffmpeg_capabilities, quote_filter_value, runtime
 from ..segment_cache import SegmentCache
 from ..youtube_sidecar import Chapter
@@ -2538,6 +2539,7 @@ def build_concat_command(
     output_path: Path,
     ffmpeg_binary: str = "ffmpeg",
     audio_labels: Sequence[str] = (),
+    remote: bool = False,
 ) -> tuple[str, ...]:
     """Stitch the per-stage temps, copying video and encoding audio once.
 
@@ -2561,19 +2563,27 @@ def build_concat_command(
     drift apart on it. Passing nothing restates nothing, which is what a
     caller stitching segments it did not build wants.
 
+    ``remote`` says the list names presigned URLs (#1691): the protocols
+    are whitelisted for the concat demuxer, and the log is cut to errors so
+    the caller can refuse a read that reported any.
+
     Restating is not optional. Stream copy carries neither the track
     names nor the disposition across the concat demuxer: the names come
     back out as plain ``SoundHandler``, so a four-shooter file would
     offer five anonymous tracks with no way to tell whose is whose.
     """
+    remote_args = ("-loglevel", "error") if remote else ()
+    remote_input = ("-protocol_whitelist", "file,http,https,tcp,tls,crypto") if remote else ()
     args: list[str] = [
         ffmpeg_binary,
         "-hide_banner",
+        *remote_args,
         "-y",
         "-f",
         "concat",
         "-safe",
         "0",
+        *remote_input,
         "-i",
         str(list_path),
         "-map",
@@ -3198,6 +3208,7 @@ class _GridEncoder:
         report: Callable[[Literal["encoding", "reused"]], None] | None = None,
         prepare: Callable[[], object] | None = None,
         tiles_for: int | None = None,
+        fetch: bool = True,
     ) -> tuple[Path | None, str]:
         """The segment's path, or ``None`` and ffmpeg's complaint.
         ``prepare`` writes an input the command reads (a sting's clip,
@@ -3224,7 +3235,7 @@ class _GridEncoder:
             extra_inputs=extra_inputs,
         )
         self.used_keys.add(key)
-        hit = self.cache.lookup(key, suffix=out.suffix)
+        hit = self.cache.lookup(key, suffix=out.suffix, fetch=fetch)
         if hit is not None:
             if report is not None:
                 report("reused")
@@ -4262,7 +4273,7 @@ def render_grid_mp4(
             raise _EdgeFailedError(error)
         return edge
 
-    def encode_stage(item: GridStageItem, prep: _GridPrep) -> tuple[Path | None, str]:
+    def encode_stage(item: GridStageItem, prep: _GridPrep, *, fetch: bool = True) -> tuple[Path | None, str]:
         """The stage's segment, narrowed for the boundaries on either side,
         or ``None`` and ffmpeg's complaint. The one place a stage segment
         is encoded, for the whole render and for ``only_stage`` alike, so a
@@ -4296,6 +4307,7 @@ def render_grid_mp4(
             extra_inputs=extra,
             report=lambda status, n=item.index, p=item.plan: report(n, p, status),
             tiles_for=item.plan.stage_number,
+            fetch=fetch,
         )
 
     if only_stage is not None:
@@ -4447,7 +4459,9 @@ def render_grid_mp4(
                     )
                     segment = None
                 else:
-                    segment, error = encode_stage(item, prep)
+                    # Only the stitch reads a stage segment: a stored cache
+                    # may hand it a URL instead of the bytes.
+                    segment, error = encode_stage(item, prep, fetch=False)
                     if segment is None:
                         outcomes.append(
                             StageOutcome(
@@ -4512,10 +4526,12 @@ def render_grid_mp4(
         )
 
     list_path = work / "concat.txt"
-    list_path.write_text(
-        "".join(f"file '{segment.resolve().as_posix()}'\n" for segment in segments),
-        encoding="utf-8",
-    )
+    sources = [
+        segment_cache.concat_source(segment) if segment_cache is not None else segment.resolve().as_posix()
+        for segment in segments
+    ]
+    remote = any("://" in source for source in sources)
+    list_path.write_text("".join(f"file '{source}'\n" for source in sources), encoding="utf-8")
     # The labels and the default flag have to be restated here: stream
     # copy carries neither across the concat demuxer, so without this the
     # finished file offers N+1 anonymous tracks.
@@ -4524,11 +4540,17 @@ def render_grid_mp4(
         output_path=output_path,
         ffmpeg_binary=binary,
         audio_labels=labels,
+        remote=remote,
     )
     report(len(plans), None, "stitching")
     completed = _run_ffmpeg(concat_cmd, runner=runner)
     if completed.returncode != 0:
-        raise GridRenderError(f"concat stitch failed: {_stderr_text(completed)}")
+        raise GridRenderError(f"concat stitch failed: {redact_urls(_stderr_text(completed))}")
+    stderr = completed.stderr
+    if remote and (stderr.decode(errors="replace") if isinstance(stderr, bytes) else stderr or "").strip():
+        # A dropped read exits 0 with a short file; only a quiet one counts.
+        detail = redact_urls(_stderr_text(completed))
+        raise GridRenderError(f"concat stitch could not read a segment: {detail}")
     if segment_cache is not None:
         segment_cache.evict(keep=encoder.used_keys)
 

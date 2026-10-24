@@ -24,6 +24,7 @@ from splitsmith.ui.grid_tiles import HostedGridTiles
 from tests.test_hosted_compare_grid import (
     SOURCE_BYTES,
     TRIM_BYTES,
+    _give_the_shooter_a_beeped_primary,
     _wait_for_job,
     hosted_grid,
     hosted_source_only,
@@ -41,24 +42,27 @@ __all__ = [
 ]
 
 
-def _load(client, match_id: str, slug: str, tiles: HostedGridTiles, **kwargs: Any):  # type: ignore[no-untyped-def]
+def _load(  # type: ignore[no-untyped-def]
+    client, match_id: str, slug: str, tiles: HostedGridTiles, stages: list[int] | None = None, **kwargs: Any
+):
     """``_load_compare_bundles`` as the grid job calls it, inside a job body
     so it runs with the job's match and tenant context: the request route
     queues it, the inline deferrer runs it."""
+    stages = stages or [1]
     state = client.app.state.splitsmith_state
     out: dict[str, Any] = {}
 
     def body(handle, req, match_root: str) -> None:  # type: ignore[no-untyped-def]
         out["state"] = state
         out["bundles"] = server_mod._load_compare_bundles(
-            Path(match_root), state.match(), state=state, stage_numbers=[1], tiles=tiles, **kwargs
+            Path(match_root), state.match(), state=state, stage_numbers=stages, tiles=tiles, **kwargs
         )
         out["project"] = state.shooter_project(req.audio_from)
         out["root"] = state.shooter_root(req.audio_from)
 
     state.jobs.bodies.register("compare-grid", body)
     resp = client.post(
-        f"/api/matches/{match_id}/match/compare-export", json={"stage_numbers": [1], "audio_from": slug}
+        f"/api/matches/{match_id}/match/compare-export", json={"stage_numbers": stages, "audio_from": slug}
     )
     assert resp.status_code == 200, resp.text
     job = _wait_for_job(client, match_id, resp.json()["id"])
@@ -135,7 +139,9 @@ def test_identity_changes_when_the_export_changes(hosted_grid, probes) -> None:
     assert before.identities != after.identities
 
 
-def test_acquire_pulls_one_stage_and_releases_it(hosted_grid, probes) -> None:
+def test_acquire_pulls_a_stage_once_and_release_deletes_it(hosted_grid, probes) -> None:
+    """A stage's reads come in a row (hold still, edges, encode): the first
+    acquire pulls it and the next ones find it; release deletes it."""
     client, _storage, match_id, slug, _rendered = hosted_grid
     tiles = HostedGridTiles()
     (bundle,) = _load(client, match_id, slug, tiles)
@@ -144,8 +150,39 @@ def test_acquire_pulls_one_stage_and_releases_it(hosted_grid, probes) -> None:
     before = _bytes_read()
     with tiles.acquire(1):
         assert trim.read_bytes() == TRIM_BYTES
+    pulled = _bytes_read() - before
+    assert pulled >= len(TRIM_BYTES)
+    with tiles.acquire(1):
+        assert trim.read_bytes() == TRIM_BYTES
+    assert _bytes_read() - before == pulled
+    tiles.release()
     assert not trim.exists()
-    assert _bytes_read() - before >= len(TRIM_BYTES)
+
+
+def test_acquiring_another_stage_releases_the_first(two_stage_grid, probes) -> None:
+    client, match_id, slug = two_stage_grid
+    tiles = HostedGridTiles()
+    (bundle,) = _load(client, match_id, slug, tiles, stages=[1, 2])
+    one, two = (bundle.stages_by_number[n].trim_path for n in (1, 2))
+    with tiles.acquire(1):
+        assert one.exists()
+    with tiles.acquire(2):
+        assert two.exists() and not one.exists()
+    tiles.release()
+    assert not two.exists()
+
+
+def test_a_tile_already_on_disk_is_never_deleted(hosted_grid, probes) -> None:
+    client, _storage, match_id, slug, _rendered = hosted_grid
+    tiles = HostedGridTiles()
+    (bundle,) = _load(client, match_id, slug, tiles)
+    trim = bundle.stages_by_number[1].trim_path
+    trim.parent.mkdir(parents=True, exist_ok=True)
+    trim.write_bytes(b"a local export")
+    with tiles.acquire(1):
+        pass
+    tiles.release()
+    assert trim.read_bytes() == b"a local export"
 
 
 def test_an_inset_clip_is_acquired_and_identified(hosted_grid, hosted_db, probes) -> None:
@@ -163,6 +200,7 @@ def test_an_inset_clip_is_acquired_and_identified(hosted_grid, hosted_db, probes
     assert inset is not None and str(inset.trim_path) in tiles.identities
     with tiles.acquire(1):
         assert inset.trim_path.read_bytes() == b"inset"
+    tiles.release()
     assert not inset.trim_path.exists()
 
 
@@ -178,8 +216,30 @@ def test_a_tile_cut_from_the_source_is_identified_and_cut_only_on_acquire(hosted
     assert len(cuts) == 1 and not stage.trim_path.exists()
     with tiles.acquire(1):
         assert stage.trim_path.exists()
+    with tiles.acquire(1):
+        pass
+    tiles.release()
     assert len(cuts) == 2 and not stage.trim_path.exists()
     assert cuts[0]["source_bytes"] == SOURCE_BYTES
+
+
+@pytest.fixture
+def two_stage_grid(hosted_grid, hosted_db):  # type: ignore[no-untyped-def]  # noqa: F811
+    client, storage, match_id, slug, _rendered = hosted_grid
+    _give_the_shooter_a_beeped_primary(hosted_db, match_id, slug, stages=(1, 2))
+    storage.write_bytes(f"matches/{match_id}/shooters/{slug}/exports/stage2_two_trimmed.mp4", TRIM_BYTES)
+    return client, match_id, slug
+
+
+def test_an_unknown_version_never_matches_a_stored_segment(hosted_grid, probes, monkeypatch) -> None:
+    """A tile whose object cannot be stat'ed gets an identity of its own
+    each time, so a segment keyed by it is never reused."""
+    client, storage, match_id, slug, _rendered = hosted_grid
+    monkeypatch.setattr(type(storage), "stat", lambda self, path: None)
+    one, two = HostedGridTiles(), HostedGridTiles()
+    _load(client, match_id, slug, one)
+    _load(client, match_id, slug, two)
+    assert one.identities != two.identities
 
 
 def _give_a_chest_camera(db_url: str, match_id: str, slug: str) -> None:

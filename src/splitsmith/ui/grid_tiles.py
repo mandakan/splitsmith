@@ -16,13 +16,17 @@ length, size and frame rate, and a render needs one stage's tiles at a time.
 - **identities**: each tile keyed by its stored object (key, size, version),
   or for a cut by its source object and the cut's window, so a segment's
   cache key is the same on every worker whatever its local copy looks like.
-- **acquire**: pulls (or cuts) one stage's tiles and deletes them after.
+- **acquire**: pulls (or cuts) one stage's tiles and keeps them until another
+  stage is acquired or :meth:`HostedGridTiles.release` is called, so a stage
+  read several times in a row (its hold still, its edges, its encode) is
+  pulled once, and the disk never holds two stages.
 """
 
 from __future__ import annotations
 
 import contextlib
 import logging
+import uuid
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -57,6 +61,8 @@ class HostedGridTiles:
         self._cuts: dict[str, _Cut] = {}
         self._projects: dict[str, MatchProject] = {}
         self._by_stage: dict[int, list[Path]] = {}
+        self._held: int | None = None
+        self._pulled: list[Path] = []
 
     # -- planning (the loader's hooks) ------------------------------------
 
@@ -108,21 +114,33 @@ class HostedGridTiles:
 
     @contextlib.contextmanager
     def acquire(self, stage_number: int) -> Iterator[None]:
-        """Stage ``stage_number``'s tiles on this disk for the ``with``
-        (``mp4_grid.TileAccess``); deleted after, pulled or cut."""
-        made: list[Path] = []
-        try:
+        """Stage ``stage_number``'s tiles on this disk (``mp4_grid.TileAccess``).
+        They stay until another stage is acquired or :meth:`release`: the
+        reads of one stage come in a row, and each would otherwise pull it
+        again. A file that was here before is never deleted."""
+        if self._held != stage_number:
+            self.release()
+            self._held = stage_number
             for path in self._by_stage.get(stage_number, []):
+                if path.exists():
+                    continue
                 cut = self._cuts.get(str(path))
-                if cut is not None:
-                    if self._cut(path, cut) is not None:
-                        made.append(path)
-                elif export_storage.pull_export_file(self._projects[str(path)], path):
-                    made.append(path)
-            yield
-        finally:
-            for path in made:
-                path.unlink(missing_ok=True)
+                made = (
+                    self._cut(path, cut) is not None
+                    if cut is not None
+                    else export_storage.pull_export_file(self._projects[str(path)], path)
+                )
+                if made:
+                    self._pulled.append(path)
+        yield
+
+    def release(self) -> None:
+        """Delete every tile this object pulled or cut. Call it when the
+        render is done; a job's scratch would otherwise keep a stage."""
+        for path in self._pulled:
+            path.unlink(missing_ok=True)
+        self._pulled = []
+        self._held = None
 
     # -- internals --------------------------------------------------------
 
@@ -165,7 +183,8 @@ class HostedGridTiles:
         key = export_storage._storage_export_key(project, path)
         stored = storage.stat(key) if storage is not None and key is not None else None
         if stored is None:
-            return f"missing:{path.name}"
+            # Unknown version: never reuse a segment keyed by it.
+            return f"missing:{path.name}:{uuid.uuid4().hex}"
         modified = stored.last_modified.isoformat() if stored.last_modified else ""
         return f"storage:{key}:{stored.size}:{modified}:{stored.etag or ''}"
 

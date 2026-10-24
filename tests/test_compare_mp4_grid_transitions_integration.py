@@ -552,3 +552,51 @@ def test_a_grid_rendered_stage_by_stage_is_the_one_process_render(tmp_path: Path
     whole = render("whole", SegmentCache(root=tmp_path / "whole-cache", max_bytes=1 << 30))
     assert all(stage.ok for stage in stitched.stages)
     assert _frame_digest(stitched.output_path) == _frame_digest(whole.output_path)
+
+
+@pytest.mark.skipif(not ffmpeg_available(), reason="needs ffmpeg and ffprobe on PATH")
+def test_a_stitch_that_reads_its_segments_over_http_matches_the_local_one(tmp_path: Path) -> None:
+    """#1691: a hosted stitch names stored segments by presigned URL instead
+    of pulling a 4K match's gigabytes onto a memory disk. Real ffmpeg, real
+    HTTP with range requests: the same frames and samples as a local stitch."""
+    import contextlib
+
+    from tests.test_proxy import _frame_digest, _RangeServer
+
+    ffmpeg = shutil.which("ffmpeg")
+    assert ffmpeg
+    shooters = _two_shooters(tmp_path, ffmpeg=ffmpeg)
+    fade = (composition.Transition(from_stage_index=0, to_stage_index=1, kind="fade", duration_seconds=1.0),)
+    servers: dict[str, str] = {}
+
+    class _Served(SegmentCache):
+        def lookup(self, key, *, suffix=".mp4", fetch=True):  # type: ignore[no-untyped-def]
+            return super().lookup(key, suffix=suffix)
+
+        def concat_source(self, path: Path) -> str:
+            return servers.get(path.name, super().concat_source(path))
+
+    def render(name: str, cache: SegmentCache) -> mp4_grid.GridRenderResult:
+        return mp4_grid.render_grid_mp4(
+            shooters,
+            audio_label="Anders",
+            output_path=tmp_path / f"{name}.mp4",
+            canvas=mp4_grid.GridCanvas(640, 360, SYNTHETIC_FPS_NUM, SYNTHETIC_FPS_DEN),
+            head_pad_seconds=0.5,
+            tail_pad_seconds=1.0,
+            ffmpeg_binary=ffmpeg,
+            work_dir=tmp_path / name,
+            transitions=fade,
+            segment_cache=cache,
+        )
+
+    local = render("local", SegmentCache(root=tmp_path / "cache", max_bytes=1 << 30))
+    served = _Served(root=tmp_path / "cache", max_bytes=1 << 30)
+    with contextlib.ExitStack() as stack:
+        for segment in sorted((tmp_path / "cache").glob("*.mov")):
+            servers[segment.name] = stack.enter_context(_RangeServer(segment)).url
+        remote = render("remote", served)
+    listed = (tmp_path / "remote" / "concat.txt").read_text(encoding="utf-8")
+    assert listed.count("http://") >= 2
+    assert all(stage.ok for stage in remote.stages)
+    assert _frame_digest(remote.output_path) == _frame_digest(local.output_path)

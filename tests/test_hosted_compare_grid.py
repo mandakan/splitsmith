@@ -166,6 +166,7 @@ def test_hosted_render_pulls_the_trim_pushes_the_grid_and_serves_it(hosted_grid)
     assert not trim.exists()
     with call["tile_access"].acquire(1):
         assert trim.read_bytes() == TRIM_BYTES
+    call["tile_access"].release()
     assert not trim.exists()
 
     # The finished grid is at the match-scoped key, and the result names it.
