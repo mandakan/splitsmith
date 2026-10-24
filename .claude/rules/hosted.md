@@ -206,7 +206,9 @@ Deploy facts (worker env, `FORWARDED_ALLOW_IPS`, the waitlist cut-over) are in
   (`WorkersStore.claim_starts`, `info["recent_starts"]`, 120 s), so the cap
   holds across serve's instances; never count them in process memory, which
   let each of the three instances start a full cap. A cold wake with no live
-  drain still starts at least one, as before fan-out. `tests/test_worker_trigger.py`
+  drain still starts at least one, as before fan-out, and the settle check
+  at the end of its cooldown fans out beside it while it boots (a Cloud Run
+  start within the grace), never beside a self-hosted box still booting. `tests/test_worker_trigger.py`
   and `tests/test_worker_drain_lifecycle.py` pin all three.
 
 ## Database connections

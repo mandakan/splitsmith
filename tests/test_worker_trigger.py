@@ -1301,16 +1301,6 @@ def test_a_burst_dropped_by_the_cooldown_is_counted_when_it_ends() -> None:
     assert starts == 1
 
 
-def test_the_settle_check_never_fans_out_without_a_live_drain() -> None:
-    """After a cold wake nothing is live yet: the tier walk chose who drains,
-    and a settle check must not add Cloud Run executions beside a box (or an
-    execution) still booting."""
-    starts = _backlog_starts(
-        pending=_sequence(1, 5), active=_inactive, triggers=5, cooldown=0.05, watch_seconds=None, live=0
-    )
-    assert starts == 1  # the cold wake's own start only
-
-
 def test_make_solo_jobs_counter_counts_queued_grid_stages() -> None:
     """#1691: only queued jobs of a solo kind count, read from the task's
     args (JSON text on SQLite, a dict on Postgres)."""
@@ -1342,3 +1332,39 @@ def test_make_solo_jobs_counter_counts_queued_grid_stages() -> None:
         return await make_solo_jobs_counter(factory)()
 
     assert asyncio.run(scenario()) == 2
+
+
+def test_a_backlog_queued_behind_a_cold_wake_fans_out_while_it_boots() -> None:
+    """A burst (a grid's stage jobs, a match's uploads) wakes one execution;
+    the rest of the burst lands in the cooldown. The settle check at its end
+    fans out beside that execution while it still boots (no heartbeat yet):
+    the platform row's recent start shows the tier walk chose Cloud Run.
+    Before, it waited for a heartbeat and the watch two minutes later."""
+    starts = _backlog_starts(
+        pending=_sequence(1, 13),
+        active=_inactive,
+        triggers=2,
+        cooldown=0.05,
+        watch_seconds=None,
+        live=0,
+        jobs_per_execution=2,
+        max_executions=13,
+    )
+    assert starts == 7
+
+
+def test_with_no_execution_booting_the_settle_check_still_waits_for_a_drain() -> None:
+    """No recent Cloud Run start (a self-hosted box was woken, or nothing
+    was): the settle check starts nothing, so it never jumps a box that is
+    still booting."""
+    starts = _backlog_starts(
+        pending=_sequence(0, 13),
+        active=_inactive,
+        triggers=1,
+        cooldown=0.05,
+        watch_seconds=None,
+        live=0,
+        jobs_per_execution=2,
+        max_executions=13,
+    )
+    assert starts <= 1
