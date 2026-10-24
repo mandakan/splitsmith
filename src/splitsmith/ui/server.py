@@ -478,6 +478,9 @@ logger = logging.getLogger(__name__)
 #: four threads, and six hours covers a clip hundreds of times longer. A
 #: read that still fails falls back to the download path.
 _PROXY_SOURCE_URL_TTL_S = 6 * 3600
+#: The same for a trim's source: a cut reads only its window, a few minutes
+#: at most on a 4K source; a read that outlives the URL falls back too.
+_TRIM_SOURCE_URL_TTL_S = 3600
 
 
 def _proxy_source_url(storage: Storage, raw_path: str) -> str | None:
@@ -2925,7 +2928,16 @@ def register_job_bodies(state: AppState) -> None:
             reused = not force and audio_helpers.stored_trim_current(
                 root, stage_number, video, stg.time_seconds, project=proj
             )
-            source = None if reused else proj.resolve_video_path(root, video.path)
+            # #1674: ffmpeg reads a hosted source from a presigned URL and
+            # cuts only its window, so nothing lands on this disk; a local
+            # mirror, a store without presigned URLs or a failed read take
+            # the download path.
+            source: Path | None = None
+            source_url: str | None = None
+            if not reused:
+                source_url = proj.source_url(root, video.path, expires_in=_TRIM_SOURCE_URL_TTL_S)
+                if source_url is None:
+                    source = proj.resolve_video_path(root, video.path)
         handle.timer.set_meta(role=video.role, trim_reused=reused)
         handle.check_cancel()
         role_label = "primary" if video.role == "primary" else f"cam {video.video_id[:6]}"
@@ -2974,25 +2986,46 @@ def register_job_bodies(state: AppState) -> None:
         # of the wrong window. Its submitters adopted this job (they dedupe on
         # the trim kind), so it re-queues the trim for the current beep itself
         # and never publishes the stale cut.
+        def _cut(src: Path | str) -> None:
+            audio_helpers.ensure_video_audit_trim(
+                root,
+                stage_number,
+                video,
+                src,
+                video.beep_time,
+                stg.time_seconds,
+                project=proj,
+                runner=_cancellable_runner(handle),
+                ffmpeg_binary=process_runtime().ffmpeg_binary,
+                force=force,
+                still_current=_still_current,
+            )
+
         superseded = False
-        with handle.timer.phase("trim"):
-            try:
-                if source is not None:
-                    audio_helpers.ensure_video_audit_trim(
-                        root,
+        try:
+            if source_url is not None:
+                try:
+                    with handle.timer.phase("trim"):
+                        _cut(source_url)
+                    handle.timer.set_meta(source_read="url")
+                except trim_module.SourceReadError as exc:
+                    # The message carries no URL (``trim_video`` redacts it).
+                    logger.warning(
+                        "trim: stage %s %s streamed read failed, downloading instead: %s",
                         stage_number,
-                        video,
-                        source,
-                        video.beep_time,
-                        stg.time_seconds,
-                        project=proj,
-                        runner=_cancellable_runner(handle),
-                        ffmpeg_binary=process_runtime().ffmpeg_binary,
-                        force=force,
-                        still_current=_still_current,
+                        video_id,
+                        exc,
                     )
-            except audio_helpers.TrimSuperseded:
-                superseded = True
+                    handle.timer.set_meta(source_read="url_failed")
+                    with handle.timer.phase("download"):
+                        source = proj.resolve_video_path(root, video.path)
+            elif source is not None:
+                handle.timer.set_meta(source_read="download")
+            if source is not None:
+                with handle.timer.phase("trim"):
+                    _cut(source)
+        except audio_helpers.TrimSuperseded:
+            superseded = True
         outcome: dict[str, bool] = {"reviewed": False, "moved": False}
         if not superseded:
             # The audit WAV is the trim's second product (spec 2026-10-14): the
@@ -3002,7 +3035,7 @@ def register_job_bodies(state: AppState) -> None:
             handle.update(progress=0.75, message="Cutting audit audio...")
             with handle.timer.phase("audit_wav"):
                 try:
-                    if source is not None:
+                    if not reused:
                         audio_helpers.ensure_video_audit_wav(
                             root,
                             stage_number,

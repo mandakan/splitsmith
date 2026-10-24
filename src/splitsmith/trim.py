@@ -56,6 +56,16 @@ class FFmpegError(RuntimeError):
     """ffmpeg exited non-zero or could not be invoked."""
 
 
+class SourceReadError(FFmpegError):
+    """ffmpeg reported a problem reading a URL source (#1674).
+
+    A dropped connection that cannot resume, or a range read that hits EOF,
+    exits 0 with a short or damaged cut and an error line on stderr (measured
+    for the proxy, ``proxy.ProxySourceReadError``). The caller discards the
+    cut and cuts again from a downloaded copy.
+    """
+
+
 @lru_cache(maxsize=4)
 def _probe_available_encoders(ffmpeg_binary: str = "ffmpeg") -> frozenset[str]:
     """Return the set of video encoder names ffmpeg reports it can use.
@@ -186,7 +196,7 @@ def beep_in_trim(beep_time: float, pre_buffer_seconds: float) -> float:
 
 
 def trim_video(
-    input_path: Path,
+    input_path: Path | str,
     output_path: Path,
     beep_time: float,
     stage_time: float,
@@ -219,9 +229,18 @@ def trim_video(
     - ``"audit"``: re-encode video with a short GOP for scrub-friendly playback
       in the production UI's audit screen. Audio is stream-copied.
 
+    ``input_path`` may be a ``str`` URL that ffmpeg reads over HTTP (#1674):
+    with ``-ss`` before ``-i`` it reads about the window's bytes, not the
+    whole object. Any stderr output then raises :class:`SourceReadError`,
+    since a failed read does not change the exit code, and no error message
+    carries the URL.
+
     Returns the absolute-source-time window of the cut. Raises ``FFmpegError``
     if ffmpeg fails or is not installed.
     """
+    from .proxy import HTTP_INPUT_ARGS, redact_urls
+
+    is_url = isinstance(input_path, str)
     ffmpeg_binary = ffmpeg_path(ffmpeg_binary)
     pre = pre_buffer_seconds if pre_buffer_seconds is not None else buffer_seconds
     post = post_buffer_seconds if post_buffer_seconds is not None else buffer_seconds
@@ -240,7 +259,7 @@ def trim_video(
         raise ValueError(f"gop_frames must be >= 1, got {gop_frames}")
     if not 0 <= crf <= 51:
         raise ValueError(f"crf must be 0..51, got {crf}")
-    if not input_path.exists():
+    if not is_url and not input_path.exists():
         raise FileNotFoundError(f"input video not found: {input_path}")
 
     start = max(0.0, beep_time - pre)
@@ -255,6 +274,7 @@ def trim_video(
         "-y" if overwrite else "-n",
         "-ss",
         f"{start:.3f}",
+        *(HTTP_INPUT_ARGS if is_url else ()),
         "-i",
         str(input_path),
         "-t",
@@ -288,11 +308,17 @@ def trim_video(
     cmd.append(str(output_path))
 
     try:
-        runner(cmd, check=True, capture_output=True, text=True)
+        completed = runner(cmd, check=True, capture_output=True, text=True)
     except FileNotFoundError as exc:
         raise FFmpegError(f"ffmpeg binary not found: {ffmpeg_binary}") from exc
     except subprocess.CalledProcessError as exc:
+        if is_url:
+            detail = redact_urls(exc.stderr or exc.stdout)
+            raise SourceReadError(f"ffmpeg failed (exit {exc.returncode}): {detail!r}") from None
         raise FFmpegError(f"ffmpeg failed (exit {exc.returncode}): {exc.stderr or exc.stdout!r}") from exc
+    stderr = getattr(completed, "stderr", None)
+    if is_url and isinstance(stderr, str) and stderr.strip():
+        raise SourceReadError(f"ffmpeg reported errors reading the source: {redact_urls(stderr).strip()!r}")
 
     return TrimResult(output_path=output_path, start_time=start, end_time=end)
 

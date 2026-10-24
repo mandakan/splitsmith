@@ -1494,7 +1494,7 @@ def ensure_video_audit_trim(
     project_root: Path,
     stage_number: int,
     video: StageVideo,
-    source: Path,
+    source: Path | str,
     beep_time: float,
     stage_time_seconds: float,
     *,
@@ -1515,6 +1515,12 @@ def ensure_video_audit_trim(
     mtime a copy or restore did not advance. ``still_current`` is asked
     once the cut passed its check: False drops it unpublished and raises
     :class:`TrimSuperseded`.
+
+    ``source`` may be a ``str`` URL (#1674, ``MatchProject.source_url``): the
+    cut reads only its window, and a failed read raises
+    ``trim.SourceReadError`` unwrapped so the caller can cut again from a
+    download. With no source on this disk the cache check has no source to
+    date the trim against, as for any hosted source not mirrored here.
     """
     from .. import trim as trim_module
 
@@ -1528,9 +1534,13 @@ def ensure_video_audit_trim(
         project=project,
     )
 
-    src_resolved = source.resolve()
-    if not src_resolved.exists():
-        raise FileNotFoundError(f"video missing on disk: {src_resolved}")
+    src_resolved: Path | str
+    if isinstance(source, str):
+        src_resolved = source
+    else:
+        src_resolved = source.resolve()
+        if not src_resolved.exists():
+            raise FileNotFoundError(f"video missing on disk: {src_resolved}")
 
     # One cut at a time per trim: a second cut swept the first's freshly
     # published trim (and every partial beside it) while readers used it.
@@ -1549,7 +1559,9 @@ def ensure_video_audit_trim(
         # than the source. An unreadable sidecar is a miss.
         cache_hit = (
             not force
-            and audit_trim_matches(output, current_params, source=src_resolved)
+            and audit_trim_matches(
+                output, current_params, source=src_resolved if isinstance(src_resolved, Path) else None
+            )
             and valid_mp4_cached(output).ok
         )
         if cache_hit:
@@ -1590,6 +1602,10 @@ def ensure_video_audit_trim(
             trim_kwargs["runner"] = runner
         try:
             trim_module.trim_video(**trim_kwargs)
+        except trim_module.SourceReadError:
+            # A URL read went wrong: the caller cuts again from a download.
+            partial.unlink(missing_ok=True)
+            raise
         except trim_module.FFmpegError as exc:
             # ffmpeg may have written some bytes before bailing; delete them.
             if partial.exists():
