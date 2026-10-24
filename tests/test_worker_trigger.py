@@ -17,6 +17,7 @@ from splitsmith.db import Base, create_engine, sessionmaker
 from splitsmith.db.workers import WorkersStore
 from splitsmith.worker_channel import WakeChannelRegistry
 from splitsmith.worker_trigger import (
+    DEFAULT_JOBS_PER_EXECUTION,
     ENV_WAKE_CHANNEL,
     ENV_WORKER_JOB,
     ENV_WORKER_JOBS_PER_EXECUTION,
@@ -1204,6 +1205,7 @@ def _backlog_starts(
     cooldown: float = 0.0,
     watch_seconds: float | None = 0.01,
     live: int = 1,
+    jobs_per_execution: int = 4,
 ) -> int:
     """Trigger ``triggers`` times on a platform-only fleet with ``live``
     heartbeats, let the watch and the settle check run out; return the job starts."""
@@ -1223,7 +1225,7 @@ def _backlog_starts(
             watch_seconds=watch_seconds,
             live_workers=_count(live),
             max_executions=4,
-            jobs_per_execution=4,
+            jobs_per_execution=jobs_per_execution,
         )
         for _ in range(triggers):
             await dispatcher.trigger()
@@ -1245,6 +1247,22 @@ def test_the_bench_shape_gets_a_second_execution(monkeypatch: pytest.MonkeyPatch
     Once its start has aged out of the boot grace, the watch adds one."""
     monkeypatch.setattr("splitsmith.worker_trigger.STARTUP_GRACE_SECONDS", 0.0)
     assert _backlog_starts(pending=_sequence(1, 5, 5, 0), active=_sequence(False, True)) == 2
+
+
+def test_the_job_a_live_drain_runs_counts_toward_the_backlog() -> None:
+    """Run A4: the drain runs one trim and four wait (``pending_jobs`` counts
+    only the four). Five jobs at four per execution want two, so one is added;
+    counting the queue alone wanted one and added none."""
+    assert _backlog_starts(pending=_sequence(1, 4, 4, 0), active=_active) == 1
+
+
+def test_a_stages_trims_fan_out_at_the_default_jobs_per_execution() -> None:
+    """The same stage at the default two jobs per execution: five jobs want
+    three executions, so two join the live drain."""
+    starts = _backlog_starts(
+        pending=_sequence(1, 4, 4, 0), active=_active, jobs_per_execution=DEFAULT_JOBS_PER_EXECUTION
+    )
+    assert starts == 2
 
 
 def test_a_burst_dropped_by_the_cooldown_is_counted_when_it_ends() -> None:

@@ -194,8 +194,11 @@ Deploy facts (worker env, `FORWARDED_ALLOW_IPS`, the waitlist cut-over) are in
 - After a wake serve watches (`WorkerDispatcher._watch`): work outstanding
   with no live heartbeat is woken again, and the watch gives up after three
   re-wakes that cleared nothing. A backlog beside a live drain gets more
-  executions, one per `SPLITSMITH_WORKER_JOBS_PER_EXECUTION` queued jobs, up to
-  `SPLITSMITH_WORKER_MAX_EXECUTIONS` (default 4). Executions still booting
+  executions, one per `SPLITSMITH_WORKER_JOBS_PER_EXECUTION` jobs (default 2),
+  up to `SPLITSMITH_WORKER_MAX_EXECUTIONS` (default 4). The jobs are the
+  queued ones plus one per live drain: `pending_jobs` leaves out what a drain
+  is running, and without it a stage's chained trims (one running, four
+  queued) never read as more than the running drain covers. Executions still booting
   (no heartbeat yet) are claimed on the platform row under a row lock
   (`WorkersStore.claim_starts`, `info["recent_starts"]`, 120 s), so the cap
   holds across serve's instances; never count them in process memory, which

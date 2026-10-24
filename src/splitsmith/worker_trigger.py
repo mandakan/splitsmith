@@ -134,15 +134,16 @@ WATCH_SECONDS = 120.0
 #: watch gives up and leaves the rest to the nets.
 WATCH_MAX_FRUITLESS_WAKES = 3
 # Fan-out (#1671): the most Cloud Run executions a backlog may run at once
-# (``SPLITSMITH_WORKER_MAX_EXECUTIONS``, default 4) and the queued jobs one
+# (``SPLITSMITH_WORKER_MAX_EXECUTIONS``, default 4) and the jobs one
 # execution is expected to clear in a few minutes
-# (``SPLITSMITH_WORKER_JOBS_PER_EXECUTION``, default 4: a proxy takes 48 to
-# 151 s on 4 vCPU). N executions bill about what one does for N times as
+# (``SPLITSMITH_WORKER_JOBS_PER_EXECUTION``, default 2: a startup is 20 to
+# 30 s, and a trim or detection job 10 to 100 s on 4 vCPU, so two jobs
+# already pay for one). N executions bill about what one does for N times as
 # long, plus a startup each.
 ENV_WORKER_MAX_EXECUTIONS = "SPLITSMITH_WORKER_MAX_EXECUTIONS"
 ENV_WORKER_JOBS_PER_EXECUTION = "SPLITSMITH_WORKER_JOBS_PER_EXECUTION"
 DEFAULT_MAX_EXECUTIONS = 4
-DEFAULT_JOBS_PER_EXECUTION = 4
+DEFAULT_JOBS_PER_EXECUTION = 2
 #: How long a started execution counts as live before its heartbeat shows
 #: (measured: 28 s from start to the first job).
 STARTUP_GRACE_SECONDS = 120.0
@@ -500,10 +501,15 @@ class WorkerDispatcher:
             live.append(worker)
         return live
 
-    async def _executions_wanted(self) -> int:
+    async def _executions_wanted(self, live: int) -> int:
         """Cloud Run executions the backlog wants: one per
-        ``jobs_per_execution`` queued jobs, at least one, at most
-        ``max_executions``. One when fan-out is off or the count fails."""
+        ``jobs_per_execution`` jobs, at least one, at most ``max_executions``.
+        One when fan-out is off or the count fails.
+
+        The jobs are the queued ones plus one in flight per ``live`` drain
+        (#1709): ``pending_jobs`` leaves out what a live drain is running, so
+        a stage's chained trims (one running, four queued) read as a backlog
+        the running drain already covers."""
         if self._max_executions == 1:
             return 1
         try:
@@ -511,14 +517,15 @@ class WorkerDispatcher:
         except Exception:
             logger.warning("worker dispatcher: pending count failed; starting one execution", exc_info=True)
             return 1
-        return min(self._max_executions, max(1, math.ceil(pending / self._jobs_per_execution)))
+        jobs = pending + live
+        return min(self._max_executions, max(1, math.ceil(jobs / self._jobs_per_execution)))
 
     async def _claim(self, worker_id: str, *, live: int, at_least_one: bool) -> int:
         """How many executions to start: what the backlog wants, less the
         ``live`` drains and the ones booting on any serve instance
         (``WorkersStore.claim_starts``). A failed claim starts one on a cold
         wake (the wake must not be lost) and none beside a live drain."""
-        wanted = await self._executions_wanted()
+        wanted = await self._executions_wanted(live)
         try:
             return await self._store.claim_starts(
                 worker_id,
