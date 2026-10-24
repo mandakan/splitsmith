@@ -78,7 +78,10 @@ jobs:
         # The unsigned build runs without the hardened runtime, so a missing
         # entitlement only shows once signed. An ad-hoc signature applies the
         # runtime and entitlements.plist with no identity: dropping allow-jit
-        # makes Electron crash at launch here. Signing proper stays local.
+        # makes Electron crash at launch here. Dropping
+        # allow-unsigned-executable-memory does not fail anything here (a
+        # forced numba JIT still ran), so verify-signed.sh's check on the
+        # signed build stays its only guard. Signing proper stays local.
         run: |
           app="$RUNNER_TEMP/hardened/Splitsmith.app"
           mkdir -p "$(dirname "$app")" && ditto "$RUNNER_TEMP/installed/Splitsmith.app" "$app"
@@ -88,19 +91,6 @@ jobs:
             "import numba; f = numba.njit(lambda x: x + 1); assert f(1) == 2; print('numba JIT ok')"
           desktop/smoke.sh "$app"
           desktop/launch-check.sh "$app"
-
-      - name: TRIAL mutation without allow-unsigned-executable-memory
-        continue-on-error: true
-        run: |
-          m="$RUNNER_TEMP/mut/Splitsmith.app"
-          mkdir -p "$(dirname "$m")" && ditto "$RUNNER_TEMP/installed/Splitsmith.app" "$m"
-          cp desktop/entitlements.plist "$RUNNER_TEMP/ent.plist"
-          /usr/libexec/PlistBuddy -c "Delete :com.apple.security.cs.allow-unsigned-executable-memory" "$RUNNER_TEMP/ent.plist"
-          codesign --force --deep --sign - --options runtime --entitlements "$RUNNER_TEMP/ent.plist" "$m"
-          codesign -d --entitlements - "$m" 2>&1 | tail -8
-          if "$m/Contents/Resources/python/bin/python3.12" -c \
-            "import numba; f = numba.njit(lambda x: x + 1); assert f(1) == 2" > "$RUNNER_TEMP/p.log" 2>&1; then
-            echo "MUT numba PASSED"; else echo "MUT numba FAILED"; tail -5 "$RUNNER_TEMP/p.log"; fi
 
       - uses: actions/upload-artifact@v4
         with:
