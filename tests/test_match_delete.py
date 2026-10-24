@@ -353,3 +353,34 @@ def test_local_rmtree_refuses_without_match_marker(tmp_path: Path) -> None:
     assert summary.local_dir_removed is False
     assert not_a_match.exists()
     assert any("marker" in e for e in summary.errors)
+
+
+def test_deleting_a_match_deletes_its_render_segments() -> None:
+    """A hosted grid keeps its stage segments under the match (#1691), so
+    the prefix sweep takes them with it."""
+    import tempfile
+
+    from splitsmith.stored_segment_cache import StoredSegmentCache
+
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td)
+        state = _hosted_state(tmp, recent_paths=["/work/m1"], jobs=0)
+        segment = StoredSegmentCache(
+            tmp / "cache", 1 << 30, storage=state.storage, prefix="matches/m1/render-segments"
+        ).object_key("ab" * 32, suffix=".mov")
+        _seed_match(state, "m1", raws_by_shooter={}, storage_objs=["matches/m1/match.json", segment])
+        state.matches.register("m1", Path("/work/m1"))
+
+        summary = asyncio.run(
+            delete_match_cascade(
+                state,
+                path="/work/m1",
+                match_id="m1",
+                storage_prefix="matches/m1",
+                delete_local_files=False,
+                delete_raw_uploads=False,
+            )
+        )
+
+        assert segment not in state.storage.objects
+        assert summary.errors == []
