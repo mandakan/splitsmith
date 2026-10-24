@@ -648,23 +648,47 @@ class WorkerDispatcher:
         except Exception:
             logger.warning("worker dispatcher: grace escalation failed; nets will recover", exc_info=True)
 
+    async def _platform_booting(self) -> bool:
+        """Whether a Cloud Run execution started within
+        :data:`STARTUP_GRACE_SECONDS` (the platform row's claims): the cold
+        wake chose the platform tier, so more executions beside it jump
+        nobody."""
+        now = datetime.now(UTC)
+        for worker in await self._store.list_enabled():
+            if worker.kind != "cloud_run":
+                continue
+            for stamp in (worker.info or {}).get("recent_starts", []):
+                try:
+                    started = datetime.fromisoformat(str(stamp))
+                except ValueError:
+                    continue
+                if started.tzinfo is None:
+                    started = started.replace(tzinfo=UTC)
+                if (now - started).total_seconds() < STARTUP_GRACE_SECONDS:
+                    return True
+        return False
+
     async def _top_up(self) -> bool:
         """:meth:`_fan_out` beside a live drain, under the lock and the cooldown (#1709).
 
         A backlog a live worker builds itself (the jobs it chains) and the
         submits a cooldown dropped never reach :meth:`trigger`; the watch
-        and the settle check call this for them. Only beside a live drain:
-        with none, the cold wake's own tier walk decides who drains, and
+        and the settle check call this for them. Only beside a live drain, or
+        beside a Cloud Run execution still booting (:meth:`_platform_booting`):
+        with neither, the cold wake's own tier walk decides who drains, and
         Cloud Run executions started here would jump a self-hosted box still
-        booting. Stamps the cooldown only when it started an execution, so a
-        no-op check never swallows a submit's trigger. Never raises.
+        booting. Without the booting case a burst (a grid's stage jobs) waited
+        for the first execution's heartbeat and then the watch, two minutes.
+        Stamps the cooldown only when it started an execution, so a no-op
+        check never swallows a submit's trigger. Never raises.
         """
         async with self._lock:
             now = time.monotonic()
             if self._last_attempt is not None and now - self._last_attempt < self._cooldown_seconds:
                 return False
             try:
-                if self._worker_active is None or not await self._worker_active():
+                live = self._worker_active is not None and await self._worker_active()
+                if not live and not await self._platform_booting():
                     return False
                 if not await self._fan_out():
                     return False
