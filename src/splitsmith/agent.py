@@ -470,6 +470,79 @@ async def _run_worker_once(db_url: str, concurrency: int, *, stop_event: asyncio
     )
 
 
+#: How often a running drain re-reads this worker's ``enabled`` flag. The
+#: database is awake while a drain runs, so this costs no Neon wake.
+ENABLED_RECHECK_SECONDS = 60.0
+
+
+async def _worker_enabled(db_url: str, worker_id: str) -> bool | None:
+    """This worker's ``enabled`` flag from its ``workers`` row (#1701).
+
+    False when the row is gone (deleted in admin), None when the read
+    failed: an unreadable flag never stops a drain, which would fail on the
+    same database anyway.
+    """
+    import psycopg
+
+    from .queue import _to_psycopg_dsn
+
+    try:
+        async with await psycopg.AsyncConnection.connect(
+            _to_psycopg_dsn(db_url), application_name="splitsmith-agent-enabled", connect_timeout=10
+        ) as conn:
+            cur = await conn.execute("SELECT enabled FROM workers WHERE id = %s", (worker_id,))
+            row = await cur.fetchone()
+    except Exception as exc:  # noqa: BLE001 - a failed read must not kill the agent
+        logger.warning("could not read this worker's enabled flag (%s); draining anyway", exc)
+        return None
+    return bool(row[0]) if row is not None else False
+
+
+async def _gated_drain(
+    db_url: str,
+    concurrency: int,
+    *,
+    stop_event: asyncio.Event,
+    enabled: Callable[[], Awaitable[bool | None]],
+    run: Callable[..., Awaitable[None]],
+    recheck_seconds: float = ENABLED_RECHECK_SECONDS,
+) -> None:
+    """One drain, unless this worker is disabled in admin (#1701).
+
+    On the "r2" channel the admin toggle has no way to reach the box: a
+    marker write for any worker wakes every box, and the drain claims
+    straight from Postgres. So the box reads its own flag when a wake
+    arrives (the drain is about to connect anyway, so an idle database is
+    never woken for it) and skips the drain while disabled. A running drain
+    re-reads it every ``recheck_seconds`` and, once disabled, stops after
+    the job in flight, as a SIGTERM does. Done on every channel: the SSE
+    channel's ``disabled`` event only drops later wakes.
+    """
+    if await enabled() is False:
+        logger.info("disabled in admin; skipping this drain")
+        return
+    drain_stop = asyncio.Event()
+
+    async def _watch() -> None:
+        while True:
+            try:
+                await asyncio.wait_for(stop_event.wait(), timeout=recheck_seconds)
+            except TimeoutError:
+                if await enabled() is False:
+                    logger.info("disabled in admin; stopping after the job in flight")
+                    break
+            else:
+                break
+        drain_stop.set()
+
+    watcher = asyncio.create_task(_watch())
+    try:
+        await run(db_url, concurrency, stop_event=drain_stop)
+    finally:
+        watcher.cancel()
+        await asyncio.gather(watcher, return_exceptions=True)
+
+
 def _prepare_cache_env(state_dir: Path) -> None:
     """Point the source cache at the persistent state volume by default.
 
@@ -621,8 +694,13 @@ async def run_agent(
         stop_event.set()
         coordinator.wake_event.set()
 
+    worker_id = state.worker_id
+
+    async def _enabled() -> bool | None:
+        return await _worker_enabled(db_url, worker_id)
+
     async def _drain(db: str, conc: int) -> None:
-        await _run_worker_once(db, conc, stop_event=stop_event)
+        await _gated_drain(db, conc, stop_event=stop_event, enabled=_enabled, run=_run_worker_once)
 
     loop = asyncio.get_running_loop()
     loop.add_signal_handler(signal.SIGTERM, _request_stop)
@@ -639,7 +717,6 @@ async def run_agent(
             s3 = state.credentials["s3"]
             bucket = _bucket_client(s3)
             board = WakeMarker(bucket, s3["bucket"])
-            worker_id = state.worker_id
 
             async def _beat() -> None:
                 await board.beat(worker_id, version=_agent_version())

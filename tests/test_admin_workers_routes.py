@@ -326,6 +326,33 @@ def test_admin_patch_enabled_true_pushes_enabled_to_channel(admin_client) -> Non
     del registry._channels[worker_id]
 
 
+class _FakeMarker:
+    def __init__(self) -> None:
+        self.touches = 0
+
+    async def touch(self) -> None:
+        self.touches += 1
+
+    async def read_heartbeats(self, worker_ids: list[str]) -> dict:
+        return dict.fromkeys(worker_ids)
+
+
+def test_admin_patch_reenable_touches_the_wake_marker(admin_client) -> None:
+    """On the r2 channel a disabled box skipped its drains (#1701); re-enabling wakes it."""
+    client, app = admin_client
+    marker = _FakeMarker()
+    app.state.splitsmith_state.wake_marker = marker
+
+    worker_id = client.post("/api/admin/workers", json={"name": "marker-enable"}).json()["worker"]["id"]
+    client.patch(f"/api/admin/workers/{worker_id}", json={"enabled": False})
+    assert marker.touches == 0
+    client.patch(f"/api/admin/workers/{worker_id}", json={"enabled": True})
+    assert marker.touches == 1
+    # Already enabled: nothing to catch up on.
+    client.patch(f"/api/admin/workers/{worker_id}", json={"enabled": True})
+    assert marker.touches == 1
+
+
 def test_admin_patch_same_enabled_no_push(admin_client) -> None:
     """PATCH with the same enabled value does not push to the channel."""
     client, app = admin_client
