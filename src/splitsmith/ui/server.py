@@ -9647,6 +9647,14 @@ def create_app(
         if registry is not None and body.enabled is not None and body.enabled != current.enabled:
             event = "enabled" if body.enabled else "disabled"
             registry.push(worker_id, event)  # best-effort; returns False if not connected
+        if body.enabled and not current.enabled and state.wake_marker is not None:
+            # "r2" channel (#1701): a box skips its drains while disabled, so
+            # re-enabling wakes it for what queued meanwhile, as the SSE
+            # channel's ``enabled`` event does.
+            try:
+                await state.wake_marker.touch()
+            except Exception:  # noqa: BLE001 - best-effort; the next submit wakes it too
+                logger.warning("wake marker write after re-enable failed", exc_info=True)
         live, beats = await _worker_liveness(state, [updated])
         return _to_worker_view(updated, live, beats.get(updated.id))
 

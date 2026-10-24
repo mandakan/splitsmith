@@ -719,3 +719,148 @@ def test_agent_drain_names_its_connections(monkeypatch: pytest.MonkeyPatch) -> N
     monkeypatch.setattr(queue_mod, "run_worker", _fake_run_worker)
     asyncio.run(agent._run_worker_once("postgresql+asyncpg://u:p@h/db", 1))
     assert seen[0]["process_name"] == "splitsmith-agent"
+
+
+# ---------------------------------------------------------------------------
+# _gated_drain: an admin disable reaches the box (#1701)
+# ---------------------------------------------------------------------------
+
+
+def _flags(*values: bool | None):
+    """An ``enabled`` reader returning ``values`` in turn, then the last forever."""
+    seq = list(values)
+
+    async def _enabled() -> bool | None:
+        return seq.pop(0) if len(seq) > 1 else seq[0]
+
+    return _enabled
+
+
+def test_disabled_worker_skips_the_drain_a_marker_wakes() -> None:
+    """A marker write for another worker wakes every box; a disabled one must not drain."""
+
+    async def scenario() -> list[str]:
+        calls: list[str] = []
+        wake, stop = asyncio.Event(), asyncio.Event()
+
+        async def run(db: str, conc: int, *, stop_event: asyncio.Event) -> None:  # pragma: no cover
+            calls.append("drained")
+
+        async def drain(db: str, conc: int) -> None:
+            await agent._gated_drain(db, conc, stop_event=stop, enabled=_flags(False), run=run)
+            calls.append("gated")
+
+        task = asyncio.create_task(_drain_loop(wake, stop, "db", 1, run=drain))
+        wake.set()
+        for _ in range(50):
+            await asyncio.sleep(0.01)
+            if calls:
+                break
+        stop.set()
+        wake.set()
+        await asyncio.wait_for(task, timeout=2)
+        return calls
+
+    assert asyncio.run(scenario()) == ["gated"]
+
+
+@pytest.mark.parametrize("flag", [True, None])
+def test_enabled_or_unreadable_flag_drains(flag: bool | None) -> None:
+    """An unreadable flag never stops a drain; the drain itself would surface a dead DB."""
+    ran: list[bool] = []
+
+    async def run(db: str, conc: int, *, stop_event: asyncio.Event) -> None:
+        ran.append(stop_event.is_set())
+
+    asyncio.run(agent._gated_drain("db", 1, stop_event=asyncio.Event(), enabled=_flags(flag), run=run))
+    assert ran == [False]
+
+
+def test_disable_mid_drain_stops_after_the_job_in_flight() -> None:
+    """A drain running when the operator disables the box is told to stop, not cancelled."""
+
+    async def scenario() -> str:
+        async def run(db: str, conc: int, *, stop_event: asyncio.Event) -> None:
+            await asyncio.wait_for(stop_event.wait(), timeout=2)
+
+        await asyncio.wait_for(
+            agent._gated_drain(
+                "db",
+                1,
+                stop_event=asyncio.Event(),
+                enabled=_flags(True, True, False),
+                run=run,
+                recheck_seconds=0.01,
+            ),
+            timeout=3,
+        )
+        return "stopped"
+
+    assert asyncio.run(scenario()) == "stopped"
+
+
+def test_agent_stop_reaches_a_gated_drain() -> None:
+    """SIGTERM's stop still reaches the drain through the gate's own stop event."""
+
+    async def scenario() -> None:
+        stop = asyncio.Event()
+
+        async def run(db: str, conc: int, *, stop_event: asyncio.Event) -> None:
+            stop.set()
+            await asyncio.wait_for(stop_event.wait(), timeout=2)
+
+        await asyncio.wait_for(
+            agent._gated_drain("db", 1, stop_event=stop, enabled=_flags(True), run=run, recheck_seconds=60),
+            timeout=3,
+        )
+
+    asyncio.run(scenario())
+
+
+class _FakeCursor:
+    def __init__(self, row: tuple | None) -> None:
+        self._row = row
+
+    async def fetchone(self) -> tuple | None:
+        return self._row
+
+
+class _FakeConn:
+    def __init__(self, row: tuple | None) -> None:
+        self.row = row
+        self.queries: list[tuple[str, tuple]] = []
+
+    async def __aenter__(self) -> _FakeConn:
+        return self
+
+    async def __aexit__(self, *_exc: object) -> None:
+        return None
+
+    async def execute(self, sql: str, params: tuple) -> _FakeCursor:
+        self.queries.append((sql, params))
+        return _FakeCursor(self.row)
+
+
+@pytest.mark.parametrize(("row", "expected"), [((True,), True), ((False,), False), (None, False)])
+def test_worker_enabled_reads_its_own_row(monkeypatch: pytest.MonkeyPatch, row, expected) -> None:
+    """The flag comes from this worker's row; a deleted row reads as disabled."""
+    import psycopg
+
+    conn = _FakeConn(row)
+
+    async def connect(dsn: str, **_kw: object) -> _FakeConn:
+        return conn
+
+    monkeypatch.setattr(psycopg.AsyncConnection, "connect", connect)
+    assert asyncio.run(agent._worker_enabled("postgresql+asyncpg://u:p@h/db", "w1")) is expected
+    assert conn.queries == [("SELECT enabled FROM workers WHERE id = %s", ("w1",))]
+
+
+def test_worker_enabled_is_none_when_the_read_fails(monkeypatch: pytest.MonkeyPatch) -> None:
+    import psycopg
+
+    async def connect(dsn: str, **_kw: object) -> _FakeConn:
+        raise OSError("connection refused")
+
+    monkeypatch.setattr(psycopg.AsyncConnection, "connect", connect)
+    assert asyncio.run(agent._worker_enabled("postgresql://u:p@h/db", "w1")) is None
