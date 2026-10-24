@@ -74,25 +74,33 @@ jobs:
       - name: Launch (installed copy)
         run: desktop/launch-check.sh "$RUNNER_TEMP/installed/Splitsmith.app"
 
-      - name: TRIAL ad-hoc hardened runtime
-        continue-on-error: true
+      - name: Hardened runtime (ad-hoc signed copy)
+        # The unsigned build runs without the hardened runtime, so a missing
+        # entitlement only shows once signed. An ad-hoc signature applies the
+        # runtime and entitlements.plist with no identity: dropping allow-jit
+        # makes Electron crash at launch here. Signing proper stays local.
         run: |
-          app="$RUNNER_TEMP/adhoc/Splitsmith.app"
+          app="$RUNNER_TEMP/hardened/Splitsmith.app"
           mkdir -p "$(dirname "$app")" && ditto "$RUNNER_TEMP/installed/Splitsmith.app" "$app"
           codesign --force --deep --sign - --options runtime --entitlements desktop/entitlements.plist "$app"
-          codesign -d --verbose=2 "$app" 2>&1 | grep -i flags
+          codesign -d --verbose=2 "$app" 2>&1 | grep -q 'flags=.*runtime' || { echo "no hardened runtime on the copy"; exit 1; }
+          "$app/Contents/Resources/python/bin/python3.12" -c \
+            "import numba; f = numba.njit(lambda x: x + 1); assert f(1) == 2; print('numba JIT ok')"
           desktop/smoke.sh "$app"
           desktop/launch-check.sh "$app"
-          for drop in allow-unsigned-executable-memory allow-jit; do
-            echo "=== MUTATION: without $drop"
-            m="$RUNNER_TEMP/mut-$drop/Splitsmith.app"
-            mkdir -p "$(dirname "$m")" && ditto "$RUNNER_TEMP/installed/Splitsmith.app" "$m"
-            cp desktop/entitlements.plist "$RUNNER_TEMP/ent-$drop.plist"
-            /usr/libexec/PlistBuddy -c "Delete :com.apple.security.cs.$drop" "$RUNNER_TEMP/ent-$drop.plist"
-            codesign --force --deep --sign - --options runtime --entitlements "$RUNNER_TEMP/ent-$drop.plist" "$m"
-            if desktop/smoke.sh "$m" > "$RUNNER_TEMP/s.log" 2>&1; then echo "MUT smoke PASSED (bad)"; else echo "MUT smoke FAILED (good)"; tail -5 "$RUNNER_TEMP/s.log"; fi
-            if desktop/launch-check.sh "$m" > "$RUNNER_TEMP/l.log" 2>&1; then echo "MUT launch PASSED (bad)"; else echo "MUT launch FAILED (good)"; tail -5 "$RUNNER_TEMP/l.log"; fi
-          done
+
+      - name: TRIAL mutation without allow-unsigned-executable-memory
+        continue-on-error: true
+        run: |
+          m="$RUNNER_TEMP/mut/Splitsmith.app"
+          mkdir -p "$(dirname "$m")" && ditto "$RUNNER_TEMP/installed/Splitsmith.app" "$m"
+          cp desktop/entitlements.plist "$RUNNER_TEMP/ent.plist"
+          /usr/libexec/PlistBuddy -c "Delete :com.apple.security.cs.allow-unsigned-executable-memory" "$RUNNER_TEMP/ent.plist"
+          codesign --force --deep --sign - --options runtime --entitlements "$RUNNER_TEMP/ent.plist" "$m"
+          codesign -d --entitlements - "$m" 2>&1 | tail -8
+          if "$m/Contents/Resources/python/bin/python3.12" -c \
+            "import numba; f = numba.njit(lambda x: x + 1); assert f(1) == 2" > "$RUNNER_TEMP/p.log" 2>&1; then
+            echo "MUT numba PASSED"; else echo "MUT numba FAILED"; tail -5 "$RUNNER_TEMP/p.log"; fi
 
       - uses: actions/upload-artifact@v4
         with:
