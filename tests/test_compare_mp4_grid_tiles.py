@@ -18,6 +18,7 @@ import subprocess
 from collections.abc import Iterator
 from pathlib import Path
 
+import pytest
 from PIL import Image
 
 from splitsmith import composition
@@ -124,8 +125,19 @@ def _runners(access: _Access | None) -> dict[str, object]:
     }
 
 
-def _render(tmp_path: Path, work: str, cache: SegmentCache, access: _Access | None, *, dressed: bool):
-    shooters, _ = _shooters(tmp_path)
+def _render(
+    tmp_path: Path,
+    work: str,
+    cache: SegmentCache | None,
+    access: _Access | None,
+    *,
+    dressed: bool,
+    runners: dict[str, object] | None = None,
+    shooters: list[CompareShooterBundle] | None = None,
+    **kwargs: object,
+):
+    if shooters is None:
+        shooters, _ = _shooters(tmp_path)
     extra: dict[str, object] = {}
     if dressed:
         extra = {
@@ -146,8 +158,9 @@ def _render(tmp_path: Path, work: str, cache: SegmentCache, access: _Access | No
         work_dir=tmp_path / work,
         segment_cache=cache,
         tile_access=access,
-        **_runners(access),
+        **(runners if runners is not None else _runners(access)),
         **extra,
+        **kwargs,
     )
 
 
@@ -183,3 +196,76 @@ def test_a_cold_dressed_render_acquires_around_cards_and_freezes(tmp_path: Path)
     assert access.still_reads >= len(STAGES) * len(LABELS)
     assert access.reads_outside_acquire == []
     assert access.max_held == 1
+
+
+# --- one stage at a time --------------------------------------------------
+
+
+def _tile_reading_runners(stage_of: dict[str, int]) -> tuple[dict[str, object], list[str]]:
+    """Runners that write their outputs and note every encode (not a still
+    grab) that reads a tile: a stage or edge encode."""
+    reads: list[str] = []
+    base = _runners(None)
+
+    def noting(inner):
+        def run(cmd, **kwargs):
+            reads.extend(token for token in (str(c) for c in cmd) if token in stage_of)
+            return inner(cmd, **kwargs)
+
+        return run
+
+    return {
+        **base,
+        "runner": noting(base["runner"]),
+        "boundary_runner": noting(base["boundary_runner"]),
+        "card_runner": noting(base["card_runner"]),
+    }, reads
+
+
+def _concat_keys(work: Path) -> list[str]:
+    listed = (work / "concat.txt").read_text(encoding="utf-8").splitlines()
+    return [Path(line[len("file '") : -1]).name for line in listed]
+
+
+@pytest.mark.parametrize("dressed", [False, True])
+def test_stage_renders_then_a_full_render_is_all_hits(tmp_path: Path, dressed: bool) -> None:
+    """Every stage rendered on its own, then the whole grid: it encodes no
+    stage and no edge (nothing reads a tile but still grabs), and stitches
+    exactly the segments a one-process render of the same grid stitches."""
+    split = SegmentCache(root=tmp_path / "split-cache", max_bytes=1 << 30)
+    for n in STAGES:
+        result = _render(tmp_path, f"stage{n}", split, None, dressed=dressed, only_stage=n)
+        assert [(s.stage_number, s.ok) for s in result.stages] == [(n, True)]
+        assert not (tmp_path / f"stage{n}.mp4").exists()
+
+    _, stage_of = _shooters(tmp_path)
+    runners, reads = _tile_reading_runners(stage_of)
+    _render(tmp_path, "stitch", split, None, dressed=dressed, runners=runners)
+    assert reads == []
+
+    whole = SegmentCache(root=tmp_path / "whole-cache", max_bytes=1 << 30)
+    _render(tmp_path, "whole", whole, None, dressed=dressed)
+    assert _concat_keys(tmp_path / "stitch") == _concat_keys(tmp_path / "whole")
+
+
+def test_a_stage_with_a_filler_tile_renders_alone(tmp_path: Path) -> None:
+    shooters, stage_of = _shooters(tmp_path)
+    del shooters[1].stages_by_number[2]  # Mathias has no trim on stage 2
+    cache = SegmentCache(root=tmp_path / "cache", max_bytes=1 << 30)
+    for n in STAGES:
+        result = _render(tmp_path, f"stage{n}", cache, None, dressed=False, shooters=shooters, only_stage=n)
+        assert [s.ok for s in result.stages] == [True]
+    runners, reads = _tile_reading_runners(stage_of)
+    _render(tmp_path, "stitch", cache, None, dressed=False, runners=runners, shooters=shooters)
+    assert reads == []
+
+
+def test_only_stage_without_a_cache_is_refused(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="segment_cache"):
+        _render(tmp_path, "w", None, None, dressed=False, only_stage=1)
+
+
+def test_only_stage_names_a_stage_in_the_grid(tmp_path: Path) -> None:
+    cache = SegmentCache(root=tmp_path / "cache", max_bytes=1 << 30)
+    with pytest.raises(ValueError, match="stage 9"):
+        _render(tmp_path, "w", cache, None, dressed=False, only_stage=9)

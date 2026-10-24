@@ -3439,6 +3439,54 @@ def _grid_missing_handle(item: GridItem, *, half: float, end: Literal["tail", "h
     return 0.0
 
 
+def _render_one_stage(
+    stage_number: int,
+    *,
+    items: list[GridItem],
+    live: dict[int, GridBoundary],
+    prepare: Callable[[GridItem], _GridPrep],
+    encode_edge: Callable[..., Path],
+    encode_stage: Callable[[GridStageItem, _GridPrep], tuple[Path | None, str]],
+    note_cut: Callable[[int, str], None],
+    output_path: Path,
+    degradations: tuple[OverlayDegradation, ...],
+    close: Callable[[], object] | None,
+) -> GridRenderResult:
+    """``render_grid_mp4(only_stage=)``: encode stage ``stage_number``'s
+    segment and its edges of the boundaries on either side into the cache,
+    as the whole render would, and nothing else (#1691). An edge that fails
+    turns its boundary into a cut here as it would there, so the stage
+    keeps its full length on that side."""
+    try:
+        for i, item in enumerate(items):
+            if not (isinstance(item, GridStageItem) and item.plan.stage_number == stage_number):
+                continue
+            prep = prepare(item)
+            if prep.failed is None:
+                for after, end in ((i - 1, "head"), (i, "tail")):
+                    boundary = live.get(after)
+                    if boundary is None:
+                        continue
+                    try:
+                        encode_edge(item, prep, half=boundary.duration_seconds / 2.0, end=end)
+                    except (_EdgeFailedError, MotionClipError) as exc:
+                        note_cut(after, str(exc))
+                        item = items[i]
+                        assert isinstance(item, GridStageItem)
+            segment, error = (None, prep.failed) if prep.failed is not None else encode_stage(item, prep)
+            outcome = StageOutcome(
+                stage_number=item.plan.stage_number,
+                stage_name=item.plan.stage_name,
+                ok=segment is not None,
+                error=None if segment is not None else error,
+            )
+            return GridRenderResult(output_path=output_path, stages=(outcome,), degradations=degradations)
+    finally:
+        if close is not None:
+            close()
+    raise ValueError(f"stage {stage_number} is not in this grid")
+
+
 @with_card_failures(
     lambda r, notes: replace(
         r, degradations=(*r.degradations, *(OverlayDegradation(summary=n, detail=n) for n in notes))
@@ -3484,6 +3532,7 @@ def render_grid_mp4(
     breakdown: bool = True,
     tile_identities: Mapping[str, str] | None = None,
     tile_access: TileAccess | None = None,
+    only_stage: int | None = None,
 ) -> GridRenderResult:
     """Render every stage as a grid, then stitch them into one MP4.
 
@@ -3594,6 +3643,13 @@ def render_grid_mp4(
     ``progress`` hears each stage as it is encoded or reused, then the
     stitch; a reused stage never reaches ``runner``.
 
+    ``only_stage`` renders one stage for a whole render to stitch later
+    (#1691): it plans the whole grid as usual, then encodes only that
+    stage's segment and its edges of the boundaries on either side into
+    ``segment_cache`` (required), and returns that stage's outcome. No
+    card, boundary, match summary or stitch is encoded and ``output_path``
+    is not written.
+
     ``tile_identities`` maps a tile input's argv token (a trim or inset
     path) to a stable identity that keys it in place of the file (#1691):
     a hosted worker reads its own copy of a stored trim, at its own path and
@@ -3611,6 +3667,10 @@ def render_grid_mp4(
     """
     # Before the canvas, the binary or anything else: this is a caller
     # error, not a render outcome, and it costs nothing to say so first.
+    if only_stage is not None and segment_cache is None:
+        # The segment is the whole point of a one-stage render; without a
+        # cache it would be encoded into a work dir and lost.
+        raise ValueError("only_stage needs a segment_cache to keep the stage's segments in")
     if summary_hold_seconds > 0 and not overlay:
         raise GridRenderError(
             f"summary_hold_seconds={summary_hold_seconds:g} needs overlay=True (--overlay on the "
@@ -4202,6 +4262,56 @@ def render_grid_mp4(
             raise _EdgeFailedError(error)
         return edge
 
+    def encode_stage(item: GridStageItem, prep: _GridPrep) -> tuple[Path | None, str]:
+        """The stage's segment, narrowed for the boundaries on either side,
+        or ``None`` and ffmpeg's complaint. The one place a stage segment
+        is encoded, for the whole render and for ``only_stage`` alike, so a
+        stage rendered on its own is the segment the whole render reuses."""
+        cut = bool(item.head_cut_seconds or item.tail_cut_seconds)
+        plan = (
+            narrow_grid_plan(item.plan, head_cut=item.head_cut_seconds, tail_cut=item.tail_cut_seconds)
+            if cut
+            else item.plan
+        )
+        lower_third = prep.lower_third
+        if lower_third is not None and item.head_cut_seconds:
+            lower_third = (
+                None
+                if item.head_cut_seconds >= lower_third.seconds
+                else replace(lower_third, skip_seconds=item.head_cut_seconds)
+            )
+        cmd, extra = stage_command(
+            item,
+            prep,
+            plan,
+            lower_third=lower_third,
+            output=work / f"{item.name}{SEGMENT_SUFFIX}",
+            head_pad=head_pad_of(item.plan) - item.head_cut_seconds if cut else None,
+            list_suffix="-cut" if cut else "",
+        )
+        return encoder.encode(
+            cmd,
+            work / f"{item.name}{SEGMENT_SUFFIX}",
+            runner=runner,
+            extra_inputs=extra,
+            report=lambda status, n=item.index, p=item.plan: report(n, p, status),
+            tiles_for=item.plan.stage_number,
+        )
+
+    if only_stage is not None:
+        return _render_one_stage(
+            only_stage,
+            items=items,
+            live=live,
+            prepare=prepare,
+            encode_edge=encode_edge,
+            encode_stage=encode_stage,
+            note_cut=note_cut,
+            output_path=output_path,
+            degradations=(*degradations, *transition_notes),
+            close=None if owned_rasterizer is None else lambda: owned_rasterizer.__exit__(None, None, None),
+        )
+
     try:
         for i, item in enumerate(items):
             prep = prepared.pop(i) if i in prepared else prepare(item)
@@ -4337,38 +4447,7 @@ def render_grid_mp4(
                     )
                     segment = None
                 else:
-                    cut = bool(item.head_cut_seconds or item.tail_cut_seconds)
-                    plan = (
-                        narrow_grid_plan(
-                            item.plan, head_cut=item.head_cut_seconds, tail_cut=item.tail_cut_seconds
-                        )
-                        if cut
-                        else item.plan
-                    )
-                    lower_third = prep.lower_third
-                    if lower_third is not None and item.head_cut_seconds:
-                        lower_third = (
-                            None
-                            if item.head_cut_seconds >= lower_third.seconds
-                            else replace(lower_third, skip_seconds=item.head_cut_seconds)
-                        )
-                    cmd, extra = stage_command(
-                        item,
-                        prep,
-                        plan,
-                        lower_third=lower_third,
-                        output=work / f"{item.name}{SEGMENT_SUFFIX}",
-                        head_pad=head_pad_of(item.plan) - item.head_cut_seconds if cut else None,
-                        list_suffix="-cut" if cut else "",
-                    )
-                    segment, error = encoder.encode(
-                        cmd,
-                        work / f"{item.name}{SEGMENT_SUFFIX}",
-                        runner=runner,
-                        extra_inputs=extra,
-                        report=lambda status, n=item.index, p=item.plan: report(n, p, status),
-                        tiles_for=item.plan.stage_number,
-                    )
+                    segment, error = encode_stage(item, prep)
                     if segment is None:
                         outcomes.append(
                             StageOutcome(
