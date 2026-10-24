@@ -86,9 +86,9 @@ paths:
   keeps it to reuse (`test_a_memory_backed_worker_keeps_no_full_trim_after_the_job`).
 - **A Cloud Run worker keeps no source cache between jobs**
   (`source_cache.per_job_cache_max_bytes` is 0 unless
-  `SPLITSMITH_SOURCE_CACHE_MAX_GB` is set). Trims and exports stream their
-  source, fan-out rarely puts the next job on a source on the same execution,
-  and a cache at a quarter of memory pushed 4K trims over the limit
+  `SPLITSMITH_SOURCE_CACHE_MAX_GB` is set). Trims, exports and beep
+  detection stream their source, fan-out rarely puts the next job on a
+  source on the same execution, and a cache at a quarter of memory pushed 4K trims over the limit
   (`test_the_default_cloud_run_sweep_empties_the_cache`).
 - **A hosted-native WAV is never cut from the rendition**: shot detection
   reads it, and the rendition's audio is re-encoded. A `derive_audio` job
@@ -126,6 +126,13 @@ paths:
   `_cut_lossless` cuts again from the download on `SourceReadError`). The
   report never names a URL as the stage's video
   (`tests/test_export_streamed_source.py`).
+- **So does beep detection's audio** (`_run_detect_beep_for_video`, then
+  `ensure_video_audio` / `ensure_video_window_audio` with a `str` source).
+  The whole-source WAV still reads every byte, but over the network, not
+  into the worker's memory-backed disk. `_run_audio_ffmpeg(url=True)` raises
+  `SourceReadError` on any stderr and the job detects again from a download
+  (`tests/test_beep_streamed_source.py`). A multi-stage take's window is
+  still derived from a downloaded source (`_derive_take_window`).
 
 ## Stream kinds
 
