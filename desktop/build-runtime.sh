@@ -54,25 +54,39 @@ if [ "${SPLITSMITH_REQUIRE_YOUTUBE_CLIENT:-0}" = 1 ]; then
   "$PY" "$HERE/scripts/check_youtube_client.py"
 fi
 
-# Console scripts get an absolute shebang pointing at this build dir. Make
-# them relocatable with the sh/python polyglot pip uses: sh reads the
-# second line as "exec ..." (two empty quotes then exec), python reads it
-# as the start of a triple-quoted string that the third line closes.
-# readlink -f resolves the /usr/local/bin symlink the app installs back
-# into the bundle (macOS 12.3+; LSMinimumSystemVersion is set to match).
+# Console scripts name this build dir's interpreter: as a shebang, or, once
+# the path passes uv's shebang length limit (release.sh's $TMPDIR worktree
+# does; CI's checkout does not), as this same polyglot with the absolute
+# path on line 2. Make both relocatable with the sh/python polyglot pip
+# uses: sh reads the second line as "exec ..." (two empty quotes then
+# exec), python reads it as the start of a triple-quoted string that the
+# third line closes. readlink -f resolves the /usr/local/bin symlink the
+# app installs back into the bundle (macOS 12.3+; LSMinimumSystemVersion
+# is set to match).
 SHIM_HEAD=$(cat <<'EOF'
 #!/bin/sh
 '''exec' "$(dirname "$(readlink -f "$0")")/python3.12" "$0" "$@"
 ' '''
 EOF
 )
-for script in "$RUNTIME"/python/bin/splitsmith*; do
-  [ -f "$script" ] || continue
+for script in "$RUNTIME"/python/bin/*; do
+  [ -f "$script" ] && [ ! -L "$script" ] || continue
+  body=""
   if head -1 "$script" | grep -q "^#!$RUNTIME"; then
-    { printf '%s\n' "$SHIM_HEAD"; tail -n +2 "$script"; } > "$script.tmp"
+    body=2
+  elif [ "$(head -1 "$script")" = "#!/bin/sh" ] && sed -n 2p "$script" | grep -qF "'''exec' '$RUNTIME/"; then
+    body=4
+  fi
+  if [ -n "$body" ]; then
+    { printf '%s\n' "$SHIM_HEAD"; tail -n +"$body" "$script"; } > "$script.tmp"
     mv "$script.tmp" "$script"; chmod +x "$script"
   fi
 done
+# The bundle outlives this dir: a script still naming it works here (and in
+# smoke.sh, run before the worktree goes) and nowhere else (0.87.2's CLI).
+if stale="$(grep -lF "$RUNTIME" "$RUNTIME"/python/bin/* 2>/dev/null)"; then
+  echo "console scripts still name the build dir:" >&2; echo "$stale" >&2; exit 1
+fi
 
 # Precompile so the sealed bundle is never written to at runtime.
 "$PY" -m compileall -q "$RUNTIME/python/lib/python$PYVER/site-packages" >/dev/null

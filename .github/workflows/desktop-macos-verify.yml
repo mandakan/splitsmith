@@ -1,0 +1,85 @@
+name: desktop-macos-verify
+
+# The signed DMG a release ships, checked on a clean Mac the way a user gets
+# it: downloaded from the release, checksum-matched, quarantined like a
+# browser download, opened and installed (check-dmg.sh), then Gatekeeper's
+# verdict, the notarization ticket and the entitlements (verify-signed.sh),
+# the sidecar (smoke.sh) and Electron (launch-check.sh). Needs no signing
+# secrets: signing stays on the release Mac (desktop/release.sh, which
+# dispatches this after its upload). The scripts come from the ref the
+# workflow runs on, only the DMG from the release. A PR that touches the
+# scripts runs it against the newest release that has a DMG.
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: "vX.Y.Z whose DMG to check (default: the newest release with one)"
+        required: false
+  pull_request:
+    paths:
+      - ".github/workflows/desktop-macos-verify.yml"
+      - "desktop/check-dmg.sh"
+      - "desktop/verify-signed.sh"
+      - "desktop/smoke.sh"
+      - "desktop/launch-check.sh"
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: signed dmg from the release
+    runs-on: macos-latest
+    timeout-minutes: 30
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Cache models
+        uses: actions/cache@v4
+        with:
+          path: ~/.splitsmith/models
+          key: models-${{ hashFiles('src/splitsmith/data/ensemble_calibration.json') }}
+
+      - name: Download the DMG
+        env:
+          TAG: ${{ inputs.release_tag }}
+        run: |
+          if [ -z "$TAG" ]; then
+            for t in $(gh release list --limit 30 --exclude-drafts --exclude-pre-releases --json tagName \
+                --jq '.[].tagName' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -rV); do
+              if gh release view "$t" --json assets --jq '.assets[].name' | grep -qE '^Splitsmith-.*-arm64\.dmg$'; then
+                TAG="$t"; break
+              fi
+            done
+            [ -n "$TAG" ] || { echo "::error::no release has a DMG"; exit 1; }
+          fi
+          echo "checking $TAG"
+          dl="$RUNNER_TEMP/download"
+          gh release download "$TAG" -D "$dl" -p 'Splitsmith-*-arm64.dmg' -p 'Splitsmith-*-arm64.dmg.sha256'
+          (cd "$dl" && shasum -a 256 -c Splitsmith-*-arm64.dmg.sha256)
+          dmg="$(ls "$dl"/Splitsmith-*-arm64.dmg)"
+          # What a browser stamps on a download; Gatekeeper judges a
+          # quarantined app on first launch.
+          xattr -w com.apple.quarantine "0083;$(printf %x "$(date +%s)");Safari;" "$dmg"
+          echo "DMG=$dmg" >> "$GITHUB_ENV"
+
+      - name: Open the DMG and install the app
+        run: |
+          desktop/check-dmg.sh "$DMG" "$RUNNER_TEMP/installed"
+          app="$RUNNER_TEMP/installed/Splitsmith.app"
+          xattr -w com.apple.quarantine "0083;$(printf %x "$(date +%s)");Safari;" "$app"
+          echo "APP=$app" >> "$GITHUB_ENV"
+
+      - name: Signature, Gatekeeper, notarization ticket
+        run: |
+          desktop/verify-signed.sh "$APP"
+          syspolicy_check distribution "$APP"
+
+      - name: Smoke (installed copy)
+        run: desktop/smoke.sh "$APP"
+
+      - name: Launch (installed copy)
+        run: desktop/launch-check.sh "$APP"

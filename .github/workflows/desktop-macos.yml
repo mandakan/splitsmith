@@ -1,0 +1,99 @@
+name: desktop-macos
+
+# Unsigned arm64 DMG, opened and installed the way a user does
+# (desktop/check-dmg.sh), then the installed copy's sidecar (smoke.sh) and
+# Electron (launch-check.sh) are run. Signing and notarization stay local
+# (desktop/release.sh, spec 2026-09-20): this DMG is for inspection, never
+# attached to a release. Called by desktop.yml on PRs (checkout-built wheel)
+# and by release-please.yml after publish-pypi with the tag, so a release's
+# bundle is proven to build from the wheel PyPI serves before release.sh's
+# hour-long signed build starts.
+on:
+  workflow_call:
+    inputs:
+      release_tag:
+        type: string
+        default: ""
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: "vX.Y.Z to build from its PyPI wheel"
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: unsigned arm64 dmg + smoke + launch
+    runs-on: macos-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.release_tag || github.ref }}
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          enable-cache: true
+
+      - name: Install Node + pnpm
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - uses: pnpm/action-setup@v4
+
+      - name: Cache models
+        uses: actions/cache@v4
+        with:
+          path: ~/.splitsmith/models
+          key: models-${{ hashFiles('src/splitsmith/data/ensemble_calibration.json') }}
+
+      - name: Published wheel
+        if: inputs.release_tag != ''
+        run: |
+          wheel="$(uv run --no-project python scripts/ci/fetch_pypi_wheel.py "${{ inputs.release_tag }}" build/wheel)"
+          echo "WHEEL=$PWD/$wheel" >> "$GITHUB_ENV"
+
+      - name: Build (unsigned)
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+          # A tagged build must carry the baked YouTube OAuth client (the PyPI wheel has it).
+          SPLITSMITH_REQUIRE_YOUTUBE_CLIENT: ${{ inputs.release_tag != '' && '1' || '0' }}
+        run: |
+          [ "$(uname -m)" = arm64 ] || { echo "::error::runner is not arm64"; exit 1; }
+          desktop/build.sh --mac ${WHEEL:+--wheel "$WHEEL"}
+
+      - name: Open the DMG and install the app
+        run: desktop/check-dmg.sh desktop/dist/Splitsmith-*-arm64.dmg "$RUNNER_TEMP/installed"
+
+      - name: Smoke (installed copy)
+        run: desktop/smoke.sh "$RUNNER_TEMP/installed/Splitsmith.app"
+
+      - name: Launch (installed copy)
+        run: desktop/launch-check.sh "$RUNNER_TEMP/installed/Splitsmith.app"
+
+      - name: Hardened runtime (ad-hoc signed copy)
+        # The unsigned build runs without the hardened runtime, so a missing
+        # entitlement only shows once signed. An ad-hoc signature applies the
+        # runtime and entitlements.plist with no identity: dropping allow-jit
+        # makes Electron crash at launch here. Dropping
+        # allow-unsigned-executable-memory does not fail anything here (a
+        # forced numba JIT still ran), so verify-signed.sh's check on the
+        # signed build stays its only guard. Signing proper stays local.
+        run: |
+          app="$RUNNER_TEMP/hardened/Splitsmith.app"
+          mkdir -p "$(dirname "$app")" && ditto "$RUNNER_TEMP/installed/Splitsmith.app" "$app"
+          codesign --force --deep --sign - --options runtime --entitlements desktop/entitlements.plist "$app"
+          codesign -d --verbose=2 "$app" 2>&1 | grep -q 'flags=.*runtime' || { echo "no hardened runtime on the copy"; exit 1; }
+          "$app/Contents/Resources/python/bin/python3.12" -c \
+            "import numba; f = numba.njit(lambda x: x + 1); assert f(1) == 2; print('numba JIT ok')"
+          desktop/smoke.sh "$app"
+          desktop/launch-check.sh "$app"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Splitsmith-arm64-dmg
+          path: desktop/dist/*.dmg
+          retention-days: 14

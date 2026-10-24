@@ -40,6 +40,13 @@ An Electron shell, not a second frontend: `desktop/src/main.ts` spawns
   `scripts/ci/assert_slim_import_surface.py` builds the local-mode app on a slim
   install to catch it. A new default dependency in `pyproject.toml` ships in
   every bundle.
+- Every console script in the runtime's `bin/` gets the relocatable sh
+  shim (`build-runtime.sh`), whichever header uv wrote: a long build path
+  makes uv emit an `#!/bin/sh` polyglot with the absolute path on line 2
+  instead of a shebang. `release.sh`'s `$TMPDIR` worktree is long enough and
+  CI's checkout is not, so only shipped DMGs broke (0.87.2's CLI pointed at
+  the deleted worktree), and `smoke.sh` passed because the worktree still
+  existed. The build fails if any `bin/` file still names the build dir.
 - The bundle is sealed: `PYTHONDONTWRITEBYTECODE`, precompiled bytecode,
   `NUMBA_CACHE_DIR` under `~/Library/Caches`. Data stays in `~/.splitsmith`,
   shared with the CLI on purpose.
@@ -64,7 +71,19 @@ must not move.
 
 - `CSC_IDENTITY_AUTO_DISCOVERY=false desktop/build.sh` is the unsigned build;
   `desktop/smoke.sh` runs the built sidecar and a detection;
-  `desktop/verify-signed.sh` is what a signed build must pass.
+  `desktop/launch-check.sh` starts Electron itself and, on a Mac, checks that
+  quitting it takes the sidecar along; `desktop/verify-signed.sh` is what a
+  signed build must pass.
+- **CI checks the DMG, never signs it.** `desktop/check-dmg.sh` opens a DMG the
+  way a user does (layout, arm64, the version, a `ditto` install) and the smoke
+  and launch checks run that installed copy, not `dist/mac-arm64`, which is
+  only what electron-builder packed. `desktop-macos.yml` runs it unsigned on
+  PRs and, chained after `publish-pypi`, from the release's PyPI wheel (red
+  there means don't start `release.sh`), then again ad-hoc signed under the
+  hardened runtime, which catches a dropped `allow-jit` (Electron crashes) but
+  not a dropped `allow-unsigned-executable-memory` (numba still JITs). `desktop-macos-verify.yml` downloads
+  the signed DMG `release.sh` uploaded, quarantines it like a browser does and
+  adds Gatekeeper, the ticket and `syspolicy_check`; `release.sh` dispatches it.
 - `desktop/release.sh [vX.Y.Z]` builds the tag (default the newest release)
   signed in a throwaway worktree, smokes it and uploads the DMG to the GitHub
   release, reading the `APPLE_API_*` notarization vars from

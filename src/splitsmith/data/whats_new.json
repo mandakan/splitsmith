@@ -1,6 +1,12 @@
 {
   "entries": [
     {
+      "id": "mac-cli-tool-runs",
+      "date": "2026-10-24",
+      "title": "The command line tool works on Mac again",
+      "body": "The splitsmith command that Install command line tool in the Splitsmith menu sets up now runs. Before, it failed with a missing file error."
+    },
+    {
       "id": "match-delete-keeps-other-work",
       "date": "2026-10-24",
       "title": "Deleting a match leaves your other matches alone",

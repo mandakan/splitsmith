@@ -223,7 +223,8 @@ then tags, publishes to PyPI, pushes both GHCR images, deploys
 production on Cloud Run (after the image publish), and builds and attaches the Linux AppImage and .deb
 (``desktop-linux``, after ``publish-pypi``). The DMG is a separate local
 step, ``desktop/release.sh`` (signing never leaves the Mac; notarization
-can take close to an hour). The update feed announces per platform: macOS
+can take close to an hour); CI checks it unsigned before and as downloaded
+after (``desktop.md``). The update feed announces per platform: macOS
 once the DMG is attached, Linux once both the AppImage and the .deb are.
 
 There are no required status checks on ``main``, so ``gh pr merge
