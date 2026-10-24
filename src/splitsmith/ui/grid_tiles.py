@@ -28,6 +28,7 @@ import contextlib
 import logging
 import uuid
 from collections.abc import Callable, Iterator, Mapping, Sequence
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -42,6 +43,8 @@ logger = logging.getLogger(__name__)
 
 #: How long a planning probe's URL lives: it reads a header, in seconds.
 PROBE_URL_TTL_S = 600
+#: How many headers planning reads at once.
+PROBE_WORKERS = 8
 
 
 @dataclass(frozen=True)
@@ -63,6 +66,11 @@ class HostedGridTiles:
         self._by_stage: dict[int, list[Path]] = {}
         self._held: int | None = None
         self._pulled: list[Path] = []
+        # A dry planning pass (:meth:`planning_pass`) records what to measure
+        # instead of measuring it, so :meth:`measure` can probe in parallel.
+        self._dry = False
+        self._to_probe: dict[str, tuple[MatchProject, Path]] = {}
+        self._failed_cuts: set[str] = set()
 
     # -- planning (the loader's hooks) ------------------------------------
 
@@ -73,6 +81,12 @@ class HostedGridTiles:
             known = self.tile_meta.get(str(path))
             if known is not None:
                 return VideoMetadata.model_validate(known)
+            if self._dry:
+                if str(path) not in self._cuts:
+                    self._to_probe[str(path)] = (project, path)
+                return VideoMetadata(
+                    width=0, height=0, duration_seconds=0.0, frame_rate_num=0, frame_rate_den=1
+                )
             meta = self._probe_stored(project, path)
             self.tile_meta[str(path)] = meta.model_dump()
             return meta
@@ -87,7 +101,9 @@ class HostedGridTiles:
         ``None`` when the cut fails, as for any missing tile."""
         cut = _Cut(project, root, stage, video)
         self._cuts[str(path)] = cut
-        if str(path) in self.tile_meta:
+        if str(path) in self._failed_cuts:
+            return None
+        if str(path) in self.tile_meta or self._dry:
             return path
         try:
             made = self._cut(path, cut)
@@ -98,8 +114,50 @@ class HostedGridTiles:
             path.unlink(missing_ok=True)
         return path
 
+    @contextlib.contextmanager
+    def planning_pass(self) -> Iterator[None]:
+        """A load inside this ``with`` measures nothing: it records the
+        exports to probe and the cuts to make, for :meth:`measure`. Load
+        again after it: every tile is then known."""
+        self._dry = True
+        try:
+            yield
+        finally:
+            self._dry = False
+
+    def measure(self, *, workers: int = PROBE_WORKERS) -> None:
+        """Measure what a planning pass recorded: the exports' headers over
+        URLs, ``workers`` at a time (each is a range read or two, so a match's
+        48 take seconds, not minutes), then the source cuts one at a time,
+        since each holds a source on this disk while it cuts."""
+        pending = [
+            (key, project, path)
+            for key, (project, path) in self._to_probe.items()
+            if key not in self.tile_meta
+        ]
+        self._to_probe = {}
+        if pending:
+            with ThreadPoolExecutor(max_workers=workers) as pool:
+                metas = list(pool.map(lambda job: self._probe_stored(job[1], job[2]), pending))
+            for (key, _project, _path), meta in zip(pending, metas, strict=True):
+                self.tile_meta[key] = meta.model_dump()
+        for key, cut in list(self._cuts.items()):
+            if key in self.tile_meta or key in self._failed_cuts:
+                continue
+            path = Path(key)
+            try:
+                made = self._cut(path, cut)
+                if made is None:
+                    self._failed_cuts.add(key)
+                    continue
+                self.tile_meta[key] = fcpxml_gen.probe_video(made).model_dump()
+            finally:
+                path.unlink(missing_ok=True)
+
     def index(self, bundles: Sequence[CompareShooterBundle]) -> None:
         """Learn each tile's stage and identity once the bundles are loaded."""
+        if self._dry:
+            return
         for bundle in bundles:
             if bundle.project is None:
                 continue

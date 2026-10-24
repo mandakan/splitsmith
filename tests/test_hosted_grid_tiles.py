@@ -266,3 +266,49 @@ def _give_a_chest_camera(db_url: str, match_id: str, slug: str) -> None:
         await store.save_project(match_id, slug, project.model_dump(mode="json"), expected_version=version)
 
     asyncio.run(_edit())
+
+
+def test_planning_probes_the_tiles_at_once(two_stage_grid, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    """The grid job's planning reads every export's header over a URL; one
+    at a time, HFO's 48 took 98 s on staging. ``_grid_inputs`` probes them
+    together, each once, and plans the same bundles."""
+    import threading
+    import time as _time
+
+    client, match_id, slug = two_stage_grid
+    lock = threading.Lock()
+    running = {"now": 0, "most": 0}
+    probed: list[str] = []
+
+    def slow_probe(target: object) -> VideoMetadata:
+        with lock:
+            running["now"] += 1
+            running["most"] = max(running["most"], running["now"])
+            probed.append(str(target).split("?")[0])
+        _time.sleep(0.2)
+        with lock:
+            running["now"] -= 1
+        return VideoMetadata(
+            width=1920, height=1080, duration_seconds=30.0, frame_rate_num=30, frame_rate_den=1
+        )
+
+    monkeypatch.setattr(pl_mod.fcpxml_gen, "probe_video", slow_probe)
+    state = client.app.state.splitsmith_state
+    out: dict[str, Any] = {}
+
+    def body(handle, req, match_root: str, **_grid_args: Any) -> None:  # type: ignore[no-untyped-def]
+        inputs = server_mod._grid_inputs(
+            req, Path(match_root), state=state, cut_dir=Path(match_root) / "cuts"
+        )
+        out["stages"] = sorted(n for b in inputs.filtered for n in b.stages_by_number)
+        out["identities"] = dict(inputs.tiles.identities)
+
+    state.jobs.bodies.register("compare-grid", body)
+    state.jobs.bodies.register("compare-grid-stage", lambda handle, **_args: None)
+    resp = client.post(
+        f"/api/matches/{match_id}/match/compare-export", json={"stage_numbers": [1, 2], "audio_from": slug}
+    )
+    assert _wait_for_job(client, match_id, resp.json()["id"])["status"] == "succeeded"
+    assert out["stages"] == [1, 2] and len(out["identities"]) == 2
+    assert running["most"] >= 2
+    assert len(probed) == len(set(probed)) == 2
