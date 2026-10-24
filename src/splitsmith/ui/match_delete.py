@@ -135,14 +135,6 @@ async def _delete_hosted(
     delete_raw_uploads: bool,
     summary: DeletionSummary,
 ) -> None:
-    # 1. Stop in-flight compute first so no worker re-writes storage/state
-    #    under us. Coarse (cancels the user's other active jobs too) -- see
-    #    PostgresJobBackend.cancel_active_for_user.
-    try:
-        summary.jobs_cancelled = await state.jobs.cancel_active_for_user()
-    except Exception as exc:  # noqa: BLE001
-        summary.errors.append(f"cancel jobs: {exc}")
-
     if match_id is None:
         # Older recent-projects rows predate match_id (record_open allows
         # None). Nothing in the stores/storage to key off -- degrade to a
@@ -150,6 +142,14 @@ async def _delete_hosted(
         summary.errors.append("no match_id on picker row; removed picker entry only")
         summary.recent_project_removed = await _drop_picker_row(state, path, summary)
         return
+
+    # 1. Stop this match's in-flight compute first so no worker re-writes
+    #    storage/state under us. Only this match: the user's other matches
+    #    keep running (PostgresJobBackend.cancel_active_for_match).
+    try:
+        summary.jobs_cancelled = await state.jobs.cancel_active_for_match(match_id)
+    except Exception as exc:  # noqa: BLE001
+        summary.errors.append(f"cancel jobs: {exc}")
 
     # 2. Read project docs to harvest this match's attached raws.
     attached_raws: set[str] = set()

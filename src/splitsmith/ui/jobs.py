@@ -439,7 +439,7 @@ class JobBackend(Protocol):
 
     async def cancel(self, job_id: str) -> Job | None: ...
 
-    async def cancel_active_for_user(self) -> int: ...
+    async def cancel_active_for_match(self, match_id: str) -> int: ...
 
     async def acknowledge(self, job_id: str) -> Job | None: ...
 
@@ -716,18 +716,19 @@ class JobRegistry:
                 logger.warning("cancel: terminate() failed for job %s", job_id, exc_info=True)
         return snapshot
 
-    async def cancel_active_for_user(self) -> int:
-        """Cancel every PENDING/RUNNING job; return the count cancelled.
+    async def cancel_active_for_match(self, match_id: str) -> int:
+        """Cancel every PENDING/RUNNING job on ``match_id``; return the count cancelled.
 
-        The local registry is already single-user (one process == one
-        operator), so "for user" is the whole registry. Used by the
-        project-delete cascade to stop in-flight compute before teardown.
-        Snapshots the active ids under the lock, then cancels each outside
-        it so :meth:`cancel`'s subprocess ``terminate()`` doesn't stall.
+        Mirrors :meth:`PostgresJobBackend.cancel_active_for_match` for the
+        protocol; the local delete path does not call it. Snapshots the
+        active ids under the lock, then cancels each outside it so
+        :meth:`cancel`'s subprocess ``terminate()`` doesn't stall.
         """
         with self._lock:
             active_ids = [
-                jid for jid, j in self._jobs.items() if j.status in (JobStatus.PENDING, JobStatus.RUNNING)
+                jid
+                for jid, j in self._jobs.items()
+                if j.match_id == match_id and j.status in (JobStatus.PENDING, JobStatus.RUNNING)
             ]
         cancelled = 0
         for job_id in active_ids:

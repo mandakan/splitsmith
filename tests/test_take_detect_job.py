@@ -121,7 +121,7 @@ class _FakeJobBackend:
     async def cancel(self, _job_id: str) -> None:
         return None
 
-    async def cancel_active_for_user(self) -> int:
+    async def cancel_active_for_match(self, _match_id: str) -> int:
         return 0
 
     async def acknowledge(self, _job_id: str) -> None:

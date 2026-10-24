@@ -303,31 +303,56 @@ def test_cancel_pending_short_circuits_to_cancelled(tmp_path) -> None:
     assert not ran.is_set()
 
 
-def test_cancel_active_for_user_cancels_pending_jobs(tmp_path) -> None:
-    """The delete cascade's pre-teardown stop cancels every queued job."""
+def _submit_on_match(backend, kind: str, match_id: str | None):
+    """Submit ``kind`` as a request bound to ``match_id`` would."""
+    from splitsmith.ui.server import current_match_id
+
+    token = current_match_id.set(match_id)
+    try:
+        return asyncio.run(backend.submit(kind=kind))
+    finally:
+        current_match_id.reset(token)
+
+
+def test_cancel_active_for_match_cancels_pending_jobs(tmp_path) -> None:
+    """The delete cascade's pre-teardown stop cancels the match's queued jobs."""
     backend, _, _ = _build_backend_for_new_user(tmp_path, inline=False)
     _register(backend, "victim", lambda _h: None)
-    a = asyncio.run(backend.submit(kind="victim"))
-    b = asyncio.run(backend.submit(kind="victim"))
+    a = _submit_on_match(backend, "victim", "m1")
+    b = _submit_on_match(backend, "victim", "m1")
 
-    cancelled = asyncio.run(backend.cancel_active_for_user())
+    cancelled = asyncio.run(backend.cancel_active_for_match("m1"))
     assert cancelled == 2
     assert asyncio.run(backend.get(a.id)).status == JobStatus.CANCELLED
     assert asyncio.run(backend.get(b.id)).status == JobStatus.CANCELLED
 
 
-def test_cancel_active_for_user_ignores_terminal_jobs(tmp_path) -> None:
+def test_cancel_active_for_match_leaves_other_matches_running(tmp_path) -> None:
+    """Deleting one match never stops the user's jobs on another (#1703)."""
+    backend, _, _ = _build_backend_for_new_user(tmp_path, inline=False)
+    _register(backend, "victim", lambda _h: None)
+    doomed = _submit_on_match(backend, "victim", "m1")
+    other = _submit_on_match(backend, "victim", "m2")
+    matchless = _submit_on_match(backend, "victim", None)
+
+    assert asyncio.run(backend.cancel_active_for_match("m1")) == 1
+    assert asyncio.run(backend.get(doomed.id)).status == JobStatus.CANCELLED
+    assert asyncio.run(backend.get(other.id)).status == JobStatus.PENDING
+    assert asyncio.run(backend.get(matchless.id)).status == JobStatus.PENDING
+
+
+def test_cancel_active_for_match_ignores_terminal_jobs(tmp_path) -> None:
     """Already-finished jobs aren't re-cancelled (nothing active to stop)."""
     backend, _, _ = _build_backend_for_new_user(tmp_path, inline=True)
     _register(backend, "quick", lambda _h: None)
-    done = asyncio.run(backend.submit(kind="quick"))  # inline -> SUCCEEDED
+    done = _submit_on_match(backend, "quick", "m1")  # inline -> SUCCEEDED
     assert asyncio.run(backend.get(done.id)).status == JobStatus.SUCCEEDED
 
-    assert asyncio.run(backend.cancel_active_for_user()) == 0
+    assert asyncio.run(backend.cancel_active_for_match("m1")) == 0
     assert asyncio.run(backend.get(done.id)).status == JobStatus.SUCCEEDED
 
 
-def test_cancel_active_for_user_isolation(tmp_path) -> None:
+def test_cancel_active_for_match_isolation(tmp_path) -> None:
     """One user's bulk cancel never touches another user's active jobs."""
     engine = create_engine(f"sqlite+aiosqlite:///{tmp_path}/cancel-iso.sqlite")
     session_factory = sessionmaker(engine)
@@ -349,10 +374,10 @@ def test_cancel_active_for_user_isolation(tmp_path) -> None:
     bob = PostgresJobBackend(session_factory, user_id=bob_id, deferrer=_noop_deferrer())
     _register(alice, "probe", lambda _h: None)
     _register(bob, "probe", lambda _h: None)
-    a_job = asyncio.run(alice.submit(kind="probe"))
-    b_job = asyncio.run(bob.submit(kind="probe"))
+    a_job = _submit_on_match(alice, "probe", "m1")
+    b_job = _submit_on_match(bob, "probe", "m1")
 
-    assert asyncio.run(alice.cancel_active_for_user()) == 1
+    assert asyncio.run(alice.cancel_active_for_match("m1")) == 1
     assert asyncio.run(alice.get(a_job.id)).status == JobStatus.CANCELLED
     # Bob's job is untouched.
     assert asyncio.run(bob.get(b_job.id)).status == JobStatus.PENDING
