@@ -3155,9 +3155,12 @@ class _GridEncoder:
     from, so a boundary keys on its edges' identities rather than on
     files the cache's own LRU touch re-dates."""
 
-    def __init__(self, cache: SegmentCache | None, work: Path) -> None:
+    def __init__(
+        self, cache: SegmentCache | None, work: Path, *, tile_identities: Mapping[str, str] | None = None
+    ) -> None:
         self.cache = cache
         self.work = work
+        self.tile_identities = dict(tile_identities or {})
         self.used_keys: set[str] = set()
         self.keys_by_path: dict[Path, str] = {}
 
@@ -3183,11 +3186,14 @@ class _GridEncoder:
                 report("encoding")
             completed = _run_ffmpeg(cmd, runner=runner)
             return (out, "") if completed.returncode == 0 else (None, _stderr_text(completed))
+        # A tile's identity stands in for its file (#1691): a hosted worker
+        # reads its own copy, at its own path and time, of the same object.
+        merged = {**self.tile_identities, **(virtual_inputs or {})} or None
         key = self.cache.key(
             cmd,
             output_path=out,
             work_dir=self.work,
-            virtual_inputs=virtual_inputs,
+            virtual_inputs=merged,
             extra_inputs=extra_inputs,
         )
         self.used_keys.add(key)
@@ -3448,6 +3454,7 @@ def render_grid_mp4(
     logo_spots: frozenset[str] = frozenset(),
     brand: BrandMark | None = None,
     breakdown: bool = True,
+    tile_identities: Mapping[str, str] | None = None,
 ) -> GridRenderResult:
     """Render every stage as a grid, then stitch them into one MP4.
 
@@ -3557,6 +3564,12 @@ def render_grid_mp4(
     (:func:`_overlay_inputs`); the rasterizer still draws them each run.
     ``progress`` hears each stage as it is encoded or reused, then the
     stitch; a reused stage never reaches ``runner``.
+
+    ``tile_identities`` maps a tile input's argv token (a trim or inset
+    path) to a stable identity that keys it in place of the file (#1691):
+    a hosted worker reads its own copy of a stored trim, at its own path and
+    time, so the file alone would key the same segment differently on every
+    worker. ``None`` keys every tile by its file, as before.
 
     ``match_summary_seconds`` above zero adds the match summary (spec
     2026-10-08-grid-match-summary-design): one card after the last stage,
@@ -3716,7 +3729,7 @@ def render_grid_mp4(
 
     outcomes: list[StageOutcome] = []
     segments: list[Path] = []
-    encoder = _GridEncoder(segment_cache, work)
+    encoder = _GridEncoder(segment_cache, work, tile_identities=tile_identities)
 
     def report(
         index: int, plan: GridStagePlan | None, status: Literal["encoding", "reused", "stitching"]
