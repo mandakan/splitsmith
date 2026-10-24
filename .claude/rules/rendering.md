@@ -3,6 +3,8 @@ paths:
   - "src/splitsmith/mp4_render.py"
   - "src/splitsmith/composition.py"
   - "src/splitsmith/segment_cache.py"
+  - "src/splitsmith/stored_segment_cache.py"
+  - "src/splitsmith/ui/grid_tiles.py"
   - "src/splitsmith/overlay/**"
   - "src/splitsmith/summary_*.py"
   - "src/splitsmith/stage_summary_data.py"
@@ -86,6 +88,23 @@ argv test proves nothing about pixels.
   a new indirect input goes there.
 - Job and CLI get it through `match_exports.render_segment_cache`. Tests run
   with `SPLITSMITH_RENDER_CACHE=0` (conftest); a cache test passes its own.
+- **A hosted grid renders one job per stage** (`compare-grid-stage`), then
+  the `compare-grid` job stitches: its tiles would not fit a Cloud Run
+  worker's memory together. Every job plans from storage
+  (`ui/grid_tiles.HostedGridTiles`: ffprobe over a presigned URL, the grid
+  job's probes handed to its stage jobs as `tile_meta`) and builds its
+  options through `_grid_inputs` / `_grid_render_options`, so all build the
+  same commands. Three renderer seams, all off for a local render, so its
+  argv and keys are unchanged: `tile_identities` keys a tile by its stored
+  object, never a local copy or a URL; `tile_access` pulls one stage's
+  tiles around each read of them, never for a cache hit; `only_stage`
+  encodes one stage and its transition edges into the cache. Segments live
+  in R2 under `matches/<id>/render-segments` (`StoredSegmentCache`), so the
+  stitch finds what the stage jobs stored and a match delete takes them.
+  A stage job that fails is a cache miss the grid job renders itself.
+  Pinned by `test_compare_mp4_grid_tiles.py` (a split render stitches the
+  same segments as one process), `test_a_grid_rendered_stage_by_stage_is_the_one_process_render`
+  and `test_hosted_grid_stage_jobs.py`.
 
 ## Live overlay
 
