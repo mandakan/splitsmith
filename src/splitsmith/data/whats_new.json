@@ -1,6 +1,12 @@
 {
   "entries": [
     {
+      "id": "match-delete-keeps-other-work",
+      "date": "2026-10-24",
+      "title": "Deleting a match leaves your other matches alone",
+      "body": "Deleting a match stops only that match's work. Beep detection, trims and exports running in your other matches keep going."
+    },
+    {
       "id": "compare-grid-from-audit-trims",
       "date": "2026-10-23",
       "title": "Compare grid without exporting trims first",

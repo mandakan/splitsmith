@@ -52,9 +52,11 @@ class FakeJobs:
     def __init__(self, count: int = 0) -> None:
         self.count = count
         self.called = False
+        self.match_ids: list[str] = []
 
-    async def cancel_active_for_user(self) -> int:
+    async def cancel_active_for_match(self, match_id: str) -> int:
         self.called = True
+        self.match_ids.append(match_id)
         return self.count
 
 
@@ -160,7 +162,7 @@ def test_hosted_cascade_removes_everything() -> None:
         )
 
         # Jobs stopped first.
-        assert state.jobs.called and summary.jobs_cancelled == 1
+        assert state.jobs.match_ids == ["m1"] and summary.jobs_cancelled == 1
         # Match storage prefix swept (2 objects), raw uploads removed.
         assert summary.storage_objects_deleted == 2
         assert not any(p.startswith("matches/m1/") for p in state.storage.objects)
@@ -263,6 +265,8 @@ def test_hosted_missing_match_id_drops_picker_only() -> None:
 
         assert summary.recent_project_removed is True
         assert any("no match_id" in e for e in summary.errors)
+        # No match to scope a cancel to, so nothing is cancelled.
+        assert state.jobs.called is False
 
 
 def _local_state(recent_paths: list[str]) -> SimpleNamespace:
