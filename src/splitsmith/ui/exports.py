@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import json
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -111,9 +112,12 @@ class SecondaryExport:
     """
 
     video_id: str
-    source_path: Path
+    #: A local file, or a presigned URL (#1674) with ``download`` as the
+    #: fallback when reading it fails.
+    source_path: Path | str
     beep_time_in_source: float
     label: str = "Secondary cam"
+    download: Callable[[], Path] | None = None
 
 
 @dataclass(frozen=True)
@@ -325,12 +329,55 @@ def _confirmed_regions(audit_data: dict[str, Any], audit_path: Path) -> list[Sta
     return confirmed_from_doc(audit_data, log_context=audit_path.name)
 
 
+def _reachable(source: Path | str) -> bool:
+    """A URL counts as reachable (its read is what fails); a path when it exists."""
+    return isinstance(source, str) or source.exists()
+
+
+def reachable_or_none(source: Path | str) -> Path | str | None:
+    """``source`` when a cut can read it (a URL, or a path that exists), else
+    ``None``: :func:`export_stage` tells "no primary" from "unreachable" by it."""
+    return source if _reachable(source) else None
+
+
+def _cut_lossless(
+    source: Path | str,
+    target: Path,
+    *,
+    download: Callable[[], Path] | None,
+    beep_time: float,
+    stage_time: float,
+    pre_buffer_seconds: float,
+    post_buffer_seconds: float,
+) -> None:
+    """The lossless stream-copy cut of one camera. A URL read that fails
+    (``trim.SourceReadError``: ffmpeg exits 0 on a dropped read with a short
+    cut) is cut again from ``download()``, when there is one."""
+    window: dict[str, Any] = {
+        "beep_time": beep_time,
+        "stage_time": stage_time,
+        "pre_buffer_seconds": pre_buffer_seconds,
+        "post_buffer_seconds": post_buffer_seconds,
+        "mode": "lossless",
+        "overwrite": True,
+    }
+    try:
+        trim.trim_video(source, target, **window)
+    except trim.SourceReadError as exc:
+        if download is None:
+            raise
+        # The message carries no URL (``trim_video`` redacts it).
+        logger.warning("export: streamed read for %s failed, downloading instead: %s", target.name, exc)
+        target.unlink(missing_ok=True)
+        trim.trim_video(download(), target, **window)
+
+
 def export_stage(
     *,
     request: StageExportRequest,
     audit_path: Path,
     exports_dir: Path,
-    source_video_path: Path | None,
+    source_video_path: Path | str | None,
     stage_data: StageData,
     beep_time_in_source: float,
     pre_buffer_seconds: float,
@@ -342,6 +389,7 @@ def export_stage(
     stage_time_is_manual: bool = False,
     segment_cache: SegmentCache | None = None,
     hud_extras: HudExtras | None = None,
+    source_video_download: Callable[[], Path] | None = None,
 ) -> StageExportResult:
     """Run the export for one stage. Pure orchestration over the engine
     modules; never re-detects.
@@ -369,7 +417,10 @@ def export_stage(
     shots (CSV, overlay, shot markers) skip themselves with a recorded
     reason. ``exports_dir`` is created if missing. ``source_video_path`` is
     the primary's source file (resolved through any symlink); it is required
-    when ``write_trim`` or ``write_fcpxml`` is set.
+    when ``write_trim`` or ``write_fcpxml`` is set. It may be a presigned URL
+    (#1674): the lossless cut then reads about its window over HTTP, and a
+    read that fails cuts again from ``source_video_download()`` (a
+    secondary's from its ``download``).
     """
     audit_data = read_audit_data(audit_path)
 
@@ -397,7 +448,7 @@ def export_stage(
     # the project stores symlinks to a USB drive that's not plugged in.
     # Build one shared, specific message so the user gets the same hint
     # regardless of which artefact tripped over the missing source.
-    source_missing = source_video_path is None or not source_video_path.exists()
+    source_missing = source_video_path is None or not _reachable(source_video_path)
     missing_msg: str | None = None
     if source_missing and (request.write_trim or request.write_fcpxml):
         if source_video_path is None:
@@ -431,15 +482,14 @@ def export_stage(
             assert source_video_path is not None  # narrowed by source_missing
             trimmed_path = exports_dir / f"{base}_trimmed.mp4"
             try:
-                trim.trim_video(
+                _cut_lossless(
                     source_video_path,
                     trimmed_path,
+                    download=source_video_download,
                     beep_time=beep_time_in_source,
                     stage_time=stage_data.time_seconds,
                     pre_buffer_seconds=pre_buffer_seconds,
                     post_buffer_seconds=post_buffer_seconds,
-                    mode="lossless",
-                    overwrite=True,
                 )
             except (trim.FFmpegError, FileNotFoundError, RuntimeError) as exc:
                 # Don't fail the whole export -- CSV / report are still
@@ -463,7 +513,7 @@ def export_stage(
     if request.write_trim:
         for sec in secondary_inputs:
             sec_target = exports_dir / f"{base}_cam_{sec.video_id}_trimmed.mp4"
-            if not sec.source_path.exists():
+            if not _reachable(sec.source_path):
                 skip_reasons.append(
                     f"secondary cam {sec.video_id} trim not written: source not "
                     f"reachable: {sec.source_path}"
@@ -472,15 +522,14 @@ def export_stage(
                     secondary_trimmed[sec.video_id] = sec_target
                 continue
             try:
-                trim.trim_video(
+                _cut_lossless(
                     sec.source_path,
                     sec_target,
+                    download=sec.download,
                     beep_time=sec.beep_time_in_source,
                     stage_time=stage_data.time_seconds,
                     pre_buffer_seconds=pre_buffer_seconds,
                     post_buffer_seconds=post_buffer_seconds,
-                    mode="lossless",
-                    overwrite=True,
                 )
                 secondary_trimmed[sec.video_id] = sec_target
             except (trim.FFmpegError, FileNotFoundError, RuntimeError) as exc:
@@ -774,7 +823,8 @@ def export_stage(
         )
         analysis = StageAnalysis(
             stage=stage_data,
-            video_path=trimmed_path or source_video_path or Path(),
+            # Never a URL: a presigned one is a credential.
+            video_path=trimmed_path or (source_video_path if isinstance(source_video_path, Path) else Path()),
             beep_time=beep_time_in_source,
             shots=shots,
             anomalies=anomalies,

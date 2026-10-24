@@ -483,6 +483,35 @@ _PROXY_SOURCE_URL_TTL_S = 6 * 3600
 _TRIM_SOURCE_URL_TTL_S = 3600
 
 
+def _export_source(
+    proj: MatchProject, root: Path, video_path: Path, reads: list[str]
+) -> tuple[Path | str, Callable[[], Path]]:
+    """A lossless export cut's source (#1674): a presigned URL when there is
+    one, so the cut reads about its window and nothing lands on this disk,
+    else the local path (mirrored from storage as before). The callable is the
+    download fallback for a URL read that fails. Each source read appends
+    ``url``, ``download`` or (on fallback) ``url_failed`` to ``reads``."""
+
+    def download() -> Path:
+        reads.append("url_failed")
+        return proj.resolve_video_path(root, video_path)
+
+    url = proj.source_url(root, video_path, expires_in=_TRIM_SOURCE_URL_TTL_S)
+    if url is None:
+        reads.append("download")
+        return proj.resolve_video_path(root, video_path), download
+    reads.append("url")
+    return url, download
+
+
+def _source_read_meta(reads: list[str]) -> str | None:
+    """One ``source_read`` value for a job's timings: the worst read it made."""
+    for kind in ("url_failed", "download", "url"):
+        if kind in reads:
+            return kind
+    return None
+
+
 def _proxy_source_url(storage: Storage, raw_path: str) -> str | None:
     """A presigned GET URL ffmpeg can read ``raw_path`` from, or ``None``
     when the store has none or presigning fails (the caller downloads)."""
@@ -3479,7 +3508,10 @@ def register_job_bodies(state: AppState) -> None:
         with handle.timer.phase("materialize_audit"):
             audit_file = state.materialize_audit(slug, stage_number)
         exports_dir = proj.exports_path(state.shooter_root(slug))
-        source_video = proj.resolve_video_path(state.shooter_root(slug), prim.path)
+        source_reads: list[str] = []
+        source_video, source_download = _export_source(
+            proj, state.shooter_root(slug), prim.path, source_reads
+        )
         engine_stage = EngineStageData(
             stage_number=stg.stage_number,
             stage_name=stg.stage_name,
@@ -3517,13 +3549,16 @@ def register_job_bodies(state: AppState) -> None:
                     continue
                 if allowed_ids is not None and sv.video_id not in allowed_ids:
                     continue
-                sec_source = proj.resolve_video_path(state.shooter_root(slug), sv.path)
+                sec_source, sec_download = _export_source(
+                    proj, state.shooter_root(slug), sv.path, source_reads
+                )
                 secondaries.append(
                     export_helpers.SecondaryExport(
                         video_id=sv.video_id,
                         source_path=sec_source,
                         beep_time_in_source=sv.beep_time,
                         label=f"Cam {sv.video_id}",
+                        download=sec_download,
                     )
                 )
         handle.timer.set_meta(secondary_count=len(secondaries))
@@ -3551,7 +3586,8 @@ def register_job_bodies(state: AppState) -> None:
                     ),
                     audit_path=audit_file,
                     exports_dir=exports_dir,
-                    source_video_path=source_video if source_video.exists() else None,
+                    source_video_path=export_helpers.reachable_or_none(source_video),
+                    source_video_download=source_download,
                     stage_data=engine_stage,
                     beep_time_in_source=prim.beep_time,
                     pre_buffer_seconds=proj.trim_pre_buffer_seconds,
@@ -3569,6 +3605,7 @@ def register_job_bodies(state: AppState) -> None:
             # the JobsPanel row reads "audit JSON has no shots in shots[]"
             # rather than a stack trace.
             raise RuntimeError(str(exc)) from exc
+        handle.timer.set_meta(source_read=_source_read_meta(source_reads))
 
         handle.update(progress=0.95, message="Saving project...")
         with handle.timer.phase("persist_project"):
@@ -3723,6 +3760,7 @@ def register_job_bodies(state: AppState) -> None:
             proj = state.shooter_project(slug)
             exports_dir = proj.exports_path(state.shooter_root(slug))
             audit_dir = proj.audit_path(state.shooter_root(slug))
+        source_reads: list[str] = []
 
         n = len(req.stage_numbers)
         handle.timer.set_meta(stage_count=n)
@@ -3834,16 +3872,21 @@ def register_job_bodies(state: AppState) -> None:
                         for sv in stg.videos:
                             if sv.role != "secondary" or sv.beep_time is None:
                                 continue
-                            sec_source = proj.resolve_video_path(state.shooter_root(slug), sv.path)
+                            sec_source, sec_download = _export_source(
+                                proj, state.shooter_root(slug), sv.path, source_reads
+                            )
                             secondaries_in.append(
                                 export_helpers.SecondaryExport(
                                     video_id=sv.video_id,
                                     source_path=sec_source,
                                     beep_time_in_source=sv.beep_time,
                                     label=f"Cam {sv.video_id}",
+                                    download=sec_download,
                                 )
                             )
-                    source_video = proj.resolve_video_path(state.shooter_root(slug), prim.path)
+                    source_video, source_download = _export_source(
+                        proj, state.shooter_root(slug), prim.path, source_reads
+                    )
                     engine_stage = EngineStageData(
                         stage_number=stg.stage_number,
                         stage_name=stg.stage_name,
@@ -3869,7 +3912,8 @@ def register_job_bodies(state: AppState) -> None:
                             ),
                             audit_path=audit_dir / f"stage{stage_number}.json",
                             exports_dir=exports_dir,
-                            source_video_path=source_video if source_video.exists() else None,
+                            source_video_path=export_helpers.reachable_or_none(source_video),
+                            source_video_download=source_download,
                             stage_data=engine_stage,
                             beep_time_in_source=prim.beep_time,
                             pre_buffer_seconds=proj.trim_pre_buffer_seconds,
@@ -3897,6 +3941,8 @@ def register_job_bodies(state: AppState) -> None:
                         message=(f"Stage {stage_number} ({idx + 1} of {n}): trim already present; skipping"),
                     )
 
+        if source_reads:
+            handle.timer.set_meta(source_read=_source_read_meta(source_reads))
         handle.check_cancel()
         handle.update(
             progress=compose_start,
