@@ -1,8 +1,9 @@
 name: desktop
 
-# Unsigned arm64 build of the Electron app plus a smoke run of its bundled
-# sidecar (desktop/smoke.sh). Signing and notarization stay local (spec
-# 2026-09-20); the DMG here is for inspection, not distribution.
+# The desktop bundles on PRs: the unsigned macOS DMG, opened, installed and
+# launched (desktop-macos.yml), and the Linux AppImage + deb
+# (desktop-linux.yml). Neither uploads to a release; signing and
+# notarization stay local (spec 2026-09-20).
 on:
   pull_request:
     paths:
@@ -10,6 +11,7 @@ on:
       - "pyproject.toml"
       - "uv.lock"
       - ".github/workflows/desktop.yml"
+      - ".github/workflows/desktop-macos.yml"
       - ".github/workflows/desktop-linux.yml"
       - "scripts/ci/fetch_pypi_wheel.py"
   push:
@@ -20,45 +22,8 @@ permissions:
   contents: read
 
 jobs:
-  build:
-    name: unsigned arm64 dmg + smoke
-    runs-on: macos-latest
-    timeout-minutes: 60
-    steps:
-      - uses: actions/checkout@v5
-
-      - name: Install uv
-        uses: astral-sh/setup-uv@v4
-        with:
-          enable-cache: true
-
-      - name: Install Node + pnpm
-        uses: actions/setup-node@v4
-        with:
-          node-version: "22"
-      - uses: pnpm/action-setup@v4
-
-      - name: Cache models
-        uses: actions/cache@v4
-        with:
-          path: ~/.splitsmith/models
-          key: models-${{ hashFiles('src/splitsmith/data/ensemble_calibration.json') }}
-
-      - name: Build (unsigned)
-        env:
-          CSC_IDENTITY_AUTO_DISCOVERY: "false"
-        run: |
-          [ "$(uname -m)" = arm64 ] || { echo "::error::runner is not arm64"; exit 1; }
-          desktop/build.sh
-
-      - name: Smoke
-        run: desktop/smoke.sh
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: Splitsmith-arm64-dmg
-          path: desktop/dist/*.dmg
-          retention-days: 14
+  macos:
+    uses: ./.github/workflows/desktop-macos.yml
 
   linux:
     # Build, smoke, launch, artifact; no release_tag, so no upload. The

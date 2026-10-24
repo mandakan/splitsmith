@@ -65,7 +65,8 @@ jobs:
   desktop-linux:
     # The Linux AppImage + deb, from the wheel PyPI now serves. The DMG
     # stays a local step (desktop/release.sh); the feed announces each
-    # platform only once its own assets are attached.
+    # platform only once its own assets are attached. desktop-macos and
+    # desktop-macos-verify.yml check that DMG without signing it.
     needs: [release-please, publish-pypi]
     if: needs.release-please.outputs.release_created == 'true'
     uses: ./.github/workflows/desktop-linux.yml
@@ -73,6 +74,19 @@ jobs:
       release_tag: ${{ needs.release-please.outputs.tag_name }}
     permissions:
       contents: write
+
+  desktop-macos:
+    # An unsigned arm64 DMG from the same PyPI wheel, opened, installed,
+    # smoked and launched, and never attached: it proves the release builds
+    # before desktop/release.sh's signed build. A red job here means fix
+    # the release before running release.sh.
+    needs: [release-please, publish-pypi]
+    if: needs.release-please.outputs.release_created == 'true'
+    uses: ./.github/workflows/desktop-macos.yml
+    with:
+      release_tag: ${{ needs.release-please.outputs.tag_name }}
+    permissions:
+      contents: read
 
   deploy-prod:
     # And the production Cloud Run deploy. Chained rather than left to the

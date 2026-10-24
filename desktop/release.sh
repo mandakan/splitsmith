@@ -110,4 +110,10 @@ else
 fi
 
 echo "release: $dmg_name is on $(gh release view "$tag" --json url --jq .url)"
+# The uploaded file, checked on a clean Mac as a download (no secrets involved).
+if gh workflow run desktop-macos-verify.yml -f release_tag="$tag"; then
+  echo "release: verifying the download: gh run list --workflow desktop-macos-verify.yml --limit 1"
+else
+  echo "release: could not dispatch desktop-macos-verify.yml; run it by hand with release_tag=$tag" >&2
+fi
 echo "release: the update feed picks it up within 10 minutes: https://splitsmith.app/desktop/latest.json"
