@@ -27,9 +27,10 @@ import logging
 import math
 import subprocess
 from collections.abc import Callable, Iterable, Mapping, Sequence
+from contextlib import AbstractContextManager, nullcontext
 from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import Literal
+from typing import Literal, Protocol
 
 from PIL import ImageFont
 
@@ -72,6 +73,7 @@ from ..overlay.layout import Anchor, CellScale, anchor_ffmpeg_expr
 from ..overlay.raster import ChromiumRasterizer, Rasterizer, RasterizerUnavailableError
 from ..overlay.text import FALLBACK_BUNDLED_FONT, overlay_font_file
 from ..overlay.theme import OverlayTheme, ThemeName, load_theme, theme_for
+from ..proxy import redact_urls
 from ..runtime import FFmpegCapabilities, ffmpeg_capabilities, quote_filter_value, runtime
 from ..segment_cache import SegmentCache
 from ..youtube_sidecar import Chapter
@@ -2537,6 +2539,7 @@ def build_concat_command(
     output_path: Path,
     ffmpeg_binary: str = "ffmpeg",
     audio_labels: Sequence[str] = (),
+    remote: bool = False,
 ) -> tuple[str, ...]:
     """Stitch the per-stage temps, copying video and encoding audio once.
 
@@ -2560,19 +2563,27 @@ def build_concat_command(
     drift apart on it. Passing nothing restates nothing, which is what a
     caller stitching segments it did not build wants.
 
+    ``remote`` says the list names presigned URLs (#1691): the protocols
+    are whitelisted for the concat demuxer, and the log is cut to errors so
+    the caller can refuse a read that reported any.
+
     Restating is not optional. Stream copy carries neither the track
     names nor the disposition across the concat demuxer: the names come
     back out as plain ``SoundHandler``, so a four-shooter file would
     offer five anonymous tracks with no way to tell whose is whose.
     """
+    remote_args = ("-loglevel", "error") if remote else ()
+    remote_input = ("-protocol_whitelist", "file,http,https,tcp,tls,crypto") if remote else ()
     args: list[str] = [
         ffmpeg_binary,
         "-hide_banner",
+        *remote_args,
         "-y",
         "-f",
         "concat",
         "-safe",
         "0",
+        *remote_input,
         "-i",
         str(list_path),
         "-map",
@@ -3148,6 +3159,22 @@ class GridRenderStep:
 GridProgress = Callable[[GridRenderStep], None]
 
 
+class TileAccess(Protocol):
+    """Makes a stage's tile files readable for the length of a ``with``
+    (#1691). A hosted worker pulls the stage's trims from storage on entry
+    and deletes them on exit, so a render holds one stage's tiles at a
+    time; locally the tiles are on disk and there is nothing to do."""
+
+    def acquire(self, stage_number: int) -> AbstractContextManager[None]: ...
+
+
+def _holding(access: TileAccess | None, stage_number: int | None) -> AbstractContextManager[None]:
+    """``access.acquire(stage_number)``, or nothing to do."""
+    if access is None or stage_number is None:
+        return nullcontext()
+    return access.acquire(stage_number)
+
+
 class _GridEncoder:
     """Runs a segment's ffmpeg command, or reuses the segment from the
     segment cache (:mod:`splitsmith.segment_cache`); with no cache it runs
@@ -3155,9 +3182,18 @@ class _GridEncoder:
     from, so a boundary keys on its edges' identities rather than on
     files the cache's own LRU touch re-dates."""
 
-    def __init__(self, cache: SegmentCache | None, work: Path) -> None:
+    def __init__(
+        self,
+        cache: SegmentCache | None,
+        work: Path,
+        *,
+        tile_identities: Mapping[str, str] | None = None,
+        tile_access: TileAccess | None = None,
+    ) -> None:
         self.cache = cache
         self.work = work
+        self.tile_identities = dict(tile_identities or {})
+        self.tile_access = tile_access
         self.used_keys: set[str] = set()
         self.keys_by_path: dict[Path, str] = {}
 
@@ -3171,27 +3207,35 @@ class _GridEncoder:
         virtual_inputs: Mapping[str, str] | None = None,
         report: Callable[[Literal["encoding", "reused"]], None] | None = None,
         prepare: Callable[[], object] | None = None,
+        tiles_for: int | None = None,
+        fetch: bool = True,
     ) -> tuple[Path | None, str]:
         """The segment's path, or ``None`` and ffmpeg's complaint.
         ``prepare`` writes an input the command reads (a sting's clip,
         #1535) and runs only when the command will: never on a cache hit.
-        What it raises reaches the caller."""
+        What it raises reaches the caller. ``tiles_for`` is the stage whose
+        tiles the command reads: they are acquired around the run, never
+        for a cache hit."""
         if self.cache is None:
             if prepare is not None:
                 prepare()
             if report is not None:
                 report("encoding")
-            completed = _run_ffmpeg(cmd, runner=runner)
+            with _holding(self.tile_access, tiles_for):
+                completed = _run_ffmpeg(cmd, runner=runner)
             return (out, "") if completed.returncode == 0 else (None, _stderr_text(completed))
+        # A tile's identity stands in for its file (#1691): a hosted worker
+        # reads its own copy, at its own path and time, of the same object.
+        merged = {**self.tile_identities, **(virtual_inputs or {})} or None
         key = self.cache.key(
             cmd,
             output_path=out,
             work_dir=self.work,
-            virtual_inputs=virtual_inputs,
+            virtual_inputs=merged,
             extra_inputs=extra_inputs,
         )
         self.used_keys.add(key)
-        hit = self.cache.lookup(key, suffix=out.suffix)
+        hit = self.cache.lookup(key, suffix=out.suffix, fetch=fetch)
         if hit is not None:
             if report is not None:
                 report("reused")
@@ -3204,9 +3248,10 @@ class _GridEncoder:
         partial = self.cache.partial_path(key, suffix=out.suffix)
         target = str(out)
         try:
-            completed = _run_ffmpeg(
-                tuple(str(partial) if token == target else token for token in cmd), runner=runner
-            )
+            with _holding(self.tile_access, tiles_for):
+                completed = _run_ffmpeg(
+                    tuple(str(partial) if token == target else token for token in cmd), runner=runner
+                )
             if completed.returncode != 0:
                 return None, _stderr_text(completed)
             if not partial.is_file():
@@ -3405,6 +3450,54 @@ def _grid_missing_handle(item: GridItem, *, half: float, end: Literal["tail", "h
     return 0.0
 
 
+def _render_one_stage(
+    stage_number: int,
+    *,
+    items: list[GridItem],
+    live: dict[int, GridBoundary],
+    prepare: Callable[[GridItem], _GridPrep],
+    encode_edge: Callable[..., Path],
+    encode_stage: Callable[[GridStageItem, _GridPrep], tuple[Path | None, str]],
+    note_cut: Callable[[int, str], None],
+    output_path: Path,
+    degradations: tuple[OverlayDegradation, ...],
+    close: Callable[[], object] | None,
+) -> GridRenderResult:
+    """``render_grid_mp4(only_stage=)``: encode stage ``stage_number``'s
+    segment and its edges of the boundaries on either side into the cache,
+    as the whole render would, and nothing else (#1691). An edge that fails
+    turns its boundary into a cut here as it would there, so the stage
+    keeps its full length on that side."""
+    try:
+        for i, item in enumerate(items):
+            if not (isinstance(item, GridStageItem) and item.plan.stage_number == stage_number):
+                continue
+            prep = prepare(item)
+            if prep.failed is None:
+                for after, end in ((i - 1, "head"), (i, "tail")):
+                    boundary = live.get(after)
+                    if boundary is None:
+                        continue
+                    try:
+                        encode_edge(item, prep, half=boundary.duration_seconds / 2.0, end=end)
+                    except (_EdgeFailedError, MotionClipError) as exc:
+                        note_cut(after, str(exc))
+                        item = items[i]
+                        assert isinstance(item, GridStageItem)
+            segment, error = (None, prep.failed) if prep.failed is not None else encode_stage(item, prep)
+            outcome = StageOutcome(
+                stage_number=item.plan.stage_number,
+                stage_name=item.plan.stage_name,
+                ok=segment is not None,
+                error=None if segment is not None else error,
+            )
+            return GridRenderResult(output_path=output_path, stages=(outcome,), degradations=degradations)
+    finally:
+        if close is not None:
+            close()
+    raise ValueError(f"stage {stage_number} is not in this grid")
+
+
 @with_card_failures(
     lambda r, notes: replace(
         r, degradations=(*r.degradations, *(OverlayDegradation(summary=n, detail=n) for n in notes))
@@ -3448,6 +3541,9 @@ def render_grid_mp4(
     logo_spots: frozenset[str] = frozenset(),
     brand: BrandMark | None = None,
     breakdown: bool = True,
+    tile_identities: Mapping[str, str] | None = None,
+    tile_access: TileAccess | None = None,
+    only_stage: int | None = None,
 ) -> GridRenderResult:
     """Render every stage as a grid, then stitch them into one MP4.
 
@@ -3558,6 +3654,19 @@ def render_grid_mp4(
     ``progress`` hears each stage as it is encoded or reused, then the
     stitch; a reused stage never reaches ``runner``.
 
+    ``only_stage`` renders one stage for a whole render to stitch later
+    (#1691): it plans the whole grid as usual, then encodes only that
+    stage's segment and its edges of the boundaries on either side into
+    ``segment_cache`` (required), and returns that stage's outcome. No
+    card, boundary, match summary or stitch is encoded and ``output_path``
+    is not written.
+
+    ``tile_identities`` maps a tile input's argv token (a trim or inset
+    path) to a stable identity that keys it in place of the file (#1691):
+    a hosted worker reads its own copy of a stored trim, at its own path and
+    time, so the file alone would key the same segment differently on every
+    worker. ``None`` keys every tile by its file, as before.
+
     ``match_summary_seconds`` above zero adds the match summary (spec
     2026-10-08-grid-match-summary-design): one card after the last stage,
     before the closing card, every shooter's match figures in their own
@@ -3569,6 +3678,10 @@ def render_grid_mp4(
     """
     # Before the canvas, the binary or anything else: this is a caller
     # error, not a render outcome, and it costs nothing to say so first.
+    if only_stage is not None and segment_cache is None:
+        # The segment is the whole point of a one-stage render; without a
+        # cache it would be encoded into a work dir and lost.
+        raise ValueError("only_stage needs a segment_cache to keep the stage's segments in")
     if summary_hold_seconds > 0 and not overlay:
         raise GridRenderError(
             f"summary_hold_seconds={summary_hold_seconds:g} needs overlay=True (--overlay on the "
@@ -3716,7 +3829,7 @@ def render_grid_mp4(
 
     outcomes: list[StageOutcome] = []
     segments: list[Path] = []
-    encoder = _GridEncoder(segment_cache, work)
+    encoder = _GridEncoder(segment_cache, work, tile_identities=tile_identities, tile_access=tile_access)
 
     def report(
         index: int, plan: GridStagePlan | None, status: Literal["encoding", "reused", "stitching"]
@@ -3895,7 +4008,11 @@ def render_grid_mp4(
             duration_seconds=match_summary_seconds,
         )
         freezes = extract_match_summary_freezes(
-            plans, work_dir=work / "match-summary", ffmpeg_binary=binary, runner=still_runner
+            plans,
+            work_dir=work / "match-summary",
+            ffmpeg_binary=binary,
+            runner=still_runner,
+            acquire=None if tile_access is None else tile_access.acquire,
         )
         composed_w, composed_h = _composed_size(canvas, plan)
         still = build_match_summary_grid_still(
@@ -3942,20 +4059,22 @@ def render_grid_mp4(
                 assert item.card is not None
                 card = item.card
             assert item.kind != "match_summary"
-            assets = _card_assets(
-                card,
-                name=item.name,
-                slot=item.kind,
-                plan=plan,
-                backdrop_at="tail" if item.kind == "closing" else "head",
-                canvas=canvas,
-                look=card_look,
-                rasterizer=active_rasterizer,
-                work=work,
-                ffmpeg_binary=binary,
-                still_runner=still_runner,
-                identities=identities,
-            )
+            # The backdrop is a frame of this stage's tiles.
+            with _holding(tile_access, plan.stage_number):
+                assets = _card_assets(
+                    card,
+                    name=item.name,
+                    slot=item.kind,
+                    plan=plan,
+                    backdrop_at="tail" if item.kind == "closing" else "head",
+                    canvas=canvas,
+                    look=card_look,
+                    rasterizer=active_rasterizer,
+                    work=work,
+                    ffmpeg_binary=binary,
+                    still_runner=still_runner,
+                    identities=identities,
+                )
             return _GridPrep(assets=assets)
         plan = item.plan
         prep = _GridPrep()
@@ -4027,18 +4146,19 @@ def render_grid_mp4(
             # would outlast its video, which is the one fault nothing
             # downstream reports.
             try:
-                prep.hold_still = _stage_hold_still(
-                    plan,
-                    canvas,
-                    overlay_data,
-                    theme_name=overlay_theme,
-                    work=work,
-                    ffmpeg_binary=binary,
-                    runner=still_runner,
-                    rasterizer=active_rasterizer,
-                    identities=identities,
-                    logos=summary_logos,
-                )
+                with _holding(tile_access, plan.stage_number):
+                    prep.hold_still = _stage_hold_still(
+                        plan,
+                        canvas,
+                        overlay_data,
+                        theme_name=overlay_theme,
+                        work=work,
+                        ffmpeg_binary=binary,
+                        runner=still_runner,
+                        rasterizer=active_rasterizer,
+                        identities=identities,
+                        logos=summary_logos,
+                    )
             except Exception as exc:  # noqa: BLE001 -- one bad stage must not lose the match
                 prep.failed = f"could not compose the stage summary still: {exc}"
                 logger.warning("compare grid stage %d: %s", plan.stage_number, prep.failed)
@@ -4146,10 +4266,63 @@ def render_grid_mp4(
                 head_pad=edge_head_pad,
                 list_suffix=f"-{end}",
             )
-        edge, error = encoder.encode(cmd, out, runner=boundary_runner, extra_inputs=extra)
+        edge, error = encoder.encode(
+            cmd, out, runner=boundary_runner, extra_inputs=extra, tiles_for=plan.stage_number
+        )
         if edge is None:
             raise _EdgeFailedError(error)
         return edge
+
+    def encode_stage(item: GridStageItem, prep: _GridPrep, *, fetch: bool = True) -> tuple[Path | None, str]:
+        """The stage's segment, narrowed for the boundaries on either side,
+        or ``None`` and ffmpeg's complaint. The one place a stage segment
+        is encoded, for the whole render and for ``only_stage`` alike, so a
+        stage rendered on its own is the segment the whole render reuses."""
+        cut = bool(item.head_cut_seconds or item.tail_cut_seconds)
+        plan = (
+            narrow_grid_plan(item.plan, head_cut=item.head_cut_seconds, tail_cut=item.tail_cut_seconds)
+            if cut
+            else item.plan
+        )
+        lower_third = prep.lower_third
+        if lower_third is not None and item.head_cut_seconds:
+            lower_third = (
+                None
+                if item.head_cut_seconds >= lower_third.seconds
+                else replace(lower_third, skip_seconds=item.head_cut_seconds)
+            )
+        cmd, extra = stage_command(
+            item,
+            prep,
+            plan,
+            lower_third=lower_third,
+            output=work / f"{item.name}{SEGMENT_SUFFIX}",
+            head_pad=head_pad_of(item.plan) - item.head_cut_seconds if cut else None,
+            list_suffix="-cut" if cut else "",
+        )
+        return encoder.encode(
+            cmd,
+            work / f"{item.name}{SEGMENT_SUFFIX}",
+            runner=runner,
+            extra_inputs=extra,
+            report=lambda status, n=item.index, p=item.plan: report(n, p, status),
+            tiles_for=item.plan.stage_number,
+            fetch=fetch,
+        )
+
+    if only_stage is not None:
+        return _render_one_stage(
+            only_stage,
+            items=items,
+            live=live,
+            prepare=prepare,
+            encode_edge=encode_edge,
+            encode_stage=encode_stage,
+            note_cut=note_cut,
+            output_path=output_path,
+            degradations=(*degradations, *transition_notes),
+            close=None if owned_rasterizer is None else lambda: owned_rasterizer.__exit__(None, None, None),
+        )
 
     try:
         for i, item in enumerate(items):
@@ -4286,37 +4459,9 @@ def render_grid_mp4(
                     )
                     segment = None
                 else:
-                    cut = bool(item.head_cut_seconds or item.tail_cut_seconds)
-                    plan = (
-                        narrow_grid_plan(
-                            item.plan, head_cut=item.head_cut_seconds, tail_cut=item.tail_cut_seconds
-                        )
-                        if cut
-                        else item.plan
-                    )
-                    lower_third = prep.lower_third
-                    if lower_third is not None and item.head_cut_seconds:
-                        lower_third = (
-                            None
-                            if item.head_cut_seconds >= lower_third.seconds
-                            else replace(lower_third, skip_seconds=item.head_cut_seconds)
-                        )
-                    cmd, extra = stage_command(
-                        item,
-                        prep,
-                        plan,
-                        lower_third=lower_third,
-                        output=work / f"{item.name}{SEGMENT_SUFFIX}",
-                        head_pad=head_pad_of(item.plan) - item.head_cut_seconds if cut else None,
-                        list_suffix="-cut" if cut else "",
-                    )
-                    segment, error = encoder.encode(
-                        cmd,
-                        work / f"{item.name}{SEGMENT_SUFFIX}",
-                        runner=runner,
-                        extra_inputs=extra,
-                        report=lambda status, n=item.index, p=item.plan: report(n, p, status),
-                    )
+                    # Only the stitch reads a stage segment: a stored cache
+                    # may hand it a URL instead of the bytes.
+                    segment, error = encode_stage(item, prep, fetch=False)
                     if segment is None:
                         outcomes.append(
                             StageOutcome(
@@ -4381,10 +4526,12 @@ def render_grid_mp4(
         )
 
     list_path = work / "concat.txt"
-    list_path.write_text(
-        "".join(f"file '{segment.resolve().as_posix()}'\n" for segment in segments),
-        encoding="utf-8",
-    )
+    sources = [
+        segment_cache.concat_source(segment) if segment_cache is not None else segment.resolve().as_posix()
+        for segment in segments
+    ]
+    remote = any("://" in source for source in sources)
+    list_path.write_text("".join(f"file '{source}'\n" for source in sources), encoding="utf-8")
     # The labels and the default flag have to be restated here: stream
     # copy carries neither across the concat demuxer, so without this the
     # finished file offers N+1 anonymous tracks.
@@ -4393,11 +4540,17 @@ def render_grid_mp4(
         output_path=output_path,
         ffmpeg_binary=binary,
         audio_labels=labels,
+        remote=remote,
     )
     report(len(plans), None, "stitching")
     completed = _run_ffmpeg(concat_cmd, runner=runner)
     if completed.returncode != 0:
-        raise GridRenderError(f"concat stitch failed: {_stderr_text(completed)}")
+        raise GridRenderError(f"concat stitch failed: {redact_urls(_stderr_text(completed))}")
+    stderr = completed.stderr
+    if remote and (stderr.decode(errors="replace") if isinstance(stderr, bytes) else stderr or "").strip():
+        # A dropped read exits 0 with a short file; only a quiet one counts.
+        detail = redact_urls(_stderr_text(completed))
+        raise GridRenderError(f"concat stitch could not read a segment: {detail}")
     if segment_cache is not None:
         segment_cache.evict(keep=encoder.used_keys)
 

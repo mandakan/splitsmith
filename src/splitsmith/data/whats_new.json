@@ -1,6 +1,12 @@
 {
   "entries": [
     {
+      "id": "whole-match-grid-online",
+      "date": "2026-10-24",
+      "title": "Whole-match compare grids render online",
+      "body": "A compare grid of a whole match now finishes on splitsmith.app instead of stopping partway. Pick the stages on the Export page as before."
+    },
+    {
       "id": "mac-cli-tool-runs",
       "date": "2026-10-24",
       "title": "The command line tool works on Mac again",

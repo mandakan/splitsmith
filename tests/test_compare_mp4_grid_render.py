@@ -2117,3 +2117,71 @@ def test_a_relative_work_dir_is_made_absolute_when_a_cache_keys_it(
     stitch = calls[-1]
     listed = Path(stitch[stitch.index("-i") + 1])
     assert listed.is_absolute() and listed.parent == (tmp_path / "work").resolve()
+
+
+# --- stable tile identities (#1691) ----------------------------------------
+
+
+def _tiled_render(tmp_path: Path, work: str, runner, cache, trims: dict[int, Path], identities=None):
+    shooters = _shooters({label: {n: _bundle(n, trims[n]) for n in trims} for label in ("Mathias", "Anders")})
+    return mp4_grid.render_grid_mp4(
+        shooters,
+        audio_label="Mathias",
+        output_path=tmp_path / f"{work}.mp4",
+        canvas=CANVAS,
+        ffmpeg_binary="/bin/ffmpeg",
+        runner=runner,
+        work_dir=tmp_path / work,
+        segment_cache=cache,
+        tile_identities=identities,
+    )
+
+
+def test_tile_identities_make_keys_independent_of_the_tile_files(tmp_path: Path):
+    """A hosted worker's tiles are its own copies, at its own paths and
+    times; with the same identities a second worker finds every stage."""
+    import os
+
+    from splitsmith.segment_cache import SegmentCache
+
+    cache = SegmentCache(root=tmp_path / "cache", max_bytes=1 << 30)
+    identities = {}
+    worker_trims = []
+    for worker in ("a", "b"):
+        trims = {}
+        for n in (1, 2):
+            trim = tmp_path / f"worker-{worker}" / f"stage{n}.mp4"
+            trim.parent.mkdir(parents=True, exist_ok=True)
+            trim.write_bytes(b"trim")
+            os.utime(trim, (1000 + ord(worker), 1000 + ord(worker)))
+            trims[n] = trim
+        worker_trims.append(trims)
+    for trims in worker_trims:
+        for n, trim in trims.items():
+            identities[str(trim)] = f"storage:exports/stage{n}.mp4:4:2026-10-24T00:00:00"
+
+    first_calls, first = _writing_runner()
+    _tiled_render(tmp_path, "work-a", first, cache, worker_trims[0], identities)
+    assert len(first_calls) == 3
+
+    calls, runner = _writing_runner()
+    _tiled_render(tmp_path, "work-b", runner, cache, worker_trims[1], identities)
+    assert len(calls) == 1 and calls[0][calls[0].index("-f") + 1] == "concat"
+
+
+def test_without_tile_identities_keys_are_unchanged(tmp_path: Path):
+    """No identities, no virtual inputs: the stage keys are the ones the
+    render computed before identities existed, so local caches stay warm."""
+    from splitsmith.segment_cache import SegmentCache
+
+    seen: list[object] = []
+
+    class Spy(SegmentCache):
+        def key(self, argv, **kwargs):
+            seen.append(kwargs.get("virtual_inputs"))
+            return super().key(argv, **kwargs)
+
+    _, runner = _writing_runner()
+    trims = {n: Path(f"/trims/stage{n}.mp4") for n in (1, 2)}
+    _tiled_render(tmp_path, "work", runner, Spy(root=tmp_path / "cache", max_bytes=1 << 30), trims)
+    assert seen == [None, None]

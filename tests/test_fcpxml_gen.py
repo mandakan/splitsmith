@@ -2711,3 +2711,23 @@ def test_probe_video_against_real_media(synthetic_source_video: Path) -> None:
     assert meta.frame_rate_num == synthetic_media.SYNTHETIC_FPS_NUM
     assert meta.frame_rate_den == synthetic_media.SYNTHETIC_FPS_DEN
     assert meta.duration_seconds == pytest.approx(synthetic_media.SYNTHETIC_DURATION_S, abs=0.5)
+
+
+def test_a_url_probe_has_a_timeout_and_a_stall_is_a_probe_error() -> None:
+    """#1691: a hosted grid probes stored trims over presigned URLs; a
+    stalled read must fail the probe, not hang the job until it is killed."""
+    import subprocess
+
+    import pytest
+
+    from splitsmith import fcpxml_gen
+
+    seen: dict = {}
+
+    def stalls(cmd, **kwargs):  # type: ignore[no-untyped-def]
+        seen.update(kwargs)
+        raise subprocess.TimeoutExpired(cmd, kwargs["timeout"])
+
+    with pytest.raises(fcpxml_gen.FFprobeError, match="timed out"):
+        fcpxml_gen.probe_video("https://bucket.example/x.mp4?X-Amz-Signature=s", runner=stalls)
+    assert seen["timeout"] == fcpxml_gen.URL_PROBE_TIMEOUT_S

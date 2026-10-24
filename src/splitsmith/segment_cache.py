@@ -163,8 +163,11 @@ class SegmentCache:
     def path_for(self, key: str, *, suffix: str = _SUFFIX) -> Path:
         return self.root / f"{key}{suffix}"
 
-    def lookup(self, key: str, *, suffix: str = _SUFFIX) -> Path | None:
-        """The cached segment for ``key``, touched so eviction keeps it."""
+    def lookup(self, key: str, *, suffix: str = _SUFFIX, fetch: bool = True) -> Path | None:
+        """The cached segment for ``key``, touched so eviction keeps it.
+        ``fetch=False`` says the caller only names it in a concat list
+        (:meth:`concat_source`), so a cache that can hand ffmpeg a URL need
+        not bring the bytes here; on disk there is nothing to fetch."""
         path = self.path_for(key, suffix=suffix)
         try:
             if path.stat().st_size == 0:
@@ -173,6 +176,10 @@ class SegmentCache:
         except OSError:
             return None
         return path
+
+    def concat_source(self, path: Path) -> str:
+        """How a concat list names a segment this cache returned."""
+        return path.resolve().as_posix()
 
     def partial_path(self, key: str, *, suffix: str = _SUFFIX) -> Path:
         """Where an encode writes before :meth:`commit`: unique per call, so

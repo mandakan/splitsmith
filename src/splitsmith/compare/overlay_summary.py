@@ -47,7 +47,8 @@ from __future__ import annotations
 
 import io
 import logging
-from collections.abc import Collection, Mapping, Sequence
+from collections.abc import Callable, Collection, Mapping, Sequence
+from contextlib import AbstractContextManager, nullcontext
 from dataclasses import dataclass, replace
 from pathlib import Path
 
@@ -722,10 +723,12 @@ def extract_match_summary_freezes(
     work_dir: Path,
     ffmpeg_binary: str,
     runner: Runner,
+    acquire: Callable[[int], AbstractContextManager[None]] | None = None,
 ) -> dict[str, Path]:
     """Each shooter's backdrop for the match summary: their tile's last frame
     on the last rendered stage that has footage of them. A shooter with no
-    footage anywhere has none (a black cell)."""
+    footage anywhere has none (a black cell). ``acquire`` makes a stage's
+    tiles readable while its frames are read (``mp4_grid.TileAccess``)."""
     latest: dict[str, int] = {}
     for index, plan in enumerate(plans):
         for tile in plan.tiles:
@@ -735,11 +738,12 @@ def extract_match_summary_freezes(
     for index in sorted(set(latest.values())):
         plan = plans[index]
         wanted = tuple(t for t in plan.tiles if latest.get(t.label) == index)
-        freezes.update(
-            extract_freeze_frames(
-                replace(plan, tiles=wanted), work_dir=work_dir, ffmpeg_binary=ffmpeg_binary, runner=runner
+        with nullcontext() if acquire is None else acquire(plan.stage_number):
+            freezes.update(
+                extract_freeze_frames(
+                    replace(plan, tiles=wanted), work_dir=work_dir, ffmpeg_binary=ffmpeg_binary, runner=runner
+                )
             )
-        )
     return freezes
 
 

@@ -252,8 +252,12 @@ class FFprobeError(RuntimeError):
     """ffprobe exited non-zero, was missing, or returned unparseable output."""
 
 
+#: How long ffprobe may take to read a header over a URL, in seconds.
+URL_PROBE_TIMEOUT_S = 120
+
+
 def probe_video(
-    path: Path,
+    path: Path | str,
     *,
     ffprobe_binary: str = "ffprobe",
     runner: Runner = subprocess.run,
@@ -261,11 +265,12 @@ def probe_video(
     """Read width / height / duration / frame rate from ``path`` via ffprobe.
 
     A bare ``ffprobe`` resolves through the runtime (the bundled one on the
-    desktop), never through PATH alone."""
+    desktop), never through PATH alone. ``path`` may be a ``str`` URL (a
+    presigned GET, #1691): ffprobe reads the header by range request."""
     from .runtime import ffprobe_path
 
     ffprobe_binary = ffprobe_path(ffprobe_binary)
-    if not path.exists():
+    if isinstance(path, Path) and not path.exists():
         raise FileNotFoundError(f"video not found: {path}")
     cmd = [
         ffprobe_binary,
@@ -281,8 +286,12 @@ def probe_video(
         "json",
         str(path),
     ]
+    # A URL read can stall on the network; a local file cannot.
+    limits = {"timeout": URL_PROBE_TIMEOUT_S} if isinstance(path, str) else {}
     try:
-        proc = runner(cmd, check=True, capture_output=True, text=True)
+        proc = runner(cmd, check=True, capture_output=True, text=True, **limits)
+    except subprocess.TimeoutExpired as exc:
+        raise FFprobeError(f"ffprobe timed out after {URL_PROBE_TIMEOUT_S}s reading a URL") from exc
     except FileNotFoundError as exc:
         raise FFprobeError(f"ffprobe binary not found: {ffprobe_binary}") from exc
     except subprocess.CalledProcessError as exc:
