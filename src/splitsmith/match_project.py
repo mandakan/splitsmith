@@ -2362,6 +2362,32 @@ class MatchProject(BaseModel):
                     pass
         return local
 
+    def source_url(self, root: Path, video_path: Path, *, expires_in: int) -> str | None:
+        """A presigned GET URL ffmpeg can read this video's source from
+        (#1674), or ``None`` when the caller should go through
+        :meth:`resolve_video_path` instead: a local mirror already exists (a
+        disk read beats a network one), the path is absolute or escapes a
+        confined root, no storage is bound, the store has no presigned URLs,
+        the object is missing, or presigning fails.
+
+        Nothing is written to disk, so a job that reads its source once (a
+        trim reads only its window) leaves nothing for the source cache.
+        """
+        if self._storage is None or not self._storage.supports_presigned_get:
+            return None
+        if video_path.is_absolute() or ".." in video_path.parts:
+            return None
+        if (root / video_path).exists():
+            return None
+        key = str(video_path)
+        try:
+            if not self._storage.exists(key):
+                return None
+            return self._storage.presign_get_url(key, expires_in=expires_in)
+        except Exception:  # noqa: BLE001 -- any failure means "download instead"
+            logger.warning("source %s: could not presign, downloading", key, exc_info=True)
+            return None
+
     def source_present(self, root: Path, video_path: Path, *, durable: bool = False) -> bool:
         """Is this video's source available, *without* fetching it?
 

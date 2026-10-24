@@ -27,6 +27,9 @@ ALLOWED = {
 
 
 def _producer_calls() -> list[tuple[str, str, int]]:
+    """Each producer call as (function, producer, line). The function is the
+    outermost job body (``_run_*``) around the call when there is one, since
+    a helper nested in a job body runs in the job, else the innermost."""
     tree = ast.parse(SERVER.read_text(encoding="utf-8"))
     found: list[tuple[str, str, int]] = []
 
@@ -40,7 +43,9 @@ def _producer_calls() -> list[tuple[str, str, int]]:
                 and base.id in ("audio_helpers", "thumbnail_helpers")
                 and node.func.attr.startswith("ensure_")
             ):
-                found.append((enclosing[-1] if enclosing else "<module>", node.func.attr, node.lineno))
+                body = next((name for name in enclosing if name.startswith("_run_")), None)
+                owner = body or (enclosing[-1] if enclosing else "<module>")
+                found.append((owner, node.func.attr, node.lineno))
                 return
         for child in ast.iter_child_nodes(node):
             visit(child, enclosing)

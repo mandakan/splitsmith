@@ -102,7 +102,19 @@ paths:
 - `HTTP_INPUT_ARGS` carries `-multiple_requests 1`: without it ffmpeg may
   reuse a socket the server is closing and read EOF on the next seek
   (`test_transcode_proxy_from_url_matches_the_local_file` fails without it).
-- A presigned URL is a credential: it never reaches an error message or log.
+- A presigned URL is a credential: it never reaches an error message or log
+  (`proxy.redact_urls`).
+- **The trim job cuts from a URL too** (`MatchProject.source_url`, then
+  `ensure_video_audit_trim` with a `str` source). With `-ss` before `-i`
+  ffmpeg seeks by range request and reads about the window's bytes, and
+  nothing lands on the worker's disk: on Cloud Run that disk is memory, and
+  a downloaded source plus the cut ran workers out of it. `trim_video` raises
+  `SourceReadError` on any stderr from a URL read, and the job cuts again
+  from a download (`meta.source_read`: `url`, `url_failed`, `download`). A
+  source already mirrored on this disk is read from disk; `source_url`
+  returns `None` for it. With no source on the disk, the trim's freshness
+  check has nothing to date it against, as for any hosted source not
+  mirrored here (`tests/test_trim_streamed_source.py`).
 
 ## Stream kinds
 

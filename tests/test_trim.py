@@ -745,3 +745,108 @@ def test_a_beep_before_the_clip_trims_from_its_first_frame(tmp_path: Path) -> No
     assert cmd[cmd.index("-ss") + 1] == "0.000"
     assert result.start_time == 0.0
     assert result.end_time == pytest.approx(14.6)
+
+
+# --- URL source (#1674) ---------------------------------------------------
+
+_SIGNED = "https://bucket.example/raw/VID1.mp4?X-Amz-Signature=s3cret"
+
+
+def test_a_url_source_reads_over_http_after_the_seek(tmp_path: Path) -> None:
+    """``-ss`` before ``-i`` makes ffmpeg range-read about the window; the
+    HTTP options sit with the input, and a URL needs no file on disk."""
+    from splitsmith.proxy import HTTP_INPUT_ARGS
+
+    runner = _RecordingRunner()
+    trim_video(_SIGNED, tmp_path / "out.mp4", beep_time=12.0, stage_time=10.0, runner=runner)
+
+    cmd = runner.calls[0]
+    i_idx = cmd.index("-i")
+    assert cmd[i_idx + 1] == _SIGNED
+    assert cmd.index("-ss") < i_idx
+    opts = cmd[cmd.index("-ss") + 2 : i_idx]
+    assert tuple(opts) == HTTP_INPUT_ARGS
+
+
+def test_a_url_read_that_prints_errors_raises_without_the_url(tmp_path: Path) -> None:
+    """ffmpeg exits 0 on a dropped, unresumable read with a short cut; the
+    stderr line is the only sign, and the URL is a credential."""
+    from splitsmith.trim import SourceReadError
+
+    def runner(cmd: list[str], **kwargs: Any) -> subprocess.CompletedProcess:
+        return subprocess.CompletedProcess(
+            args=cmd, returncode=0, stdout="", stderr=f"[https @ 0x1] Stream ends prematurely at {_SIGNED}\n"
+        )
+
+    with pytest.raises(SourceReadError) as info:
+        trim_video(_SIGNED, tmp_path / "out.mp4", beep_time=1.0, stage_time=1.0, runner=runner)
+    assert "s3cret" not in str(info.value)
+
+
+def test_a_failed_url_cut_raises_a_source_read_error_without_the_url(tmp_path: Path) -> None:
+    from splitsmith.trim import SourceReadError
+
+    def runner(cmd: list[str], **kwargs: Any) -> subprocess.CompletedProcess:
+        raise subprocess.CalledProcessError(1, cmd, output="", stderr=f"{_SIGNED}: Server returned 403")
+
+    with pytest.raises(SourceReadError) as info:
+        trim_video(_SIGNED, tmp_path / "out.mp4", beep_time=1.0, stage_time=1.0, runner=runner)
+    assert "s3cret" not in str(info.value)
+
+
+def test_a_local_cut_keeps_its_stderr_warnings_quiet(tmp_path: Path) -> None:
+    """Only a URL read treats stderr as a failure: a local source's warnings
+    never fail a cut that exited 0."""
+
+    def runner(cmd: list[str], **kwargs: Any) -> subprocess.CompletedProcess:
+        return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="", stderr="some warning\n")
+
+    trim_video(
+        _touch(tmp_path / "in.mp4"), tmp_path / "out.mp4", beep_time=1.0, stage_time=1.0, runner=runner
+    )
+
+
+@pytest.mark.integration
+def test_an_audit_cut_from_a_url_matches_the_local_cut_and_reads_about_its_window(
+    tmp_path: Path, synthetic_source_video: Path
+) -> None:
+    """Real ffmpeg over real HTTP (#1674): the audit cut of a late window
+    decodes to the same frames as the one cut from a local copy, and ffmpeg
+    seeks to the window with a range request instead of reading up to it.
+
+    The seek, not a byte count, is the assertion: what the server wrote
+    includes what loopback socket buffers took on the connections ffmpeg
+    abandons when it seeks, several MB of this small clip. On real HFO
+    clips a 30 s window read 62 to 72 % of the source, about its share."""
+    from tests.test_proxy import _frame_digest, _RangeServer
+
+    window = {"beep_time": 16.0, "stage_time": 4.0, "buffer_seconds": 1.0, "mode": "audit"}
+    from_file = tmp_path / "file.mp4"
+    from_url = tmp_path / "url.mp4"
+    trim_video(synthetic_source_video, from_file, **window)  # type: ignore[arg-type]
+    with _RangeServer(synthetic_source_video) as server:
+        trim_video(server.url, from_url, **window)  # type: ignore[arg-type]
+
+    assert _frame_digest(from_url) == _frame_digest(from_file)
+    size = synthetic_source_video.stat().st_size
+    starts = [int(r.split("=")[1].split("-")[0]) for r in server.requests if r]
+    # The window starts 15 s into a 24 s clip; one read begins well past the
+    # first half (the trailing moov's read begins near the very end).
+    assert any(size * 0.4 < start < size * 0.9 for start in starts), (server.requests, size)
+
+
+@pytest.mark.integration
+def test_an_audit_cut_from_a_url_raises_when_the_stream_cannot_resume(
+    tmp_path: Path, synthetic_source_video: Path
+) -> None:
+    """The connection drops part-way through the window and the reconnect is
+    refused (an expired URL): ffmpeg exits 0 with a short cut, and the
+    stderr check turns that into a read error."""
+    from splitsmith.trim import SourceReadError
+    from tests.test_proxy import _RangeServer
+
+    size = synthetic_source_video.stat().st_size
+    with _RangeServer(synthetic_source_video, drop_after=size // 4) as server:
+        with pytest.raises(SourceReadError):
+            trim_video(server.url, tmp_path / "url.mp4", beep_time=6.0, stage_time=12.0, mode="audit")
+    assert server.dropped

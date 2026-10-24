@@ -48,6 +48,12 @@ _URL_PLACEHOLDER = "<source-url>"
 _URL_RE = re.compile(r"[a-z][a-z0-9+.-]*://[^\s'\"]+", re.IGNORECASE)
 
 
+def redact_urls(text: str | None) -> str:
+    """``text`` with every URL replaced: a presigned URL is a credential, and
+    ffmpeg may print a redirect target or a reformatted copy of the input."""
+    return _URL_RE.sub(_URL_PLACEHOLDER, text or "")
+
+
 class ProxyError(RuntimeError):
     """ffmpeg failed to produce a proxy."""
 
@@ -124,10 +130,7 @@ def transcode_proxy(
     ]
 
     def _redact(text: str | None) -> str:
-        # Every URL, not just ``source``: ffmpeg may print a redirect target
-        # or a reformatted copy of it.
-        text = text or ""
-        return _URL_RE.sub(_URL_PLACEHOLDER, text) if is_url else text
+        return redact_urls(text) if is_url else (text or "")
 
     try:
         result = runner(cmd, check=True, capture_output=True, text=True)
