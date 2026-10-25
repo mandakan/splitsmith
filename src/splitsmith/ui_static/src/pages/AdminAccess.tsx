@@ -81,9 +81,13 @@ interface UserRowProps {
   tiers: AccessTiers;
   busy: boolean;
   onSetTier: (tier: string) => void;
+  onSetExports: (value: number | null) => void;
 }
 
-function UserRow({ account, tiers, busy, onSetTier }: UserRowProps) {
+/** The choices for an account's own export limit (spec 2026-10-25). */
+const EXPORT_LIMITS = [1, 2, 3];
+
+function UserRow({ account, tiers, busy, onSetTier, onSetExports }: UserRowProps) {
   const [open, setOpen] = useState(false);
   return (
     <Tr>
@@ -94,6 +98,9 @@ function UserRow({ account, tiers, busy, onSetTier }: UserRowProps) {
       <Td className="whitespace-nowrap">
         <span className="inline-flex items-center gap-2">
           {account.access_tier}
+          {account.concurrent_exports != null ? (
+            <span className="numeral text-sm text-muted">{account.concurrent_exports} exports at once</span>
+          ) : null}
           {account.is_admin ? (
             <>
               <Chip>Admin</Chip>
@@ -133,6 +140,21 @@ function UserRow({ account, tiers, busy, onSetTier }: UserRowProps) {
                 }}
               >
                 Set tier: {t.name}
+              </button>
+            ))}
+            {[...EXPORT_LIMITS, null].map((value) => (
+              <button
+                key={`exports-${value ?? "tier"}`}
+                type="button"
+                role="menuitem"
+                className={menuItemClass}
+                disabled={(account.concurrent_exports ?? null) === value}
+                onClick={() => {
+                  setOpen(false);
+                  onSetExports(value);
+                }}
+              >
+                Exports at once: {value ?? "tier default"}
               </button>
             ))}
           </Menu>
@@ -356,6 +378,7 @@ export function AdminAccess() {
                   tiers={tiers}
                   busy={busyId === a.id}
                   onSetTier={(tier) => void act(a.id, () => api.adminSetUserTier(a.id, tier))}
+                  onSetExports={(value) => void act(a.id, () => api.adminSetUserExports(a.id, value))}
                 />
               ))}
             </tbody>

@@ -1720,6 +1720,12 @@ export interface JobTimings {
  *  trim, future shot-detect/export) submit a job and return a snapshot;
  *  the SPA polls /api/me/jobs/{id} until status leaves "pending" / "running". */
 export type Job = Schema["Job"];
+/** One part of a job, as the export progress panel shows it (spec 2026-10-25). */
+export type JobPart = Schema["JobPart"];
+/** A running export: its parts as rows, its time left (``GET /api/me/exports/active``). */
+export type ExportView = Schema["ExportView"];
+export type ExportRow = Schema["ExportRow"];
+export type ActiveExports = Schema["ActiveExports"];
 
 /** Structured error payload emitted by source-bound endpoints (detect-beep,
  *  trim, beep-preview, video stream, export) when the primary's source file
@@ -2470,6 +2476,9 @@ export interface AdminAccount {
   email: string;
   display_name: string | null;
   access_tier: string;
+  /** Exports this account may run at once, when an admin set it; null
+   *  follows the tier (spec 2026-10-25). */
+  concurrent_exports?: number | null;
   created_at: string;
   is_admin: boolean;
 }

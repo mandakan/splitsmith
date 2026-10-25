@@ -29,6 +29,7 @@ import { DesktopCommandLine } from "@/components/desktop/DesktopCommandLine";
 import { CutGroup } from "@/components/export/CutGroup";
 import { DetailsGroup } from "@/components/export/DetailsGroup";
 import { ExportHistory } from "@/components/export/ExportHistory";
+import { ExportProgress } from "@/components/export/ExportProgress";
 import { ExportWarnings } from "@/components/export/ExportWarnings";
 import { LookGroup } from "@/components/export/LookGroup";
 import { LookHealth } from "@/components/export/LookHealth";
@@ -63,6 +64,9 @@ import { cameraChoices, camsSummary, syncedSecondaryCount } from "@/lib/camOptio
 import { mountLabel } from "@/lib/shareCameras";
 import { commandTitle, renderPresenceLine, rendersOnDesktop } from "@/lib/desktopCommands";
 import { rowUploadOptions } from "@/lib/youtubeRows";
+import { exportLimitRunning, limitReached } from "@/lib/exportProgress";
+import { matchHref } from "@/lib/matchHref";
+import { useActiveExports } from "@/lib/useActiveExports";
 import { hostedDownloads as buildHostedDownloads } from "@/lib/exportDownloads";
 import type { LookFocus } from "@/lib/exportPreview";
 import {
@@ -131,6 +135,7 @@ export function Export() {
 }
 
 function ExportInner({ slug }: { slug: string }) {
+  const { matchId } = useParams<{ matchId?: string }>();
   const { mode: deploymentMode } = useDeploymentMode();
   // Overlays and cards need the renderer; a local install without it is
   // told so here, with the install, instead of exporting without them.
@@ -172,6 +177,13 @@ function ExportInner({ slug }: { slug: string }) {
   const [queueing, setQueueing] = useState<boolean>(false);
   const [queuedNote, setQueuedNote] = useState<string | null>(null);
   const [cleanupOpen, setCleanupOpen] = useState<boolean>(false);
+  // The account's running exports (spec 2026-10-25): this match's show
+  // their progress here; any of them may hold the account's export limit.
+  const exportsState = useActiveExports();
+  const active = exportsState.active;
+  const runningHere = (active?.exports ?? []).filter((e) => e.match_id === (matchId ?? e.match_id));
+  const runningElsewhere = (active?.exports ?? []).find((e) => matchId && e.match_id !== matchId) ?? null;
+  const atLimit = limitReached(active);
 
   const reload = useCallback(async () => {
     try {
@@ -601,79 +613,49 @@ function ExportInner({ slug }: { slug: string }) {
   const busy = job?.status === "pending" || job?.status === "running" || queueing || !looksState.loaded;
   const canExport = onDesktop
     ? mode === "single" && orderedSelection.length > 0 && !!project && !desktop.busy
-    : !busy && orderedSelection.length > 0 && !!project && !editDenied && (!compare || audioFrom !== "");
+    : !busy &&
+      !atLimit &&
+      orderedSelection.length > 0 &&
+      !!project &&
+      !editDenied &&
+      (!compare || audioFrom !== "");
   const renderRequests = useMemo(
     () => desktop.commands.filter((c) => c.kind === "render_upload" && c.slug === slug),
     [desktop.commands, slug],
   );
 
-  /** Queue one trim-only job per selected stage through the per-stage
-   *  export endpoint. The write flags are literals rather than the
-   *  section state: the overlay / format controls are hidden in this
-   *  mode, and a stale toggle must never turn a bare trim back into a
-   *  full bundle. Progress lives in the jobs rail from here on. */
+  /** Trims only, as one export: one request queues a trim job per selected
+   *  stage, so the export limit counts them once (spec 2026-10-25). A stage
+   *  already exporting answers with that job, joined rather than replaced.
+   *  Progress shows in the panel below the button. */
   async function submitTrims() {
     setQueueing(true);
-    // The endpoint returns the *existing* job when one is already active
-    // for a stage rather than queueing a second one -- and that job may be
-    // a full-bundle export with entirely different flags. Report the two
-    // outcomes separately.
-    let active = new Set<number>();
     try {
-      const running = await api.listJobs();
-      active = new Set(
-        running
-          .filter(
-            (j) =>
-              j.kind === "export" &&
-              j.shooter_slug === slug &&
-              j.stage_number !== null &&
-              (j.status === "pending" || j.status === "running"),
-          )
-          .map((j) => j.stage_number as number),
-      );
-    } catch {
-      // Advisory only -- a failed pre-check must not block the export.
-    }
-
-    const queuedIds: string[] = [];
-    let attached = 0;
-    try {
-      for (const stageNumber of orderedSelection) {
-        const submitted = await api.exportStage(slug, stageNumber, {
-          write_trim: true,
-          write_csv: false,
-          write_fcpxml: false,
-          write_report: false,
-          write_overlay: false,
-        });
-        if (active.has(stageNumber)) attached += 1;
-        queuedIds.push(submitted.id);
-      }
-      const queued = queuedIds.length - attached;
+      const { jobs } = await api.exportTrims(slug, orderedSelection);
+      const joined = jobs.filter((j) => j.kind === "export" && !j.export_id).length;
       setQueuedNote(
-        [
-          `Queued ${queued} trim ${queued === 1 ? "job" : "jobs"}.`,
-          attached > 0
-            ? ` ${attached} ${attached === 1 ? "stage" : "stages"} already had an export running -- that job was joined, not replaced.`
-            : "",
-          " Progress shows under the top bar.",
-        ].join(""),
+        `Queued ${jobs.length} trim ${jobs.length === 1 ? "job" : "jobs"}.` +
+          (joined > 0 ? ` ${joined} joined an export already running.` : ""),
       );
+      void exportsState.refresh();
+      void Promise.allSettled(jobs.map((j) => api.pollJob(j.id, () => {}))).then(() => {
+        if (mountedRef.current) void reload();
+      });
     } catch (e) {
-      setError(errorLine(e, "Could not queue the trims."));
-      if (queuedIds.length > 0) setQueuedNote(`Queued ${queuedIds.length} of ${orderedSelection.length} trim jobs.`);
+      setError(startError(e, "Could not queue the trims."));
     } finally {
       setQueueing(false);
     }
+  }
 
-    // This page's own state (has_exports, lossless_trim_present) is
-    // written by those jobs; refresh once they settle.
-    if (queuedIds.length > 0) {
-      void Promise.allSettled(queuedIds.map((id) => api.pollJob(id, () => {}))).then(() => {
-        if (mountedRef.current) void reload();
-      });
+  /** A refused start names the export holding the account's slot. */
+  function startError(e: unknown, fallback: string): ErrorLine {
+    const running = exportLimitRunning(e);
+    void exportsState.refresh();
+    if (running) {
+      return { text: `${running.label} is still running. Start this export when it finishes.`, refusal: false };
     }
+    return errorLine(e, fallback);
   }
 
   /** Upload one finished render from its history row. The job rides the
@@ -768,6 +750,7 @@ function ExportInner({ slug }: { slug: string }) {
         }),
       );
       setJob(submitted);
+      void exportsState.refresh();
       const final = await api.pollJob(submitted.id, setJob);
       if (final.status === "succeeded" && final.result) {
         setResult(final.result as unknown as MatchExportResult);
@@ -778,7 +761,7 @@ function ExportInner({ slug }: { slug: string }) {
         setError({ text: final.error ?? "Export failed", refusal: false });
       }
     } catch (e) {
-      setError(errorLine(e, "Could not start the export."));
+      setError(startError(e, "Could not start the export."));
     }
   }
 
@@ -806,6 +789,7 @@ function ExportInner({ slug }: { slug: string }) {
       });
       const submitted = await api.exportCompareGrid(payload);
       setJob(submitted);
+      void exportsState.refresh();
       const final = await api.pollJob(submitted.id, setJob);
       if (final.status === "succeeded" && final.result) {
         setGridResult(final.result as unknown as CompareGridResult);
@@ -813,7 +797,7 @@ function ExportInner({ slug }: { slug: string }) {
         setError({ text: final.error ?? "Render failed.", refusal: false });
       }
     } catch (e) {
-      setError(errorLine(e, "Could not start the render."));
+      setError(startError(e, "Could not start the render."));
     }
   }
 
@@ -1220,7 +1204,32 @@ function ExportInner({ slug }: { slug: string }) {
                 <p className="mt-2 text-sm text-muted">{renderPresenceLine(desktop.presence, renderRequests)}</p>
               ) : null}
               <RendererLine state={renderer.state} onInstall={renderer.install} />
-              {busy && job?.message ? (
+              {atLimit && !onDesktop ? (
+                <p className="mt-2 text-sm text-ink-2">
+                  An export is running.{" "}
+                  {runningElsewhere ? (
+                    <a className="text-led-text underline-offset-4 hover:underline" href={matchHref(runningElsewhere.match_id, "export")}>
+                      Open {runningElsewhere.label}
+                    </a>
+                  ) : (
+                    "Its progress is below."
+                  )}
+                </p>
+              ) : null}
+              {runningHere.map((view) => (
+                <ExportProgress
+                  key={view.export_id}
+                  view={view}
+                  onCancel={() => void api.cancelExport(view.export_id).finally(() => void exportsState.refresh())}
+                  onRetry={(jobId) =>
+                    void api
+                      .retryExportPart(view.export_id, jobId)
+                      .catch((e) => setError(startError(e, "Could not retry that part.")))
+                      .finally(() => void exportsState.refresh())
+                  }
+                />
+              ))}
+              {busy && job?.message && runningHere.length === 0 ? (
                 <div className="mt-2 text-sm text-muted">
                   {job.message}
                   {job.progress != null ? ` (${Math.round(job.progress * 100)}%)` : ""}

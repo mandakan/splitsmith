@@ -143,6 +143,8 @@ const OVERVIEW: ExportOverview = { match_exports: [], stages: [ready(1), ready(2
 
 function job(overrides: Partial<Job> = {}): Job {
   return {
+    export_id: null,
+    parts: null,
     id: "job-1",
     kind: "export",
     match_id: "m1",

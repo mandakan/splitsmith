@@ -21,7 +21,7 @@ from . import server as _server
 from .access_gate import require_feature
 from .context import _hosted_mode_active
 from .export_slot import EXPORT_KIND_LABELS, export_slot, lead_job, summarize
-from .jobs import Job, JobNotRetryableError, JobStatus, export_is_active
+from .jobs import Job, JobNotRetryableError, JobPart, JobStatus, export_is_active
 
 router = APIRouter()
 
@@ -89,6 +89,26 @@ def _row_label(job: Job, key: str, label: str) -> str:
     return EXPORT_KIND_LABELS.get(job.kind, label)
 
 
+def _run_order(ordered: list[Job]) -> list[tuple[Job, JobPart]]:
+    """Every job's parts in the order they run: a lead job that waits for
+    its siblings (a grid and its stage jobs) shows the parts before its wait,
+    then the siblings, then the rest of its own; jobs queued after the lead
+    (a chained upload) come last. Otherwise, in the order they were queued."""
+    lead = lead_job(ordered)
+    lead_parts = parts_of(lead) if lead is not None else []
+    wait = next((i for i, p in enumerate(lead_parts) if p.kind == "wait"), None)
+    if lead is None or wait is None:
+        return [(job, part) for job in ordered for part in parts_of(job)]
+    siblings = [j for j in ordered if j is not lead and j.created_at <= lead.created_at]
+    followers = [j for j in ordered if j is not lead and j.created_at > lead.created_at]
+    return [
+        *((lead, part) for part in lead_parts[:wait]),
+        *((job, part) for job in siblings for part in parts_of(job)),
+        *((lead, part) for part in lead_parts[wait:]),
+        *((job, part) for job in followers for part in parts_of(job)),
+    ]
+
+
 def build_view(
     export_id: str, jobs: list[Job], history: dict[tuple[str, str | None], float], *, now: datetime
 ) -> ExportView:
@@ -98,29 +118,28 @@ def build_view(
     estimate = estimate_export(ordered, history, now=now, hosted=_hosted_mode_active())
     remaining = {(p.job_id, p.key): p for p in estimate.parts}
     rows: list[ExportRow] = []
-    for job in ordered:
-        for part in parts_of(job):
-            if part.kind == "wait":
-                continue  # a grid's stage jobs are its rows
-            est = remaining[(job.id, part.key)]
-            elapsed = None
-            if part.started_at is not None:
-                end = part.finished_at or (now if part.status == "running" else None)
-                elapsed = (end - part.started_at).total_seconds() if end is not None else None
-            failed = part.status == "failed" or job.status is JobStatus.FAILED
-            rows.append(
-                ExportRow(
-                    job_id=job.id,
-                    key=part.key,
-                    label=_row_label(job, part.key, part.label),
-                    status="cancelled" if job.status is JobStatus.CANCELLED else part.status,
-                    progress=part.progress,
-                    elapsed_s=elapsed,
-                    remaining_s=est.remaining_s,
-                    overrun=est.overrun,
-                    retryable=failed and status != "running",
-                )
+    for job, part in _run_order(ordered):
+        if part.kind == "wait":
+            continue  # a grid's stage jobs are its rows
+        est = remaining[(job.id, part.key)]
+        elapsed = None
+        if part.started_at is not None:
+            end = part.finished_at or (now if part.status == "running" else None)
+            elapsed = (end - part.started_at).total_seconds() if end is not None else None
+        failed = part.status == "failed" or job.status is JobStatus.FAILED
+        rows.append(
+            ExportRow(
+                job_id=job.id,
+                key=part.key,
+                label=_row_label(job, part.key, part.label),
+                status="cancelled" if job.status is JobStatus.CANCELLED else part.status,
+                progress=part.progress,
+                elapsed_s=elapsed,
+                remaining_s=est.remaining_s,
+                overrun=est.overrun,
+                retryable=failed and status != "running",
             )
+        )
     running = status == "running"
     return ExportView(
         export_id=export_id,

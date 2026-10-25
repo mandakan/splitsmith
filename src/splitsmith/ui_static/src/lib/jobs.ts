@@ -12,6 +12,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { ApiError, api, featureRefusal, type Job } from "@/lib/api";
+import { foldExports } from "@/lib/exportProgress";
 import { nextBatch } from "@/lib/jobBatch";
 
 const ACTIVE_POLL_MS = 1000;
@@ -90,7 +91,7 @@ export function useJobs(): JobsState {
       lastListRef.current = list;
       if (ended.length > 0) setSettled(ended);
       setJobs(list);
-      setBatch((prev) => nextBatch(prev, stripVisible(list).filter(isJobActive)));
+      setBatch((prev) => nextBatch(prev, foldExports(stripVisible(list)).filter(isJobActive)));
       setError(null);
     } catch (e) {
       if (controller.signal.aborted) return;
@@ -156,7 +157,8 @@ export function useJobs(): JobsState {
     [refresh],
   );
 
-  const visible = stripVisible(jobs);
+  // An export's jobs (a grid and its stage jobs) are one row (spec 2026-10-25).
+  const visible = foldExports(stripVisible(jobs));
   const running = visible.filter((j) => j.status === "running");
   const pending = visible.filter((j) => j.status === "pending");
   const failed = visible.filter((j) => j.status === "failed" && !j.acknowledged);

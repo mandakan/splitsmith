@@ -116,3 +116,48 @@ def test_active_reads_history_once(two_stages: Any, inline_deferrer: Any, monkey
     monkeypatch.setattr(PostgresJobBackend, "recent_export_jobs", counting)
     client.get("/api/me/exports/active")
     assert calls == [200]
+
+
+def test_rows_follow_the_order_parts_run_in() -> None:
+    """A grid's planning comes before its stage jobs, its join after them."""
+    from datetime import UTC, datetime, timedelta
+
+    from splitsmith.ui.exports_progress_api import build_view
+    from splitsmith.ui.jobs import Job, JobPart, JobStatus
+
+    t0 = datetime(2026, 10, 25, 12, 0, tzinfo=UTC)
+
+    def job(job_id: str, kind: str, created: int, parts: list[JobPart] | None) -> Job:
+        at = t0 + timedelta(seconds=created)
+        return Job(
+            id=job_id,
+            kind=kind,
+            status=JobStatus.RUNNING,
+            export_id="e1",
+            parts=parts,
+            stage_number=created + 1 if kind == "compare-grid-stage" else None,
+            created_at=at,
+            updated_at=at,
+        )
+
+    jobs = [
+        job("s1", "compare-grid-stage", 0, None),
+        job("s2", "compare-grid-stage", 1, None),
+        job(
+            "g",
+            "compare-grid",
+            2,
+            [
+                JobPart(key="plan", label="Planning", kind="load", status="done"),
+                JobPart(key="stages", label="Stage renders", kind="wait", status="running"),
+                JobPart(key="stitch", label="Joining", kind="stitch"),
+            ],
+        ),
+    ]
+    view = build_view("e1", jobs, {}, now=t0 + timedelta(seconds=60))
+    assert [(r.job_id, r.key) for r in view.rows] == [
+        ("g", "plan"),
+        ("s1", "job"),
+        ("s2", "job"),
+        ("g", "stitch"),
+    ]

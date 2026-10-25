@@ -139,6 +139,8 @@ function ready(n: number): StageExportStatus {
 
 function job(overrides: Partial<Job> = {}): Job {
   return {
+    export_id: null,
+    parts: null,
     id: "job-1",
     kind: "export",
     match_id: "m1",

@@ -1,6 +1,12 @@
 {
   "entries": [
     {
+      "id": "export-progress",
+      "date": "2026-10-25",
+      "title": "See how long an export has left",
+      "body": "While an export runs, the Export page shows each of its parts with a progress bar and the time left, with Cancel and Retry. Online, one export runs at a time."
+    },
+    {
       "id": "whole-match-grid-online",
       "date": "2026-10-24",
       "title": "Whole-match compare grids render online",

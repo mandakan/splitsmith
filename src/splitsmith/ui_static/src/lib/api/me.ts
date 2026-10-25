@@ -3,12 +3,14 @@
 import { ApiError, MULTIPART_THRESHOLD_BYTES, request, uploadRawMultipart } from "./client";
 import type {
   AccessTiers,
+  ActiveExports,
   AccountProfileView,
   AuthUser,
   DeleteProjectOptions,
   DeleteProjectResponse,
   DesktopTokenCreateResponse,
   DesktopTokenListResponse,
+  ExportView,
   Job,
   RawUploadEntry,
   RawUploadResult,
@@ -259,6 +261,22 @@ export const meApi = {
    *  calling request happens to be scoped to. */
   retryJob: (jobId: string) =>
     request<Job>(`/api/me/jobs/${encodeURIComponent(jobId)}/retry`, { method: "POST" }),
+
+  /** The account's running exports, every match, each with its parts and
+   *  time left, plus the account's export limit (``null`` on desktop). */
+  activeExports: (opts?: { signal?: AbortSignal }) =>
+    request<ActiveExports>("/api/me/exports/active", { signal: opts?.signal }),
+
+  /** Cancel every part of an export still waiting or running. */
+  cancelExport: (exportId: string) =>
+    request<ExportView>(`/api/me/exports/${encodeURIComponent(exportId)}/cancel`, { method: "POST" }),
+
+  /** Run a failed part of an export again, inside the same export. */
+  retryExportPart: (exportId: string, jobId: string) =>
+    request<ExportView>(`/api/me/exports/${encodeURIComponent(exportId)}/retry`, {
+      method: "POST",
+      json: { job_id: jobId },
+    }),
 
   /** Mark a single failed job as seen (issue #73). The badge stops
    *  counting it and the registry rolls it off ahead of unacknowledged

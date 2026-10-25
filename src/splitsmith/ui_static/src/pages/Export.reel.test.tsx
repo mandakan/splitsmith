@@ -80,6 +80,8 @@ function readiness(over: Partial<HighlightReadiness> = {}): HighlightReadiness {
 
 function job(over: Partial<Job> = {}): Job {
   return {
+    export_id: null,
+    parts: null,
     id: "job-9",
     kind: "highlight_reel",
     match_id: "m1",

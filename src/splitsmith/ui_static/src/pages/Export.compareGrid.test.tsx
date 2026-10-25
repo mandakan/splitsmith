@@ -34,6 +34,7 @@ vi.mock("@/lib/api", async (importOriginal) => {
       getExportRuns: vi.fn().mockResolvedValue({ runs: [] }),
       getCleanupPlan: vi.fn().mockResolvedValue({ items: [], totals_by_category: {}, total_bytes: 0, total_file_count: 0 }),
       exportCompareGrid: vi.fn(),
+      activeExports: vi.fn().mockResolvedValue({ limit: null, exports: [] }),
       pollJob: vi.fn(),
       revealFile: vi.fn(),
     },
@@ -130,6 +131,8 @@ function overviewStage(n: number, name: string, skipped = false): StageExportSta
 
 function makeJob(overrides: Partial<Job> = {}): Job {
   return {
+    export_id: null,
+    parts: null,
     id: "job-1",
     kind: "compare-grid",
     match_id: "m1",
@@ -420,5 +423,62 @@ describe("Export compare grid mode", () => {
 
     expect(await screen.findByText(/audio_from matches no shooter on this match/i)).toBeInTheDocument();
     expect(screen.queryByText(/rendered/i)).not.toBeInTheDocument();
+  });
+});
+
+
+describe("Export progress and the export limit (spec 2026-10-25)", () => {
+  function running(matchId: string) {
+    return {
+      export_id: "e1",
+      kind: "compare-grid",
+      label: "Compare grid",
+      match_id: matchId,
+      status: "running",
+      started_at: "2026-10-25T12:00:00Z",
+      time_left_s: 540,
+      finish_at: "2026-10-25T12:32:00Z",
+      approximate: true,
+      rows: [
+        {
+          job_id: "s1",
+          key: "render",
+          label: "Stage 1",
+          status: "running",
+          progress: 0.4,
+          elapsed_s: 75,
+          remaining_s: 120,
+          overrun: false,
+          retryable: false,
+        },
+      ],
+    };
+  }
+
+  it("blocks a start while another match's export holds the slot, and links to it", async () => {
+    vi.mocked(api.activeExports).mockResolvedValue({ limit: 1, exports: [running("m2")] });
+    const { user, grid } = await renderCompare();
+    await user.click(grid);
+    const link = await screen.findByRole("link", { name: /open compare grid/i });
+    expect(link).toHaveAttribute("href", "/match/m2/export");
+    expect(screen.getByRole("button", { name: /render grid/i })).toBeDisabled();
+    expect(screen.queryByRole("region", { name: /export progress/i })).toBeNull();
+  });
+
+  it("shows this match's running export as a panel", async () => {
+    vi.mocked(api.activeExports).mockResolvedValue({ limit: 1, exports: [running("m1")] });
+    await renderCompare();
+    const panel = await screen.findByRole("region", { name: /export progress/i });
+    expect(within(panel).getByText("Stage 1")).toBeInTheDocument();
+    expect(within(panel).getByText(/^About 9 min left/)).toBeInTheDocument();
+  });
+
+  it("never blocks without a limit (desktop)", async () => {
+    vi.mocked(api.activeExports).mockResolvedValue({ limit: null, exports: [running("m1")] });
+    const { user, grid } = await renderCompare();
+    await user.click(grid);
+    await screen.findByRole("region", { name: /export progress/i });
+    await waitFor(() => expect(screen.getByRole("checkbox", { name: /Stage Two/i })).toBeChecked());
+    expect(screen.getByRole("button", { name: /render grid/i })).toBeEnabled();
   });
 });
