@@ -163,3 +163,28 @@ def test_early_progress_does_not_set_the_rate() -> None:
     assert estimate.time_left_s == pytest.approx(
         ee.BUILTIN_PART_SECONDS[("grid_stage", "1080-basic")] - 100.0
     )
+
+
+def test_a_queued_4k_grid_uses_its_canvas() -> None:
+    """The request queues each job with its parts (run G7: 9 min said for a
+    17-minute 4K grid when the queued jobs fell back to 1080p numbers)."""
+    stage = _part("render", "grid_stage", profile="2160-basic")
+    stages = [
+        _job(f"s{i}", "compare-grid-stage", [stage], status=JobStatus.PENDING, created=i) for i in range(12)
+    ]
+    grid = _job(
+        "g",
+        "compare-grid",
+        [
+            _part("plan", "load"),
+            _part("stages", "wait"),
+            _part("stitch", "stitch", profile="2160-basic"),
+            _part("upload", "upload", profile="2160-basic"),
+        ],
+        status=JobStatus.PENDING,
+        created=100,
+    )
+    estimate = ee.estimate_export([*stages, grid], {}, now=NOW, hosted=True)
+    b = ee.BUILTIN_PART_SECONDS
+    lead = b[("load", None)] + b[("stitch", "2160-basic")] + b[("upload", "2160-basic")] + ee.WORKER_BOOT_S
+    assert estimate.time_left_s == pytest.approx(lead + b[("grid_stage", "2160-basic")] + ee.WORKER_BOOT_S)

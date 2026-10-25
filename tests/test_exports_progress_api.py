@@ -44,8 +44,8 @@ def test_active_shows_a_grid_with_its_stage_rows(two_stages: Any, inline_deferre
     assert (export["kind"], export["label"], export["status"]) == ("compare-grid", "Compare grid", "running")
     labels = [row["label"] for row in export["rows"]]
     # Queued, the grid already shows the rows it will run: its plan, the
-    # stage jobs, its join.
-    assert labels == ["Planning", "Stage 1", "Stage 2", "Joining"]
+    # stage jobs, its join and its upload.
+    assert labels == ["Planning", "Stage 1", "Stage 2", "Joining", "Uploading"]
     assert all(row["status"] == "waiting" for row in export["rows"])
     assert export["time_left_s"] > 0 and export["approximate"] is True
 

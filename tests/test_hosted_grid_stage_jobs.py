@@ -196,6 +196,7 @@ def test_the_grid_and_its_stage_jobs_publish_their_parts(two_stages) -> None:
         ("plan", "load", "done"),
         ("stages", "wait", "done"),
         ("stitch", "stitch", "done"),
+        ("upload", "upload", "done"),
     ]
     for stage_job in _stage_jobs(client, match_id):
         one = client.get(f"/api/matches/{match_id}/me/jobs/{stage_job['id']}").json()
@@ -293,4 +294,29 @@ def test_a_stage_the_grid_job_renders_itself_is_one_of_its_parts(two_stages, inl
         ("stage-2", "done"),
         ("stage-1", "done"),
         ("stitch", "done"),
+        ("upload", "done"),
     ]
+
+
+def test_the_request_queues_each_job_with_its_parts(two_stages, inline_deferrer) -> None:
+    """Queued, before any body runs, every job already says what it is:
+    its canvas, so the first estimate is the right size (staging run G7: a
+    4K grid estimated at 1080p numbers). The request moves no media, so a
+    trim's length (footage) is known only once its job loads."""
+    client, _storage, match_id, slug, *_ = two_stages
+    inline_deferrer["hold"] = True
+    resp = client.post(
+        f"/api/matches/{match_id}/match/compare-export", json={"stage_numbers": [1, 2], "audio_from": slug}
+    )
+    assert resp.status_code == 200, resp.text
+    grid = client.get(f"/api/matches/{match_id}/me/jobs/{resp.json()['id']}").json()
+    assert [(p["key"], p["kind"], p["profile"]) for p in grid["parts"]] == [
+        ("plan", "load", None),
+        ("stages", "wait", None),
+        ("stitch", "stitch", "2160-basic"),
+        ("upload", "upload", "2160-basic"),
+    ]
+    for stage in _stage_jobs(client, match_id):
+        one = client.get(f"/api/matches/{match_id}/me/jobs/{stage['id']}").json()
+        (part,) = one["parts"]
+        assert (part["kind"], part["profile"], part["status"]) == ("grid_stage", "2160-basic", "waiting")

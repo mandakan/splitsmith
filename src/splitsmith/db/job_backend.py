@@ -54,6 +54,7 @@ from ..ui.jobs import (
     JobCancelled,
     JobHandle,
     JobNotRetryableError,
+    JobPart,
     JobStatus,
     ShutdownInProgressError,
     UnknownJobKindError,
@@ -237,6 +238,7 @@ class PostgresJobBackend:
         stage_number: int | None = None,
         shooter_slug: str | None = None,
         video_id: str | None = None,
+        parts: list[JobPart] | None = None,
     ) -> Job:
         if self._shutting_down:
             raise ShutdownInProgressError("server is shutting down; no new jobs accepted")
@@ -268,6 +270,7 @@ class PostgresJobBackend:
             video_id=video_id,
             match_id=match_id,
             export_id=current_export_id.get(),
+            parts=[part.model_dump(mode="json") for part in parts] if parts else None,
             status=JobStatus.PENDING.value,
             cancel_requested=False,
             acknowledged=False,
