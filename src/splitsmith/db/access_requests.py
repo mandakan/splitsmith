@@ -91,6 +91,7 @@ class AccountView(BaseModel):
     email: str
     display_name: str | None
     access_tier: str
+    concurrent_exports: int | None = None
     created_at: datetime
 
 
@@ -116,6 +117,7 @@ def _account_view(row: User) -> AccountView:
         email=row.email,
         display_name=row.display_name,
         access_tier=row.access_tier,
+        concurrent_exports=row.concurrent_exports,
         created_at=row.created_at,
     )
 
@@ -383,6 +385,26 @@ class AccountAccessStore:
                 .all()
             )
         return [_account_view(row) for row in rows]
+
+    async def set_concurrent_exports(self, user_id: str, value: int | None) -> AccountView:
+        """Set (or, with ``None``, clear) the account's own export limit."""
+        async with self._session_factory() as session:
+            row = (
+                await session.execute(select(User).where(User.id == user_id, User.deleted_at.is_(None)))
+            ).scalar_one_or_none()
+            if row is None:
+                raise NotFoundError(user_id)
+            row.concurrent_exports = value
+            await session.commit()
+            await session.refresh(row)
+            return _account_view(row)
+
+    async def concurrent_exports(self, user_id: str) -> int | None:
+        """The account's own export limit, ``None`` when it follows its tier."""
+        async with self._session_factory() as session:
+            return (
+                await session.execute(select(User.concurrent_exports).where(User.id == user_id))
+            ).scalar_one_or_none()
 
     async def set_tier(self, user_id: str, tier: str) -> AccountView:
         async with self._session_factory() as session:

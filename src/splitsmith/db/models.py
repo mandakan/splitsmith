@@ -126,6 +126,9 @@ class User(Base):
     # which stays reserved for billing. The server default keeps a
     # non-ORM insert safe-for-today; the ORM always sets it explicitly.
     access_tier: Mapped[str] = mapped_column(String, nullable=False, server_default="full")
+    # How many exports this account may run at once, when an admin set it
+    # (spec 2026-10-25); ``None`` follows the tier (``access.export_limit``).
+    concurrent_exports: Mapped[int | None] = mapped_column(Integer, nullable=True)
     # The What's new entry ids (and ``chip:<key>`` dismissals) this account
     # has seen; ``None`` until its first visit after the feature shipped
     # (``splitsmith.whats_new``). Written only by ``db.whats_new``.

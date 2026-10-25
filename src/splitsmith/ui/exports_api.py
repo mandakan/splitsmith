@@ -28,11 +28,12 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Literal
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 from .. import composition, export_runs, youtube_sidecar
+from ..access import Feature
 from ..compare.mp4_grid import DEFAULT_CANVAS_HEIGHT, DEFAULT_CANVAS_WIDTH
 from ..logo_spots import DEFAULT_LOGO_SPOTS, LogoSpot
 from ..looks import look_names
@@ -40,8 +41,11 @@ from ..match_project import trim_blocker
 from ..overlay.hud import OverlayStyleFields
 from ..overlay.theme import ThemeName
 from . import export_storage, match_exports
+from .access_gate import require_feature
 from .context import _hosted_mode_active
+from .export_slot import export_slot
 from .http_errors import source_unreachable
+from .jobs import Job
 from .system_api import require_renderer
 
 router = APIRouter()
@@ -548,6 +552,18 @@ async def export_stage(
     a useless job.
     """
     state = request.app.state.splitsmith_state
+    _check_stage_exportable(state, slug, stage_number, req)
+    existing = await state.jobs.find_active(kind="export", stage_number=stage_number, shooter_slug=slug)
+    if existing is not None:
+        return JSONResponse(existing.model_dump(mode="json"))
+    async with export_slot(request):
+        job = await _submit_stage_export(state, slug, stage_number, req)
+    return JSONResponse(job.model_dump(mode="json"))
+
+
+def _check_stage_exportable(state: Any, slug: str, stage_number: int, req: ExportStageRequest) -> None:
+    """The stage export's pre-flight: raise the HTTP error the SPA shows
+    before a useless job is queued."""
     project = state.shooter_project(slug)
     try:
         stage = project.stage(stage_number)
@@ -591,16 +607,53 @@ async def export_stage(
         if not project.source_present(root, primary.path):
             raise source_unreachable(stage_number, root / primary.path)
 
-    existing = await state.jobs.find_active(kind="export", stage_number=stage_number, shooter_slug=slug)
-    if existing is not None:
-        return JSONResponse(existing.model_dump(mode="json"))
-    job = await state.jobs.submit(
+
+async def _submit_stage_export(state: Any, slug: str, stage_number: int, req: ExportStageRequest) -> Job:
+    return await state.jobs.submit(
         kind="export",
         stage_number=stage_number,
         shooter_slug=slug,
         args={"slug": slug, "stage_number": stage_number, "req": req},
     )
-    return JSONResponse(job.model_dump(mode="json"))
+
+
+class TrimsExportRequest(BaseModel):
+    stage_numbers: list[int] = Field(min_length=1)
+
+
+class TrimsExportResponse(BaseModel):
+    jobs: list[Job]
+
+
+@router.post(
+    "/api/shooters/{slug}/exports/trims",
+    response_model=TrimsExportResponse,
+    dependencies=[Depends(require_feature(Feature.hosted_compute))],
+)
+async def export_trims(slug: str, body: TrimsExportRequest, request: Request) -> TrimsExportResponse:
+    """Trims only, as one export (spec 2026-10-25): a trim job per stage,
+    queued together so the export limit counts them once. Every stage is
+    checked before any is queued; a stage with an export already running
+    answers with that job, as the per-stage route does."""
+    state = request.app.state.splitsmith_state
+    req = ExportStageRequest(
+        write_trim=True, write_csv=False, write_fcpxml=False, write_report=False, write_overlay=False
+    )
+    for stage_number in body.stage_numbers:
+        _check_stage_exportable(state, slug, stage_number, req)
+    jobs: list[Job] = []
+    queue: list[int] = []
+    for stage_number in body.stage_numbers:
+        existing = await state.jobs.find_active(kind="export", stage_number=stage_number, shooter_slug=slug)
+        if existing is not None:
+            jobs.append(existing)
+        else:
+            queue.append(stage_number)
+    if queue:
+        async with export_slot(request):
+            for stage_number in queue:
+                jobs.append(await _submit_stage_export(state, slug, stage_number, req))
+    return TrimsExportResponse(jobs=jobs)
 
 
 def match_export_needs_renderer(req: MatchExportRequest) -> bool:
@@ -740,9 +793,10 @@ async def export_match(slug: str, req: MatchExportRequest, request: Request) -> 
     existing = await state.jobs.find_active(kind="match_export", shooter_slug=slug)
     if existing is not None:
         return JSONResponse(existing.model_dump(mode="json"))
-    job = await state.jobs.submit(
-        kind="match_export",
-        shooter_slug=slug,
-        args={"slug": slug, "req": req},
-    )
+    async with export_slot(request):
+        job = await state.jobs.submit(
+            kind="match_export",
+            shooter_slug=slug,
+            args={"slug": slug, "req": req},
+        )
     return JSONResponse(job.model_dump(mode="json"))

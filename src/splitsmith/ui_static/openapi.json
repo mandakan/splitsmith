@@ -207,6 +207,17 @@
       "title": "Access Tier",
       "type": "string"
      },
+     "concurrent_exports": {
+      "anyOf": [
+       {
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Concurrent Exports"
+     },
      "created_at": {
       "format": "date-time",
       "title": "Created At",
@@ -238,6 +249,7 @@
     },
     "required": [
      "access_tier",
+     "concurrent_exports",
      "created_at",
      "display_name",
      "email",
@@ -8033,15 +8045,32 @@
     "type": "object"
    },
    "SetTierBody": {
+    "description": "What an admin changes on an account; a field left out stays as it\nis, and ``concurrent_exports: null`` clears the account's own limit.",
     "properties": {
      "access_tier": {
-      "title": "Access Tier",
-      "type": "string"
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Access Tier"
+     },
+     "concurrent_exports": {
+      "anyOf": [
+       {
+        "minimum": 1.0,
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Concurrent Exports"
      }
     },
-    "required": [
-     "access_tier"
-    ],
     "title": "SetTierBody",
     "type": "object"
    },
@@ -11702,6 +11731,39 @@
      "flagged_count"
     ],
     "title": "TriageSummaryResponse",
+    "type": "object"
+   },
+   "TrimsExportRequest": {
+    "properties": {
+     "stage_numbers": {
+      "items": {
+       "type": "integer"
+      },
+      "minItems": 1,
+      "title": "Stage Numbers",
+      "type": "array"
+     }
+    },
+    "required": [
+     "stage_numbers"
+    ],
+    "title": "TrimsExportRequest",
+    "type": "object"
+   },
+   "TrimsExportResponse": {
+    "properties": {
+     "jobs": {
+      "items": {
+       "$ref": "#/components/schemas/Job"
+      },
+      "title": "Jobs",
+      "type": "array"
+     }
+    },
+    "required": [
+     "jobs"
+    ],
+    "title": "TrimsExportResponse",
     "type": "object"
    },
    "UpdateMeRequest": {
@@ -18989,6 +19051,56 @@
      }
     },
     "summary": "List Export Runs"
+   }
+  },
+  "/api/shooters/{slug}/exports/trims": {
+   "post": {
+    "description": "Trims only, as one export (spec 2026-10-25): a trim job per stage,\nqueued together so the export limit counts them once. Every stage is\nchecked before any is queued; a stage with an export already running\nanswers with that job, as the per-stage route does.",
+    "operationId": "export_trims_api_shooters__slug__exports_trims_post",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "slug",
+      "required": true,
+      "schema": {
+       "title": "Slug",
+       "type": "string"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/TrimsExportRequest"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/TrimsExportResponse"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Export Trims"
    }
   },
   "/api/shooters/{slug}/exports/youtube-upload": {

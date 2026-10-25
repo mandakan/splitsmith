@@ -30,15 +30,16 @@ This is correct for the API process on restart; the worker passes
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 import subprocess
 import threading
 import uuid
-from collections.abc import Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable
 from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import and_, not_, or_, select, update
+from sqlalchemy import and_, not_, or_, select, text, update
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from .. import __version__
@@ -61,6 +62,9 @@ from ..ui.jobs import (
 from .models import ComputeJobRow
 
 logger = logging.getLogger(__name__)
+
+# The SQLite stand-in for the advisory lock (``export_lock``), per user.
+_SQLITE_EXPORT_LOCKS: dict[str, asyncio.Lock] = {}
 
 # Enqueue side of the split: ``submit`` calls this with a fully
 # JSON-serialisable payload; the implementation (see
@@ -608,6 +612,25 @@ class PostgresJobBackend:
         finally:
             current_export_id.reset(export_token)
             current_match_id.reset(match_token)
+
+    @contextlib.asynccontextmanager
+    async def export_lock(self) -> AsyncIterator[None]:
+        """Hold this user's export slot check (``ui.export_slot.admit``): two
+        starts at once from two devices are judged one after the other.
+        Postgres: a transaction-scoped advisory lock on its own connection,
+        released when the block ends however it ends; SQLite (tests): a
+        process lock per user."""
+        async with self._session_factory() as session:
+            if session.bind.dialect.name != "postgresql":
+                lock = _SQLITE_EXPORT_LOCKS.setdefault(self._user_id, asyncio.Lock())
+                async with lock:
+                    yield
+                return
+            async with session.begin():
+                await session.execute(
+                    text("SELECT pg_advisory_xact_lock(hashtext(:key))"), {"key": f"export:{self._user_id}"}
+                )
+                yield
 
     async def list_export(self, export_id: str) -> list[Job]:
         """This user's jobs of one export, in ``created_at`` order."""

@@ -51,6 +51,7 @@ from .context import (
     current_match_root,
     current_share_request,
 )
+from .export_slot import export_slot
 from .exports_api import CompareGridRequest, MatchExportRequest
 from .http_errors import ensure_source_reachable
 from .identity_media import effective_identity, ensure_local_event_logo, event_logo_storage_key, logo_response
@@ -1896,13 +1897,12 @@ async def export_compare_grid(request: Request, req: CompareGridRequest) -> JSON
     # priority) plans, publishes the plan for them, renders any stage still
     # queued itself, then stitches. Locally one process renders it all.
     planned = sorted({n for bundle in bundles for n in bundle.stages_by_number if n in req.stage_numbers})
-    # One wake after the last submit, so it counts every stage job and
-    # starts a worker for each at once (hold_wakes).
-    from ..worker_trigger import hold_wakes
-
+    # One export (the limit counts it once) and one wake after the last
+    # submit, so it counts every stage job and starts a worker for each
+    # at once (export_slot holds the wakes).
     stage_jobs: dict[str, str] = {}
     grid_run = uuid.uuid4().hex
-    async with hold_wakes():
+    async with export_slot(request):
         if state.storage is not None and len(planned) > 1:
             for number in planned:
                 stage_job = await state.jobs.submit(

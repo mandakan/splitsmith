@@ -574,6 +574,8 @@ class JobBackend(Protocol):
 
     async def active_export_ids(self) -> list[str]: ...
 
+    def export_lock(self) -> contextlib.AbstractAsyncContextManager[None]: ...
+
 
 class JobRegistry:
     """Thread-safe in-memory job backend.
@@ -1008,6 +1010,10 @@ class JobRegistry:
             current_match_origin.reset(origin_token)
             current_match_id.reset(id_token)
             current_match_root.reset(root_token)
+
+    def export_lock(self) -> contextlib.AbstractAsyncContextManager[None]:
+        """Locally there is no export limit, so nothing to serialize."""
+        return contextlib.nullcontext()  # type: ignore[return-value]
 
     async def list_export(self, export_id: str) -> list[Job]:
         """The retained jobs of one export, in submission order."""

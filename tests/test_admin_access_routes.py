@@ -141,7 +141,15 @@ def test_users_list_and_tier_change(admin_app) -> None:  # noqa: ANN001
     users = {u["email"]: u for u in client.get("/api/admin/users").json()}
     assert users["boss@x.se"]["is_admin"] is True
     assert users["friend@x.se"]["is_admin"] is False
-    expected_keys = {"id", "email", "display_name", "access_tier", "created_at", "is_admin"}
+    expected_keys = {
+        "id",
+        "email",
+        "display_name",
+        "access_tier",
+        "concurrent_exports",
+        "created_at",
+        "is_admin",
+    }
     assert set(users["friend@x.se"]) == expected_keys
     fid = users["friend@x.se"]["id"]
     changed = client.patch(f"/api/admin/users/{fid}", json={"access_tier": "sharing"}).json()

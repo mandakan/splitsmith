@@ -3940,6 +3940,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/shooters/{slug}/exports/trims": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Export Trims
+         * @description Trims only, as one export (spec 2026-10-25): a trim job per stage,
+         *     queued together so the export limit counts them once. Every stage is
+         *     checked before any is queued; a stage with an export already running
+         *     answers with that job, as the per-stage route does.
+         */
+        post: operations["export_trims_api_shooters__slug__exports_trims_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/shooters/{slug}/exports/youtube-upload": {
         parameters: {
             query?: never;
@@ -6908,6 +6931,8 @@ export interface components {
         AdminAccountView: {
             /** Access Tier */
             access_tier: string;
+            /** Concurrent Exports */
+            concurrent_exports: number | null;
             /**
              * Created At
              * Format: date-time
@@ -10646,10 +10671,16 @@ export interface components {
             /** Shooter Id */
             shooter_id: number;
         };
-        /** SetTierBody */
+        /**
+         * SetTierBody
+         * @description What an admin changes on an account; a field left out stays as it
+         *     is, and ``concurrent_exports: null`` clears the account's own limit.
+         */
         SetTierBody: {
             /** Access Tier */
-            access_tier: string;
+            access_tier?: string | null;
+            /** Concurrent Exports */
+            concurrent_exports?: number | null;
         };
         /**
          * SettingsRequest
@@ -12132,6 +12163,16 @@ export interface components {
         TriageSummaryResponse: {
             /** Flagged Count */
             flagged_count: number;
+        };
+        /** TrimsExportRequest */
+        TrimsExportRequest: {
+            /** Stage Numbers */
+            stage_numbers: number[];
+        };
+        /** TrimsExportResponse */
+        TrimsExportResponse: {
+            /** Jobs */
+            jobs: components["schemas"]["Job"][];
         };
         /**
          * UpdateMeRequest
@@ -17879,6 +17920,41 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    export_trims_api_shooters__slug__exports_trims_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TrimsExportRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TrimsExportResponse"];
                 };
             };
             /** @description Validation Error */

@@ -23,7 +23,7 @@ from datetime import datetime
 from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from .context import _hosted_mode_active
 
@@ -64,6 +64,7 @@ class AdminAccountView(BaseModel):
     email: str
     display_name: str | None
     access_tier: str
+    concurrent_exports: int | None = None
     created_at: datetime
     is_admin: bool
 
@@ -83,7 +84,11 @@ class ApproveBody(BaseModel):
 
 
 class SetTierBody(BaseModel):
-    access_tier: str
+    """What an admin changes on an account; a field left out stays as it
+    is, and ``concurrent_exports: null`` clears the account's own limit."""
+
+    access_tier: str | None = None
+    concurrent_exports: int | None = Field(default=None, ge=1)
 
 
 # ---------------------------------------------------------------------------
@@ -224,9 +229,16 @@ async def set_user_tier(request: Request, user_id: str, body: SetTierBody) -> Ad
     from ..db.access_requests import NotFoundError
 
     state = _state(request)
-    _require_known_tier(state, body.access_tier)
+    if body.access_tier is not None:
+        _require_known_tier(state, body.access_tier)
     try:
-        view = await state.accounts.set_tier(user_id, body.access_tier)
+        view = None
+        if body.access_tier is not None:
+            view = await state.accounts.set_tier(user_id, body.access_tier)
+        if "concurrent_exports" in body.model_fields_set:
+            view = await state.accounts.set_concurrent_exports(user_id, body.concurrent_exports)
+        if view is None:
+            raise HTTPException(status_code=422, detail="nothing to change")
     except NotFoundError as exc:
         raise HTTPException(status_code=404, detail="not found") from exc
     return _account_out(state, view)

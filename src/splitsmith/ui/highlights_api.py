@@ -38,6 +38,7 @@ from ..reel.plan import MOMENT_LABELS
 from ..runtime import runtime
 from . import audio, export_storage, match_exports
 from .access_gate import require_feature
+from .export_slot import export_slot
 
 router = APIRouter()
 
@@ -154,10 +155,10 @@ async def submit_highlight_reel(slug: str, req: HighlightReelRequest, request: R
     with that job (as the match export does); a locked match is refused
     here, naming its stages, rather than failing as a job."""
     async with _submit_lock():
-        return await _submit(request.app.state.splitsmith_state, slug, req)
+        return await _submit(request, request.app.state.splitsmith_state, slug, req)
 
 
-async def _submit(state: Any, slug: str, req: HighlightReelRequest) -> JSONResponse:
+async def _submit(request: Request, state: Any, slug: str, req: HighlightReelRequest) -> JSONResponse:
     existing = await state.jobs.find_active(kind=JOB_KIND, shooter_slug=slug)
     if existing is not None:
         return JSONResponse(existing.model_dump(mode="json"))
@@ -185,9 +186,10 @@ async def _submit(state: Any, slug: str, req: HighlightReelRequest) -> JSONRespo
                 "stages": blocking,
             },
         )
-    job = await state.jobs.submit(
-        kind=JOB_KIND, shooter_slug=slug, args={"slug": slug, "request": req.model_dump()}
-    )
+    async with export_slot(request):
+        job = await state.jobs.submit(
+            kind=JOB_KIND, shooter_slug=slug, args={"slug": slug, "request": req.model_dump()}
+        )
     return JSONResponse(job.model_dump(mode="json"))
 
 
