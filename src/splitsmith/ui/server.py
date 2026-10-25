@@ -420,6 +420,12 @@ def serve_media(
     return FileResponse(local_path, media_type=content_type, filename=fn)
 
 
+#: How often a running ffmpeg's job asks whether it was cancelled. Locally
+#: the registry terminates the process itself; on hosted the cancel is a
+#: flag on the job's row that only this poll reads (one small query).
+CANCEL_POLL_S = 5.0
+
+
 def _cancellable_runner(handle: JobHandle):
     """Build a ``trim.Runner`` that registers ffmpeg with the job for cancel.
 
@@ -428,6 +434,8 @@ def _cancellable_runner(handle: JobHandle):
     the registry can ``terminate()`` ffmpeg the moment a cancel arrives.
     Without this the worker thread sits inside ``proc.wait()`` until the
     whole encode finishes -- a couple of minutes on a 4K Insta360 stage.
+    A hosted worker is not the process the cancel lands in, so the runner
+    also asks every :data:`CANCEL_POLL_S` and stops ffmpeg itself.
     """
 
     def runner(cmd, *, check=True, capture_output=True, text=True, **kwargs):
@@ -443,7 +451,7 @@ def _cancellable_runner(handle: JobHandle):
         try:
             handle.attach_subprocess(proc)
             try:
-                stdout, stderr = proc.communicate()
+                stdout, stderr = _communicate_until_cancel(handle, proc)
             finally:
                 handle.detach_subprocess()
         except JobCancelled:
@@ -457,12 +465,13 @@ def _cancellable_runner(handle: JobHandle):
                 proc.kill()
                 proc.wait()
             raise
-        if check and proc.returncode != 0:
+        if proc.returncode != 0:
             # When the registry terminated ffmpeg as part of a cancel,
             # surface the cancel rather than the noisy non-zero exit.
             if handle.is_cancel_requested():
                 raise JobCancelled()
-            raise subprocess.CalledProcessError(proc.returncode, cmd, output=stdout, stderr=stderr)
+            if check:
+                raise subprocess.CalledProcessError(proc.returncode, cmd, output=stdout, stderr=stderr)
         return subprocess.CompletedProcess(
             args=cmd,
             returncode=proc.returncode,
@@ -471,6 +480,38 @@ def _cancellable_runner(handle: JobHandle):
         )
 
     return runner
+
+
+def _communicate_until_cancel(handle: JobHandle, proc: subprocess.Popen) -> tuple[Any, Any]:
+    """``proc.communicate()``, asking between waits whether the job was
+    cancelled; on a cancel ffmpeg is stopped and :class:`JobCancelled`
+    raised. A cancel check that fails (a database blip) lets the encode run."""
+    while True:
+        try:
+            return proc.communicate(timeout=CANCEL_POLL_S)
+        except subprocess.TimeoutExpired:
+            pass
+        try:
+            cancelled = handle.is_cancel_requested()
+        except Exception:  # noqa: BLE001 -- asked again on the next poll
+            logger.info("job cancel check failed; the encode keeps running", exc_info=True)
+            continue
+        if cancelled:
+            proc.terminate()
+            try:
+                proc.communicate(timeout=10)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                proc.communicate()
+            raise JobCancelled()
+
+
+def _grid_runner(handle: JobHandle) -> mp4_grid.Runner:
+    """The grid renderer's ffmpeg runner for a job: ``subprocess.run``'s
+    shape (a failed encode is a result, so one bad stage is reported and the
+    rest render) that stops when the job is cancelled (staging run G10 kept
+    encoding for half an hour after its cancel)."""
+    return functools.partial(_cancellable_runner(handle), check=False, text=False)
 
 
 logger = logging.getLogger(__name__)
@@ -2286,6 +2327,7 @@ def _render_one_grid_stage(
     state: AppState | None,
     scratch: Path,
     progress: mp4_grid.GridProgress | None = None,
+    runner: mp4_grid.Runner = subprocess.run,
 ) -> tuple[mp4_grid.StageOutcome, Mapping[str, str]]:
     """One stage of a grid into the segment cache (``only_stage``), the
     way a stage job and a grid job working off its queue both do it, and
@@ -2300,6 +2342,8 @@ def _render_one_grid_stage(
         tile_access=inputs.tiles,
         only_stage=stage_number,
         progress=progress,
+        runner=runner,
+        boundary_runner=runner,
         **options,
     )
     (outcome,) = result.stages
@@ -2364,7 +2408,14 @@ def _work_grid_stages(
                         handle.update_part(key, progress=step.fraction)
 
                 outcome, published = _render_one_grid_stage(
-                    req, inputs, options, number, state=state, scratch=scratch, progress=_here
+                    req,
+                    inputs,
+                    options,
+                    number,
+                    state=state,
+                    scratch=scratch,
+                    progress=_here,
+                    runner=_grid_runner(handle),
                 )
                 _store_grid_published(state, grid_run, number, published)
                 if tracked:
@@ -2431,8 +2482,11 @@ def _run_compare_grid_stage(
             )
 
             def _stage_step(step: mp4_grid.GridRenderStep) -> None:
-                handle.check_cancel()
-                if step.fraction is not None and step.plan is not None:
+                # A fraction mostly comes from ffmpeg's progress thread,
+                # where a raise stops nothing; the runner stops the encode.
+                if step.fraction is None:
+                    handle.check_cancel()
+                elif step.plan is not None:
                     handle.update_part("render", progress=step.fraction)
 
             with handle.timer.phase("render"):
@@ -2444,6 +2498,7 @@ def _run_compare_grid_stage(
                     state=state,
                     scratch=Path(tmp),
                     progress=_stage_step,
+                    runner=_grid_runner(handle),
                 )
             _store_grid_published(state, grid_run, stage_number, published)
         except JobCancelled:
@@ -2613,6 +2668,8 @@ def _run_compare_grid(
                 tile_identities=inputs.tiles.identities if inputs.tiles is not None else None,
                 tile_access=inputs.tiles,
                 published=published or None,
+                runner=_grid_runner(handle),
+                boundary_runner=_grid_runner(handle),
                 **options,
             )
         # The render's own word on each stage settles its part, whatever
@@ -2645,6 +2702,9 @@ def _run_compare_grid(
                 ),
             )
 
+        # A cancel that landed as the stitch ended stops here: no minute of
+        # upload for a grid the user stopped, and no chained YouTube upload.
+        handle.check_cancel()
         if state is not None and state.storage is not None:
             # A no-op without a match id (local mode has no match-scoped store).
             handle.update(progress=0.98, message="Uploading the grid...")
