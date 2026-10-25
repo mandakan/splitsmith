@@ -157,9 +157,11 @@ jobs:
       # on the next enqueue. Sized near the home worker (an i7-8700) so a
       # fallback run is not much slower: the ensemble's ONNX inference scales
       # with cores, and model load at the start of each run plus long stages'
-      # audio need the memory. Billed per second of a run only; at today's
-      # volume (a few dozen short jobs a month) this stays inside Cloud Run's
-      # free tier. No retries: a failed drain leaves its jobs queued for the
+      # audio need the memory. 16 GiB because the filesystem is in memory and
+      # a 4K dressed grid stage's encode alone reaches about 5 GB, which 8 GiB
+      # could not hold beside Python and its files. Billed per second of a
+      # run only; at today's volume (a few dozen short jobs a month) this
+      # stays inside Cloud Run's free tier. No retries: a failed drain leaves its jobs queued for the
       # next run.
       - name: Deploy the worker job
         run: |
@@ -168,7 +170,7 @@ jobs:
             --image "${{ steps.image.outputs.ref }}" \
             --args=worker,--one-shot \
             --service-account "splitsmith-worker@$GCP_PROJECT.iam.gserviceaccount.com" \
-            --cpu 4 --memory 8Gi --task-timeout 3600 --max-retries 0 \
+            --cpu 4 --memory 16Gi --task-timeout 3600 --max-retries 0 \
             --env-vars-file "deploy/cloudrun/$DEPLOY_ENV-worker.env.yaml" \
             --set-secrets "${{ steps.secrets.outputs.worker }}"
 
