@@ -52,6 +52,7 @@ import contextvars
 import logging
 import subprocess
 import threading
+import time
 import uuid
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
@@ -295,6 +296,11 @@ class Job(BaseModel):
     finished_at: datetime | None = None
 
 
+#: At most one progress-only write of a job's parts per this many seconds;
+#: a part's status change always writes (``JobHandle.update_part``).
+PART_WRITE_INTERVAL_S = 3.0
+
+
 class JobHandle:
     """Limited write-only view passed to job functions.
 
@@ -319,6 +325,10 @@ class JobHandle:
         # persist + emit of ``timer.build()`` on the terminal path; the body
         # never persists or logs the timings itself.
         self._timer = timer if timer is not None else PhaseTimer()
+        # The parts this job published (:meth:`set_parts`), and when they
+        # were last written: progress-only writes are throttled.
+        self._parts: list[JobPart] = []
+        self._parts_written_at: float | None = None
 
     @property
     def id(self) -> str:
@@ -355,6 +365,39 @@ class JobHandle:
             kwargs["message"] = message
         if kwargs:
             self._registry._patch(self._job_id, **kwargs)
+
+    def set_parts(self, parts: list[JobPart]) -> None:
+        """Publish the parts this job is made of, all waiting, in run order."""
+        self._parts = [part.model_copy() for part in parts]
+        self._write_parts()
+
+    def update_part(self, key: str, *, status: str | None = None, progress: float | None = None) -> None:
+        """Move one part on. Running stamps ``started_at``; done, failed and
+        skipped stamp ``finished_at``. A status change writes at once; a
+        progress-only change writes at most once per
+        :data:`PART_WRITE_INTERVAL_S`. Raises ``KeyError`` for a key
+        :meth:`set_parts` did not publish."""
+        part = next((p for p in self._parts if p.key == key), None)
+        if part is None:
+            raise KeyError(key)
+        now = datetime.now(UTC)
+        if progress is not None:
+            part.progress = max(0.0, min(1.0, float(progress)))
+        if status is not None and status != part.status:
+            part.status = status  # type: ignore[assignment]
+            if status == "running" and part.started_at is None:
+                part.started_at = now
+            if status in ("done", "failed", "skipped"):
+                part.finished_at = now
+            self._write_parts()
+            return
+        last = self._parts_written_at
+        if last is None or time.monotonic() - last >= PART_WRITE_INTERVAL_S:
+            self._write_parts()
+
+    def _write_parts(self) -> None:
+        self._parts_written_at = time.monotonic()
+        self._registry._patch(self._job_id, parts=[part.model_copy() for part in self._parts])
 
     def set_result(self, payload: dict[str, Any]) -> None:
         """Stash a structured result on the Job snapshot.

@@ -959,6 +959,8 @@ class PostgresJobBackend:
             if row is None:
                 return
             for key, value in kwargs.items():
+                if key == "parts" and value is not None:
+                    value = [p.model_dump(mode="json") if hasattr(p, "model_dump") else p for p in value]
                 if hasattr(row, key):
                     setattr(row, key, value)
             row.updated_at = now
