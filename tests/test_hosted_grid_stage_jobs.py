@@ -65,7 +65,11 @@ def two_stages(hosted_grid, hosted_db, monkeypatch: pytest.MonkeyPatch):  # noqa
             outcome = mp4_grid_mod.StageOutcome(
                 stage_number=only, stage_name=f"Stage {only}", ok=ok, error=None if ok else "boom"
             )
-            return mp4_grid_mod.GridRenderResult(output_path=output_path, stages=(outcome,))
+            return mp4_grid_mod.GridRenderResult(
+                output_path=output_path,
+                stages=(outcome,),
+                published={f"stage-{only}": f"key-{only}"} if ok else {},
+            )
         output_path.parent.mkdir(parents=True, exist_ok=True)
         output_path.write_bytes(b"grid")
         stages = tuple(
@@ -127,6 +131,7 @@ _PER_JOB = {
     "progress",
     "on_notice",
     "tile_identities",
+    "published",
 }
 
 
@@ -320,3 +325,61 @@ def test_the_request_queues_each_job_with_its_parts(two_stages, inline_deferrer)
         one = client.get(f"/api/matches/{match_id}/me/jobs/{stage['id']}").json()
         (part,) = one["parts"]
         assert (part["kind"], part["profile"], part["status"]) == ("grid_stage", "2160-basic", "waiting")
+
+
+def test_the_stitch_gets_every_stage_jobs_published_segments(two_stages) -> None:
+    """Each stage job stores the keys of what it encoded; the grid job hands
+    them all to its stitch, so it prepares no stage again (run G5)."""
+    client, storage, match_id, slug, calls, _failing, _raising = two_stages
+    _grid(client, match_id, slug, [1, 2])
+    (stitch,) = [c for c in calls if c.get("only_stage") is None]
+    assert stitch["published"] == {"stage-1": "key-1", "stage-2": "key-2"}
+    assert not list(storage.list(f"matches/{match_id}/render-plans/"))  # cleaned up
+
+
+def test_a_stage_the_grid_job_renders_itself_is_published_too(two_stages, inline_deferrer) -> None:
+    client, _storage, match_id, slug, calls, _failing, _raising = two_stages
+    inline_deferrer["hold_kinds"] = {"compare-grid-stage"}
+    _grid(client, match_id, slug, [1, 2])
+    (stitch,) = [c for c in calls if c.get("only_stage") is None]
+    assert stitch["published"] == {"stage-1": "key-1", "stage-2": "key-2"}
+
+
+def test_the_grid_job_never_publishes_fewer_parts_than_it_was_queued_with(two_stages, monkeypatch) -> None:
+    """Staging run G8: the grid job started with only its plan part until the
+    plan loaded, and the panel's time left halved for that minute."""
+    from splitsmith.ui import jobs as jobs_mod
+
+    client, _storage, match_id, slug, *_ = two_stages
+    seen: list[list[str]] = []
+    original = jobs_mod.JobHandle._write_parts
+
+    def spy(self) -> None:  # type: ignore[no-untyped-def]
+        if any(p.kind == "wait" for p in self._parts) or any(p.key == "plan" for p in self._parts):
+            seen.append([p.key for p in self._parts])
+        original(self)
+
+    monkeypatch.setattr(jobs_mod.JobHandle, "_write_parts", spy)
+    _grid(client, match_id, slug, [1, 2])
+    assert seen and all({"plan", "stages", "stitch", "upload"} <= set(keys) for keys in seen)
+
+
+def test_stored_segments_are_cleaned_up_when_planning_fails(two_stages, monkeypatch) -> None:
+    """Review of #1728: the cleanup listed the stage files from the plan, so a
+    grid job that failed to plan left every stage job's file behind."""
+    client, storage, match_id, slug, *_ = two_stages
+    real = server_mod._grid_inputs
+    calls = {"n": 0}
+
+    def flaky(*args, **kwargs):  # type: ignore[no-untyped-def]
+        calls["n"] += 1
+        if kwargs.get("tile_meta") is None and calls["n"] > 2:  # the grid job's own load
+            raise RuntimeError("planning failed")
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(server_mod, "_grid_inputs", flaky)
+    resp = client.post(
+        f"/api/matches/{match_id}/match/compare-export", json={"stage_numbers": [1, 2], "audio_from": slug}
+    )
+    _wait_for_job(client, match_id, resp.json()["id"], timeout=30.0)
+    assert not list(storage.list(f"matches/{match_id}/render-plans/"))
