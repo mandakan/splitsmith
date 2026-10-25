@@ -41,6 +41,10 @@ BUILTIN_PART_SECONDS: dict[tuple[str, str | None], float] = {
     ("stage_export", None): 60.0,
     ("compose", None): 120.0,
     ("upload", None): 30.0,
+    ("upload", "1080-basic"): 30.0,
+    ("upload", "1080-dressed"): 30.0,
+    ("upload", "2160-basic"): 90.0,
+    ("upload", "2160-dressed"): 90.0,
     ("reel", None): 180.0,
     ("youtube", None): 60.0,
 }

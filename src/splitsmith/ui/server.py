@@ -1927,6 +1927,42 @@ def _grid_profile(req: CompareGridRequest) -> str:
     return f"{req.canvas_height}-{'dressed' if dressed else 'basic'}"
 
 
+def _grid_queued_parts(
+    req: CompareGridRequest, bundles: list[project_loader.CompareShooterBundle], planned: list[int]
+) -> tuple[dict[int, list[JobPart]], list[JobPart]]:
+    """What a hosted grid's jobs will be made of, for the request to queue
+    with them: a render part per stage job (the stage's tiles' footage) and
+    the grid job's plan, wait, join and upload. ``footage_s`` is ``None``
+    where the request does not know a trim's length."""
+    profile = _grid_profile(req)
+    stage_parts: dict[int, list[JobPart]] = {}
+    longest: list[float] = []
+    for number in planned:
+        lengths = [
+            b.stages_by_number[number].duration_seconds
+            for b in bundles
+            if number in b.stages_by_number and b.stages_by_number[number].duration_seconds
+        ]
+        longest.append(max(lengths, default=0.0))
+        stage_parts[number] = [
+            JobPart(
+                key="render",
+                label=f"Stage {number}",
+                kind="grid_stage",
+                profile=profile,
+                footage_s=sum(lengths) or None,
+            )
+        ]
+    footage = sum(longest) or None
+    grid_parts = [
+        JobPart(key="plan", label="Planning", kind="load"),
+        JobPart(key="stages", label="Stage renders", kind="wait"),
+        JobPart(key="stitch", label="Joining", kind="stitch", profile=profile, footage_s=footage),
+        JobPart(key="upload", label="Uploading", kind="upload", profile=profile, footage_s=footage),
+    ]
+    return stage_parts, grid_parts
+
+
 def _grid_stage_part(plan: mp4_grid.GridStagePlan, profile: str, *, key: str | None = None) -> JobPart:
     return JobPart(
         key=key or f"stage-{plan.stage_number}",
@@ -2449,10 +2485,24 @@ def _run_compare_grid(
                 ),
                 JobPart(
                     key="stitch",
-                    label="Joining and uploading" if state is not None and state.storage else "Joining",
+                    label="Joining",
                     kind="stitch",
                     profile=profile,
                     footage_s=sum(plan.duration_seconds for plan in plans),
+                ),
+                # The upload of a 4K grid is a minute of its own (run G7).
+                *(
+                    [
+                        JobPart(
+                            key="upload",
+                            label="Uploading",
+                            kind="upload",
+                            profile=profile,
+                            footage_s=sum(plan.duration_seconds for plan in plans),
+                        )
+                    ]
+                    if state is not None and state.storage is not None
+                    else []
                 ),
             ]
         )
@@ -2503,6 +2553,7 @@ def _run_compare_grid(
             )
         # The render's own word on each stage settles its part, whatever
         # its steps reported on the way.
+        handle.update_part("stitch", status="done", progress=1.0)
         for outcome in result.stages:
             if handle.has_part(f"stage-{outcome.stage_number}"):
                 handle.update_part(
@@ -2533,14 +2584,13 @@ def _run_compare_grid(
         if state is not None and state.storage is not None:
             # A no-op without a match id (local mode has no match-scoped store).
             handle.update(progress=0.98, message="Uploading the grid...")
-            with handle.timer.phase("push"):
+            with handle.timer.phase("push"), handle.part("upload"):
                 export_storage.push_match_export_file(
                     state.storage, current_match_id.get(), result.output_path
                 )
                 for extra in youtube_files:
                     export_storage.push_match_export_file(state.storage, current_match_id.get(), extra)
 
-        handle.update_part("stitch", status="done", progress=1.0)
         handle.update(progress=1.0, message=f"Wrote {output_path.name}")
         handle.set_result(
             {

@@ -548,6 +548,7 @@ class JobBackend(Protocol):
         stage_number: int | None = None,
         shooter_slug: str | None = None,
         video_id: str | None = None,
+        parts: list[JobPart] | None = None,
     ) -> Job: ...
 
     async def get(self, job_id: str) -> Job | None: ...
@@ -701,9 +702,12 @@ class JobRegistry:
         stage_number: int | None = None,
         shooter_slug: str | None = None,
         video_id: str | None = None,
+        parts: list[JobPart] | None = None,
     ) -> Job:
         """Schedule the body registered for ``kind`` to run on the thread
-        pool, called as ``body(handle, **args)``.
+        pool, called as ``body(handle, **args)``. ``parts`` are what the job
+        will be made of, published before it runs (the export panel's first
+        estimate); the body's own ``set_parts`` replaces them.
 
         Returns the job snapshot (status=PENDING) immediately so the HTTP
         handler can hand the id back to the caller without blocking.
@@ -747,6 +751,7 @@ class JobRegistry:
             video_id=video_id,
             status=JobStatus.PENDING,
             export_id=current_export_id.get(),
+            parts=[part.model_copy() for part in parts] if parts else None,
             created_at=now,
             updated_at=now,
         )

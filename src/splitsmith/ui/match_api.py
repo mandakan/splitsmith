@@ -1902,11 +1902,16 @@ async def export_compare_grid(request: Request, req: CompareGridRequest) -> JSON
     # at once (export_slot holds the wakes).
     stage_jobs: dict[str, str] = {}
     grid_run = uuid.uuid4().hex
+    # Each job says at once what it is (its canvas, its footage) so the
+    # export panel's first estimate is the right size (spec 2026-10-25).
+    split = state.storage is not None and len(planned) > 1
+    stage_parts, grid_parts = _server._grid_queued_parts(req, bundles, planned) if split else ({}, None)
     async with export_slot(request):
-        if state.storage is not None and len(planned) > 1:
+        if split:
             for number in planned:
                 stage_job = await state.jobs.submit(
                     kind="compare-grid-stage",
+                    parts=stage_parts[number],
                     stage_number=number,
                     args={
                         "req": req,
@@ -1918,6 +1923,7 @@ async def export_compare_grid(request: Request, req: CompareGridRequest) -> JSON
                 stage_jobs[str(number)] = stage_job.id
         job = await state.jobs.submit(
             kind="compare-grid",
+            parts=grid_parts,
             args={"req": req, "match_root": str(match_root), "stage_jobs": stage_jobs, "grid_run": grid_run},
         )
     return JSONResponse(job.model_dump(mode="json"))
