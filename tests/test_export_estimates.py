@@ -188,3 +188,13 @@ def test_a_queued_4k_grid_uses_its_canvas() -> None:
     b = ee.BUILTIN_PART_SECONDS
     lead = b[("load", None)] + b[("stitch", "2160-basic")] + b[("upload", "2160-basic")] + ee.WORKER_BOOT_S
     assert estimate.time_left_s == pytest.approx(lead + b[("grid_stage", "2160-basic")] + ee.WORKER_BOOT_S)
+
+
+def test_the_rate_runs_from_the_first_fraction() -> None:
+    """Staging run G9: a dressed stage drew its overlay for minutes before
+    its first fraction, and the rate over the whole part said 22:43 with
+    7:03 left. Measured from the first fraction it is the encode's own."""
+    part = _running("render", "grid_stage", 400.0, progress=0.5, profile="1080-dressed")
+    part = part.model_copy(update={"rate_from": NOW - timedelta(seconds=100), "rate_from_progress": 0.2})
+    estimate = ee.estimate_export([_job("s", "compare-grid-stage", [part])], {}, now=NOW, hosted=False)
+    assert estimate.time_left_s == pytest.approx(0.5 * 100 / 0.3)
