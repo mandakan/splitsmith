@@ -226,9 +226,7 @@ def export_is_active(jobs: list[Job]) -> bool:
     already ended (the grid job cancels them; a killed worker may not)."""
     active = (JobStatus.PENDING, JobStatus.RUNNING)
     grid_ended = any(j.kind == "compare-grid" and j.status not in active for j in jobs)
-    return any(
-        j.status in active and not (grid_ended and j.kind == "compare-grid-stage") for j in jobs
-    )
+    return any(j.status in active and not (grid_ended and j.kind == "compare-grid-stage") for j in jobs)
 
 
 class Job(BaseModel):

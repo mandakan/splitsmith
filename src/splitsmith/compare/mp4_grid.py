@@ -46,6 +46,7 @@ from ..composition import (
     xfade_name,
 )
 from ..export_naming import stage_display_name
+from ..ffmpeg_progress import ffmpeg_progress
 from ..identity import ResolvedIdentity
 from ..look.brand import brand_mark_json
 from ..look.frames import frames_key
@@ -3154,6 +3155,9 @@ class GridRenderStep:
     total: int
     plan: GridStagePlan | None
     status: Literal["encoding", "reused", "stitching"]
+    # How far ffmpeg has got through this step (``ffmpeg_progress``), once
+    # it reports; ``None`` on the step's first report.
+    fraction: float | None = None
 
 
 GridProgress = Callable[[GridRenderStep], None]
@@ -3209,6 +3213,8 @@ class _GridEncoder:
         prepare: Callable[[], object] | None = None,
         tiles_for: int | None = None,
         fetch: bool = True,
+        on_fraction: Callable[[float], None] | None = None,
+        duration_s: float | None = None,
     ) -> tuple[Path | None, str]:
         """The segment's path, or ``None`` and ffmpeg's complaint.
         ``prepare`` writes an input the command reads (a sting's clip,
@@ -3222,7 +3228,7 @@ class _GridEncoder:
             if report is not None:
                 report("encoding")
             with _holding(self.tile_access, tiles_for):
-                completed = _run_ffmpeg(cmd, runner=runner)
+                completed = _run_watched(cmd, runner=runner, on_fraction=on_fraction, duration_s=duration_s)
             return (out, "") if completed.returncode == 0 else (None, _stderr_text(completed))
         # A tile's identity stands in for its file (#1691): a hosted worker
         # reads its own copy, at its own path and time, of the same object.
@@ -3249,8 +3255,11 @@ class _GridEncoder:
         target = str(out)
         try:
             with _holding(self.tile_access, tiles_for):
-                completed = _run_ffmpeg(
-                    tuple(str(partial) if token == target else token for token in cmd), runner=runner
+                completed = _run_watched(
+                    tuple(str(partial) if token == target else token for token in cmd),
+                    runner=runner,
+                    on_fraction=on_fraction,
+                    duration_s=duration_s,
                 )
             if completed.returncode != 0:
                 return None, _stderr_text(completed)
@@ -3293,6 +3302,34 @@ def _run_ffmpeg(cmd: tuple[str, ...], *, runner: Runner) -> subprocess.Completed
         return runner(list(cmd), capture_output=True)
     except FileNotFoundError as exc:
         raise GridRenderError(f"ffmpeg binary not found: {cmd[0]}") from exc
+
+
+def _run_watched(
+    cmd: tuple[str, ...],
+    *,
+    runner: Runner,
+    on_fraction: Callable[[float], None] | None,
+    duration_s: float | None,
+) -> subprocess.CompletedProcess:
+    """:func:`_run_ffmpeg`, reporting how far ffmpeg has got when asked.
+    The progress argv is added here, after the segment cache keyed the
+    command, so a watched encode and an unwatched one share a key."""
+    if on_fraction is None or not duration_s:
+        return _run_ffmpeg(cmd, runner=runner)
+    try:
+        with ffmpeg_progress(duration_s, on_fraction) as extra:
+            completed = _run_ffmpeg((cmd[0], *extra, *cmd[1:]), runner=runner)
+            if completed.returncode != 0:
+                raise _EncodeFailedError(completed)  # no closing 1.0 for a failed encode
+    except _EncodeFailedError as failed:
+        return failed.completed
+    return completed
+
+
+class _EncodeFailedError(Exception):
+    def __init__(self, completed: subprocess.CompletedProcess) -> None:
+        super().__init__("encode failed")
+        self.completed = completed
 
 
 def _stderr_text(completed: subprocess.CompletedProcess) -> str:
@@ -3832,10 +3869,23 @@ def render_grid_mp4(
     encoder = _GridEncoder(segment_cache, work, tile_identities=tile_identities, tile_access=tile_access)
 
     def report(
-        index: int, plan: GridStagePlan | None, status: Literal["encoding", "reused", "stitching"]
+        index: int,
+        plan: GridStagePlan | None,
+        status: Literal["encoding", "reused", "stitching"],
+        fraction: float | None = None,
     ) -> None:
         if progress is not None:
-            progress(GridRenderStep(index=index, total=len(plans), plan=plan, status=status))
+            progress(
+                GridRenderStep(index=index, total=len(plans), plan=plan, status=status, fraction=fraction)
+            )
+
+    def watch(
+        index: int, plan: GridStagePlan | None, status: Literal["encoding", "stitching"]
+    ) -> Callable[[float], None] | None:
+        """The ``on_fraction`` hook for one step, or ``None`` when nobody listens."""
+        if progress is None:
+            return None
+        return lambda fraction: report(index, plan, status, fraction)
 
     card_look = load_look(overlay_theme) if cards_requested or sting_requested else None
     card_theme = theme_for(card_look) if card_look is not None else None
@@ -4308,6 +4358,8 @@ def render_grid_mp4(
             report=lambda status, n=item.index, p=item.plan: report(n, p, status),
             tiles_for=item.plan.stage_number,
             fetch=fetch,
+            on_fraction=watch(item.index, item.plan, "encoding"),
+            duration_s=plan.duration_seconds,
         )
 
     if only_stage is not None:
@@ -4543,7 +4595,14 @@ def render_grid_mp4(
         remote=remote,
     )
     report(len(plans), None, "stitching")
-    completed = _run_ffmpeg(concat_cmd, runner=runner)
+    # The stitch runs as long as its input: the stages, near enough (cards
+    # and boundaries add a little; the fraction is capped at 1).
+    completed = _run_watched(
+        concat_cmd,
+        runner=runner,
+        on_fraction=watch(len(plans), None, "stitching"),
+        duration_s=sum(p.duration_seconds for p in plans),
+    )
     if completed.returncode != 0:
         raise GridRenderError(f"concat stitch failed: {redact_urls(_stderr_text(completed))}")
     stderr = completed.stderr

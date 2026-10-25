@@ -600,3 +600,27 @@ def test_a_stitch_that_reads_its_segments_over_http_matches_the_local_one(tmp_pa
     assert listed.count("http://") >= 2
     assert all(stage.ok for stage in remote.stages)
     assert _frame_digest(remote.output_path) == _frame_digest(local.output_path)
+
+
+@pytest.mark.skipif(not ffmpeg_available(), reason="needs ffmpeg and ffprobe on PATH")
+def test_a_stage_encode_reports_fractions(tmp_path: Path) -> None:
+    """Each encoded stage and the stitch report how far ffmpeg has got
+    (spec 2026-10-25), so a part never sits still while it works."""
+    ffmpeg = shutil.which("ffmpeg")
+    assert ffmpeg
+    steps: list[mp4_grid.GridRenderStep] = []
+    mp4_grid.render_grid_mp4(
+        _two_shooters(tmp_path, ffmpeg=ffmpeg),
+        audio_label="Anders",
+        output_path=tmp_path / "grid.mp4",
+        canvas=mp4_grid.GridCanvas(640, 360, SYNTHETIC_FPS_NUM, SYNTHETIC_FPS_DEN),
+        head_pad_seconds=0.5,
+        tail_pad_seconds=1.0,
+        ffmpeg_binary=ffmpeg,
+        work_dir=tmp_path / "work",
+        progress=steps.append,
+    )
+    encoding = [s for s in steps if s.status == "encoding" and s.fraction is not None]
+    assert {s.plan.stage_number for s in encoding if s.plan is not None} == {1, 2}
+    assert all(0.0 <= (s.fraction or 0.0) <= 1.0 for s in encoding)
+    assert any(s.status == "stitching" and s.fraction == 1.0 for s in steps)
