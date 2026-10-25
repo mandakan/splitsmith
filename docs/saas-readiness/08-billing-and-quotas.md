@@ -62,9 +62,19 @@ the project guidance describes -- predictable monthly cost beats
 optimal cost.
 
 If usage shows we're losing money on whales, v2 can add per-stage
-overage pricing on top of the flat tier. Today's data: a heavy
-user costs us <$1/month in compute (per 04). Even a $5/month tier
-has plenty of margin.
+overage pricing on top of the flat tier.
+
+The 2026-05 version of this doc said a heavy user costs under $1 a
+month in compute, which held for audio upload only. Measured on the
+raw-video path (04, Cost model, 2026-10-25), ingest is about $0.28 per
+shooter-match, a grid render is about $0.60 (1080) to $1.08 (4K
+dressed), and kept source footage adds about 4.8 GB per shooter-match
+every month it stays. A heavy user can therefore cost more than a
+$5/month tier brings in after VAT and fees, mostly through repeated 4K
+renders and footage kept forever. A flat tier needs a monthly grid
+render allowance, a storage cap and a source retention period from
+the start; the per-subscriber margin it leaves is small enough that
+support time, not infrastructure, decides whether the service pays.
 
 ## Stripe integration
 
@@ -213,9 +223,10 @@ This matches the "we don't have product-market-fit data yet" stage.
 Adding caps before knowing what real usage looks like risks scaring
 off legitimate users.
 
-If a single premium user starts costing us $50/month in compute (the
-data from 04 says this would require an extreme workload), we add
-quotas in v2 informed by what real usage looks like.
+The measured costs in 04 change this for raw video: unlimited 4K grid
+renders and source footage kept forever are not safe without caps, so
+those two need limits before paid launch, even if the rest stays
+display-only.
 
 ### What we measure
 

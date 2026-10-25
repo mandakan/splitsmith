@@ -255,7 +255,44 @@ known storage paths.
 - Sentry captures the exception with `project_id` + `stage_number`
   context; PII (audio bytes, full storage paths) is scrubbed.
 
-## Cost model (rough, for sizing)
+## Cost model
+
+### Measured (2026-10-25, Cloud Run)
+
+The HFO Masters 2026 benchmarks on staging (4 shooters, 12 stages,
+60 clips, 19.3 GB of source footage) measured the raw-video path that
+hosted actually runs: upload, trim, beep and shot detection, per-shooter
+exports, and the squad compare grid. Workers are Cloud Run jobs with
+4 vCPU and 16 GiB in europe-west1, at list price $0.000018 per vCPU
+second and $0.000002 per GiB second (about $0.37 per worker-hour),
+before any free tier.
+
+| Work | Billed worker time | List price |
+| --- | --- | --- |
+| Ingest one shooter-match (12 stages) | about 45 min | about $0.28 |
+| Ingest the whole match (4 shooters) | 3.0 h | $0.96 at 8 GiB, about $1.13 at 16 GiB |
+| One 4K dressed grid render | 2.9 h | $1.08 |
+| One 1080 dressed grid render | about 1.8 h | about $0.55 to $0.70 |
+
+- Trimming is two thirds of ingest (103 of 154 job-minutes).
+- Cloud Run bills about 18 % more time than ingest jobs run (container
+  boot and idle between jobs), about 5 % more for a grid.
+- A grid's parent job holds a worker for the whole render (22 of the
+  4K grid's 173 billed minutes) while it mostly waits on the stage jobs.
+- Source footage is about 4.8 GB per shooter-match. On R2 that is about
+  $0.07 per month for as long as it is kept, and it accumulates.
+
+So per stage, ingest is about $0.02 and a heavy user with 100 stages a
+month costs about $2.40 in ingest, plus about $1 per 4K grid render, plus
+storage that grows by about 40 GB (about $0.60 a month) for every month
+the source footage is kept. The costs to cap are grid renders and kept
+source footage, not detection; see 08.
+
+### Original estimate (2026-05, audio upload)
+
+The estimate below was made for the audio-upload design (Tier 2) before
+hosted ingested raw video. It is kept for the Tier 2 path; the measured
+figures above supersede its Tier 3 numbers.
 
 Tier 2 per stage:
 - 5 MB audio upload (R2: free) + 5 MB egress to worker (free, in-
@@ -268,9 +305,10 @@ Tier 3 per stage:
 - 5-30 GB video upload (R2: free) + 5-30 GB egress to worker (free).
 - Worker: ~30s-2min CPU + ffmpeg IO. ~$0.001-$0.005/stage.
 
-A heavy user with 100 stages/month costs us ~$0.10-$0.50 in compute
-+ ~$5-15 in R2 storage if they keep raw video. Either way, the
-margins on a $5-10/month flat tier are healthy. Detail in 08.
+The 2026-05 estimate put a heavy user with 100 stages/month at
+~$0.10-$0.50 in compute. The measured raw-video path is five to twenty times
+that before grids, so a flat tier needs caps on grid renders and source
+retention; see 08.
 
 ## Local-mode degradation
 
