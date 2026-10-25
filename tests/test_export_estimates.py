@@ -136,3 +136,30 @@ def test_an_upload_after_the_lead_adds_its_time() -> None:
     upload = _job("u", "youtube_upload", [_part("upload", "youtube")], status=JobStatus.PENDING, created=50)
     estimate = ee.estimate_export([lead, upload], {}, now=NOW, hosted=False)
     assert estimate.time_left_s == pytest.approx(ee.BUILTIN_PART_SECONDS[("youtube", None)])
+
+
+def test_a_queued_grid_counts_its_stages_before_any_worker_runs() -> None:
+    """Staging run G6: every job queued, none had published parts yet, and
+    the panel said 2 minutes for a 10-minute grid. Queued, a stage job is a
+    grid stage and the grid job is its plan, its wait and its join."""
+    stages = [
+        _job(f"s{i}", "compare-grid-stage", None, status=JobStatus.PENDING, created=i) for i in range(12)
+    ]
+    grid = _job("g", "compare-grid", None, status=JobStatus.PENDING, created=100)
+    estimate = ee.estimate_export([*stages, grid], {}, now=NOW, hosted=True)
+    stage = ee.BUILTIN_PART_SECONDS[("grid_stage", None)] + ee.WORKER_BOOT_S
+    lead = (
+        ee.BUILTIN_PART_SECONDS[("load", None)] + ee.BUILTIN_PART_SECONDS[("stitch", None)] + ee.WORKER_BOOT_S
+    )
+    assert estimate.time_left_s == pytest.approx(lead + stage)
+    assert [p.key for p in estimate.parts if p.job_id == "g"] == ["plan", "stages", "stitch"]
+
+
+def test_early_progress_does_not_set_the_rate() -> None:
+    """A stage part runs from its tile download; ffmpeg's first fractions
+    over that clock overshot (run G6: 13 min said, 6.5 min left)."""
+    part = _running("render", "grid_stage", 100.0, progress=0.1, profile="1080-basic")
+    estimate = ee.estimate_export([_job("s", "compare-grid-stage", [part])], {}, now=NOW, hosted=False)
+    assert estimate.time_left_s == pytest.approx(
+        ee.BUILTIN_PART_SECONDS[("grid_stage", "1080-basic")] - 100.0
+    )

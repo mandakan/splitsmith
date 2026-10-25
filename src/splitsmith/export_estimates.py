@@ -26,10 +26,13 @@ from .ui.jobs import EXPORT_LEAD_KINDS, Job, JobPart, JobStatus
 #: seconds, not per footage-second: the benchmarks never recorded footage
 #: per stage (plan ruling).
 BUILTIN_PART_SECONDS: dict[tuple[str, str | None], float] = {
+    # A queued stage job, before it knows its canvas.
+    ("grid_stage", None): 300.0,
     ("grid_stage", "1080-basic"): 300.0,
     ("grid_stage", "1080-dressed"): 480.0,
     ("grid_stage", "2160-basic"): 420.0,
     ("grid_stage", "2160-dressed"): 700.0,
+    ("stitch", None): 100.0,
     ("stitch", "1080-basic"): 100.0,
     ("stitch", "1080-dressed"): 100.0,
     ("stitch", "2160-basic"): 270.0,
@@ -44,8 +47,10 @@ BUILTIN_PART_SECONDS: dict[tuple[str, str | None], float] = {
 DEFAULT_PART_SECONDS = 60.0
 #: A hosted job still queued waits about this long for a worker to boot.
 WORKER_BOOT_S = 60.0
-#: A running part's own rate is trusted once it is this far along.
-MIN_RATE_PROGRESS = 0.05
+#: A running part's own rate is trusted once it is this far along. A grid
+#: stage's clock starts at its tile download, before ffmpeg's first fraction,
+#: so at 5% the rate overshot by double (staging run G6).
+MIN_RATE_PROGRESS = 0.15
 
 _DONE = ("done", "skipped", "failed")
 _ENDED = (JobStatus.SUCCEEDED, JobStatus.FAILED, JobStatus.CANCELLED)
@@ -82,15 +87,24 @@ def history_rates(finished: list[Job]) -> dict[tuple[str, str | None], float]:
 
 
 def parts_of(job: Job) -> list[JobPart]:
-    """A job's parts, or the job itself as one part when it published none."""
+    """A job's parts, or what a job that published none yet stands for: a
+    queued grid job is its plan, its wait for the stage jobs and its join; a
+    queued stage job is a grid stage; any other job is one part of its kind."""
     if job.parts:
         return list(job.parts)
+    if job.kind == "compare-grid" and job.status == JobStatus.PENDING:
+        return [
+            JobPart(key="plan", label="Planning", kind="load"),
+            JobPart(key="stages", label="Stage renders", kind="wait"),
+            JobPart(key="stitch", label="Joining", kind="stitch"),
+        ]
     status = {
         JobStatus.PENDING: "waiting",
         JobStatus.RUNNING: "running",
         JobStatus.SUCCEEDED: "done",
     }.get(job.status, "failed")
-    return [JobPart(key="job", label=job.kind, kind=job.kind, status=status, started_at=job.started_at)]  # type: ignore[arg-type]
+    kind = "grid_stage" if job.kind == "compare-grid-stage" else job.kind
+    return [JobPart(key="job", label=job.kind, kind=kind, status=status, started_at=job.started_at)]  # type: ignore[arg-type]
 
 
 def _planned(part: JobPart, history: dict[tuple[str, str | None], float]) -> tuple[float, bool]:
