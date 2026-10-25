@@ -210,6 +210,13 @@ Deploy facts (worker env, `FORWARDED_ALLOW_IPS`, the waitlist cut-over) are in
   at the end of its cooldown fans out beside it while it boots (a Cloud Run
   start within the grace), never beside a self-hosted box still booting. `tests/test_worker_trigger.py`
   and `tests/test_worker_drain_lifecycle.py` pin all three.
+- A route that queues a batch (a grid's stage jobs) submits inside
+  `worker_trigger.hold_wakes()`: one wake after the last submit counts the
+  whole batch and is awaited in the request. Woken per submit, the first wake
+  sees one job and the rest wait on the settle check, a background timer
+  that serve's CPU, throttled between requests, may not run in time (a
+  grid once waited two minutes for the watch). The executions of one wake
+  start concurrently, so the request waits about one `jobs.run`, not thirteen.
 
 ## Database connections
 

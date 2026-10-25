@@ -50,13 +50,15 @@ machinery.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import itertools
 import json
 import logging
 import math
 import os
 import time
-from collections.abc import Awaitable, Callable, Coroutine
+from collections.abc import AsyncIterator, Awaitable, Callable, Coroutine
+from contextvars import ContextVar
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, Protocol
 
@@ -558,17 +560,24 @@ class WorkerDispatcher:
 
         Separate executions rather than one with several tasks: each drains
         and exits on its own, and Procrastinate's locking hands every job to
-        one of them. Stops at the first refused start and releases the
-        claims it did not use.
+        one of them. The starts go at once: one after another, a grid's
+        thirteen took ten seconds, and a batch's wake waits for them inside
+        its request (:func:`hold_wakes`). Releases the claims of the starts
+        the platform refused.
         """
         started = 0
-        for _ in range(count):
-            try:
-                await self._run_job()
-            except Exception:
-                logger.warning("worker dispatcher: cloud run job start failed", exc_info=True)
-                break
-            started += 1
+        try:
+            # One token fetch for all of them, not one each on a cold cache.
+            await self._gcp_access_token()
+        except Exception:
+            logger.warning("worker dispatcher: cloud run access token failed", exc_info=True)
+        else:
+            results = await asyncio.gather(*(self._run_job() for _ in range(count)), return_exceptions=True)
+            for result in results:
+                if isinstance(result, BaseException):
+                    logger.warning("worker dispatcher: cloud run job start failed", exc_info=result)
+                else:
+                    started += 1
         if started < count:
             try:
                 await self._store.release_starts(worker_id, count - started)
@@ -684,13 +693,18 @@ class WorkerDispatcher:
         """
         async with self._lock:
             now = time.monotonic()
+            # Each no-op says why: a settle check that added nothing used to
+            # leave no trace (run G2).
             if self._last_attempt is not None and now - self._last_attempt < self._cooldown_seconds:
+                logger.info("worker dispatcher: top-up skipped, inside the cooldown")
                 return False
             try:
                 live = self._worker_active is not None and await self._worker_active()
                 if not live and not await self._platform_booting():
+                    logger.info("worker dispatcher: top-up skipped, no live drain and nothing booting")
                     return False
                 if not await self._fan_out():
+                    logger.info("worker dispatcher: top-up added nothing (live drain: %s)", live)
                     return False
             except Exception:
                 logger.warning("worker dispatcher: fan-out check failed; nets will recover", exc_info=True)
@@ -960,6 +974,37 @@ def make_solo_jobs_counter(session_factory: Callable[[], Any]) -> PendingJobsCou
     return _solo_jobs
 
 
+# The launchers whose wake a :func:`hold_wakes` batch owes, or None outside one.
+_held_wakes: ContextVar[list[WorkerLauncher] | None] = ContextVar("splitsmith_held_wakes", default=None)
+
+
+def wakes_held() -> bool:
+    """Whether a defer here is inside a :func:`hold_wakes` batch."""
+    return _held_wakes.get() is not None
+
+
+@contextlib.asynccontextmanager
+async def hold_wakes() -> AsyncIterator[None]:
+    """Queue a batch of jobs, then wake workers once, after the last.
+
+    Woken per submit, the first wake counts one queued job and starts one
+    execution; the rest of the batch lands in the dispatcher's cooldown and
+    waits for its settle check, a background timer that a request-throttled
+    serve CPU may never run in time (run G2: two minutes, until the watch).
+    Here the one wake counts the whole batch and is awaited before the
+    request answers, while serve still has its CPU. A batch that raises
+    still wakes for what it queued.
+    """
+    held: list[WorkerLauncher] = []
+    token = _held_wakes.set(held)
+    try:
+        yield
+    finally:
+        _held_wakes.reset(token)
+        for launcher in dict.fromkeys(held):
+            await launcher.trigger()
+
+
 def wrap_deferrer(
     deferrer: Callable[..., Awaitable[None]], launcher: WorkerLauncher
 ) -> Callable[..., Awaitable[None]]:
@@ -967,12 +1012,17 @@ def wrap_deferrer(
 
     The launch is fire-and-forget so enqueue latency stays flat; the
     defer's own exceptions propagate untouched (a failed enqueue must
-    not fire a worker, and the caller needs the original error).
+    not fire a worker, and the caller needs the original error). Inside
+    :func:`hold_wakes` the launch waits for the batch's end.
     """
 
     async def _defer_and_trigger(**kwargs: Any) -> None:
         await deferrer(**kwargs)
-        launcher.schedule()
+        held = _held_wakes.get()
+        if held is not None:
+            held.append(launcher)
+        else:
+            launcher.schedule()
 
     return _defer_and_trigger
 
