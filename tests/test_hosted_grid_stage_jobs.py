@@ -280,3 +280,17 @@ def test_the_wait_ends_at_its_deadline_without_cancelling(monkeypatch: pytest.Mo
     state, cancelled = _jobs(JobStatus.RUNNING)
     _work(state, _Handle(cancel_after=None), {1: "a"})
     assert cancelled == []
+
+
+def test_a_stage_the_grid_job_renders_itself_is_one_of_its_parts(two_stages, inline_deferrer) -> None:
+    client, _storage, match_id, slug, _calls, _failing, _raising = two_stages
+    inline_deferrer["hold_kinds"] = {"compare-grid-stage"}
+    grid = _grid(client, match_id, slug, [1, 2])
+    full = client.get(f"/api/matches/{match_id}/me/jobs/{grid['id']}").json()
+    assert [(p["key"], p["status"]) for p in full["parts"]] == [
+        ("plan", "done"),
+        ("stages", "done"),
+        ("stage-2", "done"),
+        ("stage-1", "done"),
+        ("stitch", "done"),
+    ]

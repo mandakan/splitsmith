@@ -99,7 +99,16 @@ def _run_order(ordered: list[Job]) -> list[tuple[Job, JobPart]]:
     wait = next((i for i, p in enumerate(lead_parts) if p.kind == "wait"), None)
     if lead is None or wait is None:
         return [(job, part) for job in ordered for part in parts_of(job)]
-    siblings = [j for j in ordered if j is not lead and j.created_at <= lead.created_at]
+    # A stage job the lead took over (cancelled, rendered by the lead as its
+    # own ``stage-N`` part) is that part's row, not a cancelled one.
+    taken = {p.key for p in lead_parts if p.kind == "grid_stage"}
+    siblings = [
+        j
+        for j in ordered
+        if j is not lead
+        and j.created_at <= lead.created_at
+        and not (j.status is JobStatus.CANCELLED and f"stage-{j.stage_number}" in taken)
+    ]
     followers = [j for j in ordered if j is not lead and j.created_at > lead.created_at]
     return [
         *((lead, part) for part in lead_parts[:wait]),
@@ -132,7 +141,15 @@ def build_view(
                 job_id=job.id,
                 key=part.key,
                 label=_row_label(job, part.key, part.label),
-                status="cancelled" if job.status is JobStatus.CANCELLED else part.status,
+                status=(
+                    "cancelled"
+                    if job.status is JobStatus.CANCELLED
+                    else (
+                        "failed"
+                        if job.status is JobStatus.FAILED and part.status == "running"
+                        else part.status
+                    )
+                ),
                 progress=part.progress,
                 elapsed_s=elapsed,
                 remaining_s=est.remaining_s,
@@ -224,6 +241,8 @@ async def retry_export_part(
     job = next((j for j in jobs if j.id == body.job_id), None)
     if job is None:
         raise HTTPException(status_code=404, detail=f"unknown job in export: {body.job_id}")
+    if export_status(jobs) == "running":
+        raise HTTPException(status_code=409, detail="the export is still running")
     part_failed = any(p.status == "failed" for p in job.parts or ())
     if job.status is not JobStatus.FAILED and not part_failed:
         raise HTTPException(status_code=409, detail="only a failed part can be retried")

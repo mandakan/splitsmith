@@ -2275,7 +2275,25 @@ def _work_grid_stages(
                 number = queued[0]
                 run_sync(state.jobs.cancel(stage_jobs[number]))
                 handle.update(message=f"Rendering stage {number} here...")
-                outcome = _render_one_grid_stage(req, inputs, options, number, state=state, scratch=scratch)
+                # The stage is this job's part now (spec 2026-10-25): the
+                # panel shows it moving here, not a cancelled stage job.
+                key = f"stage-{number}"
+                plan = next((p for p in inputs.plans if p.stage_number == number), None)
+                if plan is not None and handle.has_part("stitch") and not handle.has_part(key):
+                    handle.add_parts([_grid_stage_part(plan, _grid_profile(req))], before="stitch")
+                tracked = handle.has_part(key)
+                if tracked:
+                    handle.update_part(key, status="running")
+
+                def _here(step: mp4_grid.GridRenderStep, key: str = key, tracked: bool = tracked) -> None:
+                    if tracked and step.fraction is not None and step.plan is not None:
+                        handle.update_part(key, progress=step.fraction)
+
+                outcome = _render_one_grid_stage(
+                    req, inputs, options, number, state=state, scratch=scratch, progress=_here
+                )
+                if tracked:
+                    handle.update_part(key, status="done" if outcome.ok else "failed")
                 if not outcome.ok:
                     logger.warning("compare grid: stage %d failed here: %s", number, outcome.error)
                 continue

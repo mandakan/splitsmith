@@ -79,4 +79,21 @@ describe("ExportProgress", () => {
     fireEvent.click(await screen.findByRole("button", { name: /^stop export$/i }));
     await waitFor(() => expect(onCancel).toHaveBeenCalled());
   });
+
+  it("offers Dismiss on an export that ended", () => {
+    const onDismiss = vi.fn();
+    render(
+      <ConfirmProvider>
+        <ExportProgress
+          view={view({ status: "succeeded", time_left_s: null, rows: [row({ status: "failed", retryable: true })] })}
+          onCancel={vi.fn()}
+          onRetry={vi.fn()}
+          onDismiss={onDismiss}
+        />
+      </ConfirmProvider>,
+    );
+    expect(screen.queryByRole("button", { name: /cancel export/i })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: /dismiss/i }));
+    expect(onDismiss).toHaveBeenCalled();
+  });
 });

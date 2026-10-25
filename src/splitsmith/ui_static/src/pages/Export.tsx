@@ -182,6 +182,7 @@ function ExportInner({ slug }: { slug: string }) {
   const exportsState = useActiveExports();
   const active = exportsState.active;
   const runningHere = (active?.exports ?? []).filter((e) => e.match_id === (matchId ?? e.match_id));
+  const endedHere = exportsState.ended.filter((e) => e.match_id === (matchId ?? e.match_id));
   const runningElsewhere = (active?.exports ?? []).find((e) => matchId && e.match_id !== matchId) ?? null;
   const atLimit = limitReached(active);
 
@@ -1216,10 +1217,11 @@ function ExportInner({ slug }: { slug: string }) {
                   )}
                 </p>
               ) : null}
-              {runningHere.map((view) => (
+              {[...runningHere, ...endedHere].map((view) => (
                 <ExportProgress
                   key={view.export_id}
                   view={view}
+                  onDismiss={view.status === "running" ? undefined : () => exportsState.dismiss(view.export_id)}
                   onCancel={() => void api.cancelExport(view.export_id).finally(() => void exportsState.refresh())}
                   onRetry={(jobId) =>
                     void api

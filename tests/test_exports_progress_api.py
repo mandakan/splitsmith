@@ -161,3 +161,126 @@ def test_rows_follow_the_order_parts_run_in() -> None:
         ("s2", "job"),
         ("g", "stitch"),
     ]
+
+
+def _view_of(jobs: list[Any], now_offset: int = 60) -> Any:
+    from datetime import timedelta
+
+    from splitsmith.ui.exports_progress_api import build_view
+
+    return build_view("e1", jobs, {}, now=jobs[0].created_at + timedelta(seconds=now_offset))
+
+
+def _job(
+    job_id: str, kind: str, created: int, parts: Any, status: str = "running", stage: int | None = None
+) -> Any:
+    from datetime import UTC, datetime, timedelta
+
+    from splitsmith.ui.jobs import Job, JobStatus
+
+    at = datetime(2026, 10, 25, 12, 0, tzinfo=UTC) + timedelta(seconds=created)
+    return Job(
+        id=job_id,
+        kind=kind,
+        status=JobStatus(status),
+        export_id="e1",
+        parts=parts,
+        stage_number=stage,
+        created_at=at,
+        updated_at=at,
+    )
+
+
+def test_a_stage_the_grid_renders_itself_is_one_running_row() -> None:
+    """A queued stage job the grid job takes over is cancelled; its row is
+    the grid job's own part for that stage, and it counts toward time left."""
+    from splitsmith import export_estimates as ee
+    from splitsmith.ui.jobs import JobPart
+
+    jobs = [
+        _job("s1", "compare-grid-stage", 0, None, status="cancelled", stage=1),
+        _job(
+            "g",
+            "compare-grid",
+            1,
+            [
+                JobPart(key="plan", label="Planning", kind="load", status="done"),
+                JobPart(key="stages", label="Stage renders", kind="wait", status="running"),
+                JobPart(
+                    key="stage-1", label="Stage 1", kind="grid_stage", profile="1080-basic", status="running"
+                ),
+                JobPart(key="stitch", label="Joining", kind="stitch", profile="1080-basic"),
+            ],
+        ),
+    ]
+    view = _view_of(jobs, now_offset=0)
+    assert [(r.job_id, r.key, r.status) for r in view.rows] == [
+        ("g", "plan", "done"),
+        ("g", "stage-1", "running"),
+        ("g", "stitch", "waiting"),
+    ]
+    assert (
+        view.time_left_s
+        == ee.BUILTIN_PART_SECONDS[("grid_stage", "1080-basic")]
+        + ee.BUILTIN_PART_SECONDS[("stitch", "1080-basic")]
+    )
+
+
+def test_a_failed_job_shows_no_part_still_running() -> None:
+    from splitsmith.ui.jobs import JobPart
+
+    jobs = [
+        _job(
+            "m",
+            "match_export",
+            0,
+            [JobPart(key="stage-1", label="Stage 1", kind="stage_export", status="running")],
+            status="failed",
+        )
+    ]
+    (row,) = _view_of(jobs).rows
+    assert row.status == "failed" and row.retryable is True
+
+
+def test_the_export_follows_its_latest_grid() -> None:
+    """A grid run again inside its export: the export is what the re-run did."""
+    jobs = [
+        _job("g1", "compare-grid", 0, None, status="succeeded"),
+        _job("g2", "compare-grid", 50, None, status="failed"),
+    ]
+    assert _view_of(jobs).status == "failed"
+
+
+def test_retry_refuses_while_the_export_runs(two_stages: Any, inline_deferrer: Any, hosted_db: str) -> None:
+    """A stage failed but the grid still runs: nothing to retry yet."""
+    from sqlalchemy import update
+
+    from splitsmith.db import ComputeJobRow
+    from tests.test_export_limit import _db
+
+    client, _storage, match_id, slug, *_ = two_stages
+    inline_deferrer["hold"] = True
+    grid = _start(client, match_id, slug)
+    stage = next(j for j in _stage_jobs(client, match_id) if j["stage_number"] == 1)
+    _db(hosted_db, update(ComputeJobRow).where(ComputeJobRow.id == stage["id"]).values(status="failed"))
+    r = client.post(f"/api/me/exports/{grid['export_id']}/retry", json={"job_id": stage["id"]})
+    assert r.status_code == 409, r.text
+
+
+def test_the_jobs_retry_respects_the_export_limit(
+    two_stages: Any, inline_deferrer: Any, hosted_db: str
+) -> None:
+    """The failures sheet's Retry re-runs an export job: it takes a slot too."""
+    from sqlalchemy import update
+
+    from splitsmith.db import ComputeJobRow
+    from tests.test_export_limit import _db
+
+    client, _storage, match_id, slug, *_ = two_stages
+    inline_deferrer["hold"] = True
+    first = _start(client, match_id, slug)
+    _db(hosted_db, update(ComputeJobRow).values(status="failed"))
+    _start(client, match_id, slug)  # the second export holds the one slot
+    r = client.post(f"/api/me/jobs/{first['id']}/retry")
+    assert r.status_code == 409, r.text
+    assert r.json()["detail"]["code"] == "export_limit"

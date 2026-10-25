@@ -54,9 +54,11 @@ export interface ExportProgressProps {
   view: ExportView;
   onCancel: () => void;
   onRetry: (jobId: string) => void;
+  /** Put away an export that ended (its failed rows stay until then). */
+  onDismiss?: () => void;
 }
 
-export function ExportProgress({ view, onCancel, onRetry }: ExportProgressProps) {
+export function ExportProgress({ view, onCancel, onRetry, onDismiss }: ExportProgressProps) {
   const confirm = useConfirm();
   const running = view.status === "running";
   const timeLeft = timeLeftLine(view);
@@ -77,6 +79,10 @@ export function ExportProgress({ view, onCancel, onRetry }: ExportProgressProps)
         {running ? (
           <Button variant="ghost" size="sm" onClick={() => void cancel()} aria-label="Cancel export">
             Cancel
+          </Button>
+        ) : onDismiss ? (
+          <Button variant="ghost" size="sm" onClick={onDismiss}>
+            Dismiss
           </Button>
         ) : null}
       </div>

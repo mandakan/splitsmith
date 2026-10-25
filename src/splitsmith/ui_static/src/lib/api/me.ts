@@ -267,6 +267,9 @@ export const meApi = {
   activeExports: (opts?: { signal?: AbortSignal }) =>
     request<ActiveExports>("/api/me/exports/active", { signal: opts?.signal }),
 
+  /** One export with its parts, running or ended. */
+  getExport: (exportId: string) => request<ExportView>(`/api/me/exports/${encodeURIComponent(exportId)}`),
+
   /** Cancel every part of an export still waiting or running. */
   cancelExport: (exportId: string) =>
     request<ExportView>(`/api/me/exports/${encodeURIComponent(exportId)}/cancel`, { method: "POST" }),

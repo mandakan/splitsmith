@@ -23,9 +23,10 @@ function active(job: Job): boolean {
   return job.status === "pending" || job.status === "running";
 }
 
-/** One row per export: an export's jobs fold into its lead's (else its
- *  first job's), running while any of them runs, with their mean progress.
- *  Jobs no export queued pass through. Order follows each export's first job. */
+/** One row per export: an export's jobs fold into its latest lead's (else
+ *  its first job's), running while any of them runs, with their mean
+ *  progress; once ended, an unacknowledged failed job stands for it. Jobs
+ *  no export queued pass through. Order follows each export's first job. */
 export function foldExports(jobs: Job[]): Job[] {
   const groups = new Map<string, Job[]>();
   for (const job of jobs) {
@@ -41,14 +42,16 @@ export function foldExports(jobs: Job[]): Job[] {
     if (seen.has(job.export_id)) continue;
     seen.add(job.export_id);
     const members = groups.get(job.export_id) ?? [job];
-    const lead = members.find((j) => LEAD_KINDS.has(j.kind)) ?? members[0];
-    const status = members.some((j) => j.status === "running")
-      ? "running"
-      : members.some(active)
-        ? "pending"
-        : lead.status;
+    const lead = [...members].reverse().find((j) => LEAD_KINDS.has(j.kind)) ?? members[0];
     const progress = members.reduce((sum, j) => sum + (j.progress ?? 0), 0) / members.length;
-    out.push({ ...lead, status, progress });
+    if (members.some(active)) {
+      out.push({ ...lead, status: members.some((j) => j.status === "running") ? "running" : "pending", progress });
+      continue;
+    }
+    // Ended: a failure anywhere in it (a chained upload, one stage's trim)
+    // stands for the export, so the failures sheet still offers it.
+    const failed = members.find((j) => j.status === "failed" && !j.acknowledged);
+    out.push(failed ?? { ...lead, progress });
   }
   return out;
 }

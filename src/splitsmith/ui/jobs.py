@@ -370,10 +370,13 @@ class JobHandle:
         self._parts = [part.model_copy() for part in parts]
         self._write_parts()
 
-    def add_parts(self, parts: list[JobPart]) -> None:
+    def add_parts(self, parts: list[JobPart], *, before: str | None = None) -> None:
         """Publish more parts after the ones already there (a job that
-        learns its stages only once its plan has loaded)."""
-        self._parts.extend(part.model_copy() for part in parts)
+        learns its stages only once its plan has loaded), or ahead of the
+        part ``before`` (a stage the grid job takes over runs before its
+        join)."""
+        at = next((i for i, p in enumerate(self._parts) if p.key == before), len(self._parts))
+        self._parts[at:at] = [part.model_copy() for part in parts]
         self._write_parts()
 
     def update_part(

@@ -52,6 +52,17 @@ describe("foldExports", () => {
     expect(folded[0].progress).toBeCloseTo(0.2);
   });
 
+  it("shows a failure in the export, not its lead's success", () => {
+    const folded = foldExports([
+      job({ id: "m", kind: "match_export", export_id: "e1", status: "succeeded" }),
+      job({ id: "u", kind: "youtube_upload", export_id: "e1", status: "failed" }),
+      job({ id: "t1", export_id: "e2", status: "succeeded" }),
+      job({ id: "t2", export_id: "e2", status: "failed" }),
+    ]);
+    // The failed job stands for its export, so acknowledge and retry act on it.
+    expect(folded.map((j) => `${j.id}:${j.status}`)).toEqual(["u:failed", "t2:failed"]);
+  });
+
   it("keeps an export with no lead as its first job", () => {
     const folded = foldExports([
       job({ id: "t1", export_id: "e2", status: "succeeded" }),

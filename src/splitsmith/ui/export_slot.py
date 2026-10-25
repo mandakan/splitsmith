@@ -46,10 +46,12 @@ class ExportLimitReachedError(Exception):
 
 
 def lead_job(jobs: list[Job]) -> Job | None:
-    """The job an export's kind and status follow: its grid, match export
-    or reel, else (a stage export, trims only) its first job."""
+    """The job an export's kind and status follow: its latest grid, match
+    export or reel (a retry re-runs the grid inside its export), else (a
+    stage export, trims only) its first job."""
     ordered = sorted(jobs, key=lambda j: j.created_at)
-    return next((j for j in ordered if j.kind in EXPORT_LEAD_KINDS), ordered[0] if ordered else None)
+    leads = [j for j in ordered if j.kind in EXPORT_LEAD_KINDS]
+    return leads[-1] if leads else (ordered[0] if ordered else None)
 
 
 def summarize(export_id: str, jobs: list[Job]) -> ExportSummary:

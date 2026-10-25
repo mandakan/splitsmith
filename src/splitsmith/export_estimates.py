@@ -146,7 +146,8 @@ def estimate_export(
         job_left[job.id] = total
 
     ordered = sorted(jobs, key=lambda j: j.created_at)
-    lead = next((j for j in ordered if j.kind in EXPORT_LEAD_KINDS), None)
+    leads = [j for j in ordered if j.kind in EXPORT_LEAD_KINDS]
+    lead = leads[-1] if leads else None  # a re-run grid leads its export
     if lead is None:
         time_left = max(job_left.values(), default=0.0)
     else:
@@ -156,7 +157,13 @@ def estimate_export(
         lead_parts = {p.key: p for p in parts_of(lead)}
         waiting_on_siblings = any(lead_parts[k].status not in _DONE for k in wait_keys.get(lead.id, ()))
         if waiting_on_siblings:
-            through_lead = job_left[lead.id] + longest_sibling
+            # Stages the lead renders itself run beside the stage jobs.
+            beside = sum(
+                e.remaining_s
+                for e, p in zip([e for e in estimates if e.job_id == lead.id], parts_of(lead), strict=True)
+                if p.kind == "grid_stage"
+            )
+            through_lead = job_left[lead.id] - beside + max(beside, longest_sibling)
         else:
             through_lead = max(job_left[lead.id], longest_sibling)
         time_left = through_lead + sum(job_left[j.id] for j in followers)
