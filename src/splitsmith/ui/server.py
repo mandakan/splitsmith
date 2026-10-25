@@ -2482,8 +2482,8 @@ def _run_compare_grid_stage(
             )
 
             def _stage_step(step: mp4_grid.GridRenderStep) -> None:
-                # A fraction comes from ffmpeg's progress thread, where a
-                # raise stops nothing; the runner stops the encode itself.
+                # A fraction mostly comes from ffmpeg's progress thread,
+                # where a raise stops nothing; the runner stops the encode.
                 if step.fraction is None:
                     handle.check_cancel()
                 elif step.plan is not None:
@@ -2702,6 +2702,9 @@ def _run_compare_grid(
                 ),
             )
 
+        # A cancel that landed as the stitch ended stops here: no minute of
+        # upload for a grid the user stopped, and no chained YouTube upload.
+        handle.check_cancel()
         if state is not None and state.storage is not None:
             # A no-op without a match id (local mode has no match-scoped store).
             handle.update(progress=0.98, message="Uploading the grid...")

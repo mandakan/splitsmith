@@ -17,10 +17,11 @@ from typing import Any
 
 import pytest
 
+from splitsmith.compare import mp4_grid as mp4_grid_mod
 from splitsmith.ui import server as server_mod
 from splitsmith.ui.jobs import JobCancelled
 from tests.test_hosted_compare_grid import hosted_grid, inline_deferrer
-from tests.test_hosted_grid_stage_jobs import _grid, two_stages
+from tests.test_hosted_grid_stage_jobs import _grid, _stage_jobs, two_stages
 from tests.test_hosted_raw_upload import hosted_client, hosted_client_with_match, hosted_db
 
 __all__ = [
@@ -113,3 +114,64 @@ def test_every_grid_job_encodes_through_the_cancelling_runner(
     for call in calls:
         assert call["runner"] in built
         assert call["boundary_runner"] in built
+
+
+def test_each_stage_job_encodes_through_its_own_cancelling_runner(
+    two_stages, monkeypatch: pytest.MonkeyPatch  # noqa: F811
+) -> None:
+    """The stage jobs are what encode on the other workers (G10): each one's
+    runner answers to that job's cancel, not the grid job's."""
+    client, _storage, match_id, slug, calls, _failing, _raising = two_stages
+    owner: dict[int, str] = {}
+    real = server_mod._grid_runner
+
+    def _spy(handle: Any) -> Any:
+        runner = real(handle)
+        owner[id(runner)] = handle._job_id
+        return runner
+
+    monkeypatch.setattr(server_mod, "_grid_runner", _spy)
+    _grid(client, match_id, slug, [1, 2])
+    stage_ids = {}
+    for job in _stage_jobs(client, match_id):
+        (part,) = client.get(f"/api/matches/{match_id}/me/jobs/{job['id']}").json()["parts"]
+        stage_ids[int(part["label"].removeprefix("Stage "))] = job["id"]
+    stage_calls = [c for c in calls if c.get("only_stage") is not None]
+    assert sorted(c["only_stage"] for c in stage_calls) == [1, 2]
+    for call in stage_calls:
+        assert owner[id(call["runner"])] == stage_ids[call["only_stage"]]
+        assert owner[id(call["boundary_runner"])] == stage_ids[call["only_stage"]]
+
+
+def test_a_cancel_during_the_render_skips_the_upload(
+    two_stages, inline_deferrer, monkeypatch: pytest.MonkeyPatch  # noqa: F811
+) -> None:
+    """A cancel that lands as the stitch ends is the export's end: no upload
+    of a grid the user stopped, and the job ends cancelled, not succeeded."""
+    client, storage, match_id, slug, calls, _failing, _raising = two_stages
+    inline_deferrer["hold_kinds"] = {"compare-grid-stage"}
+    handles: list[Any] = []
+    real_runner = server_mod._grid_runner
+
+    def _spy(handle: Any) -> Any:
+        handles.append(handle)
+        return real_runner(handle)
+
+    monkeypatch.setattr(server_mod, "_grid_runner", _spy)
+    real_render = mp4_grid_mod.render_grid_mp4
+
+    def _cancel_at_the_stitch(*args: Any, **kwargs: Any) -> Any:
+        result = real_render(*args, **kwargs)
+        if kwargs.get("only_stage") is None:
+            handle = handles[-1]
+            server_mod.run_sync(handle._registry.cancel(handle._job_id))
+        return result
+
+    monkeypatch.setattr(mp4_grid_mod, "render_grid_mp4", _cancel_at_the_stitch)
+    pushed: list[Any] = []
+    monkeypatch.setattr(
+        server_mod.export_storage, "push_match_export_file", lambda *args, **kwargs: pushed.append(args)
+    )
+    job = _grid(client, match_id, slug, [1, 2])
+    assert job["status"] == "cancelled"
+    assert pushed == []
