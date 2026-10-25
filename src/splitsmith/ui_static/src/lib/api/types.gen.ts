@@ -2627,6 +2627,86 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/me/exports/active": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Active Exports
+         * @description The account's running exports, every match, oldest first.
+         */
+        get: operations["active_exports_api_me_exports_active_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/me/exports/{export_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Export */
+        get: operations["get_export_api_me_exports__export_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/me/exports/{export_id}/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Cancel Export
+         * @description Cancel every job of the export still waiting or running.
+         */
+        post: operations["cancel_export_api_me_exports__export_id__cancel_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/me/exports/{export_id}/retry": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Retry Export Part
+         * @description Run a failed part again, inside the same export (and its slot). A
+         *     grid's failed stage re-runs the grid job, which reuses every stored
+         *     stage and renders the missing one itself; any other failed job is
+         *     retried with its own settings.
+         */
+        post: operations["retry_export_part_api_me_exports__export_id__retry_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/me/jobs": {
         parameters: {
             query?: never;
@@ -3934,6 +4014,29 @@ export interface paths {
         get: operations["list_export_runs_api_shooters__slug__exports_runs_get"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/shooters/{slug}/exports/trims": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Export Trims
+         * @description Trims only, as one export (spec 2026-10-25): a trim job per stage,
+         *     queued together so the export limit counts them once. Every stage is
+         *     checked before any is queued; a stage with an export already running
+         *     answers with that job, as the per-stage route does.
+         */
+        post: operations["export_trims_api_shooters__slug__exports_trims_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -6851,6 +6954,13 @@ export interface components {
              */
             source: "form" | "waitlist";
         };
+        /** ActiveExports */
+        ActiveExports: {
+            /** Exports */
+            exports: components["schemas"]["ExportView"][];
+            /** Limit */
+            limit: number | null;
+        };
         /**
          * AddShooterRequest
          * @description POST /api/match/shooters body (#324).
@@ -6908,6 +7018,8 @@ export interface components {
         AdminAccountView: {
             /** Access Tier */
             access_tier: string;
+            /** Concurrent Exports */
+            concurrent_exports: number | null;
             /**
              * Created At
              * Format: date-time
@@ -9002,6 +9114,27 @@ export interface components {
              */
             width: number;
         };
+        /** ExportRow */
+        ExportRow: {
+            /** Elapsed S */
+            elapsed_s: number | null;
+            /** Job Id */
+            job_id: string;
+            /** Key */
+            key: string;
+            /** Label */
+            label: string;
+            /** Overrun */
+            overrun: boolean;
+            /** Progress */
+            progress: number | null;
+            /** Remaining S */
+            remaining_s: number;
+            /** Retryable */
+            retryable: boolean;
+            /** Status */
+            status: string;
+        };
         /**
          * ExportStageRequest
          * @description Body for POST /api/stages/{n}/export.
@@ -9107,6 +9240,32 @@ export interface components {
              * @default true
              */
             write_trim: boolean;
+        };
+        /** ExportView */
+        ExportView: {
+            /** Approximate */
+            approximate: boolean;
+            /** Export Id */
+            export_id: string;
+            /** Finish At */
+            finish_at: string | null;
+            /** Kind */
+            kind: string;
+            /** Label */
+            label: string;
+            /** Match Id */
+            match_id: string | null;
+            /** Rows */
+            rows: components["schemas"]["ExportRow"][];
+            /**
+             * Started At
+             * Format: date-time
+             */
+            started_at: string;
+            /** Status */
+            status: string;
+            /** Time Left S */
+            time_left_s: number | null;
         };
         /** FsEntry */
         FsEntry: {
@@ -9354,6 +9513,8 @@ export interface components {
             created_at: string;
             /** Error */
             error: string | null;
+            /** Export Id */
+            export_id: string | null;
             /** Finished At */
             finished_at: string | null;
             /** Id */
@@ -9364,6 +9525,8 @@ export interface components {
             match_id: string | null;
             /** Message */
             message: string | null;
+            /** Parts */
+            parts: components["schemas"]["JobPart"][] | null;
             /** Progress */
             progress: number | null;
             /** Result */
@@ -9388,6 +9551,37 @@ export interface components {
             updated_at: string;
             /** Video Id */
             video_id: string | null;
+        };
+        /**
+         * JobPart
+         * @description One part of a job, as the export progress panel shows it (spec
+         *     2026-10-25): a stage of a grid, the compose of a match video, the
+         *     upload. A job publishes its parts through :class:`JobHandle`; ``kind``
+         *     and ``profile`` key the estimate (``splitsmith.export_estimates``).
+         */
+        JobPart: {
+            /** Finished At */
+            finished_at: string | null;
+            /** Footage S */
+            footage_s: number | null;
+            /** Key */
+            key: string;
+            /** Kind */
+            kind: string;
+            /** Label */
+            label: string;
+            /** Profile */
+            profile: string | null;
+            /** Progress */
+            progress: number | null;
+            /** Started At */
+            started_at: string | null;
+            /**
+             * Status
+             * @default waiting
+             * @enum {string}
+             */
+            status: "waiting" | "running" | "done" | "failed" | "skipped";
         };
         /**
          * JobStatus
@@ -10477,6 +10671,11 @@ export interface components {
             /** Video Path */
             video_path: string;
         };
+        /** RetryBody */
+        RetryBody: {
+            /** Job Id */
+            job_id: string;
+        };
         /**
          * RevealRequest
          * @description Body for POST /api/files/reveal.
@@ -10611,10 +10810,16 @@ export interface components {
             /** Shooter Id */
             shooter_id: number;
         };
-        /** SetTierBody */
+        /**
+         * SetTierBody
+         * @description What an admin changes on an account; a field left out stays as it
+         *     is, and ``concurrent_exports: null`` clears the account's own limit.
+         */
         SetTierBody: {
             /** Access Tier */
-            access_tier: string;
+            access_tier?: string | null;
+            /** Concurrent Exports */
+            concurrent_exports?: number | null;
         };
         /**
          * SettingsRequest
@@ -12097,6 +12302,16 @@ export interface components {
         TriageSummaryResponse: {
             /** Flagged Count */
             flagged_count: number;
+        };
+        /** TrimsExportRequest */
+        TrimsExportRequest: {
+            /** Stage Numbers */
+            stage_numbers: number[];
+        };
+        /** TrimsExportResponse */
+        TrimsExportResponse: {
+            /** Jobs */
+            jobs: components["schemas"]["Job"][];
         };
         /**
          * UpdateMeRequest
@@ -16056,6 +16271,123 @@ export interface operations {
             };
         };
     };
+    active_exports_api_me_exports_active_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ActiveExports"];
+                };
+            };
+        };
+    };
+    get_export_api_me_exports__export_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                export_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExportView"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    cancel_export_api_me_exports__export_id__cancel_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                export_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExportView"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    retry_export_part_api_me_exports__export_id__retry_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                export_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RetryBody"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExportView"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     list_jobs_api_me_jobs_get: {
         parameters: {
             query?: never;
@@ -17844,6 +18176,41 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    export_trims_api_shooters__slug__exports_trims_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TrimsExportRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TrimsExportResponse"];
                 };
             };
             /** @description Validation Error */

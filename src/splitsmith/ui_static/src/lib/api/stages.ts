@@ -453,6 +453,15 @@ export const stagesApi = {
    *  paths + ``last_export_at``. Idempotent on the worker side: the
    *  registry dedupes by (kind, stage_number) so double-clicking
    *  Generate returns the in-flight job instead of stacking. */
+  /** Trims only, as one export: a trim job per stage, queued together so
+   *  the export limit counts them once. A stage with an export already
+   *  running answers with that job. */
+  exportTrims: (slug: string, stageNumbers: number[]) =>
+    request<{ jobs: Job[] }>(`/api/shooters/${encodeURIComponent(slug)}/exports/trims`, {
+      method: "POST",
+      json: { stage_numbers: stageNumbers },
+    }),
+
   exportStage: (
     slug: string,
     stageNumber: number,

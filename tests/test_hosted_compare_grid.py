@@ -272,6 +272,9 @@ def test_hosted_grid_cuts_a_tile_with_no_export_from_its_source(
     monkeypatch.setenv("CLOUD_RUN_EXECUTION", "splitsmith-worker-abc")
     # Stage 2 could be cut too, but only stage 1 is selected: one source read.
     _give_the_shooter_a_beeped_primary(hosted_db, match_id, slug, reviewed=True, stages=(1, 2))
+    # Two grids queued at once: room for both under the export limit.
+    state = client.app.state.splitsmith_state
+    state.access = state.access.model_copy(update={"concurrent_exports": {"full": 2}})
 
     inline_deferrer["hold"] = True
     read_before, _ = STORAGE_IO.snapshot()

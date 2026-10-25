@@ -160,6 +160,8 @@ function makeProject(): MatchProject {
 
 function makeJob(overrides: Partial<Job> = {}): Job {
   return {
+    export_id: null,
+    parts: null,
     id: "job-1",
     kind: "shot_detect",
     match_id: "m1",

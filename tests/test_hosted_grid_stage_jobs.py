@@ -186,6 +186,23 @@ def test_the_request_wakes_workers_once_for_the_whole_batch(two_stages, inline_d
     assert all(held for _, held in queued)
 
 
+def test_the_grid_and_its_stage_jobs_publish_their_parts(two_stages) -> None:
+    """Hosted with stage jobs: the grid job's parts are the plan, the wait
+    for its stages and the stitch; each stage job's is its render."""
+    client, _storage, match_id, slug, _calls, _failing, _raising = two_stages
+    grid = _grid(client, match_id, slug, [1, 2])
+    full = client.get(f"/api/matches/{match_id}/me/jobs/{grid['id']}").json()
+    assert [(p["key"], p["kind"], p["status"]) for p in full["parts"]] == [
+        ("plan", "load", "done"),
+        ("stages", "wait", "done"),
+        ("stitch", "stitch", "done"),
+    ]
+    for stage_job in _stage_jobs(client, match_id):
+        one = client.get(f"/api/matches/{match_id}/me/jobs/{stage_job['id']}").json()
+        assert [(p["key"], p["kind"]) for p in one["parts"]] == [("render", "grid_stage")]
+        assert one["parts"][0]["status"] in ("done", "waiting")  # a stage the grid job took stays waiting
+
+
 def test_a_stage_job_plans_from_the_grid_jobs_published_plan(tmp_path: Path, monkeypatch) -> None:
     from splitsmith.storage import FilesystemStorage
 
@@ -227,6 +244,9 @@ class _Handle:
     def update(self, **_kwargs: Any) -> None:
         pass
 
+    def has_part(self, key: str) -> bool:
+        return False
+
 
 def _jobs(status: JobStatus):  # type: ignore[no-untyped-def]
     cancelled: list[str] = []
@@ -260,3 +280,17 @@ def test_the_wait_ends_at_its_deadline_without_cancelling(monkeypatch: pytest.Mo
     state, cancelled = _jobs(JobStatus.RUNNING)
     _work(state, _Handle(cancel_after=None), {1: "a"})
     assert cancelled == []
+
+
+def test_a_stage_the_grid_job_renders_itself_is_one_of_its_parts(two_stages, inline_deferrer) -> None:
+    client, _storage, match_id, slug, _calls, _failing, _raising = two_stages
+    inline_deferrer["hold_kinds"] = {"compare-grid-stage"}
+    grid = _grid(client, match_id, slug, [1, 2])
+    full = client.get(f"/api/matches/{match_id}/me/jobs/{grid['id']}").json()
+    assert [(p["key"], p["status"]) for p in full["parts"]] == [
+        ("plan", "done"),
+        ("stages", "done"),
+        ("stage-2", "done"),
+        ("stage-1", "done"),
+        ("stitch", "done"),
+    ]

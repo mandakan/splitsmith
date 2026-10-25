@@ -30,21 +30,23 @@ This is correct for the API process on restart; the worker passes
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 import subprocess
 import threading
 import uuid
-from collections.abc import Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable
 from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import and_, not_, or_, select, update
+from sqlalchemy import and_, not_, or_, select, text, update
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from .. import __version__
 from ..access import Feature, FeatureRequiredError
 from ..async_bridge import run_sync
 from ..observability import PhaseTimer, WorkerProbe, capture_job_exception, emit_job_event
+from ..ui.context import current_export_id
 from ..ui.job_journal import rehydrate_args, to_wire_args
 from ..ui.jobs import (
     Job,
@@ -55,10 +57,14 @@ from ..ui.jobs import (
     JobStatus,
     ShutdownInProgressError,
     UnknownJobKindError,
+    export_is_active,
 )
 from .models import ComputeJobRow
 
 logger = logging.getLogger(__name__)
+
+# The SQLite stand-in for the advisory lock (``export_lock``), per user.
+_SQLITE_EXPORT_LOCKS: dict[str, asyncio.Lock] = {}
 
 # Enqueue side of the split: ``submit`` calls this with a fully
 # JSON-serialisable payload; the implementation (see
@@ -91,6 +97,8 @@ _ROW_TO_JOB_FIELDS = (
     "acknowledged",
     "result",
     "timings",
+    "export_id",
+    "parts",
     "created_at",
     "updated_at",
     "started_at",
@@ -259,6 +267,7 @@ class PostgresJobBackend:
             shooter_slug=shooter_slug,
             video_id=video_id,
             match_id=match_id,
+            export_id=current_export_id.get(),
             status=JobStatus.PENDING.value,
             cancel_requested=False,
             acknowledged=False,
@@ -319,8 +328,13 @@ class PostgresJobBackend:
         # through ``_run`` like any body error, so the row ends FAILED with
         # the refusal as its message and the body never starts.
         refused = self._submit_allowed is not None and not await self._submit_allowed()
+        # The export rides the row, not the queue payload: a job the body
+        # submits (a chained upload, a grid stage) joins the same export.
+        queued = await self.get(job_id)
+        export_id = queued.export_id if queued is not None else None
 
         def _ctx_fn(handle: JobHandle) -> None:
+            current_export_id.set(export_id)
             if refused:
                 raise FeatureRequiredError(Feature.hosted_compute)
             try:
@@ -583,8 +597,10 @@ class PostgresJobBackend:
             shooter_slug = row.shooter_slug
             video_id = row.video_id
             row_match_id = row.match_id
+            row_export_id = row.export_id
 
         match_token = current_match_id.set(row_match_id)
+        export_token = current_export_id.set(row_export_id)
         try:
             return await self.submit(
                 kind=kind,
@@ -594,7 +610,125 @@ class PostgresJobBackend:
                 video_id=video_id,
             )
         finally:
+            current_export_id.reset(export_token)
             current_match_id.reset(match_token)
+
+    @contextlib.asynccontextmanager
+    async def export_lock(self) -> AsyncIterator[None]:
+        """Hold this user's export slot check (``ui.export_slot.admit``): two
+        starts at once from two devices are judged one after the other.
+        Postgres: a transaction-scoped advisory lock on its own connection,
+        released when the block ends however it ends; SQLite (tests): a
+        process lock per user."""
+        async with self._session_factory() as session:
+            if session.bind.dialect.name != "postgresql":
+                lock = _SQLITE_EXPORT_LOCKS.setdefault(self._user_id, asyncio.Lock())
+                async with lock:
+                    yield
+                return
+            async with session.begin():
+                await session.execute(
+                    text("SELECT pg_advisory_xact_lock(hashtext(:key))"), {"key": f"export:{self._user_id}"}
+                )
+                yield
+
+    async def recent_export_jobs(self, limit: int = 200) -> list[Job]:
+        """This user's most recently finished export jobs: the history the
+        export estimates learn from (``export_estimates.history_rates``)."""
+        async with self._session_factory() as session:
+            rows = (
+                (
+                    await session.execute(
+                        select(ComputeJobRow)
+                        .where(
+                            ComputeJobRow.user_id == self._user_id,
+                            ComputeJobRow.export_id.is_not(None),
+                            ComputeJobRow.status == JobStatus.SUCCEEDED.value,
+                        )
+                        .order_by(ComputeJobRow.created_at.desc())
+                        .limit(limit)
+                    )
+                )
+                .scalars()
+                .all()
+            )
+        return [_row_to_job(r) for r in rows]
+
+    async def requeue(self, job_id: str, *, args_update: dict[str, Any]) -> Job | None:
+        """Queue this job's kind again with its args updated, bound to its
+        own match and export, whatever its status (the retry of a grid
+        stage re-runs a grid that succeeded). ``None`` when unknown."""
+        from ..ui.server import current_match_id
+
+        async with self._session_factory() as session:
+            row = (
+                await session.execute(
+                    select(ComputeJobRow).where(
+                        ComputeJobRow.id == job_id, ComputeJobRow.user_id == self._user_id
+                    )
+                )
+            ).scalar_one_or_none()
+        if row is None or row.args is None:
+            return None
+        match_token = current_match_id.set(row.match_id)
+        export_token = current_export_id.set(row.export_id)
+        try:
+            return await self.submit(
+                kind=row.kind,
+                args={**rehydrate_args(row.kind, row.args), **args_update},
+                stage_number=row.stage_number,
+                shooter_slug=row.shooter_slug,
+                video_id=row.video_id,
+            )
+        finally:
+            current_export_id.reset(export_token)
+            current_match_id.reset(match_token)
+
+    async def list_export(self, export_id: str) -> list[Job]:
+        """This user's jobs of one export, in ``created_at`` order."""
+        async with self._session_factory() as session:
+            rows = (
+                (
+                    await session.execute(
+                        select(ComputeJobRow)
+                        .where(ComputeJobRow.user_id == self._user_id, ComputeJobRow.export_id == export_id)
+                        .order_by(ComputeJobRow.created_at)
+                    )
+                )
+                .scalars()
+                .all()
+            )
+        return [_row_to_job(r) for r in rows]
+
+    async def active_export_ids(self) -> list[str]:
+        """The exports still holding a slot (``ui.jobs.export_is_active``):
+        every job of each export with a job pending or running, read in one
+        query and judged together."""
+        live = (
+            select(ComputeJobRow.export_id)
+            .where(
+                ComputeJobRow.user_id == self._user_id,
+                ComputeJobRow.export_id.is_not(None),
+                ComputeJobRow.status.in_((JobStatus.PENDING.value, JobStatus.RUNNING.value)),
+            )
+            .scalar_subquery()
+        )
+        async with self._session_factory() as session:
+            rows = (
+                (
+                    await session.execute(
+                        select(ComputeJobRow)
+                        .where(ComputeJobRow.user_id == self._user_id, ComputeJobRow.export_id.in_(live))
+                        .order_by(ComputeJobRow.created_at)
+                    )
+                )
+                .scalars()
+                .all()
+            )
+        grouped: dict[str, list[Job]] = {}
+        for row in rows:
+            grouped.setdefault(row.export_id, []).append(_row_to_job(row))
+        return [export_id for export_id, jobs in grouped.items() if export_is_active(jobs)]
 
     async def find_active(
         self,
@@ -900,6 +1034,8 @@ class PostgresJobBackend:
             if row is None:
                 return
             for key, value in kwargs.items():
+                if key == "parts" and value is not None:
+                    value = [p.model_dump(mode="json") if hasattr(p, "model_dump") else p for p in value]
                 if hasattr(row, key):
                     setattr(row, key, value)
             row.updated_at = now

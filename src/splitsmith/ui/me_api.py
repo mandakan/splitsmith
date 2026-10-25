@@ -9,6 +9,7 @@ move here, or to their own domain modules, as the split continues.
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import logging
 import shutil
@@ -902,11 +903,22 @@ async def retry_job(request: Request, job_id: str, user: User = Depends(_server.
     job to that match. See :meth:`JobRegistry.retry` /
     :meth:`PostgresJobBackend.retry`.
     """
+    from .export_slot import export_slot
+
     state = request.app.state.splitsmith_state
-    try:
-        job = await state.jobs.retry(job_id)
-    except JobNotRetryableError as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    # A failed export job re-runs inside its export, so it takes the
+    # account's export slot like any start (spec 2026-10-25).
+    original = await state.jobs.get(job_id)
+    slot = (
+        export_slot(request, export_id=original.export_id)
+        if original is not None and original.export_id
+        else contextlib.nullcontext()
+    )
+    async with slot:
+        try:
+            job = await state.jobs.retry(job_id)
+        except JobNotRetryableError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
     if job is None:
         raise HTTPException(status_code=404, detail=f"unknown job: {job_id}")
     return job

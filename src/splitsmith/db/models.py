@@ -126,6 +126,9 @@ class User(Base):
     # which stays reserved for billing. The server default keeps a
     # non-ORM insert safe-for-today; the ORM always sets it explicitly.
     access_tier: Mapped[str] = mapped_column(String, nullable=False, server_default="full")
+    # How many exports this account may run at once, when an admin set it
+    # (spec 2026-10-25); ``None`` follows the tier (``access.export_limit``).
+    concurrent_exports: Mapped[int | None] = mapped_column(Integer, nullable=True)
     # The What's new entry ids (and ``chip:<key>`` dismissals) this account
     # has seen; ``None`` until its first visit after the feature shipped
     # (``splitsmith.whats_new``). Written only by ``db.whats_new``.
@@ -591,6 +594,11 @@ class ComputeJobRow(Base):
     # for rows predating this column and for legitimately match-less kinds
     # (model_download). Not part of the wire Job model.
     match_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    # The export this job is part of (``ui.context.current_export_id`` at
+    # submit), and the parts it published (``JobHandle.set_parts``): the
+    # export progress panel and the export limit read both (spec 2026-10-25).
+    export_id: Mapped[str | None] = mapped_column(String, nullable=True, index=True)
+    parts: Mapped[list | None] = mapped_column(JSON().with_variant(JSONB, "postgresql"), nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),

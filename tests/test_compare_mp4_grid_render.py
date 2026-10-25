@@ -2032,7 +2032,8 @@ def test_a_second_grid_render_reuses_every_stage_from_the_cache(tmp_path: Path):
     assert len(calls) == 1 and calls[0][calls[0].index("-f") + 1] == "concat"
     listed = (tmp_path / "work-b" / "concat.txt").read_text(encoding="utf-8")
     assert str((tmp_path / "cache").resolve()) in listed
-    assert [(s.plan.stage_number if s.plan else None, s.status) for s in steps] == [
+    # Each step's first report; ffmpeg's fractions follow it (spec 2026-10-25).
+    assert [(s.plan.stage_number if s.plan else None, s.status) for s in steps if s.fraction is None] == [
         (1, "reused"),
         (2, "reused"),
         (None, "stitching"),
@@ -2059,7 +2060,11 @@ def test_progress_names_every_stage_as_it_encodes_then_the_stitch(tmp_path: Path
     steps: list = []
     _, runner = _writing_runner()
     _cached_render(tmp_path, "work", runner, None, steps)
-    assert [(s.index, s.total, s.plan.stage_number if s.plan else None, s.status) for s in steps] == [
+    assert [
+        (s.index, s.total, s.plan.stage_number if s.plan else None, s.status)
+        for s in steps
+        if s.fraction is None
+    ] == [
         (0, 2, 1, "encoding"),
         (1, 2, 2, "encoding"),
         (2, 2, None, "stitching"),

@@ -58,6 +58,8 @@ function makeStatus(overrides: Partial<SyncStatusResponse> = {}): SyncStatusResp
 
 function makeJob(overrides: Partial<Job> = {}): Job {
   return {
+    export_id: null,
+    parts: null,
     id: "job-1",
     kind: "sync_match",
     match_id: "m1",

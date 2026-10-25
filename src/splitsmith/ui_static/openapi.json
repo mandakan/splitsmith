@@ -48,6 +48,34 @@
     "title": "AccessRequestBody",
     "type": "object"
    },
+   "ActiveExports": {
+    "properties": {
+     "exports": {
+      "items": {
+       "$ref": "#/components/schemas/ExportView"
+      },
+      "title": "Exports",
+      "type": "array"
+     },
+     "limit": {
+      "anyOf": [
+       {
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Limit"
+     }
+    },
+    "required": [
+     "exports",
+     "limit"
+    ],
+    "title": "ActiveExports",
+    "type": "object"
+   },
    "AddShooterRequest": {
     "description": "POST /api/match/shooters body (#324).",
     "properties": {
@@ -207,6 +235,17 @@
       "title": "Access Tier",
       "type": "string"
      },
+     "concurrent_exports": {
+      "anyOf": [
+       {
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Concurrent Exports"
+     },
      "created_at": {
       "format": "date-time",
       "title": "Created At",
@@ -238,6 +277,7 @@
     },
     "required": [
      "access_tier",
+     "concurrent_exports",
      "created_at",
      "display_name",
      "email",
@@ -4482,6 +4522,73 @@
     "title": "ExportPreviewRequest",
     "type": "object"
    },
+   "ExportRow": {
+    "properties": {
+     "elapsed_s": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Elapsed S"
+     },
+     "job_id": {
+      "title": "Job Id",
+      "type": "string"
+     },
+     "key": {
+      "title": "Key",
+      "type": "string"
+     },
+     "label": {
+      "title": "Label",
+      "type": "string"
+     },
+     "overrun": {
+      "title": "Overrun",
+      "type": "boolean"
+     },
+     "progress": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Progress"
+     },
+     "remaining_s": {
+      "title": "Remaining S",
+      "type": "number"
+     },
+     "retryable": {
+      "title": "Retryable",
+      "type": "boolean"
+     },
+     "status": {
+      "title": "Status",
+      "type": "string"
+     }
+    },
+    "required": [
+     "elapsed_s",
+     "job_id",
+     "key",
+     "label",
+     "overrun",
+     "progress",
+     "remaining_s",
+     "retryable",
+     "status"
+    ],
+    "title": "ExportRow",
+    "type": "object"
+   },
    "ExportStageRequest": {
     "description": "Body for POST /api/stages/{n}/export.\n\nEach toggle defaults True; turning one off skips that artefact while\nleaving the others on. ``write_trim`` produces the lossless stream-copy\ntrim into ``<project>/exports/`` -- distinct from the audit-mode\nshort-GOP scrub copy in ``<project>/trimmed/``. The FCPXML always\nreferences the lossless trim so SPA exports match ``splitsmith single``.",
     "properties": {
@@ -4630,6 +4737,90 @@
      }
     },
     "title": "ExportStageRequest",
+    "type": "object"
+   },
+   "ExportView": {
+    "properties": {
+     "approximate": {
+      "title": "Approximate",
+      "type": "boolean"
+     },
+     "export_id": {
+      "title": "Export Id",
+      "type": "string"
+     },
+     "finish_at": {
+      "anyOf": [
+       {
+        "format": "date-time",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Finish At"
+     },
+     "kind": {
+      "title": "Kind",
+      "type": "string"
+     },
+     "label": {
+      "title": "Label",
+      "type": "string"
+     },
+     "match_id": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Match Id"
+     },
+     "rows": {
+      "items": {
+       "$ref": "#/components/schemas/ExportRow"
+      },
+      "title": "Rows",
+      "type": "array"
+     },
+     "started_at": {
+      "format": "date-time",
+      "title": "Started At",
+      "type": "string"
+     },
+     "status": {
+      "title": "Status",
+      "type": "string"
+     },
+     "time_left_s": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Time Left S"
+     }
+    },
+    "required": [
+     "approximate",
+     "export_id",
+     "finish_at",
+     "kind",
+     "label",
+     "match_id",
+     "rows",
+     "started_at",
+     "status",
+     "time_left_s"
+    ],
+    "title": "ExportView",
     "type": "object"
    },
    "FsEntry": {
@@ -5229,6 +5420,17 @@
       ],
       "title": "Error"
      },
+     "export_id": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Export Id"
+     },
      "finished_at": {
       "anyOf": [
        {
@@ -5270,6 +5472,20 @@
        }
       ],
       "title": "Message"
+     },
+     "parts": {
+      "anyOf": [
+       {
+        "items": {
+         "$ref": "#/components/schemas/JobPart"
+        },
+        "type": "array"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Parts"
      },
      "progress": {
       "anyOf": [
@@ -5365,11 +5581,13 @@
      "cancel_requested",
      "created_at",
      "error",
+     "export_id",
      "finished_at",
      "id",
      "kind",
      "match_id",
      "message",
+     "parts",
      "progress",
      "result",
      "shooter_slug",
@@ -5381,6 +5599,105 @@
      "video_id"
     ],
     "title": "Job",
+    "type": "object"
+   },
+   "JobPart": {
+    "description": "One part of a job, as the export progress panel shows it (spec\n2026-10-25): a stage of a grid, the compose of a match video, the\nupload. A job publishes its parts through :class:`JobHandle`; ``kind``\nand ``profile`` key the estimate (``splitsmith.export_estimates``).",
+    "properties": {
+     "finished_at": {
+      "anyOf": [
+       {
+        "format": "date-time",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Finished At"
+     },
+     "footage_s": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Footage S"
+     },
+     "key": {
+      "title": "Key",
+      "type": "string"
+     },
+     "kind": {
+      "title": "Kind",
+      "type": "string"
+     },
+     "label": {
+      "title": "Label",
+      "type": "string"
+     },
+     "profile": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Profile"
+     },
+     "progress": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Progress"
+     },
+     "started_at": {
+      "anyOf": [
+       {
+        "format": "date-time",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Started At"
+     },
+     "status": {
+      "default": "waiting",
+      "enum": [
+       "waiting",
+       "running",
+       "done",
+       "failed",
+       "skipped"
+      ],
+      "title": "Status",
+      "type": "string"
+     }
+    },
+    "required": [
+     "finished_at",
+     "footage_s",
+     "key",
+     "kind",
+     "label",
+     "profile",
+     "progress",
+     "started_at",
+     "status"
+    ],
+    "title": "JobPart",
     "type": "object"
    },
    "JobStatus": {
@@ -7675,6 +7992,19 @@
     "title": "RemoveVideoRequest",
     "type": "object"
    },
+   "RetryBody": {
+    "properties": {
+     "job_id": {
+      "title": "Job Id",
+      "type": "string"
+     }
+    },
+    "required": [
+     "job_id"
+    ],
+    "title": "RetryBody",
+    "type": "object"
+   },
    "RevealRequest": {
     "description": "Body for POST /api/files/reveal.\n\nOpens the OS file manager at ``path``'s parent, selecting the file when\nthe platform supports it (``open -R`` on macOS). The path must resolve\ninside the project root for safety -- we don't expose a generic shell\nout.",
     "properties": {
@@ -7907,15 +8237,32 @@
     "type": "object"
    },
    "SetTierBody": {
+    "description": "What an admin changes on an account; a field left out stays as it\nis, and ``concurrent_exports: null`` clears the account's own limit.",
     "properties": {
      "access_tier": {
-      "title": "Access Tier",
-      "type": "string"
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Access Tier"
+     },
+     "concurrent_exports": {
+      "anyOf": [
+       {
+        "minimum": 1.0,
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Concurrent Exports"
      }
     },
-    "required": [
-     "access_tier"
-    ],
     "title": "SetTierBody",
     "type": "object"
    },
@@ -11576,6 +11923,39 @@
      "flagged_count"
     ],
     "title": "TriageSummaryResponse",
+    "type": "object"
+   },
+   "TrimsExportRequest": {
+    "properties": {
+     "stage_numbers": {
+      "items": {
+       "type": "integer"
+      },
+      "minItems": 1,
+      "title": "Stage Numbers",
+      "type": "array"
+     }
+    },
+    "required": [
+     "stage_numbers"
+    ],
+    "title": "TrimsExportRequest",
+    "type": "object"
+   },
+   "TrimsExportResponse": {
+    "properties": {
+     "jobs": {
+      "items": {
+       "$ref": "#/components/schemas/Job"
+      },
+      "title": "Jobs",
+      "type": "array"
+     }
+    },
+    "required": [
+     "jobs"
+    ],
+    "title": "TrimsExportResponse",
     "type": "object"
    },
    "UpdateMeRequest": {
@@ -16765,6 +17145,154 @@
     "summary": "Revoke Desktop Token"
    }
   },
+  "/api/me/exports/active": {
+   "get": {
+    "description": "The account's running exports, every match, oldest first.",
+    "operationId": "active_exports_api_me_exports_active_get",
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ActiveExports"
+        }
+       }
+      },
+      "description": "Successful Response"
+     }
+    },
+    "summary": "Active Exports"
+   }
+  },
+  "/api/me/exports/{export_id}": {
+   "get": {
+    "operationId": "get_export_api_me_exports__export_id__get",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "export_id",
+      "required": true,
+      "schema": {
+       "title": "Export Id",
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ExportView"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Get Export"
+   }
+  },
+  "/api/me/exports/{export_id}/cancel": {
+   "post": {
+    "description": "Cancel every job of the export still waiting or running.",
+    "operationId": "cancel_export_api_me_exports__export_id__cancel_post",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "export_id",
+      "required": true,
+      "schema": {
+       "title": "Export Id",
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ExportView"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Cancel Export"
+   }
+  },
+  "/api/me/exports/{export_id}/retry": {
+   "post": {
+    "description": "Run a failed part again, inside the same export (and its slot). A\ngrid's failed stage re-runs the grid job, which reuses every stored\nstage and renders the missing one itself; any other failed job is\nretried with its own settings.",
+    "operationId": "retry_export_part_api_me_exports__export_id__retry_post",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "export_id",
+      "required": true,
+      "schema": {
+       "title": "Export Id",
+       "type": "string"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/RetryBody"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ExportView"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Retry Export Part"
+   }
+  },
   "/api/me/jobs": {
    "get": {
     "description": "Snapshot of the retained jobs (active + recently finished).\n\nThis is the SPA's 5-second poll, so it carries only what the poll\nreads (#1182): ``result`` and ``timings`` are nulled on every entry\n-- the keys stay so the wire shape is unchanged -- and a job's result\nis read through ``GET /api/me/jobs/{id}`` (``pollJob``), as the\nExport page already does. Hosted, the backend also bounds the list\n(see ``PostgresJobBackend.list``).",
@@ -18863,6 +19391,56 @@
      }
     },
     "summary": "List Export Runs"
+   }
+  },
+  "/api/shooters/{slug}/exports/trims": {
+   "post": {
+    "description": "Trims only, as one export (spec 2026-10-25): a trim job per stage,\nqueued together so the export limit counts them once. Every stage is\nchecked before any is queued; a stage with an export already running\nanswers with that job, as the per-stage route does.",
+    "operationId": "export_trims_api_shooters__slug__exports_trims_post",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "slug",
+      "required": true,
+      "schema": {
+       "title": "Slug",
+       "type": "string"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/TrimsExportRequest"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/TrimsExportResponse"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Export Trims"
    }
   },
   "/api/shooters/{slug}/exports/youtube-upload": {

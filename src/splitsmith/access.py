@@ -37,9 +37,16 @@ def _default_tiers() -> dict[str, frozenset[Feature]]:
     }
 
 
+#: Exports an account may run at once when neither its tier nor its own
+#: override names a number (spec 2026-10-25).
+DEFAULT_CONCURRENT_EXPORTS = 1
+
+
 class AccessConfig(BaseModel):
     tiers: dict[str, frozenset[Feature]] = Field(default_factory=_default_tiers)
     default_tier: str = "full"
+    # Exports at once, by tier; a tier missing here gets the default.
+    concurrent_exports: dict[str, int] = Field(default_factory=dict)
 
     @model_validator(mode="after")
     def _default_tier_exists(self) -> AccessConfig:
@@ -54,6 +61,16 @@ class FeatureRequiredError(Exception):
     def __init__(self, feature: Feature) -> None:
         super().__init__(f"feature required: {feature.value}")
         self.feature = feature
+
+
+def export_limit(tier: str | None, override: int | None, config: AccessConfig) -> int:
+    """How many exports an account may run at once: its own override when
+    an admin set one, else its tier's number, else the default."""
+    if override is not None:
+        return override
+    if tier is not None and tier in config.concurrent_exports:
+        return config.concurrent_exports[tier]
+    return DEFAULT_CONCURRENT_EXPORTS
 
 
 def features_for(

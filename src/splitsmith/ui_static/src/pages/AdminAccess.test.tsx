@@ -38,6 +38,7 @@ vi.mock("@/lib/api", async (importOriginal) => {
       adminResendAccessRequest: vi.fn(),
       adminUsers: vi.fn(),
       adminSetUserTier: vi.fn(),
+      adminSetUserExports: vi.fn(),
       adminAccessTiers: vi.fn(),
     },
   };
@@ -98,6 +99,7 @@ describe("AdminAccess", () => {
     vi.mocked(api.adminDeclineAccessRequest).mockReset();
     vi.mocked(api.adminResendAccessRequest).mockReset();
     vi.mocked(api.adminSetUserTier).mockReset();
+  vi.mocked(api.adminSetUserExports).mockReset();
   });
 
   it("renders a failed load as an error line, like a failed action", async () => {
@@ -222,6 +224,21 @@ describe("AdminAccess", () => {
     await user.click(screen.getByRole("menuitem", { name: "Set tier: disabled" }));
     expect(api.adminSetUserTier).toHaveBeenCalledWith("a1", "disabled");
     await waitFor(() => expect(api.adminUsers).toHaveBeenCalledTimes(2));
+  });
+
+  it("sets and clears an account's exports at once (spec 2026-10-25)", async () => {
+    const user = userEvent.setup();
+    vi.mocked(api.adminUsers).mockResolvedValue([account({ concurrent_exports: 2 })]);
+    vi.mocked(api.adminSetUserExports).mockResolvedValue(account({ concurrent_exports: 3 }));
+    render(<AdminAccess />);
+    const row = (await screen.findByText("user@x.se")).closest("tr")!;
+    expect(within(row).getByText("2 exports at once")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Set tier for user@x.se" }));
+    await user.click(screen.getByRole("menuitem", { name: "Exports at once: 3" }));
+    expect(api.adminSetUserExports).toHaveBeenCalledWith("a1", 3);
+    await user.click(screen.getByRole("button", { name: "Set tier for user@x.se" }));
+    await user.click(screen.getByRole("menuitem", { name: "Exports at once: tier default" }));
+    expect(api.adminSetUserExports).toHaveBeenLastCalledWith("a1", null);
   });
 
   it("marks an admin's tier as having no effect", async () => {

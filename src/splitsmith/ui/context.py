@@ -9,7 +9,9 @@ inside ``ui/`` import from here and no longer reach back into ``server``.
 
 from __future__ import annotations
 
+import contextlib
 import os
+from collections.abc import Iterator
 from contextvars import ContextVar
 from dataclasses import dataclass
 from pathlib import Path
@@ -69,6 +71,23 @@ def _hosted_mode_active() -> bool:
 # go away entirely once every endpoint is exercised under the new prefix.
 current_match_root: ContextVar[Path | None] = ContextVar("splitsmith_current_match_root", default=None)
 current_match_id: ContextVar[str | None] = ContextVar("splitsmith_current_match_id", default=None)
+# The export a job belongs to (spec 2026-10-25): set by an export route
+# around the submits that make up one export, stamped on every job
+# submitted inside it, and re-set around a running job's body so the jobs
+# it chains (a YouTube upload, a grid stage) join the same export.
+current_export_id: ContextVar[str | None] = ContextVar("splitsmith_current_export_id", default=None)
+
+
+@contextlib.contextmanager
+def export_scope(export_id: str | None) -> Iterator[None]:
+    """Stamp every job submitted inside the block with ``export_id``."""
+    token = current_export_id.set(export_id)
+    try:
+        yield
+    finally:
+        current_export_id.reset(token)
+
+
 # The bound match's origin ("hosted" | "desktop" | "local"), set by the
 # alias middleware from the same row it already fetched for the ownership
 # check (#631 Task 6) - so handlers that need to expose origin (e.g. the

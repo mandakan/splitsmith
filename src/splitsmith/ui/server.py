@@ -280,6 +280,7 @@ from .jobs import (
     Job,
     JobCancelled,
     JobHandle,
+    JobPart,
     JobRegistry,
     JobStatus,
     ShutdownInProgressError,
@@ -1898,13 +1899,73 @@ def _compare_missing_trims(
     ]
 
 
+def _one_part(body: Callable[..., None], *, key: str, label: str, kind: str) -> Callable[..., None]:
+    """A job body that publishes itself as one part (spec 2026-10-25): the
+    kinds whose work is one step to the export progress panel."""
+
+    def run(handle: JobHandle, *args: Any, **kwargs: Any) -> None:
+        handle.set_parts([JobPart(key=key, label=label, kind=kind)])
+        with handle.part(key):
+            body(handle, *args, **kwargs)
+
+    return run
+
+
+def _grid_profile(req: CompareGridRequest) -> str:
+    """The estimate class of a grid's parts: its canvas height, and whether
+    anything beyond the tiles is drawn (overlays, cards, titles, holds,
+    transitions), which is what doubles a stage's encode time."""
+    dressed = (
+        req.overlay
+        or req.summary_hold_seconds > 0
+        or req.stage_titles != "none"
+        or req.transition_kind != "none"
+        or req.title_page
+        or req.closing_card
+        or req.match_summary
+    )
+    return f"{req.canvas_height}-{'dressed' if dressed else 'basic'}"
+
+
+def _grid_stage_part(plan: mp4_grid.GridStagePlan, profile: str, *, key: str | None = None) -> JobPart:
+    return JobPart(
+        key=key or f"stage-{plan.stage_number}",
+        label=f"Stage {plan.stage_number} ({plan.stage_name})",
+        kind="grid_stage",
+        profile=profile,
+        footage_s=plan.duration_seconds * len(plan.tiles),
+    )
+
+
 def _compare_grid_progress(handle: JobHandle, *, start: float = 0.05) -> mp4_grid.GridProgress:
     """``render_grid_mp4``'s ``progress`` hook as job updates: one per
     stage as it is encoded or reused from the segment cache, then the
     stitch. Without it the job sits at 5% for the whole multi-minute
     encode and a working render looks exactly like a hung one."""
 
+    current: list[str] = []
+
+    def _move(key: str, step: mp4_grid.GridRenderStep) -> None:
+        """The job's parts follow the render: a step's first report starts
+        its part and ends the one before; its fractions move it on."""
+        if not handle.has_part(key):
+            return
+        if step.fraction is not None:
+            handle.update_part(key, progress=step.fraction)
+            return
+        if current and current[-1] != key:
+            handle.update_part(current[-1], status="done", progress=1.0)
+        current[:] = [key]
+        if step.status == "reused":
+            handle.update_part(key, status="done", progress=1.0)
+            current.clear()
+        else:
+            handle.update_part(key, status="running")
+
     def _report(step: mp4_grid.GridRenderStep) -> None:
+        _move("stitch" if step.plan is None else f"stage-{step.plan.stage_number}", step)
+        if step.fraction is not None:
+            return
         if step.plan is None:
             handle.update(progress=0.95, message=f"Stitching {step.total} stage(s)...")
             return
@@ -2203,6 +2264,8 @@ def _work_grid_stages(
                 progress=0.05 + (GRID_STITCH_PROGRESS - 0.05) * done / total,
                 message=f"Rendering stages: {done} of {total}...",
             )
+            if handle.has_part("stages"):
+                handle.update_part("stages", progress=done / total)
             queued = [
                 number
                 for number, job in sorted(jobs.items(), reverse=True)
@@ -2212,7 +2275,25 @@ def _work_grid_stages(
                 number = queued[0]
                 run_sync(state.jobs.cancel(stage_jobs[number]))
                 handle.update(message=f"Rendering stage {number} here...")
-                outcome = _render_one_grid_stage(req, inputs, options, number, state=state, scratch=scratch)
+                # The stage is this job's part now (spec 2026-10-25): the
+                # panel shows it moving here, not a cancelled stage job.
+                key = f"stage-{number}"
+                plan = next((p for p in inputs.plans if p.stage_number == number), None)
+                if plan is not None and handle.has_part("stitch") and not handle.has_part(key):
+                    handle.add_parts([_grid_stage_part(plan, _grid_profile(req))], before="stitch")
+                tracked = handle.has_part(key)
+                if tracked:
+                    handle.update_part(key, status="running")
+
+                def _here(step: mp4_grid.GridRenderStep, key: str = key, tracked: bool = tracked) -> None:
+                    if tracked and step.fraction is not None and step.plan is not None:
+                        handle.update_part(key, progress=step.fraction)
+
+                outcome = _render_one_grid_stage(
+                    req, inputs, options, number, state=state, scratch=scratch, progress=_here
+                )
+                if tracked:
+                    handle.update_part(key, status="done" if outcome.ok else "failed")
                 if not outcome.ok:
                     logger.warning("compare grid: stage %d failed here: %s", number, outcome.error)
                 continue
@@ -2254,6 +2335,9 @@ def _run_compare_grid_stage(
     output_dir.mkdir(parents=True, exist_ok=True)
     outcome: mp4_grid.StageOutcome | None = None
     error: str | None = None
+    handle.set_parts(
+        [JobPart(key="render", label=f"Stage {stage_number}", kind="grid_stage", profile=_grid_profile(req))]
+    )
     with tempfile.TemporaryDirectory(dir=output_dir, prefix=".compare-grid-stage-") as tmp:
         inputs: _GridInputs | None = None
         try:
@@ -2264,6 +2348,18 @@ def _run_compare_grid_stage(
                 inputs = _grid_inputs(req, root, state=state, cut_dir=Path(tmp) / "cuts", tile_meta=tile_meta)
                 options = _grid_render_options(req, inputs, state=state)
             handle.update(progress=0.1, message=f"Rendering stage {stage_number}...")
+            planned = next((p for p in inputs.plans if p.stage_number == stage_number), None)
+            handle.update_part(
+                "render",
+                status="running",
+                footage_s=planned.duration_seconds * len(planned.tiles) if planned is not None else None,
+            )
+
+            def _stage_step(step: mp4_grid.GridRenderStep) -> None:
+                handle.check_cancel()
+                if step.fraction is not None and step.plan is not None:
+                    handle.update_part("render", progress=step.fraction)
+
             with handle.timer.phase("render"):
                 outcome = _render_one_grid_stage(
                     req,
@@ -2272,7 +2368,7 @@ def _run_compare_grid_stage(
                     stage_number,
                     state=state,
                     scratch=Path(tmp),
-                    progress=lambda _step: handle.check_cancel(),
+                    progress=_stage_step,
                 )
         except JobCancelled:
             raise
@@ -2283,6 +2379,7 @@ def _run_compare_grid_stage(
             if inputs is not None and inputs.tiles is not None:
                 inputs.tiles.release()
     ok = outcome is not None and outcome.ok
+    handle.update_part("render", status="done" if ok else "failed", progress=1.0 if ok else None)
     handle.update(
         progress=1.0, message=f"Stage {stage_number} {'rendered' if ok else 'left to the grid job'}"
     )
@@ -2333,12 +2430,32 @@ def _run_compare_grid(
     cuts = tempfile.TemporaryDirectory(dir=output_dir, prefix=".compare-grid-cuts-")
     inputs: _GridInputs | None = None
     try:
+        handle.set_parts([JobPart(key="plan", label="Planning", kind="load")])
         handle.update(progress=0.02, message="Loading shooters...")
-        with handle.timer.phase("load_shooters"):
+        with handle.timer.phase("load_shooters"), handle.part("plan"):
             inputs = _grid_inputs(req, root, state=state, cut_dir=Path(cuts.name))
         match, requested, bundles, plans = inputs.match, inputs.requested, inputs.bundles, inputs.plans
         output_path = output_dir / f"{stem}.mp4"
         skipped = [number for number in requested if number not in {p.stage_number for p in plans}]
+
+        profile = _grid_profile(req)
+        split = inputs.tiles is not None and bool(stage_jobs) and state is not None
+        handle.add_parts(
+            [
+                *(
+                    [JobPart(key="stages", label="Stage renders", kind="wait")]
+                    if split
+                    else [_grid_stage_part(plan, profile) for plan in plans]
+                ),
+                JobPart(
+                    key="stitch",
+                    label="Joining and uploading" if state is not None and state.storage else "Joining",
+                    kind="stitch",
+                    profile=profile,
+                    footage_s=sum(plan.duration_seconds for plan in plans),
+                ),
+            ]
+        )
 
         stitch_from = 0.05
         if inputs.tiles is not None and stage_jobs and state is not None:
@@ -2347,7 +2464,7 @@ def _run_compare_grid(
             # below then finds every stage segment stored.
             assert grid_run is not None
             _publish_grid_plan(state, grid_run, inputs.tiles)
-            with handle.timer.phase("stages"):
+            with handle.timer.phase("stages"), handle.part("stages"):
                 _work_grid_stages(
                     handle,
                     req,
@@ -2384,6 +2501,15 @@ def _run_compare_grid(
                 tile_access=inputs.tiles,
                 **options,
             )
+        # The render's own word on each stage settles its part, whatever
+        # its steps reported on the way.
+        for outcome in result.stages:
+            if handle.has_part(f"stage-{outcome.stage_number}"):
+                handle.update_part(
+                    f"stage-{outcome.stage_number}",
+                    status="done" if outcome.ok else "failed",
+                    progress=1.0 if outcome.ok else None,
+                )
         identities = options["identities"]
         account_brand = inputs.account_brand
         event_logo = inputs.event_logo
@@ -2414,6 +2540,7 @@ def _run_compare_grid(
                 for extra in youtube_files:
                     export_storage.push_match_export_file(state.storage, current_match_id.get(), extra)
 
+        handle.update_part("stitch", status="done", progress=1.0)
         handle.update(progress=1.0, message=f"Wrote {output_path.name}")
         handle.set_result(
             {
@@ -4133,8 +4260,29 @@ def register_job_bodies(state: AppState) -> None:
         """
         from ..config import StageData as EngineStageData
 
+        handle.set_parts(
+            [
+                JobPart(key="load", label="Loading", kind="load"),
+                *(
+                    JobPart(key=f"stage-{number}", label=f"Stage {number}", kind="stage_export")
+                    for number in req.stage_numbers
+                ),
+                JobPart(
+                    key="compose",
+                    label=(
+                        "Composing the match video" if req.output_format == "mp4" else "Writing the timeline"
+                    ),
+                    kind="compose",
+                ),
+                *(
+                    [JobPart(key="upload", label="Uploading", kind="upload")]
+                    if state.storage is not None
+                    else []
+                ),
+            ]
+        )
         handle.update(progress=0.02, message="Loading project...")
-        with handle.timer.phase("load_project"):
+        with handle.timer.phase("load_project"), handle.part("load"):
             proj = state.shooter_project(slug)
             exports_dir = proj.exports_path(state.shooter_root(slug))
             audit_dir = proj.audit_path(state.shooter_root(slug))
@@ -4239,6 +4387,7 @@ def register_job_bodies(state: AppState) -> None:
 
                 needs_per_stage = not trimmed_path.exists() or not secondary_trims_present or overlay_missing
                 if needs_per_stage:
+                    handle.update_part(f"stage-{stage_number}", status="running")
                     handle.update(
                         progress=0.02 + idx * per_stage_share,
                         message=(f"Stage {stage_number} ({idx + 1} of {n}): running per-stage export..."),
@@ -4313,7 +4462,9 @@ def register_job_bodies(state: AppState) -> None:
                             "overlay not written",
                         )
                         overlay_withheld[stage_number] = reason
+                    handle.update_part(f"stage-{stage_number}", status="done")
                 else:
+                    handle.update_part(f"stage-{stage_number}", status="skipped")
                     handle.update(
                         progress=0.02 + idx * per_stage_share,
                         message=(f"Stage {stage_number} ({idx + 1} of {n}): trim already present; skipping"),
@@ -4332,6 +4483,7 @@ def register_job_bodies(state: AppState) -> None:
             handle.check_cancel()
             verb = {"encoding": "Encoding", "reused": "Reused", "stitching": "Stitching"}[step.status]
             done = (step.index - 1) / step.total
+            handle.update_part("compose", progress=done)
             handle.update(
                 progress=compose_start + (0.98 - compose_start) * done,
                 message=f"{verb} {step.label} ({step.index} of {step.total})",
@@ -4339,7 +4491,7 @@ def register_job_bodies(state: AppState) -> None:
 
         # Re-load the project: the per-stage worker writes processed flags
         # via project.save() side-effects, so a fresh load picks those up.
-        with handle.timer.phase("compose"):
+        with handle.timer.phase("compose"), handle.part("compose"):
             proj = state.shooter_project(slug)
             # One assembler for the job and the CLI verb (#973), so the
             # two cannot drift on a file name or a beep offset.
@@ -4474,7 +4626,10 @@ def register_job_bodies(state: AppState) -> None:
         # Hosted: push the stitched match deliverable (+ optional YouTube
         # sidecars, when youtube_sidecar wrote them) so the API can serve the
         # download. push_export_file skips any that don't exist. No-op local.
-        with handle.timer.phase("r2_upload"):
+        with (
+            handle.timer.phase("r2_upload"),
+            handle.part("upload") if handle.has_part("upload") else contextlib.nullcontext(),
+        ):
             export_storage.push_export_file(proj, result.fcpxml_path)
             export_storage.push_export_file(proj, result.fcpxml_path.with_suffix(".srt"))
             export_storage.push_export_file(proj, _youtube_sidecar_json(result.fcpxml_path))
@@ -4760,12 +4915,22 @@ def register_job_bodies(state: AppState) -> None:
     state.jobs.bodies.register("trim", _run_trim)
     state.jobs.bodies.register("derive_audio", _run_derive_audio)
     state.jobs.bodies.register("shot_detect", _run_shot_detect)
-    state.jobs.bodies.register("export", _run_export_for_stage)
+    state.jobs.bodies.register(
+        "export", _one_part(_run_export_for_stage, key="export", label="Stage export", kind="stage_export")
+    )
     state.jobs.bodies.register("match_export", _run_match_export)
     from .highlights_api import JOB_KIND as HIGHLIGHT_REEL_KIND
     from .highlights_api import run_highlight_reel
 
-    state.jobs.bodies.register(HIGHLIGHT_REEL_KIND, functools.partial(run_highlight_reel, state=state))
+    state.jobs.bodies.register(
+        HIGHLIGHT_REEL_KIND,
+        _one_part(
+            functools.partial(run_highlight_reel, state=state),
+            key="render",
+            label="Highlight reel",
+            kind="reel",
+        ),
+    )
 
     def _run_render_upload(handle: JobHandle, slug: str, req: MatchExportRequest, command_id: str) -> None:
         """A phone's render-and-upload request (#1100): the match export
@@ -4800,7 +4965,15 @@ def register_job_bodies(state: AppState) -> None:
     state.jobs.bodies.register("compare-grid-stage", functools.partial(_run_compare_grid_stage, state=state))
     from .youtube_api import run_youtube_upload
 
-    state.jobs.bodies.register("youtube_upload", functools.partial(run_youtube_upload, state=state))
+    state.jobs.bodies.register(
+        "youtube_upload",
+        _one_part(
+            functools.partial(run_youtube_upload, state=state),
+            key="upload",
+            label="YouTube upload",
+            kind="youtube",
+        ),
+    )
     from . import footage_sort_api
 
     state.jobs.bodies.register(
@@ -12058,8 +12231,11 @@ def create_app(
 
     app.include_router(match_api_router)
 
+    from .exports_progress_api import router as exports_progress_router
     from .me_api import router as me_api_router
 
+    # The export progress panel (spec 2026-10-25), before the me routes.
+    app.include_router(exports_progress_router)
     app.include_router(me_api_router)
 
     from .route_scope import enforce_local_only

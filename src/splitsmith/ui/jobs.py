@@ -48,22 +48,24 @@ Design notes
 
 from __future__ import annotations
 
+import contextlib
 import contextvars
 import logging
 import subprocess
 import threading
+import time
 import uuid
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
 from enum import StrEnum
 from pathlib import Path
-from typing import Any, Protocol
+from typing import Any, Literal, Protocol
 
 from pydantic import BaseModel
 
 from ..observability import PhaseTimer, emit_job_event
-from .context import current_match_id, current_match_origin, current_match_root
+from .context import current_export_id, current_match_id, current_match_origin, current_match_root
 
 logger = logging.getLogger(__name__)
 
@@ -197,6 +199,37 @@ class ShutdownInProgressError(RuntimeError):
     """
 
 
+class JobPart(BaseModel):
+    """One part of a job, as the export progress panel shows it (spec
+    2026-10-25): a stage of a grid, the compose of a match video, the
+    upload. A job publishes its parts through :class:`JobHandle`; ``kind``
+    and ``profile`` key the estimate (``splitsmith.export_estimates``)."""
+
+    key: str  # stable within the job: "plan", "stage-3", "stitch", "upload"
+    label: str
+    kind: str
+    profile: str | None = None  # "1080-basic", "2160-dressed"; None outside a grid
+    status: Literal["waiting", "running", "done", "failed", "skipped"] = "waiting"
+    progress: float | None = None
+    footage_s: float | None = None
+    started_at: datetime | None = None
+    finished_at: datetime | None = None
+
+
+#: The kinds whose job leads an export: its status is the export's once
+#: nothing is left running, and the grid's stage jobs hang off it.
+EXPORT_LEAD_KINDS = ("compare-grid", "match_export", "highlight_reel")
+
+
+def export_is_active(jobs: list[Job]) -> bool:
+    """Whether an export still holds a slot: any of its jobs pending or
+    running, except a grid stage job left queued beside a grid job that
+    already ended (the grid job cancels them; a killed worker may not)."""
+    active = (JobStatus.PENDING, JobStatus.RUNNING)
+    grid_ended = any(j.kind == "compare-grid" and j.status not in active for j in jobs)
+    return any(j.status in active and not (grid_ended and j.kind == "compare-grid-stage") for j in jobs)
+
+
 class Job(BaseModel):
     """Wire shape returned by ``/api/jobs/{id}``."""
 
@@ -250,10 +283,21 @@ class Job(BaseModel):
     # by the backend from the run's :class:`PhaseTimer`; ``None`` until the job
     # finishes (and on jobs that pre-date the column).
     timings: dict[str, Any] | None = None
+    # The export this job is part of (``ui.context.export_scope``); ``None``
+    # for work no export route queued (beep detection, audit trims, sync).
+    export_id: str | None = None
+    # The parts the job published (``JobHandle.set_parts``), for the export
+    # progress panel; ``None`` for a job that publishes none.
+    parts: list[JobPart] | None = None
     created_at: datetime
     updated_at: datetime
     started_at: datetime | None = None
     finished_at: datetime | None = None
+
+
+#: At most one progress-only write of a job's parts per this many seconds;
+#: a part's status change always writes (``JobHandle.update_part``).
+PART_WRITE_INTERVAL_S = 3.0
 
 
 class JobHandle:
@@ -280,6 +324,10 @@ class JobHandle:
         # persist + emit of ``timer.build()`` on the terminal path; the body
         # never persists or logs the timings itself.
         self._timer = timer if timer is not None else PhaseTimer()
+        # The parts this job published (:meth:`set_parts`), and when they
+        # were last written: progress-only writes are throttled.
+        self._parts: list[JobPart] = []
+        self._parts_written_at: float | None = None
 
     @property
     def id(self) -> str:
@@ -316,6 +364,75 @@ class JobHandle:
             kwargs["message"] = message
         if kwargs:
             self._registry._patch(self._job_id, **kwargs)
+
+    def set_parts(self, parts: list[JobPart]) -> None:
+        """Publish the parts this job is made of, all waiting, in run order."""
+        self._parts = [part.model_copy() for part in parts]
+        self._write_parts()
+
+    def add_parts(self, parts: list[JobPart], *, before: str | None = None) -> None:
+        """Publish more parts after the ones already there (a job that
+        learns its stages only once its plan has loaded), or ahead of the
+        part ``before`` (a stage the grid job takes over runs before its
+        join)."""
+        at = next((i for i, p in enumerate(self._parts) if p.key == before), len(self._parts))
+        self._parts[at:at] = [part.model_copy() for part in parts]
+        self._write_parts()
+
+    def update_part(
+        self,
+        key: str,
+        *,
+        status: str | None = None,
+        progress: float | None = None,
+        footage_s: float | None = None,
+    ) -> None:
+        """Move one part on. Running stamps ``started_at``; done, failed and
+        skipped stamp ``finished_at``. A status change writes at once; a
+        progress-only change writes at most once per
+        :data:`PART_WRITE_INTERVAL_S`. Raises ``KeyError`` for a key
+        :meth:`set_parts` did not publish."""
+        part = next((p for p in self._parts if p.key == key), None)
+        if part is None:
+            raise KeyError(key)
+        now = datetime.now(UTC)
+        if progress is not None:
+            part.progress = max(0.0, min(1.0, float(progress)))
+        if footage_s is not None and footage_s != part.footage_s:
+            # Known once the part's inputs load; written with the next status.
+            part.footage_s = footage_s
+        if status is not None and status != part.status:
+            part.status = status  # type: ignore[assignment]
+            if status == "running" and part.started_at is None:
+                part.started_at = now
+            if status in ("done", "failed", "skipped"):
+                part.finished_at = now
+            self._write_parts()
+            return
+        last = self._parts_written_at
+        if last is None or time.monotonic() - last >= PART_WRITE_INTERVAL_S:
+            self._write_parts()
+
+    def has_part(self, key: str) -> bool:
+        return any(p.key == key for p in self._parts)
+
+    @contextlib.contextmanager
+    def part(self, key: str) -> Iterator[None]:
+        """Run the block as part ``key``: running on entry, done on a clean
+        exit, failed when it raises (a cancel leaves it as it was)."""
+        self.update_part(key, status="running")
+        try:
+            yield
+        except JobCancelled:
+            raise
+        except BaseException:
+            self.update_part(key, status="failed")
+            raise
+        self.update_part(key, status="done")
+
+    def _write_parts(self) -> None:
+        self._parts_written_at = time.monotonic()
+        self._registry._patch(self._job_id, parts=[part.model_copy() for part in self._parts])
 
     def set_result(self, payload: dict[str, Any]) -> None:
         """Stash a structured result on the Job snapshot.
@@ -455,6 +572,16 @@ class JobBackend(Protocol):
     ) -> Job | None: ...
 
     async def retry(self, job_id: str) -> Job | None: ...
+
+    async def list_export(self, export_id: str) -> list[Job]: ...
+
+    async def active_export_ids(self) -> list[str]: ...
+
+    def export_lock(self) -> contextlib.AbstractAsyncContextManager[None]: ...
+
+    async def recent_export_jobs(self, limit: int = 200) -> list[Job]: ...
+
+    async def requeue(self, job_id: str, *, args_update: dict[str, Any]) -> Job | None: ...
 
 
 class JobRegistry:
@@ -619,6 +746,7 @@ class JobRegistry:
             shooter_slug=shooter_slug,
             video_id=video_id,
             status=JobStatus.PENDING,
+            export_id=current_export_id.get(),
             created_at=now,
             updated_at=now,
         )
@@ -870,10 +998,12 @@ class JobRegistry:
             stage_number = job.stage_number
             shooter_slug = job.shooter_slug
             video_id = job.video_id
+            export_id = job.export_id
 
         id_token = current_match_id.set(match_id)
         root_token = current_match_root.set(match_root)
         origin_token = current_match_origin.set(match_origin)
+        export_token = current_export_id.set(export_id)
         try:
             return await self.submit(
                 kind=kind,
@@ -883,9 +1013,63 @@ class JobRegistry:
                 video_id=video_id,
             )
         finally:
+            current_export_id.reset(export_token)
             current_match_origin.reset(origin_token)
             current_match_id.reset(id_token)
             current_match_root.reset(root_token)
+
+    async def recent_export_jobs(self, limit: int = 200) -> list[Job]:
+        """The retained export jobs that succeeded, newest first."""
+        done = [j for j in await self.list() if j.export_id is not None and j.status is JobStatus.SUCCEEDED]
+        return list(reversed(done))[:limit]
+
+    async def requeue(self, job_id: str, *, args_update: dict[str, Any]) -> Job | None:
+        """Queue this job's kind again with its args updated, bound to its
+        own match and export, whatever its status. ``None`` when unknown."""
+        with self._lock:
+            job = self._jobs.get(job_id)
+            if job is None:
+                return None
+            args = {**(self._args.get(job_id) or {}), **args_update}
+            match_id, match_root, match_origin = self._match_ctx.get(job_id, (None, None, None))
+            kind, stage_number, shooter_slug, video_id = (
+                job.kind,
+                job.stage_number,
+                job.shooter_slug,
+                job.video_id,
+            )
+            export_id = job.export_id
+        tokens = (
+            current_match_id.set(match_id),
+            current_match_root.set(match_root),
+            current_match_origin.set(match_origin),
+            current_export_id.set(export_id),
+        )
+        try:
+            return await self.submit(
+                kind=kind, args=args, stage_number=stage_number, shooter_slug=shooter_slug, video_id=video_id
+            )
+        finally:
+            current_export_id.reset(tokens[3])
+            current_match_origin.reset(tokens[2])
+            current_match_root.reset(tokens[1])
+            current_match_id.reset(tokens[0])
+
+    def export_lock(self) -> contextlib.AbstractAsyncContextManager[None]:
+        """Locally there is no export limit, so nothing to serialize."""
+        return contextlib.nullcontext()  # type: ignore[return-value]
+
+    async def list_export(self, export_id: str) -> list[Job]:
+        """The retained jobs of one export, in submission order."""
+        return [job for job in await self.list() if job.export_id == export_id]
+
+    async def active_export_ids(self) -> list[str]:
+        """The exports still holding a slot (:func:`export_is_active`)."""
+        grouped: dict[str, list[Job]] = {}
+        for job in await self.list():
+            if job.export_id is not None:
+                grouped.setdefault(job.export_id, []).append(job)
+        return [export_id for export_id, jobs in grouped.items() if export_is_active(jobs)]
 
     # ------------------------------------------------------------------
     # Internal -- worker glue. These run on the executor thread.

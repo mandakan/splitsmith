@@ -168,6 +168,14 @@ export const miscApi = {
       json: { access_tier: tier },
     }),
 
+  /** Set how many exports an account may run at once; ``null`` clears it
+   *  back to the tier's number. */
+  adminSetUserExports: (id: string, value: number | null) =>
+    request<AdminAccount>(`/api/admin/users/${encodeURIComponent(id)}`, {
+      method: "PATCH",
+      json: { concurrent_exports: value },
+    }),
+
   /** Read the current hosted-sync target. */
   getSyncSettings: () => request<HostedSyncSettings>("/api/settings/hosted-sync"),
 

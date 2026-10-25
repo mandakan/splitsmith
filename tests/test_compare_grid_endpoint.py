@@ -531,6 +531,14 @@ def test_partial_stage_failure_is_a_reported_success_not_a_job_failure(
     assert result["stages_total"] == 2
     assert result["stages_rendered"] == 1
     assert result["failed"] == [{"stage_number": 2, "stage_name": "Stage 2", "error": "ffmpeg exit 1"}]
+    # The failed stage's part says so; the grid still finishes (spec 2026-10-25).
+    full = match_client_with_trims.get(f"/api/me/jobs/{job['id']}").json()
+    assert {p["key"]: p["status"] for p in full["parts"]} == {
+        "plan": "done",
+        "stage-1": "done",
+        "stage-2": "failed",
+        "stitch": "done",
+    }
 
 
 # --- what actually reaches the renderer ---------------------------------------
@@ -656,6 +664,9 @@ class _RecordingHandle:
 
     def update(self, *, progress: float | None = None, message: str | None = None) -> None:
         self.updates.append((progress, message))
+
+    def has_part(self, key: str) -> bool:
+        return False
 
 
 def _plan(number: int) -> mp4_grid_mod.GridStagePlan:
@@ -1220,3 +1231,23 @@ def test_a_local_grid_queues_no_stage_jobs(match_client_with_trims: _MatchClient
     assert call["tile_access"] is None and call["tile_identities"] is None
     jobs = match_client_with_trims.get("/api/me/jobs").json()
     assert not [j for j in jobs if j["kind"] == "compare-grid-stage"]
+
+
+def test_a_local_grid_publishes_a_part_per_stage(match_client_with_trims: _MatchClient) -> None:
+    """Locally one process renders the grid: its parts are the plan, a
+    part per stage, then the stitch (spec 2026-10-25)."""
+    response = match_client_with_trims.post(
+        "/api/match/compare-export",
+        json={"stage_numbers": [1, 2], "audio_from": "mathias"},
+    )
+    job = _wait_for_job(match_client_with_trims, response.json()["id"])
+    assert job["status"] == "succeeded", job
+    full = match_client_with_trims.get(f"/api/me/jobs/{job['id']}").json()
+    assert [(p["key"], p["kind"], p["status"]) for p in full["parts"]] == [
+        ("plan", "load", "done"),
+        ("stage-1", "grid_stage", "done"),
+        ("stage-2", "grid_stage", "done"),
+        ("stitch", "stitch", "done"),
+    ]
+    assert full["parts"][1]["profile"] == "2160-basic"
+    assert full["parts"][1]["footage_s"] > 0
