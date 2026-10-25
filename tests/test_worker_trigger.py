@@ -27,6 +27,7 @@ from splitsmith.worker_trigger import (
     CloudRunJobConfig,
     WorkerDispatcher,
     build_worker_dispatcher,
+    hold_wakes,
     make_boot_retrigger,
     make_pending_jobs_counter,
     make_worker_active_checker,
@@ -811,7 +812,8 @@ def test_the_cap_holds_across_serve_instances() -> None:
 
 def test_a_refused_start_releases_its_claim() -> None:
     """Claims the platform refused are not counted as booting: the next
-    trigger may start them."""
+    trigger may start them. The starts go at once, so one refusal does not
+    stop the others: three of four start and one claim is released."""
     store = _fresh_store()
     attempts: list[str] = []
 
@@ -835,11 +837,12 @@ def test_a_refused_start_releases_its_claim() -> None:
             watch_seconds=None,
             max_executions=4,
         )
-        assert await dispatcher.trigger() is True  # one started, the second refused
+        assert await dispatcher.trigger() is True  # three started, the second refused
         await _drain_tasks(dispatcher)
         return await store.claim_starts(row_id, wanted=4, live=0, grace_seconds=120, at_least_one=False)
 
-    assert asyncio.run(scenario()) == 3
+    assert asyncio.run(scenario()) == 1
+    assert len(attempts) == 4
 
 
 def test_a_watch_re_wake_inside_the_cooldown_starts_nothing() -> None:
@@ -1135,6 +1138,132 @@ def test_wrap_deferrer_failed_defer_does_not_schedule() -> None:
     with pytest.raises(RuntimeError, match="boom"):
         asyncio.run(wrapped(job_id="j1", user_id="u1", kind="detect_beep", args={}, match_id=None))
     assert stub.scheduled == 0
+
+
+def test_held_wakes_fire_once_when_the_batch_ends() -> None:
+    """A batch of submits (a grid's stage jobs) wakes once, after its last
+    defer, so the wake counts every job rather than the first."""
+    calls: list[str] = []
+
+    async def deferrer(**kwargs: Any) -> None:
+        calls.append(kwargs["job_id"])
+
+    class _Counting(_StubLauncher):
+        def __init__(self) -> None:
+            super().__init__()
+            self.triggered: list[int] = []
+
+        async def trigger(self) -> bool:
+            self.triggered.append(len(calls))
+            return True
+
+    stub = _Counting()
+    wrapped = wrap_deferrer(deferrer, stub)
+
+    async def scenario() -> None:
+        async with hold_wakes():
+            for n in range(3):
+                await wrapped(job_id=f"j{n}", user_id="u1", kind="trim", args={}, match_id=None)
+            assert stub.scheduled == 0 and stub.triggered == []
+        await wrapped(job_id="after", user_id="u1", kind="trim", args={}, match_id=None)
+
+    asyncio.run(scenario())
+    assert stub.triggered == [3]
+    assert stub.scheduled == 1  # the submit after the batch wakes as before
+
+
+def test_a_batch_that_raises_still_wakes_for_what_it_queued() -> None:
+    async def deferrer(**kwargs: Any) -> None:
+        return None
+
+    stub = _StubLauncher()
+    wrapped = wrap_deferrer(deferrer, stub)
+
+    async def scenario() -> None:
+        async with hold_wakes():
+            await wrapped(job_id="j1", user_id="u1", kind="trim", args={}, match_id=None)
+            raise RuntimeError("boom")
+
+    with pytest.raises(RuntimeError, match="boom"):
+        asyncio.run(scenario())
+    assert stub.scheduled == 1  # _StubLauncher.trigger counts through schedule
+
+
+def test_a_batched_grid_burst_starts_every_execution_at_once() -> None:
+    """Run G2: twelve stage jobs and the grid job, queued 0.7 s apart. Woken
+    per submit, the first wake saw one job and started one execution; the
+    rest waited on the cooldown's settle check. Held to the batch's end, one
+    wake counts all thirteen and starts thirteen."""
+    store = _fresh_store()
+    requests: list[dict[str, Any]] = []
+    queued = {"n": 0}
+
+    async def pending() -> int:
+        return queued["n"]
+
+    async def solo() -> int:
+        return min(queued["n"], 12)
+
+    async def deferrer(**kwargs: Any) -> None:
+        queued["n"] += 1
+
+    async def scenario() -> int:
+        await _platform_row_id(store)
+        dispatcher = WorkerDispatcher(
+            store,
+            WakeChannelRegistry(),
+            cloud_run=_config(),
+            worker_active=_inactive,
+            pending_jobs=pending,
+            cooldown_seconds=30.0,
+            transport=_transport(requests),
+            watch_seconds=None,
+            live_workers=_count(0),
+            max_executions=13,
+            jobs_per_execution=2,
+            solo_jobs=solo,
+        )
+        wrapped = wrap_deferrer(deferrer, dispatcher)
+        async with hold_wakes():
+            for n in range(13):
+                await wrapped(job_id=f"j{n}", user_id="u1", kind="compare-grid-stage", args={}, match_id=None)
+        started = len(requests)
+        await asyncio.wait_for(_drain_tasks(dispatcher), 5)
+        return started
+
+    assert asyncio.run(scenario()) == 13
+
+
+def test_executions_start_concurrently() -> None:
+    """Thirteen ``jobs.run`` calls one after another took ten seconds on
+    staging; the batch's wake is awaited inside the request, so they go at once."""
+    store = _fresh_store()
+    in_flight = {"now": 0, "peak": 0}
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        if str(request.url) == GCP_METADATA_TOKEN_URL:
+            return httpx.Response(200, json={"access_token": "sa-token", "expires_in": 3600})
+        in_flight["now"] += 1
+        in_flight["peak"] = max(in_flight["peak"], in_flight["now"])
+        await asyncio.sleep(0.02)
+        in_flight["now"] -= 1
+        return httpx.Response(200, json={"name": "operations/op"})
+
+    async def scenario() -> int:
+        worker_id = await _platform_row_id(store)
+        dispatcher = WorkerDispatcher(
+            store,
+            WakeChannelRegistry(),
+            cloud_run=_config(),
+            worker_active=_inactive,
+            pending_jobs=_pending(0),
+            transport=httpx.MockTransport(handler),
+            watch_seconds=None,
+        )
+        return await dispatcher._start_executions(worker_id, 5)
+
+    assert asyncio.run(scenario()) == 5
+    assert in_flight["peak"] == 5
 
 
 def test_boot_retrigger_fires_when_jobs_pending() -> None:

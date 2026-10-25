@@ -175,6 +175,17 @@ def test_the_request_queues_the_stage_jobs_behind_the_grid_job(two_stages) -> No
     assert queue_mod.job_priority("compare-grid-stage") < queue_mod.job_priority("compare-grid")
 
 
+def test_the_request_wakes_workers_once_for_the_whole_batch(two_stages, inline_deferrer) -> None:
+    """Every grid job is queued with the wakes held, so serve wakes once,
+    after the last, and the wake counts every stage job (run G2)."""
+    client, _storage, match_id, slug, _calls, _failing, _raising = two_stages
+    inline_deferrer["wakes_held"] = []
+    _grid(client, match_id, slug, [1, 2])
+    queued = [(kind, held) for kind, held in inline_deferrer["wakes_held"] if kind.startswith("compare-grid")]
+    assert [kind for kind, _ in queued] == ["compare-grid-stage", "compare-grid-stage", "compare-grid"]
+    assert all(held for _, held in queued)
+
+
 def test_a_stage_job_plans_from_the_grid_jobs_published_plan(tmp_path: Path, monkeypatch) -> None:
     from splitsmith.storage import FilesystemStorage
 

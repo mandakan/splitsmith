@@ -1896,25 +1896,30 @@ async def export_compare_grid(request: Request, req: CompareGridRequest) -> JSON
     # priority) plans, publishes the plan for them, renders any stage still
     # queued itself, then stitches. Locally one process renders it all.
     planned = sorted({n for bundle in bundles for n in bundle.stages_by_number if n in req.stage_numbers})
+    # One wake after the last submit, so it counts every stage job and
+    # starts a worker for each at once (hold_wakes).
+    from ..worker_trigger import hold_wakes
+
     stage_jobs: dict[str, str] = {}
     grid_run = uuid.uuid4().hex
-    if state.storage is not None and len(planned) > 1:
-        for number in planned:
-            stage_job = await state.jobs.submit(
-                kind="compare-grid-stage",
-                stage_number=number,
-                args={
-                    "req": req,
-                    "match_root": str(match_root),
-                    "stage_number": number,
-                    "grid_run": grid_run,
-                },
-            )
-            stage_jobs[str(number)] = stage_job.id
-    job = await state.jobs.submit(
-        kind="compare-grid",
-        args={"req": req, "match_root": str(match_root), "stage_jobs": stage_jobs, "grid_run": grid_run},
-    )
+    async with hold_wakes():
+        if state.storage is not None and len(planned) > 1:
+            for number in planned:
+                stage_job = await state.jobs.submit(
+                    kind="compare-grid-stage",
+                    stage_number=number,
+                    args={
+                        "req": req,
+                        "match_root": str(match_root),
+                        "stage_number": number,
+                        "grid_run": grid_run,
+                    },
+                )
+                stage_jobs[str(number)] = stage_job.id
+        job = await state.jobs.submit(
+            kind="compare-grid",
+            args={"req": req, "match_root": str(match_root), "stage_jobs": stage_jobs, "grid_run": grid_run},
+        )
     return JSONResponse(job.model_dump(mode="json"))
 
 

@@ -99,6 +99,9 @@ def inline_deferrer(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
         async def _defer(
             *, job_id: str, user_id: str, kind: str, args: dict[str, Any], match_id: str | None
         ) -> None:
+            from splitsmith.worker_trigger import wakes_held
+
+            holder.setdefault("wakes_held", []).append((kind, wakes_held()))
             if holder.get("hold") or kind in holder.get("hold_kinds", ()):  # leave it queued
                 holder.setdefault("held", []).append(job_id)
                 return
