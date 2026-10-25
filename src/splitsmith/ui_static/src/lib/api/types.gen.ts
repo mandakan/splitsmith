@@ -9574,6 +9574,10 @@ export interface components {
             profile: string | null;
             /** Progress */
             progress: number | null;
+            /** Rate From */
+            rate_from: string | null;
+            /** Rate From Progress */
+            rate_from_progress: number | null;
             /** Started At */
             started_at: string | null;
             /**

@@ -214,6 +214,11 @@ class JobPart(BaseModel):
     footage_s: float | None = None
     started_at: datetime | None = None
     finished_at: datetime | None = None
+    # When, and at what progress, the part's first fraction arrived: its
+    # rate is measured from here, not from ``started_at`` (a dressed stage
+    # draws its overlay for minutes before ffmpeg reports anything).
+    rate_from: datetime | None = None
+    rate_from_progress: float | None = None
 
 
 #: The kinds whose job leads an export: its status is the export's once
@@ -398,6 +403,9 @@ class JobHandle:
         now = datetime.now(UTC)
         if progress is not None:
             part.progress = max(0.0, min(1.0, float(progress)))
+            if part.rate_from is None and 0.0 < part.progress < 1.0 and (status or part.status) == "running":
+                part.rate_from = now
+                part.rate_from_progress = part.progress
         if footage_s is not None and footage_s != part.footage_s:
             # Known once the part's inputs load; written with the next status.
             part.footage_s = footage_s

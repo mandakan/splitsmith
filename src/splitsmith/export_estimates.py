@@ -55,6 +55,9 @@ WORKER_BOOT_S = 60.0
 #: stage's clock starts at its tile download, before ffmpeg's first fraction,
 #: so at 5% the rate overshot by double (staging run G6).
 MIN_RATE_PROGRESS = 0.15
+#: With a first fraction on record, how far a part must have moved since it
+#: before its own rate is trusted.
+MIN_RATE_SPAN = 0.1
 
 _DONE = ("done", "skipped", "failed")
 _ENDED = (JobStatus.SUCCEEDED, JobStatus.FAILED, JobStatus.CANCELLED)
@@ -134,7 +137,14 @@ def _remaining(
     started = part.started_at or job.started_at
     elapsed = (now - started).total_seconds() if started is not None else 0.0
     progress = part.progress or 0.0
-    if progress >= MIN_RATE_PROGRESS and elapsed > 0:
+    if part.rate_from is not None and part.rate_from_progress is not None:
+        # From the first fraction: the time before it (tiles, the overlay)
+        # is not the encode's rate (staging run G9).
+        moved = progress - part.rate_from_progress
+        if moved >= MIN_RATE_SPAN:
+            span = (now - part.rate_from).total_seconds()
+            return span * (1.0 - progress) / moved, False, False
+    elif progress >= MIN_RATE_PROGRESS and elapsed > 0:
         return elapsed * (1.0 - progress) / progress, False, False
     return max(0.0, planned - elapsed), elapsed > planned, builtin
 

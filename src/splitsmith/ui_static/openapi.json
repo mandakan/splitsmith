@@ -5661,6 +5661,29 @@
       ],
       "title": "Progress"
      },
+     "rate_from": {
+      "anyOf": [
+       {
+        "format": "date-time",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Rate From"
+     },
+     "rate_from_progress": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Rate From Progress"
+     },
      "started_at": {
       "anyOf": [
        {
@@ -5694,6 +5717,8 @@
      "label",
      "profile",
      "progress",
+     "rate_from",
+     "rate_from_progress",
      "started_at",
      "status"
     ],

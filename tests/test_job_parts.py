@@ -101,3 +101,16 @@ def test_unknown_part_key_raises() -> None:
     handle.set_parts(_two_parts())
     with pytest.raises(KeyError):
         handle.update_part("nope", status="running")
+
+
+def test_the_first_fraction_marks_where_the_rate_starts() -> None:
+    """A dressed stage runs for minutes (its overlay is drawn) before
+    ffmpeg's first fraction; the rate is measured from that fraction."""
+    recorder = _Recorder()
+    handle = _handle(recorder)
+    handle.set_parts(_two_parts())
+    handle.update_part("render", status="running")
+    handle.update_part("render", progress=0.2)
+    handle.update_part("render", progress=0.5)
+    part = handle._parts[1]
+    assert part.rate_from is not None and part.rate_from_progress == 0.2
