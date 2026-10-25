@@ -632,6 +632,58 @@ class PostgresJobBackend:
                 )
                 yield
 
+    async def recent_export_jobs(self, limit: int = 200) -> list[Job]:
+        """This user's most recently finished export jobs: the history the
+        export estimates learn from (``export_estimates.history_rates``)."""
+        async with self._session_factory() as session:
+            rows = (
+                (
+                    await session.execute(
+                        select(ComputeJobRow)
+                        .where(
+                            ComputeJobRow.user_id == self._user_id,
+                            ComputeJobRow.export_id.is_not(None),
+                            ComputeJobRow.status == JobStatus.SUCCEEDED.value,
+                        )
+                        .order_by(ComputeJobRow.created_at.desc())
+                        .limit(limit)
+                    )
+                )
+                .scalars()
+                .all()
+            )
+        return [_row_to_job(r) for r in rows]
+
+    async def requeue(self, job_id: str, *, args_update: dict[str, Any]) -> Job | None:
+        """Queue this job's kind again with its args updated, bound to its
+        own match and export, whatever its status (the retry of a grid
+        stage re-runs a grid that succeeded). ``None`` when unknown."""
+        from ..ui.server import current_match_id
+
+        async with self._session_factory() as session:
+            row = (
+                await session.execute(
+                    select(ComputeJobRow).where(
+                        ComputeJobRow.id == job_id, ComputeJobRow.user_id == self._user_id
+                    )
+                )
+            ).scalar_one_or_none()
+        if row is None or row.args is None:
+            return None
+        match_token = current_match_id.set(row.match_id)
+        export_token = current_export_id.set(row.export_id)
+        try:
+            return await self.submit(
+                kind=row.kind,
+                args={**rehydrate_args(row.kind, row.args), **args_update},
+                stage_number=row.stage_number,
+                shooter_slug=row.shooter_slug,
+                video_id=row.video_id,
+            )
+        finally:
+            current_export_id.reset(export_token)
+            current_match_id.reset(match_token)
+
     async def list_export(self, export_id: str) -> list[Job]:
         """This user's jobs of one export, in ``created_at`` order."""
         async with self._session_factory() as session:

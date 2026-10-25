@@ -2627,6 +2627,86 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/me/exports/active": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Active Exports
+         * @description The account's running exports, every match, oldest first.
+         */
+        get: operations["active_exports_api_me_exports_active_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/me/exports/{export_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Export */
+        get: operations["get_export_api_me_exports__export_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/me/exports/{export_id}/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Cancel Export
+         * @description Cancel every job of the export still waiting or running.
+         */
+        post: operations["cancel_export_api_me_exports__export_id__cancel_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/me/exports/{export_id}/retry": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Retry Export Part
+         * @description Run a failed part again, inside the same export (and its slot). A
+         *     grid's failed stage re-runs the grid job, which reuses every stored
+         *     stage and renders the missing one itself; any other failed job is
+         *     retried with its own settings.
+         */
+        post: operations["retry_export_part_api_me_exports__export_id__retry_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/me/jobs": {
         parameters: {
             query?: never;
@@ -6874,6 +6954,13 @@ export interface components {
              */
             source: "form" | "waitlist";
         };
+        /** ActiveExports */
+        ActiveExports: {
+            /** Exports */
+            exports: components["schemas"]["ExportView"][];
+            /** Limit */
+            limit: number | null;
+        };
         /**
          * AddShooterRequest
          * @description POST /api/match/shooters body (#324).
@@ -9027,6 +9114,27 @@ export interface components {
              */
             width: number;
         };
+        /** ExportRow */
+        ExportRow: {
+            /** Elapsed S */
+            elapsed_s: number | null;
+            /** Job Id */
+            job_id: string;
+            /** Key */
+            key: string;
+            /** Label */
+            label: string;
+            /** Overrun */
+            overrun: boolean;
+            /** Progress */
+            progress: number | null;
+            /** Remaining S */
+            remaining_s: number;
+            /** Retryable */
+            retryable: boolean;
+            /** Status */
+            status: string;
+        };
         /**
          * ExportStageRequest
          * @description Body for POST /api/stages/{n}/export.
@@ -9132,6 +9240,32 @@ export interface components {
              * @default true
              */
             write_trim: boolean;
+        };
+        /** ExportView */
+        ExportView: {
+            /** Approximate */
+            approximate: boolean;
+            /** Export Id */
+            export_id: string;
+            /** Finish At */
+            finish_at: string | null;
+            /** Kind */
+            kind: string;
+            /** Label */
+            label: string;
+            /** Match Id */
+            match_id: string | null;
+            /** Rows */
+            rows: components["schemas"]["ExportRow"][];
+            /**
+             * Started At
+             * Format: date-time
+             */
+            started_at: string;
+            /** Status */
+            status: string;
+            /** Time Left S */
+            time_left_s: number | null;
         };
         /** FsEntry */
         FsEntry: {
@@ -10536,6 +10670,11 @@ export interface components {
             stage_number?: number | null;
             /** Video Path */
             video_path: string;
+        };
+        /** RetryBody */
+        RetryBody: {
+            /** Job Id */
+            job_id: string;
         };
         /**
          * RevealRequest
@@ -16119,6 +16258,123 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["DesktopTokenRevokeResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    active_exports_api_me_exports_active_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ActiveExports"];
+                };
+            };
+        };
+    };
+    get_export_api_me_exports__export_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                export_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExportView"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    cancel_export_api_me_exports__export_id__cancel_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                export_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExportView"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    retry_export_part_api_me_exports__export_id__retry_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                export_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RetryBody"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExportView"];
                 };
             };
             /** @description Validation Error */

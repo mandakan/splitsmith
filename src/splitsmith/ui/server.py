@@ -12213,8 +12213,11 @@ def create_app(
 
     app.include_router(match_api_router)
 
+    from .exports_progress_api import router as exports_progress_router
     from .me_api import router as me_api_router
 
+    # The export progress panel (spec 2026-10-25), before the me routes.
+    app.include_router(exports_progress_router)
     app.include_router(me_api_router)
 
     from .route_scope import enforce_local_only

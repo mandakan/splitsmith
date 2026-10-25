@@ -576,6 +576,10 @@ class JobBackend(Protocol):
 
     def export_lock(self) -> contextlib.AbstractAsyncContextManager[None]: ...
 
+    async def recent_export_jobs(self, limit: int = 200) -> list[Job]: ...
+
+    async def requeue(self, job_id: str, *, args_update: dict[str, Any]) -> Job | None: ...
+
 
 class JobRegistry:
     """Thread-safe in-memory job backend.
@@ -1010,6 +1014,43 @@ class JobRegistry:
             current_match_origin.reset(origin_token)
             current_match_id.reset(id_token)
             current_match_root.reset(root_token)
+
+    async def recent_export_jobs(self, limit: int = 200) -> list[Job]:
+        """The retained export jobs that succeeded, newest first."""
+        done = [j for j in await self.list() if j.export_id is not None and j.status is JobStatus.SUCCEEDED]
+        return list(reversed(done))[:limit]
+
+    async def requeue(self, job_id: str, *, args_update: dict[str, Any]) -> Job | None:
+        """Queue this job's kind again with its args updated, bound to its
+        own match and export, whatever its status. ``None`` when unknown."""
+        with self._lock:
+            job = self._jobs.get(job_id)
+            if job is None:
+                return None
+            args = {**(self._args.get(job_id) or {}), **args_update}
+            match_id, match_root, match_origin = self._match_ctx.get(job_id, (None, None, None))
+            kind, stage_number, shooter_slug, video_id = (
+                job.kind,
+                job.stage_number,
+                job.shooter_slug,
+                job.video_id,
+            )
+            export_id = job.export_id
+        tokens = (
+            current_match_id.set(match_id),
+            current_match_root.set(match_root),
+            current_match_origin.set(match_origin),
+            current_export_id.set(export_id),
+        )
+        try:
+            return await self.submit(
+                kind=kind, args=args, stage_number=stage_number, shooter_slug=shooter_slug, video_id=video_id
+            )
+        finally:
+            current_export_id.reset(tokens[3])
+            current_match_origin.reset(tokens[2])
+            current_match_root.reset(tokens[1])
+            current_match_id.reset(tokens[0])
 
     def export_lock(self) -> contextlib.AbstractAsyncContextManager[None]:
         """Locally there is no export limit, so nothing to serialize."""

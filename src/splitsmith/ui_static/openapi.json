@@ -48,6 +48,34 @@
     "title": "AccessRequestBody",
     "type": "object"
    },
+   "ActiveExports": {
+    "properties": {
+     "exports": {
+      "items": {
+       "$ref": "#/components/schemas/ExportView"
+      },
+      "title": "Exports",
+      "type": "array"
+     },
+     "limit": {
+      "anyOf": [
+       {
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Limit"
+     }
+    },
+    "required": [
+     "exports",
+     "limit"
+    ],
+    "title": "ActiveExports",
+    "type": "object"
+   },
    "AddShooterRequest": {
     "description": "POST /api/match/shooters body (#324).",
     "properties": {
@@ -4494,6 +4522,73 @@
     "title": "ExportPreviewRequest",
     "type": "object"
    },
+   "ExportRow": {
+    "properties": {
+     "elapsed_s": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Elapsed S"
+     },
+     "job_id": {
+      "title": "Job Id",
+      "type": "string"
+     },
+     "key": {
+      "title": "Key",
+      "type": "string"
+     },
+     "label": {
+      "title": "Label",
+      "type": "string"
+     },
+     "overrun": {
+      "title": "Overrun",
+      "type": "boolean"
+     },
+     "progress": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Progress"
+     },
+     "remaining_s": {
+      "title": "Remaining S",
+      "type": "number"
+     },
+     "retryable": {
+      "title": "Retryable",
+      "type": "boolean"
+     },
+     "status": {
+      "title": "Status",
+      "type": "string"
+     }
+    },
+    "required": [
+     "elapsed_s",
+     "job_id",
+     "key",
+     "label",
+     "overrun",
+     "progress",
+     "remaining_s",
+     "retryable",
+     "status"
+    ],
+    "title": "ExportRow",
+    "type": "object"
+   },
    "ExportStageRequest": {
     "description": "Body for POST /api/stages/{n}/export.\n\nEach toggle defaults True; turning one off skips that artefact while\nleaving the others on. ``write_trim`` produces the lossless stream-copy\ntrim into ``<project>/exports/`` -- distinct from the audit-mode\nshort-GOP scrub copy in ``<project>/trimmed/``. The FCPXML always\nreferences the lossless trim so SPA exports match ``splitsmith single``.",
     "properties": {
@@ -4642,6 +4737,90 @@
      }
     },
     "title": "ExportStageRequest",
+    "type": "object"
+   },
+   "ExportView": {
+    "properties": {
+     "approximate": {
+      "title": "Approximate",
+      "type": "boolean"
+     },
+     "export_id": {
+      "title": "Export Id",
+      "type": "string"
+     },
+     "finish_at": {
+      "anyOf": [
+       {
+        "format": "date-time",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Finish At"
+     },
+     "kind": {
+      "title": "Kind",
+      "type": "string"
+     },
+     "label": {
+      "title": "Label",
+      "type": "string"
+     },
+     "match_id": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Match Id"
+     },
+     "rows": {
+      "items": {
+       "$ref": "#/components/schemas/ExportRow"
+      },
+      "title": "Rows",
+      "type": "array"
+     },
+     "started_at": {
+      "format": "date-time",
+      "title": "Started At",
+      "type": "string"
+     },
+     "status": {
+      "title": "Status",
+      "type": "string"
+     },
+     "time_left_s": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Time Left S"
+     }
+    },
+    "required": [
+     "approximate",
+     "export_id",
+     "finish_at",
+     "kind",
+     "label",
+     "match_id",
+     "rows",
+     "started_at",
+     "status",
+     "time_left_s"
+    ],
+    "title": "ExportView",
     "type": "object"
    },
    "FsEntry": {
@@ -7811,6 +7990,19 @@
      "video_path"
     ],
     "title": "RemoveVideoRequest",
+    "type": "object"
+   },
+   "RetryBody": {
+    "properties": {
+     "job_id": {
+      "title": "Job Id",
+      "type": "string"
+     }
+    },
+    "required": [
+     "job_id"
+    ],
+    "title": "RetryBody",
     "type": "object"
    },
    "RevealRequest": {
@@ -16951,6 +17143,154 @@
      }
     },
     "summary": "Revoke Desktop Token"
+   }
+  },
+  "/api/me/exports/active": {
+   "get": {
+    "description": "The account's running exports, every match, oldest first.",
+    "operationId": "active_exports_api_me_exports_active_get",
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ActiveExports"
+        }
+       }
+      },
+      "description": "Successful Response"
+     }
+    },
+    "summary": "Active Exports"
+   }
+  },
+  "/api/me/exports/{export_id}": {
+   "get": {
+    "operationId": "get_export_api_me_exports__export_id__get",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "export_id",
+      "required": true,
+      "schema": {
+       "title": "Export Id",
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ExportView"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Get Export"
+   }
+  },
+  "/api/me/exports/{export_id}/cancel": {
+   "post": {
+    "description": "Cancel every job of the export still waiting or running.",
+    "operationId": "cancel_export_api_me_exports__export_id__cancel_post",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "export_id",
+      "required": true,
+      "schema": {
+       "title": "Export Id",
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ExportView"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Cancel Export"
+   }
+  },
+  "/api/me/exports/{export_id}/retry": {
+   "post": {
+    "description": "Run a failed part again, inside the same export (and its slot). A\ngrid's failed stage re-runs the grid job, which reuses every stored\nstage and renders the missing one itself; any other failed job is\nretried with its own settings.",
+    "operationId": "retry_export_part_api_me_exports__export_id__retry_post",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "export_id",
+      "required": true,
+      "schema": {
+       "title": "Export Id",
+       "type": "string"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/RetryBody"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ExportView"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Retry Export Part"
    }
   },
   "/api/me/jobs": {

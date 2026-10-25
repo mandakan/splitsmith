@@ -81,7 +81,7 @@ def history_rates(finished: list[Job]) -> dict[tuple[str, str | None], float]:
     return {key: median(values) for key, values in samples.items()}
 
 
-def _parts_of(job: Job) -> list[JobPart]:
+def parts_of(job: Job) -> list[JobPart]:
     """A job's parts, or the job itself as one part when it published none."""
     if job.parts:
         return list(job.parts)
@@ -135,7 +135,7 @@ def estimate_export(
     wait_keys: dict[str, list[str]] = {}
     for job in jobs:
         total = WORKER_BOOT_S if hosted and job.status == JobStatus.PENDING else 0.0
-        for part in _parts_of(job):
+        for part in parts_of(job):
             seconds, overrun, builtin = _remaining(part, job, history, now)
             if part.kind == "wait":
                 wait_keys.setdefault(job.id, []).append(part.key)
@@ -153,7 +153,7 @@ def estimate_export(
         siblings = [j for j in ordered if j is not lead and j.created_at <= lead.created_at]
         followers = [j for j in ordered if j is not lead and j.created_at > lead.created_at]
         longest_sibling = max((job_left[j.id] for j in siblings), default=0.0)
-        lead_parts = {p.key: p for p in _parts_of(lead)}
+        lead_parts = {p.key: p for p in parts_of(lead)}
         waiting_on_siblings = any(lead_parts[k].status not in _DONE for k in wait_keys.get(lead.id, ()))
         if waiting_on_siblings:
             through_lead = job_left[lead.id] + longest_sibling
