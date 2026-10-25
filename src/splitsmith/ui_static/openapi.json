@@ -5229,6 +5229,17 @@
       ],
       "title": "Error"
      },
+     "export_id": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Export Id"
+     },
      "finished_at": {
       "anyOf": [
        {
@@ -5270,6 +5281,20 @@
        }
       ],
       "title": "Message"
+     },
+     "parts": {
+      "anyOf": [
+       {
+        "items": {
+         "$ref": "#/components/schemas/JobPart"
+        },
+        "type": "array"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Parts"
      },
      "progress": {
       "anyOf": [
@@ -5365,11 +5390,13 @@
      "cancel_requested",
      "created_at",
      "error",
+     "export_id",
      "finished_at",
      "id",
      "kind",
      "match_id",
      "message",
+     "parts",
      "progress",
      "result",
      "shooter_slug",
@@ -5381,6 +5408,105 @@
      "video_id"
     ],
     "title": "Job",
+    "type": "object"
+   },
+   "JobPart": {
+    "description": "One part of a job, as the export progress panel shows it (spec\n2026-10-25): a stage of a grid, the compose of a match video, the\nupload. A job publishes its parts through :class:`JobHandle`; ``kind``\nand ``profile`` key the estimate (``splitsmith.export_estimates``).",
+    "properties": {
+     "finished_at": {
+      "anyOf": [
+       {
+        "format": "date-time",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Finished At"
+     },
+     "footage_s": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Footage S"
+     },
+     "key": {
+      "title": "Key",
+      "type": "string"
+     },
+     "kind": {
+      "title": "Kind",
+      "type": "string"
+     },
+     "label": {
+      "title": "Label",
+      "type": "string"
+     },
+     "profile": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Profile"
+     },
+     "progress": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Progress"
+     },
+     "started_at": {
+      "anyOf": [
+       {
+        "format": "date-time",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Started At"
+     },
+     "status": {
+      "default": "waiting",
+      "enum": [
+       "waiting",
+       "running",
+       "done",
+       "failed",
+       "skipped"
+      ],
+      "title": "Status",
+      "type": "string"
+     }
+    },
+    "required": [
+     "finished_at",
+     "footage_s",
+     "key",
+     "kind",
+     "label",
+     "profile",
+     "progress",
+     "started_at",
+     "status"
+    ],
+    "title": "JobPart",
     "type": "object"
    },
    "JobStatus": {

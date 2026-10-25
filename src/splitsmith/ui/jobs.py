@@ -48,13 +48,14 @@ Design notes
 
 from __future__ import annotations
 
+import contextlib
 import contextvars
 import logging
 import subprocess
 import threading
 import time
 import uuid
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
 from enum import StrEnum
@@ -369,7 +370,20 @@ class JobHandle:
         self._parts = [part.model_copy() for part in parts]
         self._write_parts()
 
-    def update_part(self, key: str, *, status: str | None = None, progress: float | None = None) -> None:
+    def add_parts(self, parts: list[JobPart]) -> None:
+        """Publish more parts after the ones already there (a job that
+        learns its stages only once its plan has loaded)."""
+        self._parts.extend(part.model_copy() for part in parts)
+        self._write_parts()
+
+    def update_part(
+        self,
+        key: str,
+        *,
+        status: str | None = None,
+        progress: float | None = None,
+        footage_s: float | None = None,
+    ) -> None:
         """Move one part on. Running stamps ``started_at``; done, failed and
         skipped stamp ``finished_at``. A status change writes at once; a
         progress-only change writes at most once per
@@ -381,6 +395,9 @@ class JobHandle:
         now = datetime.now(UTC)
         if progress is not None:
             part.progress = max(0.0, min(1.0, float(progress)))
+        if footage_s is not None and footage_s != part.footage_s:
+            # Known once the part's inputs load; written with the next status.
+            part.footage_s = footage_s
         if status is not None and status != part.status:
             part.status = status  # type: ignore[assignment]
             if status == "running" and part.started_at is None:
@@ -392,6 +409,23 @@ class JobHandle:
         last = self._parts_written_at
         if last is None or time.monotonic() - last >= PART_WRITE_INTERVAL_S:
             self._write_parts()
+
+    def has_part(self, key: str) -> bool:
+        return any(p.key == key for p in self._parts)
+
+    @contextlib.contextmanager
+    def part(self, key: str) -> Iterator[None]:
+        """Run the block as part ``key``: running on entry, done on a clean
+        exit, failed when it raises (a cancel leaves it as it was)."""
+        self.update_part(key, status="running")
+        try:
+            yield
+        except JobCancelled:
+            raise
+        except BaseException:
+            self.update_part(key, status="failed")
+            raise
+        self.update_part(key, status="done")
 
     def _write_parts(self) -> None:
         self._parts_written_at = time.monotonic()

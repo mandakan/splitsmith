@@ -9354,6 +9354,8 @@ export interface components {
             created_at: string;
             /** Error */
             error: string | null;
+            /** Export Id */
+            export_id: string | null;
             /** Finished At */
             finished_at: string | null;
             /** Id */
@@ -9364,6 +9366,8 @@ export interface components {
             match_id: string | null;
             /** Message */
             message: string | null;
+            /** Parts */
+            parts: components["schemas"]["JobPart"][] | null;
             /** Progress */
             progress: number | null;
             /** Result */
@@ -9388,6 +9392,37 @@ export interface components {
             updated_at: string;
             /** Video Id */
             video_id: string | null;
+        };
+        /**
+         * JobPart
+         * @description One part of a job, as the export progress panel shows it (spec
+         *     2026-10-25): a stage of a grid, the compose of a match video, the
+         *     upload. A job publishes its parts through :class:`JobHandle`; ``kind``
+         *     and ``profile`` key the estimate (``splitsmith.export_estimates``).
+         */
+        JobPart: {
+            /** Finished At */
+            finished_at: string | null;
+            /** Footage S */
+            footage_s: number | null;
+            /** Key */
+            key: string;
+            /** Kind */
+            kind: string;
+            /** Label */
+            label: string;
+            /** Profile */
+            profile: string | null;
+            /** Progress */
+            progress: number | null;
+            /** Started At */
+            started_at: string | null;
+            /**
+             * Status
+             * @default waiting
+             * @enum {string}
+             */
+            status: "waiting" | "running" | "done" | "failed" | "skipped";
         };
         /**
          * JobStatus
