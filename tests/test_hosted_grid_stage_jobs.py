@@ -343,3 +343,43 @@ def test_a_stage_the_grid_job_renders_itself_is_published_too(two_stages, inline
     _grid(client, match_id, slug, [1, 2])
     (stitch,) = [c for c in calls if c.get("only_stage") is None]
     assert stitch["published"] == {"stage-1": "key-1", "stage-2": "key-2"}
+
+
+def test_the_grid_job_never_publishes_fewer_parts_than_it_was_queued_with(two_stages, monkeypatch) -> None:
+    """Staging run G8: the grid job started with only its plan part until the
+    plan loaded, and the panel's time left halved for that minute."""
+    from splitsmith.ui import jobs as jobs_mod
+
+    client, _storage, match_id, slug, *_ = two_stages
+    seen: list[list[str]] = []
+    original = jobs_mod.JobHandle._write_parts
+
+    def spy(self) -> None:  # type: ignore[no-untyped-def]
+        if any(p.kind == "wait" for p in self._parts) or any(p.key == "plan" for p in self._parts):
+            seen.append([p.key for p in self._parts])
+        original(self)
+
+    monkeypatch.setattr(jobs_mod.JobHandle, "_write_parts", spy)
+    _grid(client, match_id, slug, [1, 2])
+    assert seen and all({"plan", "stages", "stitch", "upload"} <= set(keys) for keys in seen)
+
+
+def test_stored_segments_are_cleaned_up_when_planning_fails(two_stages, monkeypatch) -> None:
+    """Review of #1728: the cleanup listed the stage files from the plan, so a
+    grid job that failed to plan left every stage job's file behind."""
+    client, storage, match_id, slug, *_ = two_stages
+    real = server_mod._grid_inputs
+    calls = {"n": 0}
+
+    def flaky(*args, **kwargs):  # type: ignore[no-untyped-def]
+        calls["n"] += 1
+        if kwargs.get("tile_meta") is None and calls["n"] > 2:  # the grid job's own load
+            raise RuntimeError("planning failed")
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(server_mod, "_grid_inputs", flaky)
+    resp = client.post(
+        f"/api/matches/{match_id}/match/compare-export", json={"stage_numbers": [1, 2], "audio_from": slug}
+    )
+    _wait_for_job(client, match_id, resp.json()["id"], timeout=30.0)
+    assert not list(storage.list(f"matches/{match_id}/render-plans/"))

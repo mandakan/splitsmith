@@ -681,3 +681,79 @@ def test_a_dressed_grid_stitches_from_what_its_stages_published(tmp_path: Path) 
     assert all(stage.ok for stage in stitched.stages)
     whole = render("whole", SegmentCache(root=tmp_path / "whole-cache", max_bytes=1 << 30))
     assert _frame_digest(stitched.output_path) == _frame_digest(whole.output_path)
+
+
+def _failing_runner(cmd, **kwargs):  # type: ignore[no-untyped-def]
+    return subprocess.CompletedProcess(cmd, 1, b"", b"boundary refused")
+
+
+@pytest.mark.skipif(not ffmpeg_available(), reason="needs ffmpeg and ffprobe on PATH")
+def test_a_boundary_that_fails_in_the_stitch_does_not_take_the_trimmed_segments(tmp_path: Path) -> None:
+    """Review of #1728: the stage jobs cut their segments for the fade; a
+    stitch whose fade fails turns it into a cut, so both stages play in
+    full. A published segment keyed by name alone was still the trimmed
+    one: 8.0 s where the cut grid is 9.0 s."""
+    ffmpeg = shutil.which("ffmpeg")
+    ffprobe = shutil.which("ffprobe")
+    assert ffmpeg and ffprobe
+    shooters = _two_shooters(tmp_path, ffmpeg=ffmpeg)
+    fade = (composition.Transition(from_stage_index=0, to_stage_index=1, kind="fade", duration_seconds=1.0),)
+
+    def render(name: str, cache: SegmentCache, **kwargs: object) -> mp4_grid.GridRenderResult:
+        return mp4_grid.render_grid_mp4(
+            shooters,
+            audio_label="Anders",
+            output_path=tmp_path / f"{name}.mp4",
+            canvas=mp4_grid.GridCanvas(640, 360, SYNTHETIC_FPS_NUM, SYNTHETIC_FPS_DEN),
+            head_pad_seconds=0.5,
+            tail_pad_seconds=1.0,
+            ffmpeg_binary=ffmpeg,
+            work_dir=tmp_path / name,
+            transitions=fade,
+            segment_cache=cache,
+            **kwargs,
+        )
+
+    split = SegmentCache(root=tmp_path / "split-cache", max_bytes=1 << 30)
+    published: dict[str, str] = {}
+    for number in (1, 2):
+        published.update(render(f"stage{number}", split, only_stage=number).published)
+    stitched = render("stitched", split, published=published, boundary_runner=_failing_runner)
+    alone = render(
+        "alone", SegmentCache(root=tmp_path / "c2", max_bytes=1 << 30), boundary_runner=_failing_runner
+    )
+    assert probe_seconds(stitched.output_path, ffprobe=ffprobe) == pytest.approx(
+        probe_seconds(alone.output_path, ffprobe=ffprobe), abs=FRAME
+    )
+
+
+@pytest.mark.skipif(not ffmpeg_available(), reason="needs ffmpeg and ffprobe on PATH")
+def test_a_stage_job_whose_slate_edge_fails_publishes_the_full_slate(tmp_path: Path) -> None:
+    """Review of #1728: the slate's head edge failed, the boundary became a
+    cut, and the stage job still encoded and published the slate cut short."""
+    ffmpeg = shutil.which("ffmpeg")
+    ffprobe = shutil.which("ffprobe")
+    assert ffmpeg and ffprobe
+    shooters = _two_shooters(tmp_path, ffmpeg=ffmpeg)
+    fade = (composition.Transition(from_stage_index=0, to_stage_index=1, kind="fade", duration_seconds=1.0),)
+    cache = SegmentCache(root=tmp_path / "cache", max_bytes=1 << 30)
+    result = mp4_grid.render_grid_mp4(
+        shooters,
+        audio_label="Anders",
+        output_path=tmp_path / "s2.mp4",
+        canvas=mp4_grid.GridCanvas(640, 360, SYNTHETIC_FPS_NUM, SYNTHETIC_FPS_DEN),
+        head_pad_seconds=0.5,
+        tail_pad_seconds=1.0,
+        ffmpeg_binary=ffmpeg,
+        work_dir=tmp_path / "s2",
+        transitions=fade,
+        segment_cache=cache,
+        stage_titles="slate",
+        title_duration_seconds=1.5,
+        only_stage=2,
+        boundary_runner=_failing_runner,
+    )
+    (slate_key,) = [key for name, key in result.published.items() if name.startswith("slate")]
+    slate = cache.lookup(slate_key, suffix=mp4_grid.SEGMENT_SUFFIX)
+    assert slate is not None
+    assert probe_seconds(slate, ffprobe=ffprobe) == pytest.approx(1.5, abs=FRAME)

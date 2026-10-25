@@ -2506,7 +2506,26 @@ def _run_compare_grid(
     cuts = tempfile.TemporaryDirectory(dir=output_dir, prefix=".compare-grid-cuts-")
     inputs: _GridInputs | None = None
     try:
-        handle.set_parts([JobPart(key="plan", label="Planning", kind="load")])
+        profile = _grid_profile(req)
+        uploads = state is not None and state.storage is not None
+        # Queued with stage jobs, the job already showed its plan, wait,
+        # join and upload (``_grid_queued_parts``): keep them all from the
+        # start, so the panel's time left never drops while the plan loads.
+        queued_split = bool(stage_jobs) and uploads
+        handle.set_parts(
+            [
+                JobPart(key="plan", label="Planning", kind="load"),
+                *(
+                    [
+                        JobPart(key="stages", label="Stage renders", kind="wait"),
+                        JobPart(key="stitch", label="Joining", kind="stitch", profile=profile),
+                        JobPart(key="upload", label="Uploading", kind="upload", profile=profile),
+                    ]
+                    if queued_split
+                    else []
+                ),
+            ]
+        )
         handle.update(progress=0.02, message="Loading shooters...")
         with handle.timer.phase("load_shooters"), handle.part("plan"):
             inputs = _grid_inputs(req, root, state=state, cut_dir=Path(cuts.name))
@@ -2514,38 +2533,39 @@ def _run_compare_grid(
         output_path = output_dir / f"{stem}.mp4"
         skipped = [number for number in requested if number not in {p.stage_number for p in plans}]
 
-        profile = _grid_profile(req)
+        footage = sum(plan.duration_seconds for plan in plans)
         split = inputs.tiles is not None and bool(stage_jobs) and state is not None
-        handle.add_parts(
-            [
-                *(
-                    [JobPart(key="stages", label="Stage renders", kind="wait")]
-                    if split
-                    else [_grid_stage_part(plan, profile) for plan in plans]
-                ),
-                JobPart(
-                    key="stitch",
-                    label="Joining",
-                    kind="stitch",
-                    profile=profile,
-                    footage_s=sum(plan.duration_seconds for plan in plans),
-                ),
-                # The upload of a 4K grid is a minute of its own (run G7).
-                *(
-                    [
-                        JobPart(
-                            key="upload",
-                            label="Uploading",
-                            kind="upload",
-                            profile=profile,
-                            footage_s=sum(plan.duration_seconds for plan in plans),
-                        )
-                    ]
-                    if state is not None and state.storage is not None
-                    else []
-                ),
-            ]
-        )
+        if split and queued_split:
+            handle.update_part("stitch", footage_s=footage)
+            handle.update_part("upload", footage_s=footage)
+        else:
+            if queued_split:
+                # Planned without its stage jobs after all: the rows change.
+                handle.set_parts([JobPart(key="plan", label="Planning", kind="load", status="done")])
+            handle.add_parts(
+                [
+                    *(
+                        [JobPart(key="stages", label="Stage renders", kind="wait")]
+                        if split
+                        else [_grid_stage_part(plan, profile) for plan in plans]
+                    ),
+                    JobPart(key="stitch", label="Joining", kind="stitch", profile=profile, footage_s=footage),
+                    # The upload of a 4K grid is a minute of its own (run G7).
+                    *(
+                        [
+                            JobPart(
+                                key="upload",
+                                label="Uploading",
+                                kind="upload",
+                                profile=profile,
+                                footage_s=footage,
+                            )
+                        ]
+                        if uploads
+                        else []
+                    ),
+                ]
+            )
 
         stitch_from = 0.05
         published: dict[str, str] = {}
@@ -2684,9 +2704,10 @@ def _run_compare_grid(
             inputs.tiles.release()
         plan_key = _grid_plan_key(grid_run) if grid_run and stage_jobs else None
         if plan_key is not None and state is not None and state.storage is not None:
-            leftovers = [plan_key]
-            if inputs is not None:
-                leftovers += [_grid_published_key(grid_run, plan.stage_number) for plan in inputs.plans]  # type: ignore[arg-type]
+            # Every stage job's stored segments, whether or not this job got
+            # as far as its plan (review of #1728).
+            assert grid_run is not None and stage_jobs is not None
+            leftovers = [plan_key, *(_grid_published_key(grid_run, int(number)) for number in stage_jobs)]
             for key in leftovers:
                 if key is None:
                     continue

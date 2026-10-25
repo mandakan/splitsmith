@@ -3505,6 +3505,23 @@ def _grid_missing_handle(item: GridItem, *, half: float, end: Literal["tail", "h
     return 0.0
 
 
+def _published_segment(item: GridItem) -> str:
+    """The name a stage render publishes an item's segment under: the item
+    and the cuts its boundaries took, so a stitch whose items came out
+    otherwise (a boundary that failed there and became a cut, a stage job
+    that planned alone) misses and encodes its own (review of #1691)."""
+    base = item.plan.total_seconds if isinstance(item, GridStageItem) else item.card_seconds
+    return f"{item.name}|{base:.4f}|{item.head_cut_seconds:.4f}|{item.tail_cut_seconds:.4f}"
+
+
+def _published_edge(item: GridItem, end: str, half: float) -> str:
+    """The name of an item's boundary edge: the item, the end, the half
+    length. An edge is cut from the whole item, so its own cuts do not
+    change it."""
+    base = item.plan.total_seconds if isinstance(item, GridStageItem) else item.card_seconds
+    return f"edge-{item.name}-{end}|{base:.4f}|{half:.4f}"
+
+
 def _render_one_stage(
     stage_number: int,
     *,
@@ -3540,8 +3557,9 @@ def _render_one_stage(
             if boundary is None:
                 continue
             try:
-                edge = encode_edge(item, prep, half=boundary.duration_seconds / 2.0, end=end)
-                publish(f"edge-{item.name}-{end}", edge)
+                half = boundary.duration_seconds / 2.0
+                edge = encode_edge(item, prep, half=half, end=end)
+                publish(_published_edge(item, end, half), edge)
             except (_EdgeFailedError, MotionClipError) as exc:
                 note_cut(after, str(exc))
                 item = items[i]
@@ -3557,15 +3575,20 @@ def _render_one_stage(
                 if isinstance(card, GridCardItem) and card.kind == "slate" and card.stage_index == item.index:
                     card_prep = prepare(card)
                     if card_prep.assets is not None:
-                        edges(j, card, card_prep)
-                        publish(card.name, encode_card(card, card_prep))
+                        # A failed edge makes its boundary a cut: the slate
+                        # is then encoded whole, as the stitch would.
+                        slate = edges(j, card, card_prep)
+                        assert isinstance(slate, GridCardItem)
+                        publish(_published_segment(slate), encode_card(slate, card_prep))
+            item = items[i]
+            assert isinstance(item, GridStageItem)
             prep = prepare(item)
             if prep.failed is None:
                 stage = edges(i, item, prep)
                 assert isinstance(stage, GridStageItem)
                 item = stage
             segment, error = (None, prep.failed) if prep.failed is not None else encode_stage(item, prep)
-            publish(item.name, segment)
+            publish(_published_segment(item), segment)
             outcome = StageOutcome(
                 stage_number=item.plan.stage_number,
                 stage_name=item.plan.stage_name,
@@ -4469,10 +4492,10 @@ def render_grid_mp4(
                         sting_clip = work / f"{boundary.name}_sting.mov"
                 try:
                     tail_edge = encoder.published_hit(
-                        f"edge-{item.name}-tail", published, fetch=True
+                        _published_edge(item, "tail", half), published, fetch=True
                     ) or encode_edge(item, prep_of(i), half=half, end="tail")
                     head_edge = encoder.published_hit(
-                        f"edge-{nxt.name}-head", published, fetch=True
+                        _published_edge(nxt, "head", half), published, fetch=True
                     ) or encode_edge(nxt, prep_of(i + 1), half=half, end="head")
                     boundary_out = work / f"{boundary.name}{SEGMENT_SUFFIX}"
                     tail_pad = _grid_missing_handle(item, half=half, end="tail")
@@ -4556,7 +4579,9 @@ def render_grid_mp4(
             segment: Path | None
             # Only the stitch reads a stage or card segment: a stored cache
             # may hand it a URL instead of the bytes.
-            hit = encoder.published_hit(item.name, published, fetch=False)
+            hit = encoder.published_hit(_published_segment(item), published, fetch=False)
+            if hit is not None and isinstance(item, GridStageItem):
+                report(item.index, item.plan, "reused")
             if isinstance(item, GridCardItem):
                 if hit is not None:
                     segment = hit
