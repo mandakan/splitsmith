@@ -16,6 +16,9 @@ paths:
   - "src/splitsmith/ui/admin_access_api.py"
   - "src/splitsmith/ui/presence.py"
   - "src/splitsmith/ui/jobs.py"
+  - "src/splitsmith/ui/export_slot.py"
+  - "src/splitsmith/ui/exports_progress_api.py"
+  - "src/splitsmith/export_estimates.py"
   - "src/splitsmith/ui/youtube_api.py"
   - "src/splitsmith/ui/capabilities.py"
   - "src/splitsmith/ui/embedded.py"
@@ -210,6 +213,17 @@ Deploy facts (worker env, `FORWARDED_ALLOW_IPS`, the waitlist cut-over) are in
   at the end of its cooldown fans out beside it while it boots (a Cloud Run
   start within the grace), never beside a self-hosted box still booting. `tests/test_worker_trigger.py`
   and `tests/test_worker_drain_lifecycle.py` pin all three.
+- Every export route queues its jobs inside `ui.export_slot.export_slot`: it
+  gives the export its id (`Job.export_id`, which jobs the body chains
+  inherit), holds the wakes, and hosted refuses a start over the account's
+  limit (`access.export_limit`: the user's override, else the tier's
+  `concurrent_exports`, else 1) with a 409 naming the running export. The
+  check runs under a per-user advisory lock, so two starts in the same
+  second are judged in turn; an export route that submits outside the slot
+  escapes the limit. A new export kind joins `EXPORT_LEAD_KINDS` (if it
+  leads a group of jobs) and publishes its parts (`JobHandle.set_parts`) so
+  the panel and the estimates see it. `tests/test_export_limit.py` and
+  `tests/test_export_parts.py` pin both.
 - A route that queues a batch (a grid's stage jobs) submits inside
   `worker_trigger.hold_wakes()`: one wake after the last submit counts the
   whole batch and is awaited in the request. Woken per submit, the first wake

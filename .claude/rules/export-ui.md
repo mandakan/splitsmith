@@ -19,6 +19,8 @@ paths:
   - "src/splitsmith/ui_static/src/lib/logoSpots*.ts"
   - "src/splitsmith/ui_static/src/lib/logoPlan*.ts"
   - "src/splitsmith/ui_static/src/lib/exportPreview*.ts"
+  - "src/splitsmith/ui_static/src/lib/exportProgress*.ts"
+  - "src/splitsmith/ui_static/src/lib/useActiveExports.ts"
   - "tests/test_export_pre*.py"
   - "scripts/render_look_thumbnails.py"
 ---
@@ -120,3 +122,15 @@ Look manifests and templates are in `looks.md`; the renderers in
   content-named PNG under `cache_dir/logo-placeholders`), keyed apart by
   `PLACEHOLDER_REVISION`. The switch is the viewer's (`lib/logoSpots`, on by
   default); **no export path ever asks for it**.
+
+## The progress panel (spec 2026-10-25)
+
+- The page reads running exports only through `useActiveExports`
+  (`GET /api/me/exports/active`, the account's, every match); never build a
+  panel from `pollJob` or the jobs list. `components/export/ExportProgress`
+  draws one export, `lib/exportProgress` words it (time left, row times,
+  the limit, the 409's running export) and `foldExports` makes an export
+  one row in the jobs drawer.
+- The Export button is off while `limitReached`; the note links to the
+  export holding the slot when it is another match's. Trims only is one
+  request (`exportTrims`), or the limit would refuse its second stage.
