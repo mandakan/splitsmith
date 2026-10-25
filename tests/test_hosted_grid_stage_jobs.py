@@ -132,6 +132,9 @@ _PER_JOB = {
     "on_notice",
     "tile_identities",
     "published",
+    # Each job's own cancel runner; the commands it runs are the same.
+    "runner",
+    "boundary_runner",
 }
 
 
