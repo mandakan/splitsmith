@@ -65,7 +65,11 @@ def two_stages(hosted_grid, hosted_db, monkeypatch: pytest.MonkeyPatch):  # noqa
             outcome = mp4_grid_mod.StageOutcome(
                 stage_number=only, stage_name=f"Stage {only}", ok=ok, error=None if ok else "boom"
             )
-            return mp4_grid_mod.GridRenderResult(output_path=output_path, stages=(outcome,))
+            return mp4_grid_mod.GridRenderResult(
+                output_path=output_path,
+                stages=(outcome,),
+                published={f"stage-{only}": f"key-{only}"} if ok else {},
+            )
         output_path.parent.mkdir(parents=True, exist_ok=True)
         output_path.write_bytes(b"grid")
         stages = tuple(
@@ -127,6 +131,7 @@ _PER_JOB = {
     "progress",
     "on_notice",
     "tile_identities",
+    "published",
 }
 
 
@@ -320,3 +325,21 @@ def test_the_request_queues_each_job_with_its_parts(two_stages, inline_deferrer)
         one = client.get(f"/api/matches/{match_id}/me/jobs/{stage['id']}").json()
         (part,) = one["parts"]
         assert (part["kind"], part["profile"], part["status"]) == ("grid_stage", "2160-basic", "waiting")
+
+
+def test_the_stitch_gets_every_stage_jobs_published_segments(two_stages) -> None:
+    """Each stage job stores the keys of what it encoded; the grid job hands
+    them all to its stitch, so it prepares no stage again (run G5)."""
+    client, storage, match_id, slug, calls, _failing, _raising = two_stages
+    _grid(client, match_id, slug, [1, 2])
+    (stitch,) = [c for c in calls if c.get("only_stage") is None]
+    assert stitch["published"] == {"stage-1": "key-1", "stage-2": "key-2"}
+    assert not list(storage.list(f"matches/{match_id}/render-plans/"))  # cleaned up
+
+
+def test_a_stage_the_grid_job_renders_itself_is_published_too(two_stages, inline_deferrer) -> None:
+    client, _storage, match_id, slug, calls, _failing, _raising = two_stages
+    inline_deferrer["hold_kinds"] = {"compare-grid-stage"}
+    _grid(client, match_id, slug, [1, 2])
+    (stitch,) = [c for c in calls if c.get("only_stage") is None]
+    assert stitch["published"] == {"stage-1": "key-1", "stage-2": "key-2"}

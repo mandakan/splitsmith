@@ -624,3 +624,60 @@ def test_a_stage_encode_reports_fractions(tmp_path: Path) -> None:
     assert {s.plan.stage_number for s in encoding if s.plan is not None} == {1, 2}
     assert all(0.0 <= (s.fraction or 0.0) <= 1.0 for s in encoding)
     assert any(s.status == "stitching" and s.fraction == 1.0 for s in steps)
+
+
+@pytest.mark.skipif(not ffmpeg_available(), reason="needs ffmpeg and ffprobe on PATH")
+def test_a_dressed_grid_stitches_from_what_its_stages_published(tmp_path: Path) -> None:
+    """Staging run G5: a dressed grid's stitch pulled every stage's tiles
+    again (9.5 GB, 28 minutes) to rebuild hold stills and slates whose
+    bytes need not match the stage job's. Each stage render publishes the
+    keys of what it encoded (its segment, its edges, its slate); the
+    stitch looks them up and acquires no tile, and the result decodes to
+    the one-process render's frames and samples."""
+    import contextlib
+
+    from tests.test_proxy import _frame_digest
+
+    ffmpeg = shutil.which("ffmpeg")
+    assert ffmpeg
+    shooters = _two_shooters(tmp_path, ffmpeg=ffmpeg)
+    fade = (composition.Transition(from_stage_index=0, to_stage_index=1, kind="fade", duration_seconds=1.0),)
+    acquired: list[int] = []
+
+    class _Spy:
+        @contextlib.contextmanager
+        def acquire(self, stage_number: int):  # type: ignore[no-untyped-def]
+            acquired.append(stage_number)
+            yield
+
+    def render(name: str, cache: SegmentCache, **kwargs: object) -> mp4_grid.GridRenderResult:
+        return mp4_grid.render_grid_mp4(
+            shooters,
+            audio_label="Anders",
+            output_path=tmp_path / f"{name}.mp4",
+            canvas=mp4_grid.GridCanvas(640, 360, SYNTHETIC_FPS_NUM, SYNTHETIC_FPS_DEN),
+            head_pad_seconds=0.5,
+            tail_pad_seconds=1.0,
+            ffmpeg_binary=ffmpeg,
+            work_dir=tmp_path / name,
+            transitions=fade,
+            segment_cache=cache,
+            overlay=True,
+            summary_hold_seconds=2.0,
+            stage_titles="slate",
+            **kwargs,
+        )
+
+    split = SegmentCache(root=tmp_path / "split-cache", max_bytes=1 << 30)
+    published: dict[str, str] = {}
+    for number in (1, 2):
+        result = render(f"stage{number}", split, only_stage=number)
+        assert result.stages[0].ok
+        assert result.published, "a stage render names what it encoded"
+        published.update(result.published)
+    acquired.clear()
+    stitched = render("stitched", split, published=published, tile_access=_Spy())
+    assert acquired == []
+    assert all(stage.ok for stage in stitched.stages)
+    whole = render("whole", SegmentCache(root=tmp_path / "whole-cache", max_bytes=1 << 30))
+    assert _frame_digest(stitched.output_path) == _frame_digest(whole.output_path)

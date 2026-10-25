@@ -28,7 +28,7 @@ import math
 import subprocess
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from contextlib import AbstractContextManager, nullcontext
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Literal, Protocol
 
@@ -2637,6 +2637,11 @@ class GridRenderResult:
     #: that does not start at 0:00. Built from the planned durations as
     #: the segments are laid down, the same spine the stitch plays.
     chapters: tuple[Chapter, ...] = ()
+    #: ``only_stage``: the cache key of everything the stage render
+    #: encoded (its segment, its boundary edges, its slate and the slate's
+    #: edges), by item or edge name. A stitch handed these (``published=``)
+    #: looks the segments up instead of preparing those items (#1691).
+    published: Mapping[str, str] = field(default_factory=dict)
 
     @property
     def failed(self) -> tuple[StageOutcome, ...]:
@@ -3201,6 +3206,19 @@ class _GridEncoder:
         self.used_keys: set[str] = set()
         self.keys_by_path: dict[Path, str] = {}
 
+    def published_hit(self, name: str, published: Mapping[str, str] | None, *, fetch: bool) -> Path | None:
+        """The segment a stage render published as ``name``, from the cache,
+        or ``None`` (not published, or no longer stored: encode it then)."""
+        if self.cache is None or not published or name not in published:
+            return None
+        key = published[name]
+        hit = self.cache.lookup(key, suffix=SEGMENT_SUFFIX, fetch=fetch)
+        if hit is None:
+            return None
+        self.used_keys.add(key)
+        self.keys_by_path[hit] = key
+        return hit
+
     def encode(
         self,
         cmd: tuple[str, ...],
@@ -3495,6 +3513,8 @@ def _render_one_stage(
     prepare: Callable[[GridItem], _GridPrep],
     encode_edge: Callable[..., Path],
     encode_stage: Callable[[GridStageItem, _GridPrep], tuple[Path | None, str]],
+    encode_card: Callable[[GridCardItem, _GridPrep], Path | None],
+    key_of: Callable[[Path], str | None],
     note_cut: Callable[[int, str], None],
     output_path: Path,
     degradations: tuple[OverlayDegradation, ...],
@@ -3502,33 +3522,59 @@ def _render_one_stage(
 ) -> GridRenderResult:
     """``render_grid_mp4(only_stage=)``: encode stage ``stage_number``'s
     segment and its edges of the boundaries on either side into the cache,
-    as the whole render would, and nothing else (#1691). An edge that fails
-    turns its boundary into a cut here as it would there, so the stage
-    keeps its full length on that side."""
+    as the whole render would, and its slate with the slate's edges, and
+    nothing else (#1691). An edge that fails turns its boundary into a cut
+    here as it would there, so the stage keeps its full length on that
+    side. The result's ``published`` names each segment's cache key, so
+    the stitch can use them without preparing the stage again."""
+    published: dict[str, str] = {}
+
+    def publish(name: str, path: Path | None) -> None:
+        key = key_of(path) if path is not None else None
+        if key is not None:
+            published[name] = key
+
+    def edges(i: int, item: GridItem, prep: _GridPrep) -> GridItem:
+        for after, end in ((i - 1, "head"), (i, "tail")):
+            boundary = live.get(after)
+            if boundary is None:
+                continue
+            try:
+                edge = encode_edge(item, prep, half=boundary.duration_seconds / 2.0, end=end)
+                publish(f"edge-{item.name}-{end}", edge)
+            except (_EdgeFailedError, MotionClipError) as exc:
+                note_cut(after, str(exc))
+                item = items[i]
+        return item
+
     try:
         for i, item in enumerate(items):
             if not (isinstance(item, GridStageItem) and item.plan.stage_number == stage_number):
                 continue
+            # The stage's slate: its backdrop is a frame of this stage's
+            # tiles, which are here now and nowhere else.
+            for j, card in enumerate(items):
+                if isinstance(card, GridCardItem) and card.kind == "slate" and card.stage_index == item.index:
+                    card_prep = prepare(card)
+                    if card_prep.assets is not None:
+                        edges(j, card, card_prep)
+                        publish(card.name, encode_card(card, card_prep))
             prep = prepare(item)
             if prep.failed is None:
-                for after, end in ((i - 1, "head"), (i, "tail")):
-                    boundary = live.get(after)
-                    if boundary is None:
-                        continue
-                    try:
-                        encode_edge(item, prep, half=boundary.duration_seconds / 2.0, end=end)
-                    except (_EdgeFailedError, MotionClipError) as exc:
-                        note_cut(after, str(exc))
-                        item = items[i]
-                        assert isinstance(item, GridStageItem)
+                stage = edges(i, item, prep)
+                assert isinstance(stage, GridStageItem)
+                item = stage
             segment, error = (None, prep.failed) if prep.failed is not None else encode_stage(item, prep)
+            publish(item.name, segment)
             outcome = StageOutcome(
                 stage_number=item.plan.stage_number,
                 stage_name=item.plan.stage_name,
                 ok=segment is not None,
                 error=None if segment is not None else error,
             )
-            return GridRenderResult(output_path=output_path, stages=(outcome,), degradations=degradations)
+            return GridRenderResult(
+                output_path=output_path, stages=(outcome,), degradations=degradations, published=published
+            )
     finally:
         if close is not None:
             close()
@@ -3581,6 +3627,7 @@ def render_grid_mp4(
     tile_identities: Mapping[str, str] | None = None,
     tile_access: TileAccess | None = None,
     only_stage: int | None = None,
+    published: Mapping[str, str] | None = None,
 ) -> GridRenderResult:
     """Render every stage as a grid, then stitch them into one MP4.
 
@@ -4362,6 +4409,27 @@ def render_grid_mp4(
             duration_s=plan.duration_seconds,
         )
 
+    def encode_card_item(item: GridCardItem, prep: _GridPrep) -> Path | None:
+        assert prep.assets is not None
+        return _encode_card(
+            prep.assets,
+            seconds=item.duration_seconds,
+            name=item.name,
+            plan=plans[item.stage_index if item.stage_index is not None else 0],
+            canvas=canvas,
+            ffmpeg_binary=binary,
+            runner=card_runner,
+            clip_offset_seconds=item.head_cut_seconds,
+            encoder=encoder,
+        )
+
+    def prep_of(i: int) -> _GridPrep:
+        """Item ``i``'s prep, made the first time something needs it: an
+        item whose segments a stage render published is never prepared."""
+        if i not in prepared:
+            prepared[i] = prepare(items[i])
+        return prepared[i]
+
     if only_stage is not None:
         return _render_one_stage(
             only_stage,
@@ -4370,6 +4438,8 @@ def render_grid_mp4(
             prepare=prepare,
             encode_edge=encode_edge,
             encode_stage=encode_stage,
+            encode_card=lambda card, card_prep: encode_card_item(card, card_prep),
+            key_of=lambda path: encoder.keys_by_path.get(path),
             note_cut=note_cut,
             output_path=output_path,
             degradations=(*degradations, *transition_notes),
@@ -4378,13 +4448,10 @@ def render_grid_mp4(
 
     try:
         for i, item in enumerate(items):
-            prep = prepared.pop(i) if i in prepared else prepare(item)
             boundary = live.get(i)
             boundary_segment: Path | None = None
             if boundary is not None:
                 nxt = items[i + 1]
-                if i + 1 not in prepared:
-                    prepared[i + 1] = prepare(nxt)
                 half = boundary.duration_seconds / 2.0
                 kind = boundary.kind
                 sting: CardMotion | FramesSting | None = None
@@ -4401,8 +4468,12 @@ def render_grid_mp4(
                     else:
                         sting_clip = work / f"{boundary.name}_sting.mov"
                 try:
-                    tail_edge = encode_edge(item, prep, half=half, end="tail")
-                    head_edge = encode_edge(nxt, prepared[i + 1], half=half, end="head")
+                    tail_edge = encoder.published_hit(
+                        f"edge-{item.name}-tail", published, fetch=True
+                    ) or encode_edge(item, prep_of(i), half=half, end="tail")
+                    head_edge = encoder.published_hit(
+                        f"edge-{nxt.name}-head", published, fetch=True
+                    ) or encode_edge(nxt, prep_of(i + 1), half=half, end="head")
                     boundary_out = work / f"{boundary.name}{SEGMENT_SUFFIX}"
                     tail_pad = _grid_missing_handle(item, half=half, end="tail")
                     head_pad = _grid_missing_handle(nxt, half=half, end="head")
@@ -4483,23 +4554,19 @@ def render_grid_mp4(
             if isinstance(item, GridCardItem) and item.kind == "slate" and item.stage_index is not None:
                 run_starts[item.stage_index] = elapsed - pending_half
             segment: Path | None
+            # Only the stitch reads a stage or card segment: a stored cache
+            # may hand it a URL instead of the bytes.
+            hit = encoder.published_hit(item.name, published, fetch=False)
             if isinstance(item, GridCardItem):
-                if prep.assets is None:
+                if hit is not None:
+                    segment = hit
+                elif prep_of(i).assets is None:
                     segment = None
                 else:
-                    segment = _encode_card(
-                        prep.assets,
-                        seconds=item.duration_seconds,
-                        name=item.name,
-                        plan=plans[item.stage_index if item.stage_index is not None else 0],
-                        canvas=canvas,
-                        ffmpeg_binary=binary,
-                        runner=card_runner,
-                        clip_offset_seconds=item.head_cut_seconds,
-                        encoder=encoder,
-                    )
+                    segment = encode_card_item(item, prep_of(i))
             else:
                 stage_start = run_starts.pop(item.index, elapsed - pending_half)
+                prep = _GridPrep() if hit is not None else prep_of(i)
                 if prep.failed is not None:
                     outcomes.append(
                         StageOutcome(
@@ -4511,9 +4578,7 @@ def render_grid_mp4(
                     )
                     segment = None
                 else:
-                    # Only the stitch reads a stage segment: a stored cache
-                    # may hand it a URL instead of the bytes.
-                    segment, error = encode_stage(item, prep, fetch=False)
+                    segment, error = (hit, "") if hit is not None else encode_stage(item, prep, fetch=False)
                     if segment is None:
                         outcomes.append(
                             StageOutcome(
