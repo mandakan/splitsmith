@@ -591,6 +591,11 @@ class ComputeJobRow(Base):
     # for rows predating this column and for legitimately match-less kinds
     # (model_download). Not part of the wire Job model.
     match_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    # The export this job is part of (``ui.context.current_export_id`` at
+    # submit), and the parts it published (``JobHandle.set_parts``): the
+    # export progress panel and the export limit read both (spec 2026-10-25).
+    export_id: Mapped[str | None] = mapped_column(String, nullable=True, index=True)
+    parts: Mapped[list | None] = mapped_column(JSON().with_variant(JSONB, "postgresql"), nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),

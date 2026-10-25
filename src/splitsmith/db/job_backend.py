@@ -45,6 +45,7 @@ from .. import __version__
 from ..access import Feature, FeatureRequiredError
 from ..async_bridge import run_sync
 from ..observability import PhaseTimer, WorkerProbe, capture_job_exception, emit_job_event
+from ..ui.context import current_export_id
 from ..ui.job_journal import rehydrate_args, to_wire_args
 from ..ui.jobs import (
     Job,
@@ -55,6 +56,7 @@ from ..ui.jobs import (
     JobStatus,
     ShutdownInProgressError,
     UnknownJobKindError,
+    export_is_active,
 )
 from .models import ComputeJobRow
 
@@ -91,6 +93,8 @@ _ROW_TO_JOB_FIELDS = (
     "acknowledged",
     "result",
     "timings",
+    "export_id",
+    "parts",
     "created_at",
     "updated_at",
     "started_at",
@@ -259,6 +263,7 @@ class PostgresJobBackend:
             shooter_slug=shooter_slug,
             video_id=video_id,
             match_id=match_id,
+            export_id=current_export_id.get(),
             status=JobStatus.PENDING.value,
             cancel_requested=False,
             acknowledged=False,
@@ -319,8 +324,13 @@ class PostgresJobBackend:
         # through ``_run`` like any body error, so the row ends FAILED with
         # the refusal as its message and the body never starts.
         refused = self._submit_allowed is not None and not await self._submit_allowed()
+        # The export rides the row, not the queue payload: a job the body
+        # submits (a chained upload, a grid stage) joins the same export.
+        queued = await self.get(job_id)
+        export_id = queued.export_id if queued is not None else None
 
         def _ctx_fn(handle: JobHandle) -> None:
+            current_export_id.set(export_id)
             if refused:
                 raise FeatureRequiredError(Feature.hosted_compute)
             try:
@@ -583,8 +593,10 @@ class PostgresJobBackend:
             shooter_slug = row.shooter_slug
             video_id = row.video_id
             row_match_id = row.match_id
+            row_export_id = row.export_id
 
         match_token = current_match_id.set(row_match_id)
+        export_token = current_export_id.set(row_export_id)
         try:
             return await self.submit(
                 kind=kind,
@@ -594,7 +606,54 @@ class PostgresJobBackend:
                 video_id=video_id,
             )
         finally:
+            current_export_id.reset(export_token)
             current_match_id.reset(match_token)
+
+    async def list_export(self, export_id: str) -> list[Job]:
+        """This user's jobs of one export, in ``created_at`` order."""
+        async with self._session_factory() as session:
+            rows = (
+                (
+                    await session.execute(
+                        select(ComputeJobRow)
+                        .where(ComputeJobRow.user_id == self._user_id, ComputeJobRow.export_id == export_id)
+                        .order_by(ComputeJobRow.created_at)
+                    )
+                )
+                .scalars()
+                .all()
+            )
+        return [_row_to_job(r) for r in rows]
+
+    async def active_export_ids(self) -> list[str]:
+        """The exports still holding a slot (``ui.jobs.export_is_active``):
+        every job of each export with a job pending or running, read in one
+        query and judged together."""
+        live = (
+            select(ComputeJobRow.export_id)
+            .where(
+                ComputeJobRow.user_id == self._user_id,
+                ComputeJobRow.export_id.is_not(None),
+                ComputeJobRow.status.in_((JobStatus.PENDING.value, JobStatus.RUNNING.value)),
+            )
+            .scalar_subquery()
+        )
+        async with self._session_factory() as session:
+            rows = (
+                (
+                    await session.execute(
+                        select(ComputeJobRow)
+                        .where(ComputeJobRow.user_id == self._user_id, ComputeJobRow.export_id.in_(live))
+                        .order_by(ComputeJobRow.created_at)
+                    )
+                )
+                .scalars()
+                .all()
+            )
+        grouped: dict[str, list[Job]] = {}
+        for row in rows:
+            grouped.setdefault(row.export_id, []).append(_row_to_job(row))
+        return [export_id for export_id, jobs in grouped.items() if export_is_active(jobs)]
 
     async def find_active(
         self,

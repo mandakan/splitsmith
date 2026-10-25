@@ -58,12 +58,12 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
 from enum import StrEnum
 from pathlib import Path
-from typing import Any, Protocol
+from typing import Any, Literal, Protocol
 
 from pydantic import BaseModel
 
 from ..observability import PhaseTimer, emit_job_event
-from .context import current_match_id, current_match_origin, current_match_root
+from .context import current_export_id, current_match_id, current_match_origin, current_match_root
 
 logger = logging.getLogger(__name__)
 
@@ -197,6 +197,39 @@ class ShutdownInProgressError(RuntimeError):
     """
 
 
+class JobPart(BaseModel):
+    """One part of a job, as the export progress panel shows it (spec
+    2026-10-25): a stage of a grid, the compose of a match video, the
+    upload. A job publishes its parts through :class:`JobHandle`; ``kind``
+    and ``profile`` key the estimate (``splitsmith.export_estimates``)."""
+
+    key: str  # stable within the job: "plan", "stage-3", "stitch", "upload"
+    label: str
+    kind: str
+    profile: str | None = None  # "1080-basic", "2160-dressed"; None outside a grid
+    status: Literal["waiting", "running", "done", "failed", "skipped"] = "waiting"
+    progress: float | None = None
+    footage_s: float | None = None
+    started_at: datetime | None = None
+    finished_at: datetime | None = None
+
+
+#: The kinds whose job leads an export: its status is the export's once
+#: nothing is left running, and the grid's stage jobs hang off it.
+EXPORT_LEAD_KINDS = ("compare-grid", "match_export", "highlight_reel")
+
+
+def export_is_active(jobs: list[Job]) -> bool:
+    """Whether an export still holds a slot: any of its jobs pending or
+    running, except a grid stage job left queued beside a grid job that
+    already ended (the grid job cancels them; a killed worker may not)."""
+    active = (JobStatus.PENDING, JobStatus.RUNNING)
+    grid_ended = any(j.kind == "compare-grid" and j.status not in active for j in jobs)
+    return any(
+        j.status in active and not (grid_ended and j.kind == "compare-grid-stage") for j in jobs
+    )
+
+
 class Job(BaseModel):
     """Wire shape returned by ``/api/jobs/{id}``."""
 
@@ -250,6 +283,12 @@ class Job(BaseModel):
     # by the backend from the run's :class:`PhaseTimer`; ``None`` until the job
     # finishes (and on jobs that pre-date the column).
     timings: dict[str, Any] | None = None
+    # The export this job is part of (``ui.context.export_scope``); ``None``
+    # for work no export route queued (beep detection, audit trims, sync).
+    export_id: str | None = None
+    # The parts the job published (``JobHandle.set_parts``), for the export
+    # progress panel; ``None`` for a job that publishes none.
+    parts: list[JobPart] | None = None
     created_at: datetime
     updated_at: datetime
     started_at: datetime | None = None
@@ -456,6 +495,10 @@ class JobBackend(Protocol):
 
     async def retry(self, job_id: str) -> Job | None: ...
 
+    async def list_export(self, export_id: str) -> list[Job]: ...
+
+    async def active_export_ids(self) -> list[str]: ...
+
 
 class JobRegistry:
     """Thread-safe in-memory job backend.
@@ -619,6 +662,7 @@ class JobRegistry:
             shooter_slug=shooter_slug,
             video_id=video_id,
             status=JobStatus.PENDING,
+            export_id=current_export_id.get(),
             created_at=now,
             updated_at=now,
         )
@@ -870,10 +914,12 @@ class JobRegistry:
             stage_number = job.stage_number
             shooter_slug = job.shooter_slug
             video_id = job.video_id
+            export_id = job.export_id
 
         id_token = current_match_id.set(match_id)
         root_token = current_match_root.set(match_root)
         origin_token = current_match_origin.set(match_origin)
+        export_token = current_export_id.set(export_id)
         try:
             return await self.submit(
                 kind=kind,
@@ -883,9 +929,22 @@ class JobRegistry:
                 video_id=video_id,
             )
         finally:
+            current_export_id.reset(export_token)
             current_match_origin.reset(origin_token)
             current_match_id.reset(id_token)
             current_match_root.reset(root_token)
+
+    async def list_export(self, export_id: str) -> list[Job]:
+        """The retained jobs of one export, in submission order."""
+        return [job for job in await self.list() if job.export_id == export_id]
+
+    async def active_export_ids(self) -> list[str]:
+        """The exports still holding a slot (:func:`export_is_active`)."""
+        grouped: dict[str, list[Job]] = {}
+        for job in await self.list():
+            if job.export_id is not None:
+                grouped.setdefault(job.export_id, []).append(job)
+        return [export_id for export_id, jobs in grouped.items() if export_is_active(jobs)]
 
     # ------------------------------------------------------------------
     # Internal -- worker glue. These run on the executor thread.
