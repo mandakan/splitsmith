@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -112,6 +113,7 @@ def test_without_a_font_the_probe_stops_at_the_listing(tmp_path: Path):
     assert not any("-vf" in argv for argv in calls), calls
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="a directory name cannot hold a colon on Windows")
 def test_a_font_path_with_a_colon_is_quoted_into_the_exercise(tmp_path: Path):
     """``:`` separates filter options, so an unquoted path splits the filter.
 
@@ -133,20 +135,20 @@ def test_a_font_path_with_a_colon_is_quoted_into_the_exercise(tmp_path: Path):
     ffmpeg_capabilities("/bin/ffmpeg", font_path=weird, runner=runner)
 
     assert seen, "the exercise render never ran"
-    assert f"fontfile='{weird}'" in seen[0], seen
+    assert f"fontfile={quote_filter_value(str(weird))}" in seen[0], seen
 
 
 @pytest.mark.parametrize(
     ("value", "expected"),
     [
-        (":", "':'"),
+        (":", r"'\:'"),
         (",", "','"),
         ("[", "'['"),
         ("]", "']'"),
-        ("'", r"''\'''"),
-        ("\\", "'\\'"),
+        ("'", r"'\'\'''"),
+        ("\\", r"'\\'"),
         (" ", "' '"),
-        ("a:b,c[d]e'f\\g h", r"'a:b,c[d]e'\''f\g h'"),
+        ("a:b,c[d]e'f\\g h", r"'a\:b,c[d]e\'\''f\\g h'"),
     ],
 )
 def test_quote_filter_value_matches_ffmpegs_escaping_rule(value: str, expected: str) -> None:
@@ -159,9 +161,11 @@ def test_quote_filter_value_matches_ffmpegs_escaping_rule(value: str, expected: 
     being a proxy for what the render does. They are one function now
     (see ``test_mp4_grid_imports_the_one_quote_filter_value``); this
     pins its behaviour on the awkward characters a filter option value
-    can carry: ``:`` and ``,`` separate options, ``[``/``]`` name pads,
-    ``'`` has to be escaped without leaving the quotes, ``\\`` and a
-    literal space must pass through untouched.
+    can carry: ``,``, ``[``/``]`` and a space pass through the quotes;
+    ``:``, ``'`` and ``\\`` are escaped for ffmpeg's second read, and ``'``
+    also leaves and re-enters the quotes. What ffmpeg makes of them is
+    pinned against the real binary by
+    ``test_ffmpeg_reads_a_quoted_value_back_exactly``.
     """
     assert quote_filter_value(value) == expected
 
@@ -483,3 +487,35 @@ def test_the_unknown_keyword_message_is_still_the_one_the_probe_keys_on(tmp_path
     )
     ok_text = (done_ok.stdout + done_ok.stderr).decode(errors="replace").lower()
     assert "unknown keyword" not in ok_text, ok_text[:500]
+
+
+@pytest.mark.integration
+@pytest.mark.skipif(FFMPEG is None, reason="needs a real ffmpeg on PATH")
+@pytest.mark.parametrize(
+    "value",
+    [
+        r"C:\Users\me\AppData\Local\splitsmith\font.ttf",  # every Windows path
+        "/fonts/a:b/font.ttf",
+        "/fonts/it's/font.ttf",
+        r"/fonts/back\slash/font.ttf",
+        "/fonts/[pad],comma/font.ttf",
+        "/fonts/plain/font.ttf",
+    ],
+)
+def test_ffmpeg_reads_a_quoted_value_back_exactly(value: str) -> None:
+    """ffmpeg parses a ``filter_complex`` value twice (the graph, then the
+    filter's options), so the quoting must survive both. The oracle is
+    ffmpeg itself: ``drawtext`` names the font file it was given when it
+    cannot open it, and that name must be ``value`` character for
+    character. Single-level quoting split a Windows path at its drive
+    colon and ate its backslashes, so no clock or LUT rendered there."""
+    graph = f"[0:v]drawtext=fontfile={quote_filter_value(value)}:text=x[o]"
+    result = subprocess.run(
+        [FFMPEG, "-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i", "color=s=16x16:d=0.04"]
+        + ["-filter_complex", graph, "-map", "[o]", "-f", "null", "-"],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
+    assert f'Could not load font "{value}"' in result.stderr, result.stderr
