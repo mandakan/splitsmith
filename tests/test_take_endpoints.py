@@ -415,7 +415,7 @@ def test_take_overview_status_none_on_failed_detect(tmp_path: Path) -> None:
     # detect job that ran and produced no candidate.
     shooter_root = Match.shooter_root(tmp_path / "match", "me")
     project = MatchProject.load(shooter_root)
-    sv = next(v for v in project.stage(1).videos if str(v.path) == f"raw/{filename}")
+    sv = next(v for v in project.stage(1).videos if v.path.as_posix() == f"raw/{filename}")
     sv.beep_auto_detect_failed = True
     project.save(shooter_root)
 

@@ -2025,7 +2025,7 @@ def test_match_analysis_uses_canonical_heuristic(tmp_path: Path) -> None:
     assert len(analysis.stages) == 2
     assert analysis.stages[0].lower == sc1 - timedelta(minutes=15)
     assert analysis.stages[0].upper == sc1
-    by_path = {str(e.path): e for e in analysis.videos}
+    by_path = {e.path.as_posix(): e for e in analysis.videos}
     assert by_path["raw/a.mp4"].classification == "in_window"
     assert by_path["raw/a.mp4"].stage_numbers == [1]
     assert by_path["raw/b.mp4"].classification == "orphan"
@@ -2270,7 +2270,7 @@ def test_unassign_stage_videos_moves_videos_to_unassigned(tmp_path: Path) -> Non
 
     assert moved == 2
     assert stage.videos == []
-    assert {str(v.path) for v in project.unassigned_videos} == {"a.mp4", "b.mp4"}
+    assert {v.path.as_posix() for v in project.unassigned_videos} == {"a.mp4", "b.mp4"}
     assert all(v.role == "secondary" for v in project.unassigned_videos)
 
 
@@ -2282,7 +2282,7 @@ def test_unassign_stage_videos_leaves_other_stages_alone(tmp_path: Path) -> None
 
     project.unassign_stage_videos(2)
 
-    assert [str(v.path) for v in project.stages[0].videos] == ["keep.mp4"]
+    assert [v.path.as_posix() for v in project.stages[0].videos] == ["keep.mp4"]
     assert project.stages[0].videos[0].role == "primary"
 
 

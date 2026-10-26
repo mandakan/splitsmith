@@ -194,7 +194,7 @@ def test_auto_beep_on_assignment_does_not_fetch_sources(tmp_path: Path) -> None:
 
     resp = client.post(
         "/api/shooters/me/assignments/move",
-        json={"video_path": str(primary.path), "to_stage_number": 1, "role": "primary"},
+        json={"video_path": primary.path.as_posix(), "to_stage_number": 1, "role": "primary"},
     )
 
     assert resp.status_code == 200, resp.text

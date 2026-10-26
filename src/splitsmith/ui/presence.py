@@ -111,7 +111,7 @@ class StoragePresence:
             return project.source_present(root, video_path)
         if (root / video_path).exists():
             return True
-        return self.has_key(str(video_path))
+        return self.has_key(video_path.as_posix())
 
     def trim_available(self, project: MatchProject, local_mp4: Path) -> bool:
         """:func:`splitsmith.ui.audio.trim_available` answered from the index."""

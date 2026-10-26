@@ -7705,7 +7705,7 @@ def _queue_take_detects(state: AppState, slug: str, project: MatchProject, creat
     """
     if not created:
         return
-    storage_path = str(created[0].path)
+    storage_path = created[0].path.as_posix()
     raw = project.find_raw_video(storage_path)
     if raw is None:
         return

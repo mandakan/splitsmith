@@ -41,10 +41,10 @@ def test_same_name_different_clips_each_import(tmp_path: Path) -> None:
     project.assign_video(second.path, to_stage_number=2, role="primary")
 
     assert second is not first
-    assert str(first.path) == "raw/IMG_1234.MOV"
-    assert str(second.path) == "raw/IMG_1234-2.MOV"
-    assert [str(v.path) for v in project.stage(1).videos] == ["raw/IMG_1234.MOV"]
-    assert [str(v.path) for v in project.stage(2).videos] == ["raw/IMG_1234-2.MOV"]
+    assert first.path.as_posix() == "raw/IMG_1234.MOV"
+    assert second.path.as_posix() == "raw/IMG_1234-2.MOV"
+    assert [v.path.as_posix() for v in project.stage(1).videos] == ["raw/IMG_1234.MOV"]
+    assert [v.path.as_posix() for v in project.stage(2).videos] == ["raw/IMG_1234-2.MOV"]
     assert (root / "raw" / "IMG_1234.MOV").resolve() == martin
     assert (root / "raw" / "IMG_1234-2.MOV").resolve() == anton
 
@@ -54,7 +54,7 @@ def test_a_third_same_name_clip_takes_the_next_free_name(tmp_path: Path) -> None
     paths = [
         project.register_video(_clip(tmp_path, f"src{i}", f"clip {i}".encode()), root).path for i in range(3)
     ]
-    assert [str(p) for p in paths] == ["raw/IMG_1234.MOV", "raw/IMG_1234-2.MOV", "raw/IMG_1234-3.MOV"]
+    assert [p.as_posix() for p in paths] == ["raw/IMG_1234.MOV", "raw/IMG_1234-2.MOV", "raw/IMG_1234-3.MOV"]
 
 
 def test_the_same_source_twice_is_one_entry(tmp_path: Path) -> None:
@@ -78,7 +78,7 @@ def test_a_link_left_behind_for_the_same_source_is_reused(tmp_path: Path) -> Non
     first = project.register_video(martin, root)
     project.unassigned_videos.clear()
     again = project.register_video(martin, root)
-    assert str(again.path) == str(first.path) == "raw/IMG_1234.MOV"
+    assert again.path.as_posix() == first.path.as_posix() == "raw/IMG_1234.MOV"
 
 
 def test_a_copy_of_the_same_source_is_reused(tmp_path: Path) -> None:
@@ -87,7 +87,7 @@ def test_a_copy_of_the_same_source_is_reused(tmp_path: Path) -> None:
     first = project.register_video(martin, root, link_mode="copy")
     project.unassigned_videos.clear()
     again = project.register_video(martin, root, link_mode="copy")
-    assert str(again.path) == str(first.path) == "raw/IMG_1234.MOV"
+    assert again.path.as_posix() == first.path.as_posix() == "raw/IMG_1234.MOV"
 
 
 def test_a_different_file_already_in_raw_is_not_adopted(tmp_path: Path) -> None:
@@ -100,6 +100,6 @@ def test_a_different_file_already_in_raw_is_not_adopted(tmp_path: Path) -> None:
 
     video = project.register_video(anton, root)
 
-    assert str(video.path) == "raw/IMG_1234-2.MOV"
+    assert video.path.as_posix() == "raw/IMG_1234-2.MOV"
     assert (raw / "IMG_1234.MOV").read_bytes() == b"something the user put here"
     assert (raw / "IMG_1234-2.MOV").resolve() == anton

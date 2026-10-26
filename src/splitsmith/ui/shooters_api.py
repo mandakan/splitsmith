@@ -1719,10 +1719,10 @@ async def scan_videos(request: Request, slug: str, req: ScanRequest) -> ScanResp
                 if stage.primary() is not None:
                     continue
                 project.assign_video(suggestion.primary, to_stage_number=stage_num, role="primary")
-                auto_assigned[stage_num] = str(suggestion.primary)
+                auto_assigned[stage_num] = suggestion.primary.as_posix()
             for video_path in suggestion.secondaries:
                 project.assign_video(video_path, to_stage_number=stage_num, role="secondary")
-                auto_secondary.setdefault(stage_num, []).append(str(video_path))
+                auto_secondary.setdefault(stage_num, []).append(video_path.as_posix())
 
     if last_dir is not None:
         project.last_scanned_dir = str(last_dir)

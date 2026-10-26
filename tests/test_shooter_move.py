@@ -305,7 +305,7 @@ def test_carried_stage_video_fields(tmp_path: Path) -> None:
     assert target_video.beep_reviewed is True
     assert target_video.match_timestamp == ts
     assert target_video.processed == {"beep": True, "shot_detect": True, "trim": True}
-    assert str(target_video.path) == "raw/GH03.MP4"
+    assert target_video.path.as_posix() == "raw/GH03.MP4"
 
 
 # ---------------------------------------------------------------------------
@@ -553,9 +553,9 @@ def test_unassigned_video_moves(tmp_path: Path) -> None:
     assert len(outcome.blocked) == 0
 
     # Removed from source unassigned.
-    assert all(str(v.path) != "raw/GH05.MP4" for v in proj_a.unassigned_videos)
+    assert all(v.path.as_posix() != "raw/GH05.MP4" for v in proj_a.unassigned_videos)
     # Appeared in target unassigned.
-    assert any(str(v.path) == "raw/GH05.MP4" for v in proj_b.unassigned_videos)
+    assert any(v.path.as_posix() == "raw/GH05.MP4" for v in proj_b.unassigned_videos)
 
 
 # ---------------------------------------------------------------------------
@@ -993,7 +993,7 @@ def test_a_take_moves_every_stage(tmp_path: Path) -> None:
 
     assert outcome.blocked == []
     assert sorted(m.stage_number for m in outcome.moved) == [1, 2, 3]
-    assert [v for v in proj_a.all_videos() if str(v.path) == "raw/TAKE.MP4"] == []
+    assert [v for v in proj_a.all_videos() if v.path.as_posix() == "raw/TAKE.MP4"] == []
     assert {n: [v.beep_time for v in proj_b.stage(n).videos] for n in (1, 2, 3)} == {
         1: [100.0],
         2: [200.0],

@@ -2348,7 +2348,7 @@ class MatchProject(BaseModel):
         local = root / video_path
         if self._storage is not None:
             if not local.exists():
-                self._mirror_from_storage(self._storage, str(video_path), local)
+                self._mirror_from_storage(self._storage, video_path.as_posix(), local)
             else:
                 # Cache hit: bump the atime so the source-cache LRU sweep sees
                 # last use. Never the mtime: it stands for the storage
@@ -2380,7 +2380,7 @@ class MatchProject(BaseModel):
             return None
         if (root / video_path).exists():
             return None
-        key = str(video_path)
+        key = video_path.as_posix()
         try:
             if not self._storage.exists(key):
                 return None
@@ -2422,7 +2422,7 @@ class MatchProject(BaseModel):
             return (root / video_path).exists()
         if not durable and (root / video_path).exists():
             return True
-        return self._storage.exists(str(video_path))
+        return self._storage.exists(video_path.as_posix())
 
     @staticmethod
     def _mirror_from_storage(storage: Storage, key: str, dest: Path) -> None:
