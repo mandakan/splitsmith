@@ -5814,6 +5814,23 @@ class GlobalAutoSyncRequest(BaseModel):
     enabled: bool
 
 
+class DetectionModelSettingsRequest(BaseModel):
+    """Body for PUT /api/settings/detection-model: the machine's model set."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    model_set: Literal["base", "clap"]
+
+
+class DetectionModelSettings(BaseModel):
+    """The detection model preference and what it needs on this machine."""
+
+    model_set: str = Field(description="The set detection asks for (``SPLITSMITH_MODEL_SET`` wins).")
+    required: list[str] = Field(description="Model registry slugs that set needs; none for ``base``.")
+    present: bool = Field(description="Every required artifact is cached and verified.")
+    active_job: str | None = Field(description="The running model download job, if any.")
+
+
 class ScrubSettingsRequest(BaseModel):
     """Body for PUT /api/settings/scrub: the Audit full-resolution switch."""
 
@@ -9709,6 +9726,48 @@ def create_app(
         prefs.full_res_scrub = req.full_res_scrub
         user_config.save_global_prefs(prefs)
         return JSONResponse({"full_res_scrub": prefs.full_res_scrub})
+
+    async def _detection_model_settings() -> DetectionModelSettings:
+        model_set, required = _required_model_artifacts()
+        registry = model_layer.get_default_registry()
+        states = {st.slug: st.state for st in registry.status()} if registry is not None else {}
+        job = await state.jobs.find_active(kind="model_download")
+        return DetectionModelSettings(
+            model_set=model_set,
+            required=required,
+            present=all(states.get(slug) == "present" for slug in required),
+            active_job=job.id if job is not None else None,
+        )
+
+    @app.get("/api/settings/detection-model", response_model=DetectionModelSettings)
+    async def get_detection_model_settings() -> DetectionModelSettings:
+        """Which model set shot detection uses on this machine, and whether
+        its files are here (spec 2026-10-26). Local only."""
+        if _hosted_mode_active():
+            raise HTTPException(status_code=404, detail="not found")
+        return await _detection_model_settings()
+
+    @app.put("/api/settings/detection-model", response_model=DetectionModelSettings)
+    async def put_detection_model_settings(req: DetectionModelSettingsRequest) -> DetectionModelSettings:
+        """Home's "Audio model for head cameras" switch. Choosing ``clap``
+        starts the model download when its files are missing and no download
+        is running; detection uses ``base`` until they are here. Turning it
+        off keeps the files."""
+        if _hosted_mode_active():
+            raise HTTPException(status_code=404, detail="not found")
+        prefs = user_config.load_global_prefs()
+        prefs.detection_model_set = req.model_set
+        user_config.save_global_prefs(prefs)
+        current = await _detection_model_settings()
+        if current.required and not current.present and current.active_job is None:
+            try:
+                job = await state.jobs.submit(kind="model_download")
+            except ShutdownInProgressError:
+                return current
+            # Named from the submit itself: a fast job may already be done
+            # by the time the registry is read again.
+            current = current.model_copy(update={"active_job": job.id})
+        return current
 
     @app.exception_handler(ShutdownInProgressError)
     async def _shutdown_in_progress_handler(request: Request, exc: ShutdownInProgressError) -> JSONResponse:
