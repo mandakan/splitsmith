@@ -905,6 +905,7 @@ def audit_prep(
         check=True,
         capture_output=True,
         text=True,
+        encoding="utf-8",
     )
 
     audio, sr = beep_detect.load_audio(full_wav)
@@ -1628,13 +1629,14 @@ def _extract_or_load_audio(video: Path, audio_path: Path):
             check=True,
             capture_output=True,
             text=True,
+            encoding="utf-8",
         )
     return beep_detect.load_audio(audio_path)
 
 
 def _load_stage_json(path: Path) -> CompetitorStages:
     """Load the SSI Scoreboard JSON and return the first competitor's stages."""
-    raw = json.loads(path.read_text())
+    raw = json.loads(path.read_text(encoding="utf-8"))
     competitors = raw.get("competitors") or []
     if not competitors:
         raise typer.BadParameter(f"no competitors in {path}")

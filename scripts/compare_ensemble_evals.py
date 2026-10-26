@@ -20,7 +20,9 @@ def prf(tp: int, fp: int, fn: int) -> tuple[float, float, float]:
 
 
 def main(old_path: Path, new_path: Path) -> None:
-    old, new = json.loads(old_path.read_text()), json.loads(new_path.read_text())
+    old, new = json.loads(old_path.read_text(encoding="utf-8")), json.loads(
+        new_path.read_text(encoding="utf-8")
+    )
     common = [fx for fx in old if fx in new]
     for mode in ("rounds", "blind"):
         print(f"\n== mode: {mode}")

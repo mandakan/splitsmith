@@ -221,7 +221,7 @@ def test_calibration_loader_uses_runtime_artifacts_dir(
 
 
 def _make_executable(path: Path) -> None:
-    path.write_text("#!/bin/sh\nexit 0\n")
+    path.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
     path.chmod(0o755)
 
 

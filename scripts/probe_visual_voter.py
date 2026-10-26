@@ -166,7 +166,7 @@ def probe_fixture(
     neg_feats: torch.Tensor,
     device: str,
 ) -> dict:
-    data = json.loads(fixture_path.read_text())
+    data = json.loads(fixture_path.read_text(encoding="utf-8"))
     candidates = ((data.get("_candidates_pending_audit") or {}).get("candidates")) or []
     window = data.get("fixture_window_in_source") or [0.0, 0.0]
     src_offset = float(window[0])

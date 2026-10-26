@@ -121,7 +121,7 @@ def _download(base_url: str, name: str, entry: dict) -> str | None:
 def read_names(path: Path) -> list[str]:
     """A names file: one WAV per line (``.wav`` optional), ``#`` comments and blanks ignored."""
     out = []
-    for line in path.read_text().splitlines():
+    for line in path.read_text(encoding="utf-8").splitlines():
         name = line.split("#", 1)[0].strip()
         if name:
             out.append(name if name.endswith(".wav") else f"{name}.wav")

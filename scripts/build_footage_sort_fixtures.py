@@ -99,7 +99,7 @@ def _sorted_match(match_dir: Path) -> dict:
 
 
 def _unsorted(source_dir: Path, project_dir: Path, scorecards_json: Path) -> dict:
-    sb = json.loads(scorecards_json.read_text())
+    sb = json.loads(scorecards_json.read_text(encoding="utf-8"))
     shooters = [
         {
             "key": _key(c["name"]),

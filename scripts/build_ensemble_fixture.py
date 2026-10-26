@@ -319,7 +319,7 @@ def _build_fixture_json(
 
 def _materialize(json_path: Path, wav_src: Path, fixture_dict: dict) -> None:
     json_path.parent.mkdir(parents=True, exist_ok=True)
-    json_path.write_text(json.dumps(fixture_dict, indent=2) + "\n")
+    json_path.write_text(json.dumps(fixture_dict, indent=2) + "\n", encoding="utf-8")
     wav_link = json_path.with_suffix(".wav")
     if wav_link.exists() or wav_link.is_symlink():
         wav_link.unlink()

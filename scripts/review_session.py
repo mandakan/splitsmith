@@ -95,10 +95,10 @@ def lan_address() -> str:
 def phone_token(path: Path, rotate: bool) -> str:
     """The phone's token, kept between runs so the phone stays signed in."""
     if path.exists() and not rotate:
-        return path.read_text().strip()
+        return path.read_text(encoding="utf-8").strip()
     path.parent.mkdir(parents=True, exist_ok=True)
     token = secrets.token_urlsafe(24)
-    path.write_text(token)
+    path.write_text(token, encoding="utf-8")
     path.chmod(0o600)
     return token
 

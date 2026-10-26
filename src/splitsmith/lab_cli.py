@@ -295,7 +295,7 @@ def _extract_video_audio(video: Path, dest: Path, *, sample_rate: int) -> None:
         str(dest),
     ]
     try:
-        subprocess.run(cmd, check=True, capture_output=True, text=True)
+        subprocess.run(cmd, check=True, capture_output=True, text=True, encoding="utf-8")
     except subprocess.CalledProcessError as exc:
         raise typer.BadParameter(
             f"ffmpeg failed (exit {exc.returncode}): {exc.stderr or exc.stdout!r}"

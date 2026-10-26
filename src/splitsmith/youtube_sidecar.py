@@ -512,4 +512,5 @@ def write_thumbnail(
         check=True,
         capture_output=True,
         text=True,
+        encoding="utf-8",
     )

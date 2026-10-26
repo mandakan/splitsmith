@@ -15,7 +15,7 @@ from splitsmith import system_check
 
 
 def _make_fake_ffmpeg(path: Path) -> None:
-    path.write_text("#!/bin/sh\nexit 0\n")
+    path.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
     path.chmod(0o755)
 
 

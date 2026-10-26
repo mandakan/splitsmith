@@ -771,7 +771,7 @@ def _write_decoder_only(
     taken at that calibration's own thresholds, as the runtime computes it."""
     if not cal_path.exists():
         raise BuildError(f"{cal_path}: no calibration to add a decoder to")
-    cal = json.loads(cal_path.read_text())
+    cal = json.loads(cal_path.read_text(encoding="utf-8"))
     shipped = cal.get("thresholds_by_camera_class") or {}
     thresholds = {
         cls: {"voter_b_threshold": shipped.get(cls, {}).get("voter_b_threshold", cal["voter_b_threshold"])}
@@ -781,7 +781,7 @@ def _write_decoder_only(
     if decoder is None:
         raise BuildError("the decoder could not be fitted (needs at least two matches)")
     cal["decoder"] = decoder.model_dump()
-    cal_path.write_text(json.dumps(cal, indent=2) + "\n")
+    cal_path.write_text(json.dumps(cal, indent=2) + "\n", encoding="utf-8")
     log(f"Wrote the decoder into {cal_path} (nothing else changed)")
     return cal
 
@@ -1203,7 +1203,7 @@ def _carry_model_artifacts(cal_path: Path) -> dict | None:
     CI's slim-wheel smoke test on the 2026-08-17 retrain).
     """
     try:
-        prev = json.loads(cal_path.read_text())
+        prev = json.loads(cal_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return None
     block = prev.get("model_artifacts")

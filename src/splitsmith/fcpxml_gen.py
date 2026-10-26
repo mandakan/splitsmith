@@ -289,7 +289,7 @@ def probe_video(
     # A URL read can stall on the network; a local file cannot.
     limits = {"timeout": URL_PROBE_TIMEOUT_S} if isinstance(path, str) else {}
     try:
-        proc = runner(cmd, check=True, capture_output=True, text=True, **limits)
+        proc = runner(cmd, check=True, capture_output=True, text=True, encoding="utf-8", **limits)
     except subprocess.TimeoutExpired as exc:
         raise FFprobeError(f"ffprobe timed out after {URL_PROBE_TIMEOUT_S}s reading a URL") from exc
     except FileNotFoundError as exc:

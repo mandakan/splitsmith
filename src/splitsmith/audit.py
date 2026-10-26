@@ -55,7 +55,7 @@ def apply_audit_to_fixture(candidates_csv: Path, fixture_json: Path) -> int:
     be re-run from the same source if the user changes their mind.
     """
     kept_numbers = read_kept_candidate_numbers(candidates_csv)
-    data = json.loads(fixture_json.read_text())
+    data = json.loads(fixture_json.read_text(encoding="utf-8"))
 
     candidates = data.get("_candidates_pending_audit", {}).get("candidates")
     if not candidates:
@@ -83,5 +83,5 @@ def apply_audit_to_fixture(candidates_csv: Path, fixture_json: Path) -> int:
             }
         )
     data["shots"] = shots
-    fixture_json.write_text(json.dumps(data, indent=2) + "\n")
+    fixture_json.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
     return len(shots)

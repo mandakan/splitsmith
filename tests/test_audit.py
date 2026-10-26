@@ -25,7 +25,8 @@ def _make_fixture(path: Path, candidates: list[dict]) -> None:
                 "_candidates_pending_audit": {"candidates": candidates},
             },
             indent=2,
-        )
+        ),
+        encoding="utf-8",
     )
 
 
@@ -34,7 +35,7 @@ def _make_candidates_csv(path: Path, rows: list[tuple[str, int, float, float]]) 
     lines = ["audit_keep,candidate_number,time_fixture_s,ms_after_beep"]
     for keep, n, t, ms in rows:
         lines.append(f"{keep},{n},{t},{ms}")
-    path.write_text("\n".join(lines) + "\n")
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
 def test_is_kept_recognizes_common_marks() -> None:

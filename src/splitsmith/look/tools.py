@@ -444,10 +444,12 @@ def _sample_logo(work: Path) -> Path:
 
 def _card(slot: str, variant: str, text: str) -> composition.TitleCard | composition.MatchTitle:
     if slot in ("title_page", "closing"):
-        return composition.MatchTitle(text=text, info=("2026-06-27", "Production Optics"), variant=variant)
+        return composition.MatchTitle(
+            text=text, encoding="utf-8", info=("2026-06-27", "Production Optics"), variant=variant
+        )
     style: Literal["slate", "lower-third"] = "lower-third" if slot == "lower_third" else "slate"
     return composition.TitleCard(
-        text=text, duration_seconds=1.5, style=style, info=("24 rounds",), variant=variant
+        text=text, encoding="utf-8", duration_seconds=1.5, style=style, info=("24 rounds",), variant=variant
     )
 
 
@@ -778,6 +780,7 @@ def summary_samples(
                     slot=slot,
                     variant=variant,
                     text=SUMMARY_SAMPLE_LABEL,
+                    encoding="utf-8",
                     payload=payload,
                     duration_seconds=3.0,
                     width=width,
@@ -817,6 +820,7 @@ def summary_samples(
             slot=slot,
             variant=variant,
             text=summary.title,
+            encoding="utf-8",
             payload=payload,
             duration_seconds=summary.duration_seconds,
             width=width,

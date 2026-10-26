@@ -504,7 +504,9 @@ def probe_clip(path: Path, *, timeout: float = 8.0) -> dict[str, Any]:
         str(path),
     ]
     try:
-        completed = subprocess.run(cmd, check=True, capture_output=True, text=True, timeout=timeout)
+        completed = subprocess.run(
+            cmd, check=True, capture_output=True, text=True, encoding="utf-8", timeout=timeout
+        )
         fmt = json.loads(completed.stdout).get("format") or {}
     except (subprocess.SubprocessError, OSError, json.JSONDecodeError):
         return {}

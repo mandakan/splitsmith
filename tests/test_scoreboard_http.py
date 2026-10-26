@@ -53,7 +53,7 @@ def client() -> SsiHttpClient:
 
 
 def _load(path: Path):
-    return json.loads(path.read_text())
+    return json.loads(path.read_text(encoding="utf-8"))
 
 
 def test_satisfies_protocol(client: SsiHttpClient) -> None:

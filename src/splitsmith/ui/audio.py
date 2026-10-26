@@ -545,7 +545,7 @@ def _extract_audio(
         str(dest),
     ]
     try:
-        subprocess.run(cmd, check=True, capture_output=True, text=True)
+        subprocess.run(cmd, check=True, capture_output=True, text=True, encoding="utf-8")
     except subprocess.CalledProcessError as exc:
         raise AudioExtractionError(
             f"ffmpeg failed (exit {exc.returncode}): {exc.stderr or exc.stdout!r}"
@@ -588,7 +588,7 @@ def _run_audio_ffmpeg(args: list[str], out: Path, ffmpeg_binary: str, *, url: bo
         raise AudioExtractionError(f"ffmpeg binary not found: {ffmpeg_binary}")
     cmd = [ffmpeg_binary, "-hide_banner", "-loglevel", "error", "-y", *args, str(out)]
     try:
-        completed = subprocess.run(cmd, check=True, capture_output=True, text=True)
+        completed = subprocess.run(cmd, check=True, capture_output=True, text=True, encoding="utf-8")
     except subprocess.CalledProcessError as exc:
         if url:
             detail = redact_urls(exc.stderr or exc.stdout)

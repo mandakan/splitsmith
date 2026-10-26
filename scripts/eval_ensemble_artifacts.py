@@ -65,7 +65,7 @@ def main(out_path: Path) -> None:
             row[mode] = score([c.time for c in res.candidates if c.kept], truth)
         out[fx.stem] = row
         print(fx.stem, row, flush=True)
-    out_path.write_text(json.dumps(out, indent=1))
+    out_path.write_text(json.dumps(out, indent=1), encoding="utf-8")
 
 
 if __name__ == "__main__":

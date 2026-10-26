@@ -64,7 +64,7 @@ def _last_saved(audit: Path) -> str | None:
     """When the audit was last saved in the app (ISO, UTC), or None."""
     if not audit.exists():
         return None
-    doc = json.loads(audit.read_text())
+    doc = json.loads(audit.read_text(encoding="utf-8"))
     saves = [e.get("ts") for e in doc.get("audit_events") or [] if e.get("kind") == "save" and e.get("ts")]
     return max(saves) if saves else None
 
@@ -74,7 +74,7 @@ def _stale_reason(fixture: Path, audit: Path) -> str | None:
     was saved after it was promoted."""
     if not fixture.exists():
         return f"no fixture named {fixture.stem} (its fixture has another name)"
-    data = json.loads(fixture.read_text())
+    data = json.loads(fixture.read_text(encoding="utf-8"))
     if data.get("anchor"):
         return "the fixture is a snap; use promote_secondary_angles.py --resnap"
     promoted = data.get("promoted_at")
@@ -94,7 +94,7 @@ def _utc(ts: str) -> str:
 def _audited(audit: Path) -> bool:
     if not audit.exists():
         return False
-    doc = json.loads(audit.read_text())
+    doc = json.loads(audit.read_text(encoding="utf-8"))
     saved = any(e.get("kind") == "save" for e in doc.get("audit_events") or [])
     return bool(doc.get("shots")) and saved
 

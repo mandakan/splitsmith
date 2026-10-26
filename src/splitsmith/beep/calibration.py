@@ -297,7 +297,7 @@ def load_manifest(path: Path) -> BeepCalibrationManifest:
 
     if not path.exists():
         return BeepCalibrationManifest()
-    raw = yaml.safe_load(path.read_text()) or {}
+    raw = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
     return BeepCalibrationManifest.model_validate(raw)
 
 
@@ -307,7 +307,7 @@ def save_manifest(manifest: BeepCalibrationManifest, path: Path) -> None:
 
     path.parent.mkdir(parents=True, exist_ok=True)
     payload = manifest.model_dump(exclude_none=True)
-    path.write_text(yaml.safe_dump(payload, sort_keys=False, indent=2))
+    path.write_text(yaml.safe_dump(payload, sort_keys=False, indent=2), encoding="utf-8")
 
 
 def fixtures_with_full_audio(
@@ -326,4 +326,4 @@ def fixtures_with_full_audio(
 
 def read_audit_json(path: Path) -> dict:
     """Thin wrapper -- only exists so tests can stub the read."""
-    return json.loads(path.read_text())
+    return json.loads(path.read_text(encoding="utf-8"))

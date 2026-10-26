@@ -85,7 +85,7 @@ def _load_entries(path: Path) -> tuple[list[tuple[str, datetime]], int]:
     oldest one -- later duplicates for the same address are then skipped
     as "already known" by the store itself, rather than by any dedup
     logic here. Returns ``(entries, invalid_count)``."""
-    raw: list[dict[str, Any]] = json.loads(path.read_text())
+    raw: list[dict[str, Any]] = json.loads(path.read_text(encoding="utf-8"))
     entries: list[tuple[str, datetime]] = []
     invalid = 0
     for item in raw:

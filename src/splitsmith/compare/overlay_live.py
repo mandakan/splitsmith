@@ -152,7 +152,7 @@ def panel_groups(
             Group(
                 anchor=Anchor.TOP_RIGHT if stacked else Anchor.TOP_LEFT,
                 flow=Flow.ROW,
-                elements=(Element(text=counter, role=Role.LIVE_PRIMARY, size=size),),
+                elements=(Element(text=counter, encoding="utf-8", role=Role.LIVE_PRIMARY, size=size),),
                 margin_top=fit.stack_offset if stacked and fit is not None else None,
             )
         )
@@ -164,6 +164,7 @@ def panel_groups(
                 elements=(
                     Element(
                         text=f"{panel.last_split:.2f}s",
+                        encoding="utf-8",
                         role=Role.LIVE_PRIMARY,
                         color=ColorToken.SPLIT,
                     ),

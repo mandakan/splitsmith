@@ -259,6 +259,6 @@ def test_models_are_the_shipped_one_and_every_bundle(tmp_path, monkeypatch) -> N
 
 
 def test_gbdt_hyperparameters_are_read_from_the_build_script() -> None:
-    params = gbdt_hyperparameters(Path(BUILD_SCRIPT).read_text())
+    params = gbdt_hyperparameters(Path(BUILD_SCRIPT).read_text(encoding="utf-8"))
     assert set(params) >= {"n_estimators", "max_depth", "learning_rate"}
     assert gbdt_hyperparameters("nothing here") == {}

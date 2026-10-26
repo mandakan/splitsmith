@@ -455,7 +455,7 @@ def _build_clap_runtime_torch() -> ClapRuntime:
     processor = ClapProcessor.from_pretrained(CLAP_MODEL_ID)
     model.eval()
 
-    text_inputs = processor(text=list(CLAP_PROMPTS), return_tensors="pt", padding=True)
+    text_inputs = processor(text=list(CLAP_PROMPTS), encoding="utf-8", return_tensors="pt", padding=True)
     with torch.no_grad():
         text_out = model.get_text_features(**dict(text_inputs))
     text_emb_t = text_out.pooler_output if hasattr(text_out, "pooler_output") else text_out

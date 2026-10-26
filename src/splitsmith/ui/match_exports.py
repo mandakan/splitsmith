@@ -908,6 +908,7 @@ def export_match(
         else:
             card = composition.MatchTitle(
                 text=request.project_name,
+                encoding="utf-8",
                 info=request.title_page_info,
                 duration_seconds=request.title_page_duration_seconds,
                 logo=request.event_logo,
@@ -1153,6 +1154,7 @@ def _build_uniform_titles(
     return {
         idx: composition.TitleCard(
             text=stage_input.stage_name,
+            encoding="utf-8",
             duration_seconds=duration,
             style=kind,
             info=(f"{stage_input.expected_rounds} rounds",) if stage_input.expected_rounds else (),

@@ -371,6 +371,7 @@ def probe_camera_metadata(
             check=True,
             capture_output=True,
             text=True,
+            encoding="utf-8",
             timeout=timeout,
         )
         payload = json.loads(completed.stdout)

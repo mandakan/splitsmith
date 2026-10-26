@@ -133,7 +133,7 @@ def transcode_proxy(
         return redact_urls(text) if is_url else (text or "")
 
     try:
-        result = runner(cmd, check=True, capture_output=True, text=True)
+        result = runner(cmd, check=True, capture_output=True, text=True, encoding="utf-8")
     except FileNotFoundError as exc:
         raise ProxyError(f"ffmpeg binary not found: {ffmpeg_binary}") from exc
     except subprocess.CalledProcessError as exc:

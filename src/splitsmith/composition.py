@@ -945,6 +945,7 @@ def _lower_titles(composition: Composition) -> list[fcpxml_gen.StageTitle]:
             fcpxml_gen.StageTitle(
                 stage_index=idx,
                 text=stage.title.text,
+                encoding="utf-8",
                 style=stage.title.style,
                 duration_seconds=stage.title.duration_seconds,
                 font_size=stage.title.font_size,

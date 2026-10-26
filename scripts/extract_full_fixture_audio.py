@@ -57,7 +57,7 @@ def load_sources(path: Path = SOURCES_YAML) -> dict:
             f"sources map missing: {path}. Seed it from each fixture's audit JSON "
             "'source' field before running."
         )
-    return yaml.safe_load(path.read_text()) or {}
+    return yaml.safe_load(path.read_text(encoding="utf-8")) or {}
 
 
 def resolve_video(stem: str, sources: dict) -> Path:
