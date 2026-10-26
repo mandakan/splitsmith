@@ -8,8 +8,12 @@ served to the phone (stage 8: 10.475 s of 28.223 s).
 
 from __future__ import annotations
 
+import os
+import subprocess
+import sys
 import threading
 import time
+import types
 import wave
 from pathlib import Path
 
@@ -182,3 +186,38 @@ def test_a_torn_download_leaves_neither_final_nor_partial(tmp_path: Path) -> Non
 
 def test_a_missing_key_is_not_a_download(tmp_path: Path) -> None:
     assert derived.download(_Storage({}), "k", tmp_path / "web.mp4") is False
+
+
+def test_trim_and_derived_import_where_there_is_no_fcntl() -> None:
+    # Windows has no fcntl; a module-level import of it stopped every module
+    # that reaches trim or derived (the CLI, the server, the test conftest).
+    code = "import sys; sys.modules['fcntl'] = None; import splitsmith.derived, splitsmith.trim"
+    result = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr
+
+
+def test_the_windows_lock_keeps_waiting_past_msvcrt_giving_up_and_unlocks(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # msvcrt.LK_LOCK retries for about 10 s and then raises; flock waits for
+    # as long as it takes, so the Windows branch must keep trying.
+    calls: list[tuple[str, int]] = []
+    refusals = iter([True, True, False])
+
+    def locking(fd: int, mode: int, nbytes: int) -> None:
+        name = {1: "lock", 0: "unlock"}[mode]
+        calls.append((name, os.lseek(fd, 0, os.SEEK_CUR)))
+        assert nbytes == 1
+        if name == "lock" and next(refusals):
+            raise OSError(36, "Resource deadlock avoided")
+
+    fake = types.SimpleNamespace(LK_LOCK=1, LK_UNLCK=0, locking=locking)
+    monkeypatch.setitem(sys.modules, "msvcrt", fake)
+    monkeypatch.setattr(sys, "platform", "win32")
+    # A lock file with bytes in it: "a" opens at the end, and the lock must
+    # still land on byte 0, where every other opener locks.
+    derived.lock_path(tmp_path / "x.mp4").write_bytes(b"left over")
+
+    with derived.locked(tmp_path / "x.mp4"):
+        assert calls == [("lock", 0), ("lock", 0), ("lock", 0)]
+    assert calls[-1] == ("unlock", 0)

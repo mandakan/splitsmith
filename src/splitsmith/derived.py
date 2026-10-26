@@ -19,10 +19,10 @@ at once on one file.
 
 from __future__ import annotations
 
-import fcntl
 import logging
 import os
 import shutil
+import sys
 import uuid
 import wave
 from collections.abc import Callable, Iterator
@@ -56,12 +56,35 @@ def lock_path(final: Path, purpose: str = "") -> Path:
 
 @contextmanager
 def locked(final: Path, purpose: str = "") -> Iterator[None]:
-    """Hold the exclusive lock for ``final``. ``flock`` on a fresh open, so
-    threads of one process exclude each other as well as processes."""
+    """Hold the exclusive lock for ``final``. A lock on a fresh open, so
+    threads of one process exclude each other as well as processes: ``flock``
+    on POSIX, a lock on byte 0 on Windows (``msvcrt`` locks belong to the
+    handle, so a second open in the same thread blocks there too)."""
     final.parent.mkdir(parents=True, exist_ok=True)
     with lock_path(final, purpose).open("a") as lock:
-        fcntl.flock(lock, fcntl.LOCK_EX)
-        yield
+        if sys.platform != "win32":
+            import fcntl
+
+            fcntl.flock(lock, fcntl.LOCK_EX)
+            yield
+            return
+        import msvcrt
+
+        # "a" opens at the end; every opener must lock the same byte.
+        lock.seek(0)
+        while True:
+            try:
+                msvcrt.locking(lock.fileno(), msvcrt.LK_LOCK, 1)
+                break
+            except OSError:
+                # LK_LOCK gives up after about 10 s; flock waits as long as
+                # it takes, so keep trying.
+                continue
+        try:
+            yield
+        finally:
+            lock.seek(0)
+            msvcrt.locking(lock.fileno(), msvcrt.LK_UNLCK, 1)
 
 
 def produce(
