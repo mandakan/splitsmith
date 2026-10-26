@@ -7,6 +7,7 @@ import type {
   CalibratedCameraModel,
   CheckFinding,
   CreateWorkerResponse,
+  DetectionModelSettings,
   DevicePendingInfo,
   DeviceStartResponse,
   DeviceStatusResponse,
@@ -325,6 +326,14 @@ export const miscApi = {
     request<{ global_enabled: boolean }>("/api/settings/auto-sync", {
       method: "PUT",
       json: { enabled },
+    }),
+  /** The machine's shot-detection model set and whether its files are here (local only). */
+  getDetectionModel: () => request<DetectionModelSettings>("/api/settings/detection-model"),
+  /** Choose a model set; choosing ``clap`` starts its download when the files are missing. */
+  putDetectionModel: (modelSet: "base" | "clap") =>
+    request<DetectionModelSettings>("/api/settings/detection-model", {
+      method: "PUT",
+      json: { model_set: modelSet },
     }),
   getScrubSettings: () => request<{ full_res_scrub: boolean }>("/api/settings/scrub"),
   setScrubSettings: (fullRes: boolean) =>

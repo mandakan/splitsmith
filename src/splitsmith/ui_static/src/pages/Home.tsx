@@ -19,6 +19,7 @@ import { Link, useOutletContext, useParams } from "react-router-dom";
 import { DesktopRequestsSheet } from "@/components/desktop/DesktopRequestsSheet";
 import { EditStagesDrawer } from "@/components/match/EditStagesDrawer";
 import type { MatchShellOutletContext } from "@/components/match/MatchShell";
+import { DetectionModelCard } from "@/components/match/DetectionModelCard";
 import { SyncCard } from "@/components/match/SyncCard";
 import { OverviewCards } from "@/components/overview/OverviewCards";
 import { OverviewTable, type OverviewHrefs } from "@/components/overview/OverviewTable";
@@ -326,6 +327,7 @@ export function Home() {
       ) : null}
 
       {deploymentMode === "local" ? <SyncCard jobs={jobs} matchId={matchId} /> : null}
+      {deploymentMode === "local" ? <DetectionModelCard /> : null}
 
       <StatStrip lead className="mb-4">
         <Stat label="Audited" value={String(stats.audited)} unit={`/ ${stats.total}`} />

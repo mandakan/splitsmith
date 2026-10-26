@@ -30,6 +30,7 @@ export type BeepSource = "auto" | "manual" | "aligned";
  *  ``beep_candidates[0]`` matches the promoted ``beep_time`` on the
  *  parent ``StageVideo``. */
 export type BeepCandidate = Schema["BeepCandidate"];
+export type DetectionModelSettings = Schema["DetectionModelSettings"];
 
 /** Response from POST /api/stages/{n}/videos/{vid}/beep/snap. The user
  *  placed a marker by ear; the server returns the rise-foot leading edge
@@ -1692,7 +1693,13 @@ export interface StageAudit {
   stage_time_seconds?: number;
   fixture_window_in_source?: [number, number];
   shots: AuditShot[];
-  _candidates_pending_audit?: { candidates: AuditCandidate[] };
+  _candidates_pending_audit?: {
+    candidates: AuditCandidate[];
+    /** The model set that detected them (``base`` / ``clap``); absent on a
+     *  detection from before model sets. */
+    _model_set?: string;
+    _calibration_built_at?: string;
+  };
   audit_events?: AuditEvent[];
   source?: string;
   /** Triage flag (#823) - present when a mobile operator flagged this
