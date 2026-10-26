@@ -656,7 +656,7 @@ def keep_this_shooters(
         meta = probe_clip(source)
         clips.append(
             SortClip(
-                clip_id=str(path),
+                clip_id=path.as_posix(),
                 folder=str(_resolved(source).parent),
                 filename=source.name,
                 start=meta.get("start"),
@@ -699,9 +699,9 @@ def run_footage_sort_scan(handle: Any, *, state: Any, scan_id: str) -> None:
             handle.check_cancel()
             handle.update(progress=i / max(len(videos), 1), message=f"Reading {path.name}")
             meta = probe_clip(path)
-            folder = str(path.parent.relative_to(source)) if path.parent != source else ""
+            folder = path.parent.relative_to(source).as_posix() if path.parent != source else ""
             clip = SortClip(
-                clip_id=str(path.relative_to(source)),
+                clip_id=path.relative_to(source).as_posix(),
                 folder=folder,
                 filename=path.name,
                 start=meta.get("start"),
