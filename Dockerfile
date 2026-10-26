@@ -194,6 +194,9 @@ RUN find /app/.venv -type d -name '__pycache__' -prune -exec rm -rf {} + ; \
 # <config_dir>/models on a volume, since without one the fetch repeats on
 # every container recreate rather than once.
 ENV SPLITSMITH_CONFIG_DIR=/opt/splitsmith
+# Hosted detects with the clap model set (spec 2026-10-26): every image,
+# Cloud Run, the Railway fallback or a self-hosted worker, carries it.
+ENV SPLITSMITH_MODEL_SET=clap
 ARG BAKE_MODELS=0
 RUN if [ "$BAKE_MODELS" = "1" ]; then \
         /app/.venv/bin/splitsmith fetch-models; \

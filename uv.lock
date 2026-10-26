@@ -2233,20 +2233,6 @@ wheels = [
 ]
 
 [[package]]
-name = "panns-inference"
-version = "0.1.1"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "librosa" },
-    { name = "matplotlib" },
-    { name = "torchlibrosa" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/42/aa/308a94956501bf8a9a3d389e2c0e5cb405acc81780f7c16ba3898ae08fc3/panns-inference-0.1.1.tar.gz", hash = "sha256:f8074268513571775e154294729b66fc0ccbdbeceb5c8f6eaa9670664e40c03d", size = 6340, upload-time = "2023-03-26T15:37:18.254Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/ad/ac/0558484d9b5383125912b1cedeb95b1f7e928c2b0781f52d77b068f0ba3d/panns_inference-0.1.1-py3-none-any.whl", hash = "sha256:97f6b56b6c9467cf00e21f041e1f88933188c65c1b5ca64eeb3c92e37fb27fc2", size = 8267, upload-time = "2023-03-26T15:37:16.277Z" },
-]
-
-[[package]]
 name = "pathspec"
 version = "1.1.1"
 source = { registry = "https://pypi.org/simple" }
@@ -3584,7 +3570,6 @@ dependencies = [
     { name = "cryptography" },
     { name = "fastapi" },
     { name = "httpx" },
-    { name = "huggingface-hub" },
     { name = "librosa" },
     { name = "mcp" },
     { name = "numpy" },
@@ -3625,7 +3610,6 @@ dev = [
     { name = "mypy" },
     { name = "onnx" },
     { name = "onnxscript" },
-    { name = "panns-inference" },
     { name = "pyarrow" },
     { name = "pytest" },
     { name = "pytest-cov" },
@@ -3648,7 +3632,6 @@ requires-dist = [
     { name = "cryptography", specifier = ">=42.0.0" },
     { name = "fastapi", specifier = ">=0.115.0" },
     { name = "httpx", specifier = ">=0.28.0" },
-    { name = "huggingface-hub", specifier = ">=0.26.0" },
     { name = "librosa", specifier = ">=0.10.2" },
     { name = "mcp", specifier = ">=1.0.0" },
     { name = "numpy", specifier = ">=1.26.0" },
@@ -3682,7 +3665,6 @@ dev = [
     { name = "mypy", specifier = ">=1.10.0" },
     { name = "onnx", specifier = ">=1.16.0" },
     { name = "onnxscript", specifier = ">=0.1.0" },
-    { name = "panns-inference", specifier = ">=0.1.1" },
     { name = "pyarrow", specifier = ">=17.0.0" },
     { name = "pytest", specifier = ">=8.0.0" },
     { name = "pytest-cov", specifier = ">=5.0.0" },
@@ -3952,19 +3934,6 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/69/d1/491e3a0389430946145888b0203f2b6a759ce2a61481b96a85c2da4f2ced/torch-2.13.0-cp314-cp314t-manylinux_2_28_aarch64.whl", hash = "sha256:31061ff56ed8fbf26c749806905aeb749ebeb819810fd5d52508aa5afd90dddc", size = 427219769, upload-time = "2026-07-08T16:02:31.18Z" },
     { url = "https://files.pythonhosted.org/packages/9a/1d/38006e045bf0a1fc28ef01e757c554e59e59a8770c284bc4f47b14e60441/torch-2.13.0-cp314-cp314t-manylinux_2_28_x86_64.whl", hash = "sha256:cc26eead4cf51d0b544e31e364dcf000846549c273bd148936fe9d24d29acb92", size = 526571320, upload-time = "2026-07-08T16:01:59.348Z" },
     { url = "https://files.pythonhosted.org/packages/56/94/655c91992a882bd5071aa0b5d22a07dbb130d801e872be97c0b627a7c693/torch-2.13.0-cp314-cp314t-win_amd64.whl", hash = "sha256:a7de8a313090dc5c7d7ba4bfe5c3be222528f9a4dba1acc83bddb1157360c4b8", size = 122306773, upload-time = "2026-07-08T16:02:39.832Z" },
-]
-
-[[package]]
-name = "torchlibrosa"
-version = "0.1.0"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "librosa" },
-    { name = "numpy" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/a4/67/e4c79da3f15777b9bc2b655d47dac553fc31e40360500fef5e66d6877ce8/torchlibrosa-0.1.0.tar.gz", hash = "sha256:62a8beedf9c9b4141a06234df3f10229f7ba86e67678ccee02489ec4ef044028", size = 11719, upload-time = "2023-02-21T09:40:54.968Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/3e/af/ccf007edf442c3c0cd3a98be2c82bc99edc957c04436a759b6e1e01077e0/torchlibrosa-0.1.0-py3-none-any.whl", hash = "sha256:89b65fd28b833ceb6bc74a3d0d87e2924ddc5a845d0a246b194952a4e12a38cb", size = 11741, upload-time = "2023-02-21T09:40:52.58Z" },
 ]
 
 [[package]]

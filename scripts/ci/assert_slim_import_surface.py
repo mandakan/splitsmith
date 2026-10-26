@@ -26,7 +26,7 @@ from __future__ import annotations
 import sys
 
 FORBIDDEN = ("torch", "transformers")
-REQUIRED = ("onnxruntime", "librosa", "huggingface_hub", "numpy", "PIL")
+REQUIRED = ("onnxruntime", "librosa", "numpy", "PIL")
 
 
 def main() -> int:

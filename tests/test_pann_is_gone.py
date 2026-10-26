@@ -68,3 +68,15 @@ def test_old_eval_candidates_still_load() -> None:
     }
     assert EvalCandidate.model_validate({**row, "gunshot_prob": 0.9}).gunshot_prob == 0.9
     assert EvalCandidate.model_validate(row).gunshot_prob is None
+
+
+def test_hosted_images_pin_the_clap_set_and_the_wheel_has_no_hub_dependency() -> None:
+    import tomllib
+
+    for name in ("Dockerfile", "Dockerfile.gpu"):
+        assert "SPLITSMITH_MODEL_SET=clap" in (REPO / name).read_text(encoding="utf-8"), name
+    pyproject = tomllib.loads((REPO / "pyproject.toml").read_text(encoding="utf-8"))
+    deps = pyproject["project"]["dependencies"]
+    assert not any(d.replace("-", "_").startswith("huggingface_hub") for d in deps)
+    dev = [d for group in pyproject.get("dependency-groups", {}).values() for d in group if isinstance(d, str)]
+    assert not any(d.replace("-", "_").startswith("panns_inference") for d in dev)

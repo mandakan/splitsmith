@@ -123,7 +123,7 @@ for name in forbidden:
         f"slim wheel pulled in {name} -- the [dev] group leaked into the runtime install"
     )
 
-required = ("onnxruntime", "librosa", "huggingface_hub", "numpy", "PIL")
+required = ("onnxruntime", "librosa", "numpy", "PIL")
 for name in required:
     __import__(name)
 
