@@ -6,8 +6,6 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 
-import pytest
-
 REPO = Path(__file__).resolve().parents[1]
 
 # ``PANN``, ``pann_cnn14``, ``panns_inference``, ``PannRuntime`` and the
@@ -76,5 +74,7 @@ def test_hosted_images_pin_the_clap_set_and_the_wheel_has_no_hub_dependency() ->
     pyproject = tomllib.loads((REPO / "pyproject.toml").read_text(encoding="utf-8"))
     deps = pyproject["project"]["dependencies"]
     assert not any(d.replace("-", "_").startswith("huggingface_hub") for d in deps)
-    dev = [d for group in pyproject.get("dependency-groups", {}).values() for d in group if isinstance(d, str)]
+    dev = [
+        d for group in pyproject.get("dependency-groups", {}).values() for d in group if isinstance(d, str)
+    ]
     assert not any(d.replace("-", "_").startswith("panns_inference") for d in dev)
