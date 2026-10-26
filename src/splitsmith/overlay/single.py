@@ -169,11 +169,7 @@ def run_groups(run: OverlayRun) -> tuple[Group, ...]:
             Group(
                 anchor=Anchor.TOP_LEFT,
                 flow=Flow.ROW,
-                elements=(
-                    Element(
-                        text=f"{run.shots_fired}/{run.shot_count}", encoding="utf-8", role=Role.LIVE_PRIMARY
-                    ),
-                ),
+                elements=(Element(text=f"{run.shots_fired}/{run.shot_count}", role=Role.LIVE_PRIMARY),),
             )
         )
     if run.last_split is not None:
@@ -184,7 +180,6 @@ def run_groups(run: OverlayRun) -> tuple[Group, ...]:
                 elements=(
                     Element(
                         text=f"{run.last_split:.2f}s",
-                        encoding="utf-8",
                         role=Role.LIVE_PRIMARY,
                         color=ColorToken.SPLIT,
                     ),

@@ -13,6 +13,10 @@ import ast
 from pathlib import Path
 
 SRC = Path(__file__).resolve().parents[1] / "src" / "splitsmith"
+# ``subprocess.run``, ``Popen`` and friends, and the injected ``runner`` the
+# media modules take. ``text=`` on any other call (an XML element's text) is
+# not a decode.
+_SUBPROCESS_CALLEES = {"run", "Popen", "check_output", "check_call", "call", "runner"}
 
 
 def _text_subprocess_calls_without_encoding(source: str) -> list[int]:
@@ -20,10 +24,13 @@ def _text_subprocess_calls_without_encoding(source: str) -> list[int]:
     for node in ast.walk(ast.parse(source)):
         if not isinstance(node, ast.Call):
             continue
+        if ast.unparse(node.func).rsplit(".", 1)[-1] not in _SUBPROCESS_CALLEES:
+            continue
         kwargs = {kw.arg for kw in node.keywords if kw.arg}
         text_mode = any(
             kw.arg in ("text", "universal_newlines")
-            and not (isinstance(kw.value, ast.Constant) and not kw.value.value)
+            and isinstance(kw.value, ast.Constant)
+            and kw.value.value is True
             for kw in node.keywords
         )
         if text_mode and "encoding" not in kwargs:
@@ -33,10 +40,12 @@ def _text_subprocess_calls_without_encoding(source: str) -> list[int]:
 
 def test_the_check_finds_a_text_call_without_encoding() -> None:
     assert _text_subprocess_calls_without_encoding("subprocess.run(['x'], text=True)\n") == [1]
+    assert _text_subprocess_calls_without_encoding("runner(['x'], capture_output=True, text=True)\n") == [1]
     assert (
         _text_subprocess_calls_without_encoding("subprocess.run(['x'], text=True, encoding='utf-8')\n") == []
     )
     assert _text_subprocess_calls_without_encoding("subprocess.run(['x'], text=False)\n") == []
+    assert _text_subprocess_calls_without_encoding("ET.SubElement(parent, 'a', text=label)\n") == []
 
 
 def test_every_text_mode_subprocess_call_names_its_encoding() -> None:

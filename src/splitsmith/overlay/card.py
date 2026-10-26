@@ -169,23 +169,18 @@ def card_groups(card: Card) -> tuple[Group, ...]:
     lead first for both and the lower-third came out upside down.
     """
     if _is_lower_third(card):
-        lead = Element(role=Role.HEADLINE, text=card.text, encoding="utf-8", emphasis=Emphasis.PLATE)
+        lead = Element(role=Role.HEADLINE, text=card.text, emphasis=Emphasis.PLATE)
         lines = [_line(Anchor.BOTTOM_LEFT, "left", text) for text in reversed(card.info)]
         lines.append(Group(anchor=Anchor.BOTTOM_LEFT, flow=Flow.ROW, elements=(lead,), align="left"))
         return tuple(lines)
-    lead = Element(role=Role.IDENTITY, text=card.text, encoding="utf-8")
+    lead = Element(role=Role.IDENTITY, text=card.text)
     groups = [Group(anchor=Anchor.MIDDLE_CENTER, flow=Flow.ROW, elements=(lead,), align="center")]
     groups.extend(_line(Anchor.MIDDLE_CENTER, "center", text) for text in card.info)
     return tuple(groups)
 
 
 def _line(anchor: Anchor, align: Literal["left", "center"], text: str) -> Group:
-    return Group(
-        anchor=anchor,
-        flow=Flow.ROW,
-        elements=(Element(role=Role.DETAIL, text=text, encoding="utf-8"),),
-        align=align,
-    )
+    return Group(anchor=anchor, flow=Flow.ROW, elements=(Element(role=Role.DETAIL, text=text),), align=align)
 
 
 def card_scale(height: int) -> CellScale:

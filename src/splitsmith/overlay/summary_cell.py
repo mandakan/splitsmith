@@ -165,7 +165,6 @@ def count_elements(scorecard: StageScorecard) -> list[Element]:
             Element(
                 role=Role.DETAIL,
                 text=f"{tag}{value_text}",
-                encoding="utf-8",
                 emphasis=Emphasis.PLATE if plate else Emphasis.PLAIN,
                 color=token,
                 drop_priority=priorities[index],
@@ -254,9 +253,9 @@ def _split_stat_elements(splits: list[float]) -> list[Element]:
     if not splits:
         return []
     return [
-        Element(role=Role.HEADLINE, text=f"{min(splits):.2f}", encoding="utf-8", caption="Best"),
-        Element(role=Role.HEADLINE, text=f"{sum(splits) / len(splits):.2f}", encoding="utf-8", caption="Avg"),
-        Element(role=Role.HEADLINE, text=f"{max(splits):.2f}", encoding="utf-8", caption="Worst"),
+        Element(role=Role.HEADLINE, text=f"{min(splits):.2f}", caption="Best"),
+        Element(role=Role.HEADLINE, text=f"{sum(splits) / len(splits):.2f}", caption="Avg"),
+        Element(role=Role.HEADLINE, text=f"{max(splits):.2f}", caption="Worst"),
     ]
 
 
@@ -288,7 +287,7 @@ def _reload_elements(reloads: tuple[ReloadFigure, ...], *, first_priority: int) 
     ]
     last = first_priority + len(declared) - 1
     return [
-        Element(role=Role.HEADLINE, text=text, encoding="utf-8", caption=caption, drop_priority=last - index)
+        Element(role=Role.HEADLINE, text=text, caption=caption, drop_priority=last - index)
         for index, (text, caption) in enumerate(declared)
     ]
 
@@ -374,9 +373,9 @@ def summary_groups(
     # Top row: who this is, and the DQ chip beside the name when DQ'd.
     # The placing this once shared the slot with is gone (issue #683 Task
     # 8) -- a DQ is a status, not a placing, so it keeps the slot alone.
-    identity: list[Element] = [Element(role=Role.IDENTITY, text=label, encoding="utf-8")]
+    identity: list[Element] = [Element(role=Role.IDENTITY, text=label)]
     if scorecard is not None and scorecard.dq:
-        identity.append(Element(role=Role.VERDICT, text="DQ", encoding="utf-8", emphasis=Emphasis.PLATE))
+        identity.append(Element(role=Role.VERDICT, text="DQ", emphasis=Emphasis.PLATE))
     groups.append(Group(anchor=Anchor.TOP_CENTER, flow=Flow.ROW, elements=tuple(identity), align="left"))
 
     if tile is None:
@@ -427,24 +426,16 @@ def summary_groups(
         next_priority = len(counts) + len(reload_row)
         working: list[Element] = []
         if hf_text is not None:
-            working.append(
-                Element(
-                    role=Role.HEADLINE, text=hf_text, encoding="utf-8", unit="HF", drop_priority=next_priority
-                )
-            )
+            working.append(Element(role=Role.HEADLINE, text=hf_text, unit="HF", drop_priority=next_priority))
             next_priority += 1
         if time_text is not None:
-            working.append(
-                Element(role=Role.HEADLINE, text=time_text, encoding="utf-8", drop_priority=next_priority)
-            )
+            working.append(Element(role=Role.HEADLINE, text=time_text, drop_priority=next_priority))
             next_priority += 1
         scoring.append(
             Group(
                 anchor=Anchor.MIDDLE_CENTER,
                 flow=Flow.ROW,
-                elements=(
-                    Element(role=Role.LABEL, text="Scoring", encoding="utf-8", drop_priority=next_priority),
-                ),
+                elements=(Element(role=Role.LABEL, text="Scoring", drop_priority=next_priority),),
                 align="left",
             )
         )
@@ -528,15 +519,13 @@ def summary_groups(
             selected = statistic_split_shots(tile.shots)
             static = [shot.split for shot in selected if not shot.moving]
             moving = [shot.split for shot in selected if shot.moving]
-            draw = Element(role=Role.HEADLINE, text=f"{tile.draw:.2f}", encoding="utf-8", caption="Draw")
+            draw = Element(role=Role.HEADLINE, text=f"{tile.draw:.2f}", caption="Draw")
             if static and moving and split_rows and _fits_split_rows(cell_width, cell_height):
-                rows.append(
-                    [Element(role=Role.LABEL, text="Static", encoding="utf-8"), *_split_stat_elements(static)]
-                )
+                rows.append([Element(role=Role.LABEL, text="Static"), *_split_stat_elements(static)])
                 # No captions: the Moving figures sit under the Static row's.
                 rows.append(
                     [
-                        Element(role=Role.LABEL, text="Moving", encoding="utf-8"),
+                        Element(role=Role.LABEL, text="Moving"),
                         *(replace(e, caption=None) for e in _split_stat_elements(moving)),
                     ]
                 )
@@ -551,7 +540,7 @@ def summary_groups(
                 Group(
                     anchor=Anchor.MIDDLE_CENTER,
                     flow=Flow.ROW,
-                    elements=(Element(role=Role.LABEL, text="Splits", encoding="utf-8"),),
+                    elements=(Element(role=Role.LABEL, text="Splits"),),
                     align="left",
                     margin_top=_band_gap_extra(cell_height) if scoring_present else None,
                 )
@@ -610,14 +599,14 @@ def _upright_split_groups(
     selected = statistic_split_shots(tile.shots)
     static = [shot.split for shot in selected if not shot.moving]
     moving = [shot.split for shot in selected if shot.moving]
-    draw = Element(role=Role.HEADLINE, text=f"{tile.draw:.2f}", encoding="utf-8", caption="Draw")
+    draw = Element(role=Role.HEADLINE, text=f"{tile.draw:.2f}", caption="Draw")
     gap = _sgrid_gap(cell_width)
 
     def label(text: str) -> Group:
         return Group(
             anchor=Anchor.MIDDLE_CENTER,
             flow=Flow.ROW,
-            elements=(Element(role=Role.LABEL, text=text, encoding="utf-8"),),
+            elements=(Element(role=Role.LABEL, text=text),),
             align="left",
         )
 
@@ -676,12 +665,7 @@ def _caption_value_rows(figures: list[Element], scale: CellScale) -> Group:
     elements: list[Element] = []
     for figure in figures:
         elements.append(
-            Element(
-                role=Role.LABEL,
-                text=figure.caption or "",
-                encoding="utf-8",
-                drop_priority=figure.drop_priority,
-            )
+            Element(role=Role.LABEL, text=figure.caption or "", drop_priority=figure.drop_priority)
         )
         elements.append(replace(figure, caption=None))
     return Group(

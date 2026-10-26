@@ -596,7 +596,6 @@ def render_preview(
     elif spec.card in ("title", "closing"):
         card = composition.MatchTitle(
             text=name,
-            encoding="utf-8",
             info=title_info_lines(project, extra=spec.title_info, division=spec.title_division, book=book),
             variant=spec.variant,
             logo=event_logo,
@@ -614,7 +613,6 @@ def render_preview(
     elif spec.card == "slate":
         slate = composition.TitleCard(
             text=stage_label,
-            encoding="utf-8",
             duration_seconds=1.5,
             style="slate",
             info=_rounds_info(stage),
@@ -630,7 +628,6 @@ def render_preview(
     elif spec.card == "lower-third":
         lower = composition.TitleCard(
             text=stage_label,
-            encoding="utf-8",
             duration_seconds=1.5,
             style="lower-third",
             info=_rounds_info(stage),

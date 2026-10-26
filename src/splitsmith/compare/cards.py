@@ -59,7 +59,7 @@ def match_title(match: Match, *, extra: str | None = None, roster: tuple[str, ..
     info.extend(roster)
     if extra and extra.strip():
         info.append(extra.strip())
-    return MatchTitle(text=match.name, encoding="utf-8", info=tuple(info))
+    return MatchTitle(text=match.name, info=tuple(info))
 
 
 def title_cards(
@@ -81,7 +81,6 @@ def title_cards(
     card = match_title(match, extra=cards.title_info, roster=roster)
     card = MatchTitle(
         text=card.text,
-        encoding="utf-8",
         info=card.info,
         duration_seconds=cards.title_page_duration_seconds,
         logo=event_logo,

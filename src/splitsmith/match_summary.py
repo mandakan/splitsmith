@@ -177,7 +177,7 @@ def coverage_lines(summary: MatchSummary) -> list[str]:
 def _coverage(covered: int, total: int) -> Element | None:
     """The note beside a band when its figures stand on part of the match."""
     if 0 < covered < total:
-        return Element(role=Role.LABEL, text=f"({covered} of {total} stages)", encoding="utf-8")
+        return Element(role=Role.LABEL, text=f"({covered} of {total} stages)")
     return None
 
 
@@ -205,9 +205,9 @@ def match_summary_groups(
     caption beside its figure, so "Best draw" never wraps), then Scoring
     with the counts wrapping to ``count_columns`` (three; two on a two-up).
     """
-    identity: list[Element] = [Element(role=Role.IDENTITY, text=label, encoding="utf-8")]
+    identity: list[Element] = [Element(role=Role.IDENTITY, text=label)]
     if summary.dq:
-        identity.append(Element(role=Role.VERDICT, text="DQ", encoding="utf-8", emphasis=Emphasis.PLATE))
+        identity.append(Element(role=Role.VERDICT, text="DQ", emphasis=Emphasis.PLATE))
     groups: list[Group] = [
         Group(anchor=Anchor.TOP_CENTER, flow=Flow.ROW, elements=tuple(identity), align="left")
     ]
@@ -232,7 +232,7 @@ def match_summary_groups(
             )
         elif counts:
             scoring = True
-            head = [Element(role=Role.LABEL, text="Scoring", encoding="utf-8", drop_priority=len(counts))]
+            head = [Element(role=Role.LABEL, text="Scoring", drop_priority=len(counts))]
             note = _coverage(summary.scored_stages, total)
             if note is not None:
                 head.append(note)
@@ -254,12 +254,11 @@ def match_summary_groups(
     splits: list[Element] = []
     if any(v is not None for v in (summary.avg_split, summary.best_draw, summary.rounds)):
         splits = [
-            Element(role=Role.HEADLINE, text=_num(summary.avg_split), encoding="utf-8", caption="Avg"),
-            Element(role=Role.HEADLINE, text=_num(summary.best_draw), encoding="utf-8", caption="Best draw"),
+            Element(role=Role.HEADLINE, text=_num(summary.avg_split), caption="Avg"),
+            Element(role=Role.HEADLINE, text=_num(summary.best_draw), caption="Best draw"),
             Element(
                 role=Role.HEADLINE,
                 text=DASH if summary.rounds is None else str(summary.rounds),
-                encoding="utf-8",
                 caption="Rounds",
             ),
         ]
@@ -273,7 +272,7 @@ def match_summary_groups(
             cell_height=cell_height,
         )
     if splits:
-        head = [Element(role=Role.LABEL, text="Splits", encoding="utf-8")]
+        head = [Element(role=Role.LABEL, text="Splits")]
         note = _coverage(summary.split_stages, total)
         if note is not None:
             head.append(note)
@@ -304,7 +303,7 @@ def _upright_scoring_groups(
     """An upright grid tile's Scoring band: its label (and coverage note),
     then the counts three to a row. The counts drop first, then the note,
     then the label, as on the hold."""
-    head = [Element(role=Role.LABEL, text="Scoring", encoding="utf-8", drop_priority=len(counts) + 1)]
+    head = [Element(role=Role.LABEL, text="Scoring", drop_priority=len(counts) + 1)]
     if note is not None:
         head.append(replace(note, drop_priority=len(counts)))
     return [
@@ -338,16 +337,13 @@ def _upright_tile(
         (e.drop_priority for g in scoring for e in g.elements if e.drop_priority is not None), default=-1
     )
     if splits:
-        head = [Element(role=Role.LABEL, text="Splits", encoding="utf-8")]
+        head = [Element(role=Role.LABEL, text="Splits")]
         rows: list[Element] = []
         for index, element in enumerate(splits):
             rounds = index == len(splits) - 1
             rows.append(
                 Element(
-                    role=Role.LABEL,
-                    text=element.caption or "",
-                    encoding="utf-8",
-                    drop_priority=priority if rounds else None,
+                    role=Role.LABEL, text=element.caption or "", drop_priority=priority if rounds else None
                 )
             )
             rows.append(replace(element, caption=None, drop_priority=priority if rounds else None))

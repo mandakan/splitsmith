@@ -1649,7 +1649,6 @@ def stage_card(
     ``variant`` names the Look template variant that draws it (#1242)."""
     return TitleCard(
         text=plan.stage_name,
-        encoding="utf-8",
         duration_seconds=seconds,
         style=style,
         info=(f"{expected_rounds} rounds",) if expected_rounds else (),

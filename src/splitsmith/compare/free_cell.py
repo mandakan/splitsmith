@@ -134,12 +134,11 @@ def _bests(rows: Sequence[_SplitRow]) -> dict[str, float | None]:
 
 def _figure(value: float | None, best: float | None, *, caption: str | None) -> Element:
     if value is None:
-        return Element(role=Role.DETAIL, text="-", encoding="utf-8", caption=caption, color=ColorToken.INK)
+        return Element(role=Role.DETAIL, text="-", caption=caption, color=ColorToken.INK)
     marked = best is not None and value == best
     return Element(
         role=Role.DETAIL,
         text=f"{value:.2f}",
-        encoding="utf-8",
         caption=caption,
         color=ColorToken.SPLIT_GOOD if marked else ColorToken.INK,
     )
@@ -147,10 +146,7 @@ def _figure(value: float | None, best: float | None, *, caption: str | None) -> 
 
 def _line(role: Role, text: str) -> Group:
     return Group(
-        anchor=Anchor.MIDDLE_CENTER,
-        flow=Flow.ROW,
-        elements=(Element(role=role, text=text, encoding="utf-8"),),
-        align="center",
+        anchor=Anchor.MIDDLE_CENTER, flow=Flow.ROW, elements=(Element(role=role, text=text),), align="center"
     )
 
 
@@ -200,12 +196,7 @@ def free_cell_groups(
                     anchor=Anchor.MIDDLE_CENTER,
                     flow=Flow.GRID,
                     elements=(
-                        Element(
-                            role=Role.DETAIL,
-                            text=row.name,
-                            encoding="utf-8",
-                            caption="Shooter" if index == 0 else None,
-                        ),
+                        Element(role=Role.DETAIL, text=row.name, caption="Shooter" if index == 0 else None),
                         _figure(row.draw, best["draw"], caption=captions[0]),
                         _figure(row.avg, best["avg"], caption=captions[1]),
                         _figure(row.best, best["best"], caption=captions[2]),
@@ -233,21 +224,20 @@ def race_groups(
             value = Element(
                 role=Role.DETAIL,
                 text=f"{clock_text(row.finish_seconds)} s",
-                encoding="utf-8",
                 color=ColorToken.SPLIT_GOOD if row.first else ColorToken.INK,
             )
         elif row.present and row.shots_fired > 0:
             count = (
                 f"{row.shots_fired} / {row.expected_shots}" if row.expected_shots else f"{row.shots_fired}"
             )
-            value = Element(role=Role.DETAIL, text=count, encoding="utf-8", color=ColorToken.INK)
+            value = Element(role=Role.DETAIL, text=count, color=ColorToken.INK)
         else:
-            value = Element(role=Role.DETAIL, text="-", encoding="utf-8", color=ColorToken.INK)
+            value = Element(role=Role.DETAIL, text="-", color=ColorToken.INK)
         groups.append(
             Group(
                 anchor=Anchor.MIDDLE_CENTER,
                 flow=Flow.GRID,
-                elements=(Element(role=Role.DETAIL, text=names[row.label], encoding="utf-8"), value),
+                elements=(Element(role=Role.DETAIL, text=names[row.label]), value),
                 align="left",
                 gap=gutter,
             )

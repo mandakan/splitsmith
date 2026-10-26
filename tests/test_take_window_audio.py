@@ -67,7 +67,7 @@ def _write_wav(path: Path) -> None:
 def test_window_wav_ffmpeg_args_and_cache(tmp_path: Path) -> None:
     calls: list[list[str]] = []
 
-    def fake_run(cmd, check, capture_output, text):  # noqa: ANN001
+    def fake_run(cmd, check, capture_output, text, encoding):  # noqa: ANN001
         calls.append(cmd)
         _write_wav(Path(cmd[-1]))
 
@@ -97,7 +97,7 @@ def test_ensure_take_audio_uses_8khz_and_caches(tmp_path: Path) -> None:
     """ensure_take_audio passes -ar 8000 to ffmpeg and caches by storage_path hash."""
     calls: list[list[str]] = []
 
-    def fake_run(cmd, check, capture_output, text):  # noqa: ANN001
+    def fake_run(cmd, check, capture_output, text, encoding):  # noqa: ANN001
         calls.append(cmd)
         _write_wav(Path(cmd[-1]))
 

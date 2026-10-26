@@ -446,7 +446,6 @@ def _cancellable_runner(handle: JobHandle):
             stdout=stdout_arg,
             stderr=stderr_arg,
             text=text,
-            encoding="utf-8",
             **kwargs,
         )
         try:

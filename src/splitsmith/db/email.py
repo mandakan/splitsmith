@@ -193,15 +193,11 @@ class LettermintEmailSender:
 
     async def send_magic_link(self, *, to: str, link: str) -> None:
         text, html = _magic_link_email_body(link)
-        await self._send(
-            to=to, subject="Your Splitsmith sign-in link", text=text, encoding="utf-8", html=html
-        )
+        await self._send(to=to, subject="Your Splitsmith sign-in link", text=text, html=html)
 
     async def send_access_granted(self, *, to: str, link: str) -> None:
         text, html = _access_granted_email_body(link)
-        await self._send(
-            to=to, subject="You have access to Splitsmith", text=text, encoding="utf-8", html=html
-        )
+        await self._send(to=to, subject="You have access to Splitsmith", text=text, html=html)
 
     async def send_access_request_alert(
         self, *, to: str, email: str, note: str | None, source: str, admin_url: str
@@ -210,7 +206,7 @@ class LettermintEmailSender:
         # A stranger typed ``email``: keep control characters out of the
         # subject line.
         subject = "Splitsmith access request: " + "".join(c for c in email if c.isprintable())
-        await self._send(to=to, subject=subject, text=text, encoding="utf-8", html=html)
+        await self._send(to=to, subject=subject, text=text, html=html)
 
 
 def build_email_sender(backend: str | None) -> EmailSender:
