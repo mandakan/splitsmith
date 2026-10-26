@@ -10,6 +10,9 @@ FastAPI app or a real object store.
 from __future__ import annotations
 
 import asyncio
+import tempfile
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -92,6 +95,7 @@ def _hosted_state(tmp_path: Path, *, recent_paths: list[str], jobs: int = 1) -> 
     uid = asyncio.run(_setup())
     state_store = ProjectStateStore(sf, user_id=uid)
     return SimpleNamespace(
+        engine=engine,
         matches_store=PostgresMatchStore(sf, user_id=uid),
         project_state=state_store,
         # The cascade reads and deletes documents through the storage port,
@@ -107,6 +111,18 @@ def _hosted_state(tmp_path: Path, *, recent_paths: list[str], jobs: int = 1) -> 
         # AppState.comments in local mode / no tenant pinned.
         comments=None,
     )
+
+
+@contextmanager
+def _temp_hosted(*, recent_paths: list[str], jobs: int = 1) -> Iterator[tuple[Path, SimpleNamespace]]:
+    """A hosted state in a temp dir, its engine closed before the dir goes:
+    Windows cannot delete a SQLite file a pooled connection still holds."""
+    with tempfile.TemporaryDirectory() as td:
+        state = _hosted_state(Path(td), recent_paths=recent_paths, jobs=jobs)
+        try:
+            yield Path(td), state
+        finally:
+            asyncio.run(state.engine.dispose())
 
 
 def _seed_match(
@@ -132,11 +148,7 @@ def _seed_match(
 
 
 def test_hosted_cascade_removes_everything() -> None:
-    import tempfile
-
-    with tempfile.TemporaryDirectory() as td:
-        tmp = Path(td)
-        state = _hosted_state(tmp, recent_paths=["/work/m1"], jobs=1)
+    with _temp_hosted(recent_paths=["/work/m1"], jobs=1) as (tmp, state):
         _seed_match(
             state,
             "m1",
@@ -181,11 +193,7 @@ def test_hosted_cascade_removes_everything() -> None:
 
 
 def test_hosted_raw_refcount_skips_shared() -> None:
-    import tempfile
-
-    with tempfile.TemporaryDirectory() as td:
-        tmp = Path(td)
-        state = _hosted_state(tmp, recent_paths=["/work/m1"])
+    with _temp_hosted(recent_paths=["/work/m1"]) as (tmp, state):
         # m2 also references raw/shared.mp4 -> it must survive m1's delete.
         _seed_match(state, "m2", raws_by_shooter={"x": ["raw/shared.mp4"]}, storage_objs=[])
         _seed_match(
@@ -213,11 +221,7 @@ def test_hosted_raw_refcount_skips_shared() -> None:
 
 
 def test_hosted_partial_failure_is_recorded_but_continues() -> None:
-    import tempfile
-
-    with tempfile.TemporaryDirectory() as td:
-        tmp = Path(td)
-        state = _hosted_state(tmp, recent_paths=["/work/m1"])
+    with _temp_hosted(recent_paths=["/work/m1"]) as (tmp, state):
         _seed_match(
             state,
             "m1",
@@ -246,11 +250,7 @@ def test_hosted_partial_failure_is_recorded_but_continues() -> None:
 
 
 def test_hosted_missing_match_id_drops_picker_only() -> None:
-    import tempfile
-
-    with tempfile.TemporaryDirectory() as td:
-        tmp = Path(td)
-        state = _hosted_state(tmp, recent_paths=["/work/legacy"])
+    with _temp_hosted(recent_paths=["/work/legacy"]) as (tmp, state):
 
         summary = asyncio.run(
             delete_match_cascade(
@@ -358,13 +358,9 @@ def test_local_rmtree_refuses_without_match_marker(tmp_path: Path) -> None:
 def test_deleting_a_match_deletes_its_render_segments() -> None:
     """A hosted grid keeps its stage segments under the match (#1691), so
     the prefix sweep takes them with it."""
-    import tempfile
-
     from splitsmith.stored_segment_cache import StoredSegmentCache
 
-    with tempfile.TemporaryDirectory() as td:
-        tmp = Path(td)
-        state = _hosted_state(tmp, recent_paths=["/work/m1"], jobs=0)
+    with _temp_hosted(recent_paths=["/work/m1"], jobs=0) as (tmp, state):
         segment = StoredSegmentCache(
             tmp / "cache", 1 << 30, storage=state.storage, prefix="matches/m1/render-segments"
         ).object_key("ab" * 32, suffix=".mov")
