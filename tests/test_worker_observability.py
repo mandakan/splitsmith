@@ -8,6 +8,7 @@ was; the per-job ``meta`` stays the body's own.
 from __future__ import annotations
 
 import asyncio
+import sys
 import threading
 from pathlib import Path
 
@@ -107,7 +108,10 @@ def test_probe_records_identity_uptime_and_storage_deltas(monkeypatch) -> None:
     assert facts["storage_read_bytes"] == 250
     assert facts["storage_written_bytes"] == 40
     assert facts["ran_alone"] is True
-    assert facts["peak_rss_mb"] > 0
+    if sys.platform != "win32":  # no ``resource`` module there: the probe records None
+        assert facts["peak_rss_mb"] > 0
+    else:
+        assert facts["peak_rss_mb"] is None
 
 
 def test_overlapping_jobs_are_not_alone() -> None:

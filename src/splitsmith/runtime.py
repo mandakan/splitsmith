@@ -175,11 +175,21 @@ def _bundle_search_dirs() -> list[Path]:
     return dirs
 
 
+_WINDOWS_RUNNABLE = (".exe", ".com", ".bat", ".cmd")
+
+
 def _executable_in_dir(directory: Path, name: str) -> Path | None:
-    """Return ``directory/name`` (with ``.exe`` on Windows) if it's executable."""
+    """Return ``directory/name`` (with ``.exe`` on Windows) if it's executable.
+
+    Windows answers ``os.access(X_OK)`` true for any file that exists, so
+    there only a name with a runnable suffix counts: an extensionless
+    ``ffmpeg`` beside the interpreter cannot be run."""
     candidates = [directory / name]
-    if sys.platform.startswith("win") and not name.lower().endswith(".exe"):
-        candidates.append(directory / f"{name}.exe")
+    if sys.platform.startswith("win"):
+        if not name.lower().endswith(_WINDOWS_RUNNABLE):
+            candidates = []
+        if not name.lower().endswith(".exe"):
+            candidates.append(directory / f"{name}.exe")
     for candidate in candidates:
         if candidate.is_file() and os.access(candidate, os.X_OK):
             return candidate
