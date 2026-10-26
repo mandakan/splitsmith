@@ -13,6 +13,7 @@ pinned separately by :func:`test_the_video_chain_ends_at_format_yuv420p`.
 """
 
 import io
+import re
 import subprocess
 from pathlib import Path
 from urllib.parse import urlparse
@@ -26,6 +27,7 @@ from splitsmith.compare.mp4_grid import GridCanvas, GridStagePlan, GridTile
 from splitsmith.compare.project_loader import CompareShooterBundle, CompareStageBundle
 from splitsmith.overlay import clock as overlay_clock
 from splitsmith.overlay import html as overlay_html
+from splitsmith.runtime import quote_filter_value
 from tests.conftest import fake_ffmpeg_probe
 
 CANVAS = GridCanvas(width=1920, height=1080, frame_rate_num=60000, frame_rate_den=1001)
@@ -131,6 +133,14 @@ def _video_parts(graph):
     """
     parts = graph.split(";")
     return parts[: [i for i, p in enumerate(parts) if p.endswith("[final]")][0] + 1]
+
+
+def _fontfile(graph: str) -> Path:
+    """The ``fontfile=`` path in ``graph``, read back from
+    ``quote_filter_value``'s escaping (a Windows path has its drive colon
+    and backslashes escaped)."""
+    quoted = graph.split("fontfile='")[1].split("'")[0]
+    return Path(re.sub(r"\\(.)", r"\1", quoted))
 
 
 def test_without_overlay_the_graph_is_untouched(tmp_path):
@@ -476,7 +486,7 @@ def test_the_clock_uses_the_font_size_and_colours_the_plan_names(tmp_path):
             overlay=overlay,
         )
     )
-    assert f"fontfile='{overlay.font_path}'" in graph
+    assert f"fontfile={quote_filter_value(str(overlay.font_path))}" in graph
     assert "fontsize=64" in graph
     # Hex, not a name: ffmpeg only knows colours from its own table and
     # has no name for (244, 244, 245).
@@ -701,8 +711,7 @@ def test_render_with_overlay_writes_sprites_and_uses_them(tmp_path):
     assert "overlay=0:0" in " ".join(stage_cmd)
     # The font must be a real file drawtext can open.
     graph = _graph(stage_cmd)
-    font = graph.split("fontfile='")[1].split("'")[0]
-    assert Path(font).is_file()
+    assert _fontfile(graph).is_file()
 
 
 def test_the_sprite_list_is_written_at_the_canvas_frame_rate(tmp_path):
@@ -1149,7 +1158,7 @@ def test_the_rendered_clock_uses_the_face_the_sprite_draws_with(tmp_path):
         rasterizer=_StubRasterizer(),
     )
     graph = _graph(calls[0])
-    font = Path(graph.split("fontfile='")[1].split("'")[0])
+    font = _fontfile(graph)
     assert font.is_file()
     assert (
         font.read_bytes() == _sprite_face_file().read_bytes()

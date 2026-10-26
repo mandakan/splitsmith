@@ -8,6 +8,7 @@ reasoning, and a "harmless tidy" of it has to change a test deliberately.
 from pathlib import Path
 
 from splitsmith.overlay import clock as overlay_clock
+from splitsmith.runtime import quote_filter_value
 
 
 def test_ffmpeg_color_is_hex_because_the_theme_ink_has_no_name() -> None:
@@ -43,7 +44,7 @@ def test_the_common_options_are_character_for_character_what_the_grid_emits() ->
         x_expr="960+960-tw-24",
         y_expr="540+24",
     ) == (
-        "fontfile='/tmp/JetBrainsMono-Bold.ttf':fontsize=64:"
+        f"fontfile={quote_filter_value(str(Path('/tmp/JetBrainsMono-Bold.ttf')))}:fontsize=64:"
         "fontcolor=0xf4f4f5:borderw=3:bordercolor=0x0a0b0d:"
         "x=960+960-tw-24:y=540+24"
     )

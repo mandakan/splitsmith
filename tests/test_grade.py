@@ -12,6 +12,7 @@ import pytest
 
 from splitsmith import grade, looks
 from splitsmith.grade import GradeError, Lut, ResolvedGrade
+from splitsmith.runtime import quote_filter_value
 
 
 def _cube(size: int, rows: list[str], header: str = "") -> str:
@@ -76,7 +77,8 @@ def test_the_render_file_is_named_by_what_it_draws(tmp_path: Path) -> None:
 
 
 def test_the_filter_reads_the_file_with_tetrahedral_interpolation(tmp_path: Path) -> None:
-    assert grade.lut_filter(Path("/w/grade-abc.cube")) == "lut3d=file='/w/grade-abc.cube':interp=tetrahedral"
+    cube = Path("/w/grade-abc.cube")
+    assert grade.lut_filter(cube) == f"lut3d=file={quote_filter_value(str(cube))}:interp=tetrahedral"
 
 
 def test_every_shipped_preset_is_a_valid_cube() -> None:

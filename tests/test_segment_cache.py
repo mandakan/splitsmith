@@ -4,8 +4,10 @@ key, what does not, and what eviction keeps."""
 from __future__ import annotations
 
 import os
+import sys
 from pathlib import Path
 
+from splitsmith.runtime import quote_filter_value
 from splitsmith.segment_cache import SegmentCache
 
 
@@ -215,3 +217,27 @@ def test_a_mov_segment_keeps_its_suffix_and_counts_toward_the_cap(tmp_path: Path
     newer.write_bytes(b"x" * 10)
     cache.evict(keep={"single"})
     assert not final.exists() and newer.exists()
+
+
+def test_a_quoted_filter_path_in_the_work_dir_does_not_move_the_key(tmp_path: Path) -> None:
+    """``fontfile=`` and ``lut3d=file=`` carry ``quote_filter_value`` paths,
+    which spell the work dir escaped. On Windows every path has a drive
+    colon and backslashes; a colon in the dir's name is the same case on
+    POSIX. Missing that spelling keyed every render apart (no reuse)."""
+    names = ("work-a", "work-b") if sys.platform == "win32" else ("work:a", "work:b")
+    cache = _cache(tmp_path)
+    keys = []
+    for name in names:
+        work, png, font, listing = _grid_work(tmp_path, name)
+        argv = (
+            "ffmpeg",
+            "-f",
+            "concat",
+            "-i",
+            str(listing),
+            "-filter_complex",
+            f"[0:v]drawtext=fontfile={quote_filter_value(str(font))}:fontsize=40[v]",
+            str(work / "stage1.mov"),
+        )
+        keys.append(cache.key(argv, output_path=work / "stage1.mov", work_dir=work, extra_inputs=(png, font)))
+    assert keys[0] == keys[1]

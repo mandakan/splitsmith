@@ -49,6 +49,8 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
+from .runtime import escape_filter_value
+
 logger = logging.getLogger(__name__)
 
 #: Bump when the key's recipe changes, so no entry keyed the old way hits.
@@ -84,8 +86,12 @@ def _content_hash(path: Path, work_names: tuple[str, ...] = ()) -> str:
 
 def _work_names(work_dir: Path) -> tuple[str, ...]:
     """The work dir as a token may spell it, longest first so a resolved
-    ``/private/var/...`` is replaced before its ``/var/...`` alias."""
-    names = {str(work_dir), str(work_dir.resolve())}
+    ``/private/var/...`` is replaced before its ``/var/...`` alias. A
+    filter value (``fontfile=``, ``lut3d=file=``) spells it escaped
+    (``runtime.escape_filter_value``): on Windows that is every path, for
+    its drive colon and backslashes."""
+    plain = {str(work_dir), str(work_dir.resolve())}
+    names = plain | {escape_filter_value(name) for name in plain}
     return tuple(sorted(names, key=len, reverse=True))
 
 

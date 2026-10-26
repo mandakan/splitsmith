@@ -344,7 +344,7 @@ def test_the_exercise_render_names_the_path_it_was_handed(tmp_path: Path):
     ffmpeg_capabilities("/bin/ffmpeg", font_path=font, runner=runner)
 
     assert seen, "the exercise render never ran"
-    assert f"fontfile='{font}'" in seen[0], seen
+    assert f"fontfile={quote_filter_value(str(font))}" in seen[0], seen
 
 
 def test_an_unreadable_font_falls_back_to_keying_on_its_path(tmp_path: Path):
@@ -494,28 +494,28 @@ def test_the_unknown_keyword_message_is_still_the_one_the_probe_keys_on(tmp_path
 @pytest.mark.parametrize(
     "value",
     [
-        r"C:\Users\me\AppData\Local\splitsmith\font.ttf",  # every Windows path
-        "/fonts/a:b/font.ttf",
-        "/fonts/it's/font.ttf",
-        r"/fonts/back\slash/font.ttf",
-        "/fonts/[pad],comma/font.ttf",
-        "/fonts/plain/font.ttf",
+        r"C:\Users\me\AppData\Local\splitsmith\clip.mp4",  # every Windows path
+        "/media/a:b/clip.mp4",
+        "/media/it's/clip.mp4",
+        r"/media/back\slash/clip.mp4",
+        "/media/[pad],comma/clip.mp4",
+        "/media/plain/clip.mp4",
     ],
 )
 def test_ffmpeg_reads_a_quoted_value_back_exactly(value: str) -> None:
     """ffmpeg parses a ``filter_complex`` value twice (the graph, then the
     filter's options), so the quoting must survive both. The oracle is
-    ffmpeg itself: ``drawtext`` names the font file it was given when it
-    cannot open it, and that name must be ``value`` character for
-    character. Single-level quoting split a Windows path at its drive
-    colon and ate its backslashes, so no clock or LUT rendered there."""
-    graph = f"[0:v]drawtext=fontfile={quote_filter_value(value)}:text=x[o]"
+    ffmpeg itself: ``movie=`` names the file it was given when it cannot
+    open it, on any build (a font error is fontconfig's on some), and that
+    name must be ``value`` character for character. Single-level quoting
+    split a Windows path at its drive colon and ate its backslashes, so no
+    clock or LUT rendered there."""
     result = subprocess.run(
-        [FFMPEG, "-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i", "color=s=16x16:d=0.04"]
-        + ["-filter_complex", graph, "-map", "[o]", "-f", "null", "-"],
+        [FFMPEG, "-hide_banner", "-loglevel", "error"]
+        + ["-filter_complex", f"movie={quote_filter_value(value)}[o]", "-map", "[o]", "-f", "null", "-"],
         capture_output=True,
         text=True,
         encoding="utf-8",
         errors="replace",
     )
-    assert f'Could not load font "{value}"' in result.stderr, result.stderr
+    assert f"Failed to avformat_open_input '{value}'" in result.stderr, result.stderr

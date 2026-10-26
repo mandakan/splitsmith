@@ -439,8 +439,15 @@ def quote_filter_value(value: str) -> str:
     the other way around), so there is no cycle to avoid by duplicating
     it -- ``mp4_grid`` imports this function instead.
     """
-    inner = re.sub(r"([\\':])", r"\\\1", value)
-    return "'" + inner.replace("'", r"'\''") + "'"
+    return "'" + escape_filter_value(value).replace("'", r"'\''") + "'"
+
+
+def escape_filter_value(value: str) -> str:
+    """The second-read half of :func:`quote_filter_value`: ``\\``, ``'`` and
+    ``:`` backslash-escaped. ``segment_cache`` writes a work dir spelled
+    this way as ``<work>`` too, or a quoted path inside the work dir would
+    key every render apart."""
+    return re.sub(r"([\\':])", r"\\\1", value)
 
 
 def _probe_version(binary: str, runner: Runner) -> str | None:
