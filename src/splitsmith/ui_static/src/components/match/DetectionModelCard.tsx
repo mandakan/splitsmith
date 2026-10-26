@@ -10,8 +10,13 @@
 import { AudioLines } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 
+import { NewChip } from "@/components/whatsNew/WhatsNew";
 import { api, type DetectionModelSettings } from "@/lib/api";
 import { detectionModelLine } from "@/lib/detectionModel";
+import { dismissNewChip } from "@/lib/useWhatsNew";
+
+/** The What's new entry this card's "New" chip belongs to. */
+const FEATURE = "thin-detection";
 
 /** How often the card re-reads the setting while a download runs. */
 const POLL_MS = 2000;
@@ -43,6 +48,7 @@ export function DetectionModelCard() {
 
   const on = settings?.model_set === "clap";
   const toggle = async () => {
+    dismissNewChip(FEATURE);
     setSaving(true);
     setError(null);
     try {
@@ -68,6 +74,7 @@ export function DetectionModelCard() {
           <AudioLines className="size-3" />
         </span>
         <h2 className="text-md font-medium text-ink">Audio model for head cameras</h2>
+        <NewChip feature={FEATURE} />
         <p className="min-w-0 flex-1 text-sm text-ink-2">
           Downloads a 120 MB model once. Improves shot detection on head cameras a little.
         </p>
