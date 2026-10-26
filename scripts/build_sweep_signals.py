@@ -163,7 +163,9 @@ def _attach_heldout_scores(rows: list[dict], oof_path: Path) -> dict:
             row[col] = float("nan")
     if not oof_path.exists():
         return {"source": None, "n_matched": 0}
-    oof = pq.read_table(oof_path).to_pylist()
+    # The clap set's rows (this table's score_c is the clap set's); a file
+    # written before model sets has no ``model_set`` column and is that set.
+    oof = [r for r in pq.read_table(oof_path).to_pylist() if r.get("model_set", "clap") == "clap"]
     by_key = {(r["fixture"], int(r["candidate_idx"])): r for r in oof}
     matched = 0
     for row in rows:

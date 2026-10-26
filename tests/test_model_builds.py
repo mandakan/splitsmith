@@ -197,8 +197,9 @@ def test_lomo_figures_per_match_and_labels_in_the_oof_rows(build, monkeypatch) -
     assert report["lomo_by_match"]["alpha"]["fp"] == 1
     assert report["lomo_by_match"]["beta"]["recall"] == 0.5
 
-    out = build._heldout_rows(rows, cv, {"grouped": None, "lomo": lomo})
+    out = build._heldout_rows(rows, cv, {"grouped": None, "lomo": lomo}, "base")
     assert [r["label"] for r in out] == [1, 0, 1, 1]
+    assert {r["model_set"] for r in out} == {"base"}
 
 
 # -- the bundle --------------------------------------------------------------------

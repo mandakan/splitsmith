@@ -788,7 +788,12 @@ def load_model_map(shipped_calibration: Path, model_id: str = SHIPPED_ID) -> Mod
         event_ids=event_ids,
         calibration=calibration,
         heldout=_read_json(heldout_dir / "report.json"),
-        heldout_by_fixture=fixture_heldout(_oof_rows(heldout_dir), thresholds),
+        heldout_by_fixture=fixture_heldout(
+            # The primary set's rows; a build from before model sets has no
+            # ``model_set`` column and reads as that one set.
+            [r for r in _oof_rows(heldout_dir) if r.get("model_set") in (None, _primary_set(calibration))],
+            thresholds,
+        ),
         model=next(s for s in summaries if s.id == model_id),
         models=summaries,
         ranker_report=_read_json(RANKER_DIR / "ranker_report.json"),

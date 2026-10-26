@@ -19,6 +19,8 @@ from pathlib import Path
 import numpy as np
 import pytest
 
+from splitsmith.ensemble.features import MODEL_SETS
+
 ENV_CLAP_ONNX = "SPLITSMITH_ONNX_CLAP"
 ENV_CLAP_TEXT = "SPLITSMITH_CLAP_TEXT"
 ENV_CLAP_SAMPLE_INPUT = "SPLITSMITH_CLAP_SAMPLE_INPUT"
@@ -183,19 +185,20 @@ def _shipped_artifacts_only() -> None:
 
 
 @pytest.mark.xfail(strict=True, reason="until the rebuild in Task 10")
-def test_voter_c_onnx_matches_frozen_sklearn_reference() -> None:
-    """Each class's ONNX graph reproduces the sklearn probabilities it was exported from."""
+@pytest.mark.parametrize("model_set", MODEL_SETS)
+def test_voter_c_onnx_matches_frozen_sklearn_reference(model_set: str) -> None:
+    """Each set's per-class ONNX graph reproduces the sklearn probabilities it was exported from."""
     pytest.importorskip("onnxruntime")
     _shipped_artifacts_only()
     from splitsmith.ensemble.calibration import load_calibration, load_voter_c_model
 
-    ref = _parity_reference("voter_c_parity_reference.npz")
-    calibration = load_calibration()
-    models = load_voter_c_model(calibration.voter_c_onnx_artifacts)
+    ref = _parity_reference(f"voter_c_parity_reference_{model_set}.npz")
+    block = load_calibration().model_set(model_set)
+    models = load_voter_c_model(block.voter_c_onnx_artifacts)
     assert models, "calibration names no voter C ONNX artifacts"
 
     features = ref["X"]
-    assert features.shape[1] == calibration.voter_c_feature_dim
+    assert features.shape[1] == block.voter_c_feature_dim
     for camera_class, model in sorted(models.items()):
         expected = ref[f"proba_{camera_class}"]
         got = model.predict_proba(features)[:, 1]
@@ -205,7 +208,8 @@ def test_voter_c_onnx_matches_frozen_sklearn_reference() -> None:
 
 
 @pytest.mark.xfail(strict=True, reason="until the rebuild in Task 10")
-def test_voter_c_onnx_vote_decisions_match_reference() -> None:
+@pytest.mark.parametrize("model_set", MODEL_SETS)
+def test_voter_c_onnx_vote_decisions_match_reference(model_set: str) -> None:
     """The calibrated vote is bit-identical, not merely close.
 
     A probability delta only reaches the user if it flips a candidate
@@ -216,9 +220,8 @@ def test_voter_c_onnx_vote_decisions_match_reference() -> None:
     _shipped_artifacts_only()
     from splitsmith.ensemble.calibration import load_calibration, load_voter_c_model
 
-    ref = _parity_reference("voter_c_parity_reference.npz")
-    calibration = load_calibration()
-    models = load_voter_c_model(calibration.voter_c_onnx_artifacts)
+    ref = _parity_reference(f"voter_c_parity_reference_{model_set}.npz")
+    models = load_voter_c_model(load_calibration().model_set(model_set).voter_c_onnx_artifacts)
 
     features = ref["X"]
     for camera_class, model in sorted(models.items()):
