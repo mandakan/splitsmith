@@ -121,6 +121,10 @@ TESTS_DATA_DIR = TESTS_DIR / "data"
 # to keep the 512-wide embedding matrix near 2 MB on disk.
 VOTER_E_PARITY_REFERENCE_PATH = TESTS_DATA_DIR / "voter_e_parity_reference.npz"
 VOTER_E_PARITY_MAX_ROWS: int = 1024
+# The voter C references ship in git and every build rewrites them; a
+# fixed-seed sample of the universe keeps them near the size they had
+# before the corpus grew, with plenty of rows to exercise each tree.
+VOTER_C_PARITY_MAX_ROWS: int = 6000
 PARITY_SUBSAMPLE_SEED: int = 649
 
 # Cap mined negatives per fixture relative to that fixture's positive count,
@@ -1291,6 +1295,16 @@ def _export_onnx_proba(clf: Any, n_features: int, path: Path) -> None:
     path.write_bytes(onx.SerializeToString())
 
 
+def parity_rows(n_rows: int, max_rows: int) -> np.ndarray:
+    """The sorted row indices a parity reference keeps: all of them up to
+    ``max_rows``, else a fixed-seed sample, so a rebuild of the same
+    universe writes the same rows."""
+    if n_rows <= max_rows:
+        return np.arange(n_rows)
+    rng = np.random.default_rng(PARITY_SUBSAMPLE_SEED)
+    return np.sort(rng.choice(n_rows, size=max_rows, replace=False))
+
+
 def voter_c_parity_reference_path(model_set: str) -> Path:
     return TESTS_DATA_DIR / f"voter_c_parity_reference_{model_set}.npz"
 
@@ -1305,7 +1319,8 @@ def _write_voter_c_parity_reference(
 ) -> None:
     """Freeze the sklearn voter C probabilities the ONNX graphs must match.
 
-    ``X`` is the real calibration feature matrix -- every class model is
+    ``X`` is the real calibration feature matrix (a fixed-seed sample of at
+    most ``VOTER_C_PARITY_MAX_ROWS`` rows of it) -- every class model is
     scored over the whole matrix, not just its own class's rows, so the
     parity test exercises more of each tree ensemble. Stored as float32
     because that is what the runtime feeds the ONNX session; the frozen
@@ -1316,7 +1331,7 @@ def _write_voter_c_parity_reference(
         log(f"  skipped voter C parity reference ({TESTS_DIR}/ not present)")
         return
     TESTS_DATA_DIR.mkdir(parents=True, exist_ok=True)
-    X32 = np.ascontiguousarray(X, dtype=np.float32)
+    X32 = np.ascontiguousarray(X[parity_rows(X.shape[0], VOTER_C_PARITY_MAX_ROWS)], dtype=np.float32)
     arrays: dict[str, np.ndarray] = {"X": X32}
     for cls, model in sorted(models.items()):
         arrays[f"proba_{cls}"] = np.asarray(

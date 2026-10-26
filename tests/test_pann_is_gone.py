@@ -32,12 +32,10 @@ def test_no_runtime_build_or_spa_code_references_pann() -> None:
     assert _hits("src/splitsmith", "scripts", ":!src/splitsmith/data") == []
 
 
-@pytest.mark.xfail(strict=True, reason="until the rebuild in Task 10")
 def test_the_shipped_artifacts_name_no_pann() -> None:
     assert _hits("src/splitsmith/data") == []
 
 
-@pytest.mark.xfail(strict=True, reason="until the rebuild in Task 10")
 def test_fetch_models_lists_only_clap() -> None:
     from splitsmith.models.registry import load_spec_from_calibration
 

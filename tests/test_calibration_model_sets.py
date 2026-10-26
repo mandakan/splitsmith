@@ -114,7 +114,6 @@ def test_a_flat_calibration_names_the_rebuild(tmp_path, monkeypatch, _fresh_runt
         load_calibration()
 
 
-@pytest.mark.xfail(strict=True, reason="until the rebuild in Task 10")
 def test_the_shipped_calibration_validates_with_two_sets() -> None:
     cal = load_calibration()
     assert set(cal.model_sets) == {"base", "clap"}

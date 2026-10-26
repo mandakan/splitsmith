@@ -199,3 +199,28 @@ def test_a_graph_whose_width_differs_from_its_set_is_refused() -> None:
 
     with pytest.raises(b.BuildError, match="base"):
         b._check_graph_width("base", "headcam", Model(), {"voter_c_feature_dim": 33})
+
+
+def test_the_voter_c_parity_reference_is_capped_and_deterministic(tmp_path, monkeypatch) -> None:
+    """The reference ships in git and is rewritten by every build; its rows
+    are a fixed-seed sample so it stays small and two builds of the same
+    universe write the same rows."""
+    import numpy as np
+
+    b = _build_mod()
+    monkeypatch.setattr(b, "TESTS_DIR", tmp_path)
+    monkeypatch.setattr(b, "TESTS_DATA_DIR", tmp_path / "data")
+
+    class Model:
+        def predict_proba(self, x):
+            return np.column_stack([1 - x[:, 0], x[:, 0]])
+
+    n = b.VOTER_C_PARITY_MAX_ROWS + 500
+    x = np.arange(n * 3, dtype=np.float64).reshape(n, 3) / (n * 3)
+    thresholds = {"headcam": {"voter_c_threshold": 0.5}}
+    b._write_voter_c_parity_reference("base", {"headcam": Model()}, thresholds, x, log=lambda s: None)
+    first = np.load(b.voter_c_parity_reference_path("base"))
+    assert first["X"].shape == (b.VOTER_C_PARITY_MAX_ROWS, 3)
+    np.testing.assert_allclose(first["proba_headcam"], first["X"][:, 0].astype(np.float64), rtol=1e-6)
+    b._write_voter_c_parity_reference("base", {"headcam": Model()}, thresholds, x, log=lambda s: None)
+    np.testing.assert_array_equal(np.load(b.voter_c_parity_reference_path("base"))["X"], first["X"])
