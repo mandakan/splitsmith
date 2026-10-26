@@ -216,6 +216,12 @@ def test_delete_missing_is_noop(s3_client) -> None:
         "../escape.txt",
         "nested/../../escape.txt",
         "a/../../b",
+        # Windows forms, refused on every host: on Windows the first two are
+        # absolute and a FilesystemStorage would write outside its root.
+        "\\etc\\passwd",
+        "C:/Windows/x",
+        "C:x",
+        "a\\..\\..\\b",
     ],
 )
 def test_traversal_or_absolute_paths_rejected(s3_client, bad_path: str) -> None:

@@ -206,6 +206,12 @@ def test_delete_removes_directory_recursively(tmp_path: Path) -> None:
         "../escape.txt",
         "nested/../../escape.txt",
         "a/../../b",
+        # Windows forms, refused on every host: on Windows the first two are
+        # absolute and a FilesystemStorage would write outside its root.
+        "\\etc\\passwd",
+        "C:/Windows/x",
+        "C:x",
+        "a\\..\\..\\b",
     ],
 )
 def test_traversal_or_absolute_paths_rejected(tmp_path: Path, bad_path: str) -> None:
