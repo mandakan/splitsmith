@@ -9,9 +9,10 @@ import math
 from pathlib import Path
 
 import numpy as np
+import pytest
 
 from splitsmith.ensemble.calibration import EnsembleCalibration
-from splitsmith.ensemble.decoder import PriorTable, StageDecoder, decode_stage
+from splitsmith.ensemble.decoder import FEATURES, PriorTable, StageDecoder, decode_stage
 
 
 def _model(**over) -> StageDecoder:
@@ -22,7 +23,7 @@ def _model(**over) -> StageDecoder:
     ends = np.arange(-1.0, 0.3, 0.01)
     end = -((ends / 0.03) ** 2) / 2
     kw = {
-        "coef": [1.0, 0, 0, 0, 0, 0],
+        "coef": [1.0, 0, 0, 0, 0],
         "intercept": 0.0,
         "bias": 0.0,
         "w_split": 1.0,
@@ -185,7 +186,6 @@ def _synthetic_corpus(seed: int = 0):
                         "label": y,
                         "score_c": s,
                         "clap_diff": 0.0,
-                        "gunshot_prob": s,
                         "confidence": 0.5,
                         "peak_amp": 0.3,
                         "vote_b": 1,
@@ -197,8 +197,9 @@ def _synthetic_corpus(seed: int = 0):
 def test_the_fit_learns_to_keep_shots_and_drop_their_echoes() -> None:
     fsd = _fit_module()
     rows, stages = _synthetic_corpus()
-    model = fsd.fit_stage_decoder(rows, stages, tolerance_ms=15.0, log=lambda _m: None)
+    model = fsd.fit_stage_decoder(rows, stages, features=FEATURES, tolerance_ms=15.0, log=lambda _m: None)
     assert model is not None
+    assert model.features == list(FEATURES)
     oof = model.fit_report["out_of_fold"]
     assert oof["f1"] > 0.95, oof
     # Decoding a fresh stage with the shipped recalibration recovers its shots.
@@ -207,12 +208,14 @@ def test_the_fit_learns_to_keep_shots_and_drop_their_echoes() -> None:
     mine = [r for r in test_rows if r["fixture"] == fix]
     probs = (
         fsd.decoder_features(
-            np.array([r["score_c"] for r in mine]),
-            np.zeros(len(mine)),
-            np.array([r["gunshot_prob"] for r in mine]),
-            np.full(len(mine), 0.5),
-            np.full(len(mine), 0.3),
-            np.ones(len(mine)),
+            model,
+            {
+                "score_c": np.array([r["score_c"] for r in mine]),
+                "clap_diff": np.zeros(len(mine)),
+                "confidence": np.full(len(mine), 0.5),
+                "peak_amplitude": np.full(len(mine), 0.3),
+                "vote_b": np.ones(len(mine)),
+            },
         )
         @ np.array(model.coef)
         + model.intercept
@@ -229,11 +232,53 @@ def test_the_fit_learns_to_keep_shots_and_drop_their_echoes() -> None:
     assert fsd.match_count(kept, test_stages[fix]["truth"], 0.015) == (10, 0, 0)
 
 
+def test_decoder_features_follow_the_decoder_s_own_list() -> None:
+    from splitsmith.ensemble.decoder import DECODER_FEATURES_BY_SET, decoder_features
+
+    base = _model(features=list(DECODER_FEATURES_BY_SET["base"]), coef=[1.0, 0.0, 0.0])
+    x = decoder_features(
+        base,
+        {"score_c": np.array([0.9]), "confidence": np.array([0.5]), "peak_amplitude": np.array([0.1])},
+    )
+    assert x.shape == (1, 3)
+    assert x[0, 0] == 0.9 and x[0, 1] == 0.5
+    assert x[0, 2] == pytest.approx(np.log(0.1))
+    with pytest.raises(KeyError, match="clap_diff"):
+        decoder_features(_model(features=["score_c", "clap_diff"]), {"score_c": np.array([0.9])})
+
+
+def test_no_set_reads_the_retired_pann_signal() -> None:
+    from splitsmith.ensemble.decoder import DECODER_FEATURES_BY_SET, FEATURES
+
+    assert "gunshot_prob" not in FEATURES
+    assert DECODER_FEATURES_BY_SET["clap"] == FEATURES
+    assert not {"clap_diff", "vote_b"} & set(DECODER_FEATURES_BY_SET["base"])
+
+
+def test_the_fit_without_clap_signals_uses_three_features() -> None:
+    from splitsmith.ensemble.decoder import DECODER_FEATURES_BY_SET
+
+    fsd = _fit_module()
+    rows, stages = _synthetic_corpus()
+    for r in rows:
+        del r["clap_diff"], r["vote_b"]
+    model = fsd.fit_stage_decoder(
+        rows, stages, features=DECODER_FEATURES_BY_SET["base"], tolerance_ms=15.0, log=lambda _m: None
+    )
+    assert model is not None
+    assert model.features == list(DECODER_FEATURES_BY_SET["base"])
+    assert len(model.coef) == 3
+    assert model.fit_report["out_of_fold"]["f1"] > 0.95
+
+
 def test_one_match_cannot_be_held_out_against_itself() -> None:
     fsd = _fit_module()
     rows, stages = _synthetic_corpus()
     alpha = [r for r in rows if r["match"] == "alpha"]
-    assert fsd.fit_stage_decoder(alpha, stages, tolerance_ms=15.0, log=lambda _m: None) is None
+    assert (
+        fsd.fit_stage_decoder(alpha, stages, features=FEATURES, tolerance_ms=15.0, log=lambda _m: None)
+        is None
+    )
 
 
 def test_the_fast_floor_stops_penalising_splits_faster_than_the_corpus() -> None:
@@ -249,9 +294,9 @@ def test_the_fast_floor_stops_penalising_splits_faster_than_the_corpus() -> None
     assert math.isclose(at(floored, 0.35), at(plain, 0.35), abs_tol=1e-6)
 
 
-def _stub_detection(monkeypatch, times, gunshot):
+def _stub_detection(monkeypatch, times, confidence):
     """The ensemble on the stub runtime from test_ensemble, with the given
-    candidate times and a per-candidate gunshot probability (the stub GBDT
+    candidate times and per-candidate detector confidence (the stub GBDT
     and CLAP give every candidate the same scores)."""
     from splitsmith.config import Shot
     from splitsmith.ensemble import api as ensemble_api
@@ -266,10 +311,10 @@ def _stub_detection(monkeypatch, times, gunshot):
             time_from_beep=t - 1.0,
             split=0.3,
             peak_amplitude=0.4,
-            confidence=0.6,
+            confidence=c,
             notes="",
         )
-        for i, t in enumerate(times)
+        for i, (t, c) in enumerate(zip(times, confidence, strict=True))
     ]
     monkeypatch.setattr(ensemble_api, "detect_shots", lambda *a, **kw: shots)
     monkeypatch.setattr(
@@ -280,11 +325,11 @@ def _stub_detection(monkeypatch, times, gunshot):
     monkeypatch.setattr(
         ensemble_features,
         "compute_pann_gunshot_probs",
-        lambda audio, sr, t, runtime: np.array(gunshot, dtype=np.float32),
+        lambda audio, sr, t, runtime: np.zeros(len(t), dtype=np.float32),
     )
     runtime = _build_stub_runtime()
-    # A decoder that reads only the gunshot probability (logit = 10 * (g - 0.5)).
-    model = _model(coef=[0, 0, 10.0, 0, 0, 0], intercept=-5.0)
+    # A decoder that reads only the detector confidence (logit = 10 * (c - 0.5)).
+    model = _model(coef=[0, 0, 10.0, 0, 0], intercept=-5.0)
     runtime.calibration = with_set_update(
         runtime.calibration, "clap", decoders_by_camera_class={"headcam": model, "handheld": model}
     )

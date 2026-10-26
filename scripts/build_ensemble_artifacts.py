@@ -61,6 +61,7 @@ from splitsmith.ensemble.calibration import (
     camera_class_from_mount,
     normalize_camera_model_key,
 )
+from splitsmith.ensemble.decoder import DECODER_FEATURES_BY_SET
 from splitsmith.ensemble.fixtures import (
     WRONG_CLIP_FIXTURES,
     fixture_stems,
@@ -752,7 +753,12 @@ def _fit_decoder(
         }
     # A fixture with candidates scored in only some folds is decoded on those.
     return fit_stage_decoder.fit_stage_decoder(
-        rows, stages, tolerance_ms=tolerance_ms, fast_floor_s=fast_floor_s, log=log
+        rows,
+        stages,
+        features=DECODER_FEATURES_BY_SET["clap"],
+        tolerance_ms=tolerance_ms,
+        fast_floor_s=fast_floor_s,
+        log=log,
     )
 
 

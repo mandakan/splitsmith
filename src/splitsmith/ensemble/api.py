@@ -436,7 +436,16 @@ def detect_shots_ensemble(
     if decoder is not None and decoder_on:
         decoder_probs = dec.shot_probabilities(
             decoder,
-            dec.decoder_features(score_c, clap_diff, gunshot_prob, confidences, peak_amps, vb),
+            dec.decoder_features(
+                decoder,
+                {
+                    "score_c": score_c,
+                    "clap_diff": clap_diff,
+                    "confidence": confidences,
+                    "peak_amplitude": peak_amps,
+                    "vote_b": vb,
+                },
+            ),
         )
         keep_mask = dec.decode_stage(
             decoder,

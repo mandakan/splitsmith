@@ -33,19 +33,27 @@ that score high.
 from __future__ import annotations
 
 import math
+from collections.abc import Mapping, Sequence
 
 import numpy as np
 from pydantic import BaseModel, Field
 
-#: The features the recalibration reads, in coefficient order.
+#: Every signal the recalibration can read. A fitted decoder's own
+#: ``features`` list (a subset, in coefficient order) is what it decodes with.
 FEATURES: tuple[str, ...] = (
     "score_c",
     "clap_diff",
-    "gunshot_prob",
     "confidence",
     "log_peak_amplitude",
     "vote_b",
 )
+
+#: The features each model set's decoders are fitted on: ``base`` has no
+#: CLAP, so no ``clap_diff`` and no voter B.
+DECODER_FEATURES_BY_SET: dict[str, tuple[str, ...]] = {
+    "base": ("score_c", "confidence", "log_peak_amplitude"),
+    "clap": FEATURES,
+}
 
 
 class PriorTable(BaseModel):
@@ -95,25 +103,23 @@ class StageDecoder(BaseModel):
     fit_report: dict = Field(default_factory=dict, description="Held-out figures from the build.")
 
 
-def decoder_features(
-    score_c: np.ndarray,
-    clap_diff: np.ndarray,
-    gunshot_prob: np.ndarray,
-    confidence: np.ndarray,
-    peak_amplitude: np.ndarray,
-    vote_b: np.ndarray,
-) -> np.ndarray:
-    """The recalibration's feature matrix, in :data:`FEATURES` order."""
-    return np.column_stack(
-        [
-            np.asarray(score_c, dtype=np.float64),
-            np.asarray(clap_diff, dtype=np.float64),
-            np.asarray(gunshot_prob, dtype=np.float64),
-            np.asarray(confidence, dtype=np.float64),
-            np.log(np.maximum(np.asarray(peak_amplitude, dtype=np.float64), 1e-4)),
-            np.asarray(vote_b, dtype=np.float64),
-        ]
-    )
+def feature_matrix(features: Sequence[str], signals: Mapping[str, np.ndarray]) -> np.ndarray:
+    """The recalibration's matrix with one column per name in ``features``.
+    ``log_peak_amplitude`` is computed from ``signals["peak_amplitude"]``;
+    every other name is a signal key. A name missing from ``signals`` raises
+    ``KeyError``. The fit and the runtime both go through here."""
+    cols = []
+    for name in features:
+        if name == "log_peak_amplitude":
+            cols.append(np.log(np.maximum(np.asarray(signals["peak_amplitude"], dtype=np.float64), 1e-4)))
+        else:
+            cols.append(np.asarray(signals[name], dtype=np.float64))
+    return np.column_stack(cols)
+
+
+def decoder_features(model: StageDecoder, signals: Mapping[str, np.ndarray]) -> np.ndarray:
+    """The recalibration matrix for ``model``, in its own ``features`` order."""
+    return feature_matrix(model.features, signals)
 
 
 def shot_probabilities(model: StageDecoder, x: np.ndarray) -> np.ndarray:
