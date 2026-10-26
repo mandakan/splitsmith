@@ -26,6 +26,7 @@ storage singleton.
 from __future__ import annotations
 
 import os
+import re
 import shutil
 import tempfile
 from collections.abc import Iterator
@@ -175,10 +176,7 @@ class FilesystemStorage:
         # caller can't accidentally write outside the storage root.
         # In hosted mode the same check protects against tenant-
         # crossing prefixes that bypass the bucket scope.
-        rel = Path(path)
-        if rel.is_absolute() or any(part == ".." for part in rel.parts):
-            raise ValueError(f"path must be relative and contain no '..': {path!r}")
-        return self._root / rel
+        return self._root / Path(_validate_relative_key(path))
 
     def read_bytes(self, path: str) -> bytes:
         return self._resolve(path).read_bytes()
@@ -378,13 +376,20 @@ class _CountingReader:
         return chunk
 
 
+_DRIVE = re.compile(r"^[A-Za-z]:")
+
+
 def _validate_relative_key(key: str) -> str:
     """Reject absolute / traversing keys before we hand them to a
     backend. The same guard ``FilesystemStorage._resolve`` runs --
     factored out so ``S3Storage`` doesn't have to reimplement it.
     """
-    rel = Path(key)
-    if rel.is_absolute() or any(part == ".." for part in rel.parts):
+    # Judged the same on every host: a key is posix, but a backslash is a
+    # separator on Windows, so ``\\x`` and ``C:x`` would be absolute there
+    # (a FilesystemStorage on Windows would write outside its root) while
+    # ``Path`` on POSIX reads them as plain names.
+    parts = key.replace("\\", "/").split("/")
+    if key.startswith(("/", "\\")) or _DRIVE.match(key) or ".." in parts:
         raise ValueError(f"path must be relative and contain no '..': {key!r}")
     return key
 
