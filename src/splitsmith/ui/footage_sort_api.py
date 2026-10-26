@@ -549,7 +549,7 @@ def _registrations(state: Any) -> dict[Path, Registration]:
                 continue
             if source in out and out[source].assigned and not assigned:
                 continue
-            out[source] = Registration(shooter=slug, video_path=str(video.path), assigned=assigned)
+            out[source] = Registration(shooter=slug, video_path=video.path.as_posix(), assigned=assigned)
     return out
 
 
@@ -567,7 +567,9 @@ def _fingerprint_registrations(state: Any) -> dict[str, Registration]:
                 continue
             if video.fingerprint in out and out[video.fingerprint].assigned and not assigned:
                 continue
-            out[video.fingerprint] = Registration(shooter=slug, video_path=str(video.path), assigned=assigned)
+            out[video.fingerprint] = Registration(
+                shooter=slug, video_path=video.path.as_posix(), assigned=assigned
+            )
     return out
 
 
@@ -1079,13 +1081,17 @@ async def import_scan(scan_id: str, req: ImportRequest, request: Request) -> Imp
         except (FileNotFoundError, KeyError, ValueError) as exc:
             not_imported[c.clip_id] = str(exc)
             continue
-        placed = Registration(shooter=slug, video_path=str(video.path), assigned=True)
+        placed = Registration(shooter=slug, video_path=video.path.as_posix(), assigned=True)
         registered[_resolved(paths[c.clip_id])] = placed
         if fingerprint is not None:
             by_fingerprint[fingerprint] = placed
         imported.append(
             ImportedClip(
-                clip_id=c.clip_id, shooter=slug, stage=stage_number, role=video.role, path=str(video.path)
+                clip_id=c.clip_id,
+                shooter=slug,
+                stage=stage_number,
+                role=video.role,
+                path=video.path.as_posix(),
             )
         )
         queued.append((slug, project, stage_number, video))

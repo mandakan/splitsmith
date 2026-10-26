@@ -416,7 +416,7 @@ def _apply_raw_video_coverage(
     # Add StageVideos for stages not yet registered.
     for stage_number in covers:
         stage = project.stage(stage_number)
-        if any(str(v.path) == storage_path for v in stage.videos):
+        if any(v.path.as_posix() == storage_path for v in stage.videos):
             continue  # already registered - skip
         role: VideoRole = "secondary" if stage.primary() is not None else "primary"
         sv = StageVideo(path=video_path, role=role, stage_number=stage_number)
@@ -430,8 +430,8 @@ def _apply_raw_video_coverage(
             stage = project.stage(stage_number)
         except KeyError:
             continue
-        to_remove = [v for v in stage.videos if str(v.path) == storage_path]
-        stage.videos = [v for v in stage.videos if str(v.path) != storage_path]
+        to_remove = [v for v in stage.videos if v.path.as_posix() == storage_path]
+        stage.videos = [v for v in stage.videos if v.path.as_posix() != storage_path]
         for v in to_remove:
             audio_helpers.invalidate_video_audit_trim(root, stage_number, v, project=project)
 
@@ -440,7 +440,7 @@ def _apply_raw_video_coverage(
 
     # Remove from unassigned tray when coverage is being applied for
     # the first time (moves it from "unregistered" to named stages).
-    project.unassigned_videos = [v for v in project.unassigned_videos if str(v.path) != storage_path]
+    project.unassigned_videos = [v for v in project.unassigned_videos if v.path.as_posix() != storage_path]
 
     return created
 
@@ -891,7 +891,7 @@ def raw_video_overview(
         except KeyError:
             continue
         # Find the StageVideo for this take (matched by path).
-        sv = next((v for v in stage.videos if str(v.path) == storage_path), None)
+        sv = next((v for v in stage.videos if v.path.as_posix() == storage_path), None)
         if sv is None:
             continue
 
@@ -1669,7 +1669,7 @@ async def scan_videos(request: Request, slug: str, req: ScanRequest) -> ScanResp
     # shooter already has (same source, or a byte copy by fingerprint);
     # that is not an import, and counting it as one told the page a
     # video was added when none was (#1233).
-    had_before = {str(v.path) for v in project.all_videos()}
+    had_before = {v.path.as_posix() for v in project.all_videos()}
     added_from: dict[str, str] = {}
     for entry in candidates:
         if elsewhere:
@@ -1689,7 +1689,7 @@ async def scan_videos(request: Request, slug: str, req: ScanRequest) -> ScanResp
         except (FileNotFoundError, ValueError) as exc:
             skipped.append(f"{entry.name}: {exc}")
             continue
-        stored = str(video.path)
+        stored = video.path.as_posix()
         if stored in had_before:
             skipped.append(f"{entry.name}: already imported for this shooter as {stored}")
             continue
@@ -1736,7 +1736,7 @@ async def scan_videos(request: Request, slug: str, req: ScanRequest) -> ScanResp
     attached += [(n, p) for n, paths in auto_secondary.items() for p in paths]
     for stage_num, video_path in attached:
         stage = project.stage(stage_num)
-        video = next((v for v in stage.videos if str(v.path) == video_path), None)
+        video = next((v for v in stage.videos if v.path.as_posix() == video_path), None)
         if video is not None:
             await _server._auto_queue_beep_if_needed(state, slug, project, stage_num, video)
 
@@ -2214,7 +2214,7 @@ def stream_video(
     stage, video = located
 
     storage = state.storage
-    raw_str = str(video.path)
+    raw_str = video.path.as_posix()
     # "hosted" here means "redirect the browser to a presigned URL". A
     # storage whose bytes aren't browser-reachable (FilesystemStorage)
     # takes the local byte-serving path below, same as no storage at all.
@@ -2908,7 +2908,7 @@ async def swap_primary(
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
     current = stage.primary()
-    if current is not None and str(current.path) == req.video_path:
+    if current is not None and current.path.as_posix() == req.video_path:
         # Already the primary: nothing to swap, back up or redo.
         return JSONResponse(project.model_dump(mode="json"))
     video_path = Path(req.video_path)
@@ -2932,7 +2932,7 @@ async def swap_primary(
                     "swap to move its shots onto the new primary's clip."
                 ),
                 "stage_number": req.stage_number,
-                "current_primary": str(current.path) if current else None,
+                "current_primary": current.path.as_posix() if current else None,
                 "new_primary": req.video_path,
             },
         )
@@ -2999,7 +2999,7 @@ def reveal_video(request: Request, slug: str, req: RevealRequest) -> JSONRespons
     if located is None:
         raise HTTPException(status_code=404, detail=f"video not registered: {req.path}")
     _, video = located
-    target = project.resolve_video_path(state.shooter_root(slug), Path(str(video.path)))
+    target = project.resolve_video_path(state.shooter_root(slug), Path(video.path.as_posix()))
     try:
         resolved = target.resolve(strict=True)
     except (OSError, FileNotFoundError) as exc:

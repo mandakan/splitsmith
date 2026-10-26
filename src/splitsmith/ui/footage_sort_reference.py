@@ -68,7 +68,7 @@ def project_reference(
         return ProjectReference(
             shooter=slug,
             stage=stage_number,
-            video_path=str(primary.path),
+            video_path=primary.path.as_posix(),
             video_id=primary.video_id,
             stream_kind="trim" if audit is not None else "auto",
             source_file=trim,
@@ -80,7 +80,7 @@ def project_reference(
     return ProjectReference(
         shooter=slug,
         stage=stage_number,
-        video_path=str(primary.path),
+        video_path=primary.path.as_posix(),
         video_id=primary.video_id,
         stream_kind="auto",
         source_file=raw,

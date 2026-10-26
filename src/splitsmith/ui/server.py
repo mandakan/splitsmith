@@ -2990,7 +2990,7 @@ async def _advance_sequential_chain(
     ``scorecard_updated_at`` - scoreboard mode derives independent
     windows and doesn't chain).
     """
-    raw = project.find_raw_video(str(video.path))
+    raw = project.find_raw_video(video.path.as_posix())
     if raw is None or len(raw.covers_stages) < 2:
         return
     # Scoreboard mode: every covered stage has a scorecard timestamp.
@@ -3144,7 +3144,7 @@ def register_job_bodies(state: AppState) -> None:
         multi-stage take (raw is None or covers only one stage). Resolution
         order: manual > scoreboard > sequential.
         """
-        raw = proj.find_raw_video(str(video.path))
+        raw = proj.find_raw_video(video.path.as_posix())
         if raw is None or len(raw.covers_stages) < 2:
             return None
         if video.beep_window_source == "manual" and video.beep_window is not None:
@@ -3189,7 +3189,9 @@ def register_job_bodies(state: AppState) -> None:
                 sibling = proj.stage(n)
             except KeyError:
                 continue
-            sib_primary = next((v for v in sibling.videos if str(v.path) == str(video.path)), None)
+            sib_primary = next(
+                (v for v in sibling.videos if v.path.as_posix() == video.path.as_posix()), None
+            )
             if sib_primary is not None and sib_primary.beep_time is not None:
                 cand = sib_primary.beep_time + sibling.time_seconds + cfg.reset_margin_s
                 anchor = cand if anchor is None else max(anchor, cand)
@@ -3471,9 +3473,9 @@ def register_job_bodies(state: AppState) -> None:
                 v_fresh.processed["beep"] = True
                 # Backfill raw video wall-clock metadata derived during this run so
                 # subsequent jobs on the same take don't need to re-probe.
-                raw_working = proj.find_raw_video(str(video.path))
+                raw_working = proj.find_raw_video(video.path.as_posix())
                 if raw_working is not None:
-                    raw_fresh = fresh.find_raw_video(str(video.path))
+                    raw_fresh = fresh.find_raw_video(video.path.as_posix())
                     if raw_fresh is not None:
                         if raw_working.duration_seconds is not None and raw_fresh.duration_seconds is None:
                             raw_fresh.duration_seconds = raw_working.duration_seconds
@@ -3585,7 +3587,7 @@ def register_job_bodies(state: AppState) -> None:
                 root_for_peaks = state.shooter_root(slug)
                 take_wav = audio_helpers.ensure_take_audio(
                     root_for_peaks,
-                    str(video.path),
+                    video.path.as_posix(),
                     local_source,
                     project=proj,
                     ffmpeg_binary=process_runtime().ffmpeg_binary,
@@ -8427,7 +8429,7 @@ def _coach_video_entries(state: AppState, slug: str, project: MatchProject, stg:
         anchor, kind = _video_clip_anchor(state, slug, project, stg.stage_number, v)
         out.append(
             {
-                "path": str(v.path),
+                "path": v.path.as_posix(),
                 "role": v.role,
                 "beep_in_clip": anchor,
                 "kind": kind,
@@ -8739,7 +8741,7 @@ def _serve_proxy(state: AppState, base_root: Path, video: StageVideo) -> FileRes
     """
     from ..proxy import proxy_key_for
 
-    _raw_str = str(video.path)
+    _raw_str = video.path.as_posix()
     _storage = state.storage
     if not _raw_str.startswith("raw/") or _storage is None:
         return None

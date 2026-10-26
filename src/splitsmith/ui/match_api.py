@@ -1560,7 +1560,7 @@ async def move_shooter_endpoint(request: Request, req: MoveShooterRequest) -> JS
         except KeyError:
             continue
         prim = t_stage.primary()
-        if prim is not None and str(prim.path) == item.video_path:
+        if prim is not None and prim.path.as_posix() == item.video_path:
             # Best-effort: the move is already persisted. A queue hiccup
             # must not turn a completed move into a 500 -- the jobs rail
             # (and a manual "Detect beep") remain as the recovery path.
@@ -2004,7 +2004,7 @@ def stream_shooter_video(
     if located is not None:
         stage, video = located
         storage = state.storage
-        raw_str = str(video.path)
+        raw_str = video.path.as_posix()
         # "hosted" here means "redirect the browser to a presigned URL". A
         # storage whose bytes aren't browser-reachable (FilesystemStorage)
         # takes the local byte-serving path below, same as no storage at all.

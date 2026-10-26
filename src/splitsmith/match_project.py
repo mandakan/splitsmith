@@ -45,6 +45,7 @@ from .export_naming import is_match_export, stage_file_base
 from .fingerprint import clip_fingerprint
 from .identity import ShooterIdentity
 from .storage import Storage
+from .stored_path import StoredPath
 from .video_match import match_videos_to_stages
 
 if TYPE_CHECKING:
@@ -268,7 +269,7 @@ def _migrate_v2_to_v3(root: Path, project: MatchProject) -> None:
     aggregated: dict[str, dict[str, Any]] = {}
 
     def _ingest(video: StageVideo, stage_number: int | None) -> None:
-        key = str(video.path)
+        key = video.path.as_posix()
         entry = aggregated.setdefault(
             key,
             {
@@ -330,7 +331,7 @@ class StageVideo(BaseModel):
     per-stage status by scanning these flags rather than re-running detection.
     """
 
-    path: Path
+    path: StoredPath
     role: VideoRole = "secondary"
     added_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     # The canonical timestamp used by the match heuristic
@@ -469,7 +470,7 @@ class StageVideo(BaseModel):
         cache filenames stay collision-free). Unassigned videos keep the
         legacy path-only hash so tray identity is stable across assigns.
         """
-        seed = str(self.path)
+        seed = self.path.as_posix()
         if self.stage_number is not None:
             seed = f"{seed}#{self.stage_number}"
         return hashlib.blake2s(seed.encode("utf-8"), digest_size=6).hexdigest()
@@ -487,7 +488,7 @@ class StageVideo(BaseModel):
         legacy names, not part of the serialised project. Remove
         together with the fallbacks once a cache migration tool exists.
         """
-        return hashlib.blake2s(str(self.path).encode("utf-8"), digest_size=6).hexdigest()
+        return hashlib.blake2s(self.path.as_posix().encode("utf-8"), digest_size=6).hexdigest()
 
 
 def tone_flag_ms(video: StageVideo) -> float | None:
@@ -786,8 +787,8 @@ class StageAutoMatch(BaseModel):
     of one run. ``primary`` is ``None`` when the clips join the stage's
     existing primary as secondaries."""
 
-    primary: Path | None = None
-    secondaries: list[Path] = Field(default_factory=list)
+    primary: StoredPath | None = None
+    secondaries: list[StoredPath] = Field(default_factory=list)
 
 
 class RemovalPlan(BaseModel):
@@ -799,13 +800,13 @@ class RemovalPlan(BaseModel):
     tests can exercise the model without disk fixtures.
     """
 
-    video_path: Path  # the path that was removed (project-relative or absolute)
+    video_path: StoredPath  # the path that was removed (project-relative or absolute)
     # symlink under raw_dir to unlink; None while another registration of
     # the same file remains (a multi-stage single take, #1212)
-    raw_link_path: Path | None
-    audio_cache_path: Path | None = None  # WAV cache to clear if cached
-    trimmed_cache_path: Path | None = None  # trimmed clip to clear if cached
-    audit_path: Path | None = None  # stage audit JSON to clear when reset_audit
+    raw_link_path: StoredPath | None
+    audio_cache_path: StoredPath | None = None  # WAV cache to clear if cached
+    trimmed_cache_path: StoredPath | None = None  # trimmed clip to clear if cached
+    audit_path: StoredPath | None = None  # stage audit JSON to clear when reset_audit
     was_primary: bool = False
     stage_number: int | None = None
     audit_reset: bool = False  # caller-facing flag: did we wipe stage audit?
@@ -823,7 +824,7 @@ class SecondaryExportStatus(BaseModel):
     """
 
     video_id: str
-    path: Path
+    path: StoredPath
     label: str
     has_beep: bool
     beep_reviewed: bool
@@ -832,7 +833,7 @@ class SecondaryExportStatus(BaseModel):
     # populated only when the file is actually present on disk; ``None``
     # before the user runs Generate (or when the cam was excluded last
     # time). The SPA uses this to drive the per-cam Reveal button.
-    trim_path: Path | None
+    trim_path: StoredPath | None
     trim_present: bool
 
 
@@ -872,22 +873,22 @@ class StageExportStatus(BaseModel):
     # rejected. The SPA renders this as "X shots audited from Y candidates"
     # so the math makes sense at a glance.
     total_candidate_count: int
-    audit_path: Path | None
+    audit_path: StoredPath | None
     # The video reference the SPA renders. Prefers the lossless trim under
     # ``exports/``; falls back to the audit-mode short-GOP copy from
     # ``trimmed/`` only when no lossless trim exists yet, so the user
     # always has *something* trimmed to inspect. ``lossless_trim_present``
     # disambiguates "this is the deliverable" vs "this is the scrub cache".
-    trimmed_video_path: Path | None
+    trimmed_video_path: StoredPath | None
     lossless_trim_present: bool = False
-    csv_path: Path | None
-    fcpxml_path: Path | None
-    report_path: Path | None
+    csv_path: StoredPath | None
+    fcpxml_path: StoredPath | None
+    report_path: StoredPath | None
     # Pre-rendered alpha overlay MOV (issue #45). ``None`` until the user
     # ticks the Overlay toggle on Generate at least once for this stage.
     # The FCPXML references this file as a connected clip on V2 when it
     # exists; absent, the FCPXML is unchanged.
-    overlay_path: Path | None = None
+    overlay_path: StoredPath | None = None
     has_exports: bool
     last_export_at: datetime | None
     ready_to_export: bool
@@ -945,7 +946,7 @@ class VideoMatchAnalysisEntry(BaseModel):
     renders, but no tick).
     """
 
-    path: Path
+    path: StoredPath
     timestamp: datetime | None
     classification: str  # video_match.VideoClassification
     stage_numbers: list[int]
@@ -1764,20 +1765,20 @@ class MatchProject(BaseModel):
         when the caller needs the file and not the stage's video (#1211);
         with it, only that stage is searched.
         """
-        target = str(path)
+        target = Path(path).as_posix()
         if stage_number is not None:
             for s in self.stages:
                 if s.stage_number == stage_number:
                     for v in s.videos:
-                        if str(v.path) == target:
+                        if v.path.as_posix() == target:
                             return s, v
             return None
         for v in self.unassigned_videos:
-            if str(v.path) == target:
+            if v.path.as_posix() == target:
                 return None, v
         for s in self.stages:
             for v in s.videos:
-                if str(v.path) == target:
+                if v.path.as_posix() == target:
                     return s, v
         return None
 
@@ -2545,7 +2546,7 @@ class MatchProject(BaseModel):
 
         if to_stage_number is not None:
             target = self.stage(to_stage_number)
-            if any(v is not video and str(v.path) == str(video.path) for v in target.videos):
+            if any(v is not video and v.path.as_posix() == video.path.as_posix() for v in target.videos):
                 raise ValueError(
                     f"stage {to_stage_number} already has {video.path}; "
                     "a file can be registered on a stage once"
@@ -2714,7 +2715,7 @@ class MatchProject(BaseModel):
         return sorted(
             stage.stage_number
             for stage in self.stages
-            if sum(1 for v in stage.videos if str(v.path) == storage_path) > 1
+            if sum(1 for v in stage.videos if v.path.as_posix() == storage_path) > 1
         )
 
     def repair_take(self, storage_path: str) -> list[int]:
@@ -2734,7 +2735,7 @@ class MatchProject(BaseModel):
             seen = False
             kept: list[StageVideo] = []
             for v in stage.videos:
-                if str(v.path) == storage_path:
+                if v.path.as_posix() == storage_path:
                     if seen:
                         continue
                     seen = True
@@ -2783,7 +2784,7 @@ class MatchProject(BaseModel):
         else:
             current_stage.videos = [v for v in current_stage.videos if v is not video]
 
-        still_registered = any(str(v.path) == str(video.path) for v in self.all_videos())
+        still_registered = any(v.path.as_posix() == video.path.as_posix() for v in self.all_videos())
         raw_link = None if still_registered else self.resolve_video_path(root, video.path)
 
         # Cache files are keyed per-video for every role (stage<N>_cam_<id>.*)
