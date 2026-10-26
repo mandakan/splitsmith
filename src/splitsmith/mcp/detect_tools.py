@@ -36,6 +36,7 @@ from typing import Any
 
 from .. import automation as automation_module
 from .. import ensemble as ensemble_module
+from .. import fs_atomic
 from ..audit_clock import CLIP_VIDEO_FIELD
 from ..beep import detect as beep_detect
 from ..detection_merge import merge_detection_into
@@ -385,7 +386,7 @@ def _atomic_write_audit_json(audit_file: Any, payload: dict[str, Any]) -> None:
         if backup.exists():
             backup.unlink()
         audit_file.replace(backup)
-    tmp.replace(audit_file)
+    fs_atomic.replace(tmp, audit_file)
 
 
 def trim_audit_clip(

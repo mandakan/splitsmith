@@ -16,6 +16,7 @@ Personal tool for an IPSC competitor to extract shot splits from head-mounted ca
 - Pydantic for data validation
 - `pathlib.Path` for paths, never strings
 - A path that is stored, compared or used as a key (a project path, a storage key, an id hashed from a path) is `as_posix()`, never `str()`, and a `Path` field that reaches JSON is `stored_path.StoredPath`: `str()` writes backslashes on Windows. `as_posix()` is `str()` on POSIX.
+- A temp-then-rename writer publishes with `fs_atomic.replace(tmp, target)`, never a bare `replace`: Windows refuses a rename onto a file another handle holds open for a moment, and that helper rides it out.
 - f-strings for formatting
 - Black formatting (line length 110)
 - Ruff for linting

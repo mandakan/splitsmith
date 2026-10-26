@@ -30,6 +30,8 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
+from . import fs_atomic
+
 logger = logging.getLogger(__name__)
 
 
@@ -123,7 +125,7 @@ def _publish(final: Path, make: Callable[[Path], None], check: Callable[[Path], 
         problem = check(partial) if check is not None else None
         if problem is not None:
             raise DerivedFileError(f"{final.name}: {problem}")
-        partial.replace(final)
+        fs_atomic.replace(partial, final)
     finally:
         partial.unlink(missing_ok=True)
 

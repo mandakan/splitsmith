@@ -23,6 +23,7 @@ import io
 from dataclasses import dataclass
 from pathlib import Path
 
+from . import fs_atomic
 from .fonts import OWN_DIR, OWN_FILE_RE, own_value
 
 #: The largest file the upload takes. A condensed display face is a few
@@ -86,7 +87,7 @@ def save_font(root: Path, data: bytes) -> OwnFont:
     if not target.is_file():
         partial = folder / f".{file}.part"
         partial.write_bytes(data)
-        partial.replace(target)
+        fs_atomic.replace(partial, target)
     return OwnFont(value=own_value(file), file=file, family=family)
 
 

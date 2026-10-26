@@ -38,7 +38,7 @@ from typing import TYPE_CHECKING, Any, Literal
 
 from pydantic import BaseModel, Field, PrivateAttr, computed_field, model_validator
 
-from . import raw_link, stage_details, video_match
+from . import fs_atomic, raw_link, stage_details, video_match
 from .automation import AutomationOverride
 from .config import BeepCandidate, StageData, StageRounds, VideoMatchConfig
 from .export_naming import is_match_export, stage_file_base
@@ -2464,7 +2464,7 @@ class MatchProject(BaseModel):
             version = _object_mtime(storage, key)
             if version is not None and version == version_before:
                 os.utime(tmp_name, (time.time(), version))
-            Path(tmp_name).replace(dest)
+            fs_atomic.replace(Path(tmp_name), dest)
         except Exception:
             try:
                 Path(tmp_name).unlink()
@@ -2938,7 +2938,7 @@ def atomic_write_json(path: Path, data: Any, *, indent: int = 2) -> None:
             f.write("\n")
             f.flush()
             os.fsync(f.fileno())
-        tmp.replace(path)
+        fs_atomic.replace(tmp, path)
     except Exception:
         tmp.unlink(missing_ok=True)
         raise

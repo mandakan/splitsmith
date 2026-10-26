@@ -31,7 +31,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
-from .. import derived
+from .. import derived, fs_atomic
 from ..beep import detect as beep_detect
 from ..config import BeepDetectConfig, BeepDetection
 from ..match_project import MatchProject, StageVideo
@@ -1663,7 +1663,7 @@ def ensure_video_audit_trim(
         if still_current is not None and not still_current():
             partial.unlink(missing_ok=True)
             raise TrimSuperseded(f"beep moved while cutting {output.name}")
-        partial.replace(output)
+        fs_atomic.replace(partial, output)
         derived.produce(
             params_file,
             fresh=lambda: False,

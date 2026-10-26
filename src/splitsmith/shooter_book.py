@@ -28,7 +28,7 @@ from typing import Protocol
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from . import user_config
+from . import fs_atomic, user_config
 from .async_bridge import run_sync
 from .identity import _LOGO_RE, ShooterIdentity, logo_name, sniff_logo
 
@@ -319,7 +319,7 @@ class JsonShooterBookStore:
         if not target.is_file():
             partial = files / f".{name}.part"
             partial.write_bytes(data)
-            partial.replace(target)
+            fs_atomic.replace(partial, target)
         return name
 
     async def logo_file(self, name: str) -> Path | None:

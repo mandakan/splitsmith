@@ -20,6 +20,7 @@ from pathlib import Path
 
 from PIL import Image
 
+from .. import fs_atomic
 from ..composition import SequenceFormat
 from ..config import VideoMetadata
 from ..grade import ResolvedGrade, lut_filter, materialize
@@ -437,7 +438,7 @@ def render_reel(
         )
         if mix is not None:
             _run(mix, runner=runner)
-        partial.replace(output_path)
+        fs_atomic.replace(partial, output_path)
     finally:
         partial.unlink(missing_ok=True)
     if segment_cache is not None:

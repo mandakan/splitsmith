@@ -131,6 +131,7 @@ from .. import (
     cross_align,
     derived,
     export_runs,
+    fs_atomic,
     match_model,
     report,
     user_config,
@@ -10592,7 +10593,7 @@ def create_app(
             if backup.exists():
                 backup.unlink()
             target.replace(backup)
-            tmp.replace(target)
+            fs_atomic.replace(tmp, target)
         except OSError as exc:
             if tmp.exists():
                 tmp.unlink()
@@ -11677,7 +11678,7 @@ def create_app(
                     __import__("json").dumps(result.fixture_data, indent=2, ensure_ascii=True) + "\n",
                     encoding="utf-8",
                 )
-                tmp.replace(target_json)
+                fs_atomic.replace(tmp, target_json)
 
                 target_wav = fixtures_root / f"{body.slug}.wav"
                 _shutil.copy2(secondary_wav_path, target_wav)

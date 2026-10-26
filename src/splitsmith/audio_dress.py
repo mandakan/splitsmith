@@ -29,6 +29,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
+from . import fs_atomic
 from .looks import sounds_folder_has_files
 from .reel.render import AUDIO_NORMALIZE
 from .render_timeline import TimelineEntry, read_timeline, timeline_path
@@ -321,7 +322,7 @@ def dress_export(
     )
     try:
         runner(list(cmd), check=True, capture_output=True, text=True, encoding="utf-8")
-        partial.replace(out)
+        fs_atomic.replace(partial, out)
     except subprocess.CalledProcessError as exc:
         partial.unlink(missing_ok=True)
         tail = (exc.stderr or "").strip().splitlines()[-3:]

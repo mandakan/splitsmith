@@ -27,6 +27,7 @@ import time
 from contextlib import contextmanager
 from pathlib import Path
 
+from .. import fs_atomic
 from ..runtime import runtime as process_runtime
 from .errors import HashMismatch
 from .manifest import ArtifactSpec
@@ -135,5 +136,5 @@ def install_verified(
         )
     dest = artifact_path(spec, root=root)
     dest.parent.mkdir(parents=True, exist_ok=True)
-    source.replace(dest)
+    fs_atomic.replace(source, dest)
     return dest

@@ -28,6 +28,7 @@ from sqlalchemy import delete, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
+from .. import fs_atomic
 from ..account_profile import AccountProfile
 from ..identity import _LOGO_RE, ShooterIdentity, logo_name, sniff_logo
 from ..look.brand import BrandError, check_brand_logo
@@ -81,7 +82,7 @@ def _mirror(storage: Storage | None, key: str, cache: Path, name: str) -> Path |
         target = cache / name
         if target.is_symlink():
             target.unlink()
-        Path(tmp_name).replace(target)
+        fs_atomic.replace(Path(tmp_name), target)
     except Exception as exc:  # noqa: BLE001 -- a logo is never worth a failed render
         logger.info("account files: could not mirror %s (%s)", key, exc)
         return None

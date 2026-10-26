@@ -14,7 +14,7 @@ import json
 import os
 from pathlib import Path
 
-from .. import youtube_sidecar
+from .. import fs_atomic, youtube_sidecar
 from ..audit_revision import audit_revision
 from ..match_model import load_match_or_legacy
 from ..match_project import MatchProject
@@ -112,7 +112,7 @@ def record_command_upload(match_root: Path, command_id: str, video: dict) -> Non
     path = match_root / DONE_LEDGER_NAME
     tmp = path.with_name(f".{DONE_LEDGER_NAME}.{os.getpid()}.tmp")
     tmp.write_text(json.dumps(ledger, indent=2, sort_keys=True), encoding="utf-8")
-    tmp.replace(path)
+    fs_atomic.replace(tmp, path)
 
 
 def prior_result(match_root: Path, command: dict) -> dict | None:

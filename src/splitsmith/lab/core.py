@@ -19,6 +19,7 @@ from typing import Any, Literal
 import numpy as np
 from pydantic import BaseModel, Field
 
+from .. import fs_atomic
 from ..beep.detect import load_audio
 from ..ensemble.api import (
     EnsembleConfig,
@@ -796,7 +797,7 @@ def apply_labels(audit_path: Path, labels: list[CandidateLabel]) -> dict[str, in
     if backup.exists():
         backup.unlink()
     audit_path.replace(backup)
-    tmp.replace(audit_path)
+    fs_atomic.replace(tmp, audit_path)
     return counts
 
 
@@ -878,7 +879,7 @@ def confirm_review(audit_path: Path, method: str | None = None) -> str:
     if backup.exists():
         backup.unlink()
     audit_path.replace(backup)
-    tmp.replace(audit_path)
+    fs_atomic.replace(tmp, audit_path)
     return stamp
 
 
@@ -1282,7 +1283,7 @@ def promote_stage_to_fixture(req: PromoteRequest) -> FixtureRecord:
 
     tmp_json = target_json.with_suffix(".json.tmp")
     tmp_json.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
-    tmp_json.replace(target_json)
+    fs_atomic.replace(tmp_json, target_json)
     shutil.copy2(req.audit_wav_path, target_wav)
     catalog = list_fixtures(root)
     for rec in catalog:

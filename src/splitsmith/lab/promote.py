@@ -34,6 +34,7 @@ from typing import Any
 
 import numpy as np
 
+from .. import fs_atomic
 from ..beep.detect import load_audio
 from ..cross_align import CrossAlignResult, align_secondary_to_primary
 from ..ensemble.api import EnsembleResult, detect_shots_ensemble, load_ensemble_runtime
@@ -410,7 +411,7 @@ def write_promoted_fixture(
 
     tmp = target_json.with_suffix(".json.tmp")
     tmp.write_text(json.dumps(data, indent=2, ensure_ascii=True) + "\n", encoding="utf-8")
-    tmp.replace(target_json)
+    fs_atomic.replace(tmp, target_json)
     (fixtures_root / f"{slug}-promotion-report.json").write_text(
         json.dumps(promotion_report, indent=2, ensure_ascii=True) + "\n", encoding="utf-8"
     )

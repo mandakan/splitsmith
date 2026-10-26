@@ -20,6 +20,7 @@ from typing import Any
 import typer
 import yaml
 
+from . import fs_atomic
 from . import lab as lab_module
 from .beep import detect as beep_detect
 from .cross_align import CrossAlignError, align_secondary_to_primary
@@ -652,7 +653,7 @@ def promote_from_anchor_cmd(
         json.dumps(result.fixture_data, indent=2, ensure_ascii=True) + "\n",
         encoding="utf-8",
     )
-    tmp_json.replace(target_json)
+    fs_atomic.replace(tmp_json, target_json)
 
     # Copy secondary WAV alongside fixture.
     shutil.copy2(wav_source_path, target_wav)

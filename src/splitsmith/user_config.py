@@ -44,6 +44,8 @@ from typing import Any, Protocol
 import yaml
 from pydantic import BaseModel, Field
 
+from . import fs_atomic
+
 logger = logging.getLogger(__name__)
 
 # Bumped when an on-disk schema in this directory changes incompatibly. The
@@ -231,7 +233,7 @@ def _atomic_write_text(path: Path, text: str) -> None:
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as f:
             f.write(text)
-        tmp.replace(path)
+        fs_atomic.replace(tmp, path)
     except Exception:
         try:
             tmp.unlink()

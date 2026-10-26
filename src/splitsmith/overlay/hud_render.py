@@ -28,6 +28,7 @@ import tempfile
 from pathlib import Path
 from typing import Any, Literal
 
+from .. import fs_atomic
 from ..audit_data import read_audit_data
 from ..config import StageEvent
 from ..events import confirmed_from_doc
@@ -120,7 +121,7 @@ def _install(source: Path, output_path: Path) -> None:
     output_path.parent.mkdir(parents=True, exist_ok=True)
     partial = output_path.with_name(f".{output_path.name}.part")
     shutil.copyfile(source, partial)
-    partial.replace(output_path)
+    fs_atomic.replace(partial, output_path)
 
 
 def render_hud_overlay(

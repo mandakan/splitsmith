@@ -31,6 +31,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from splitsmith import fs_atomic
 from splitsmith.ui.scoreboard.models import (
     CompetitorStageResults,
     MatchData,
@@ -253,4 +254,4 @@ def _write_envelope(path: Path, envelope: dict[str, Any]) -> None:
     ) as tmp:
         json.dump(envelope, tmp, indent=2, sort_keys=True)
         tmp_path = Path(tmp.name)
-    tmp_path.replace(path)
+    fs_atomic.replace(tmp_path, path)
