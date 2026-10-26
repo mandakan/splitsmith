@@ -405,13 +405,13 @@ def test_lab_promote_drift_compares_each_row_with_its_audit(
     root = tmp_path / "match"
     _setup_promote_endpoint_project(root, camera_mount="hand")
     shooter_audit = root / "shooters" / "me" / "audit" / "stage1.json"
-    doc = json.loads(shooter_audit.read_text())
+    doc = json.loads(shooter_audit.read_text(encoding="utf-8"))
     doc["shots"] = [{"time": 2.0}, {"time": 2.4}, {"time": 2.9}]
     shooter_audit.write_text(json.dumps(doc), encoding="utf-8")
     fixtures_root = tmp_path / "fixtures-out"
     fixtures_root.mkdir()
     (fixtures_root / "stage-shots-x-stage1-t.json").write_text(
-        json.dumps({"shots": [{"time": 2.0}, {"time": 2.4}]})
+        json.dumps({"shots": [{"time": 2.0}, {"time": 2.4}]}), encoding="utf-8"
     )
     monkeypatch.setattr(lab_core, "DEFAULT_FIXTURES_ROOT", fixtures_root)
 

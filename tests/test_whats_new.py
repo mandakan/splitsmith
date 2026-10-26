@@ -173,7 +173,10 @@ def test_a_chip_key_is_a_slug_and_used_once() -> None:
 
 def test_a_bad_entries_file_fails_loudly(tmp_path: Path) -> None:
     bad = tmp_path / "whats_new.json"
-    bad.write_text('{"entries": [{"id": "Not A Slug", "date": "2026-10-07", "title": "x", "body": "y."}]}')
+    bad.write_text(
+        '{"entries": [{"id": "Not A Slug", "date": "2026-10-07", "title": "x", "body": "y."}]}',
+        encoding="utf-8",
+    )
     with pytest.raises(ValueError):
         whats_new.load_entries(bad)
 

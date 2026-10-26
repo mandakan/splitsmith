@@ -105,7 +105,7 @@ def test_generates_snippet_for_unreviewed_video(tmp_path: Path):
     assert report.generated == 1 and not report.errors
     out = shooter_root / "beep_review"
     m4a = out / f"{video.video_id}.m4a"
-    peaks = json.loads((out / f"{video.video_id}.peaks.json").read_text())
+    peaks = json.loads((out / f"{video.video_id}.peaks.json").read_text(encoding="utf-8"))
     assert m4a.stat().st_size > 0
     # Default search window is 0..30 s; the 20 s source ends first.
     assert peaks["snippet_start"] == pytest.approx(0.0)
@@ -124,7 +124,9 @@ def test_wrong_pick_does_not_hide_the_search_window(tmp_path: Path):
     project.save(shooter_root)
 
     assert generate_beep_snippets(match_root).generated == 1
-    peaks = json.loads((shooter_root / "beep_review" / f"{video.video_id}.peaks.json").read_text())
+    peaks = json.loads(
+        (shooter_root / "beep_review" / f"{video.video_id}.peaks.json").read_text(encoding="utf-8")
+    )
     assert peaks["snippet_start"] == pytest.approx(2.0)
     assert peaks["snippet_start"] + peaks["duration"] >= 19.5  # pick + margin, clipped by the source
 
@@ -135,7 +137,9 @@ def test_candidate_outside_the_window_widens_the_snippet(tmp_path: Path):
     project.save(shooter_root)
 
     assert generate_beep_snippets(match_root).generated == 1
-    peaks = json.loads((shooter_root / "beep_review" / f"{video.video_id}.peaks.json").read_text())
+    peaks = json.loads(
+        (shooter_root / "beep_review" / f"{video.video_id}.peaks.json").read_text(encoding="utf-8")
+    )
     assert peaks["snippet_start"] == pytest.approx(0.0)  # 4.0 - 5.0 margin, floored
     assert peaks["duration"] == pytest.approx(15.0, abs=0.5)  # window end
 
@@ -198,7 +202,7 @@ def test_missing_beep_uses_video_beep_window(tmp_path: Path):
     report = generate_beep_snippets(match_root)
     assert report.generated == 1 and not report.errors
     out = shooter_root / "beep_review"
-    peaks = json.loads((out / f"{video.video_id}.peaks.json").read_text())
+    peaks = json.loads((out / f"{video.video_id}.peaks.json").read_text(encoding="utf-8"))
     assert peaks["snippet_start"] == pytest.approx(5.0)
     assert peaks["beep_time"] is None
 
@@ -217,7 +221,7 @@ def test_missing_beep_no_window_uses_default(tmp_path: Path):
     report = generate_beep_snippets(match_root)
     assert report.generated == 1 and not report.errors
     out = shooter_root / "beep_review"
-    peaks = json.loads((out / f"{video.video_id}.peaks.json").read_text())
+    peaks = json.loads((out / f"{video.video_id}.peaks.json").read_text(encoding="utf-8"))
     assert peaks["snippet_start"] == pytest.approx(0.0)
 
 

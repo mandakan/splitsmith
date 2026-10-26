@@ -215,7 +215,7 @@ class JobJournal:
         self._locks_dir = path.with_name(path.name + ".locks")
         self._locks_dir.mkdir(parents=True, exist_ok=True)
         self._owner_token = uuid.uuid4().hex
-        self._owner_fh = (self._locks_dir / f"{self._owner_token}.lock").open("w")
+        self._owner_fh = (self._locks_dir / f"{self._owner_token}.lock").open("w", encoding="utf-8")
         if not try_lock(self._owner_fh):  # pragma: no cover - unique name; environmental only
             logger.warning("could not lock job-journal owner file; sibling servers may resume our jobs")
 
@@ -329,7 +329,7 @@ class JobJournal:
         """
         lock_path = self._locks_dir / f"{token}.lock"
         try:
-            fh = lock_path.open("r+")
+            fh = lock_path.open("r+", encoding="utf-8")
         except OSError:
             return False
         with fh:

@@ -419,7 +419,7 @@ def test_execute_merge_copy_creates_full_layout(tmp_path: Path):
     _make_legacy(tmp_path / "martin", name="VADS", competitor="Martin Engström")
     # Seed some user data to confirm copy.
     (tmp_path / "anton" / "raw" / "fake.mp4").write_bytes(b"raw-anton")
-    (tmp_path / "anton" / "audit" / "stage1.json").write_text('{"shots": []}')
+    (tmp_path / "anton" / "audit" / "stage1.json").write_text('{"shots": []}', encoding="utf-8")
     (tmp_path / "martin" / "raw" / "fake.mp4").write_bytes(b"raw-martin")
 
     out = tmp_path / "merged"
@@ -442,7 +442,7 @@ def test_execute_merge_copy_creates_full_layout(tmp_path: Path):
         assert (sroot / SHOOTER_FILE).is_file(), slug
         assert (sroot / "project.json").is_file(), slug
         assert (sroot / "raw").is_dir(), slug
-        legacy = json.loads((sroot / "project.json").read_text())
+        legacy = json.loads((sroot / "project.json").read_text(encoding="utf-8"))
         assert legacy["scoreboard_match_id"] is None
         assert legacy["scoreboard_content_type"] is None
         assert legacy["match_date"] is None
@@ -450,7 +450,9 @@ def test_execute_merge_copy_creates_full_layout(tmp_path: Path):
     # User data carried across.
     raw_file = out / SHOOTERS_DIR / anton_slug / "raw" / "fake.mp4"
     assert raw_file.read_bytes() == b"raw-anton"
-    assert (out / SHOOTERS_DIR / anton_slug / "audit" / "stage1.json").read_text() == '{"shots": []}'
+    assert (out / SHOOTERS_DIR / anton_slug / "audit" / "stage1.json").read_text(
+        encoding="utf-8"
+    ) == '{"shots": []}'
 
     # Sources untouched (copy mode).
     assert (tmp_path / "anton" / "raw" / "fake.mp4").exists()
@@ -502,7 +504,7 @@ def test_execute_merge_shooter_json_has_no_match_fields(tmp_path: Path):
     execute_merge(plan, move=False)
 
     anton_slug = next(m.slug for m in plan.shooter_moves if m.source_root == tmp_path / "anton")
-    shooter_json = json.loads((out / SHOOTERS_DIR / anton_slug / SHOOTER_FILE).read_text())
+    shooter_json = json.loads((out / SHOOTERS_DIR / anton_slug / SHOOTER_FILE).read_text(encoding="utf-8"))
     for forbidden in ("name", "scoreboard_match_id", "scoreboard_content_type", "match_date"):
         # ``name`` IS a Shooter field (the human-readable shooter name), so
         # only the *match*-flavored fields are forbidden. The shooter's own
@@ -566,7 +568,7 @@ def test_match_id_persists_across_reload(tmp_path: Path):
     reloaded = Match.load(tmp_path / "match")
     assert reloaded.match_id == minted
     # Frozen on disk too.
-    on_disk = json.loads((tmp_path / "match" / MATCH_FILE).read_text())
+    on_disk = json.loads((tmp_path / "match" / MATCH_FILE).read_text(encoding="utf-8"))
     assert on_disk["match_id"] == minted
     assert on_disk["schema_version"] == MATCH_SCHEMA_VERSION
 
@@ -585,7 +587,7 @@ def test_load_migrates_pre_v4_match_in_place(tmp_path: Path):
         "shooters": [],
         "stages": [],
     }
-    (root / MATCH_FILE).write_text(json.dumps(legacy_payload))
+    (root / MATCH_FILE).write_text(json.dumps(legacy_payload), encoding="utf-8")
 
     loaded = Match.load(root)
     assert loaded.match_id is not None
@@ -593,7 +595,7 @@ def test_load_migrates_pre_v4_match_in_place(tmp_path: Path):
     second = Match.load(root)
     assert second.match_id == loaded.match_id
     # The on-disk file now has it too.
-    on_disk = json.loads((root / MATCH_FILE).read_text())
+    on_disk = json.loads((root / MATCH_FILE).read_text(encoding="utf-8"))
     assert on_disk["match_id"] == loaded.match_id
 
 
@@ -667,7 +669,7 @@ def test_load_shooter_without_project_json_reads_the_snapshot(tmp_path: Path):
 
 def test_load_shooter_with_an_unreadable_project_json_falls_back(tmp_path: Path):
     match_root, slug = _merged_then_edited(tmp_path)
-    (Match.shooter_root(match_root, slug) / "project.json").write_text("{not json")
+    (Match.shooter_root(match_root, slug) / "project.json").write_text("{not json", encoding="utf-8")
 
     shooter = Match.load(match_root).load_shooter(match_root, slug)
 

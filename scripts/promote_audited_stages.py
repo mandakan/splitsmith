@@ -42,7 +42,7 @@ def _known_sources(fixtures_dir: Path) -> set[str]:
     for f in fx_module.all_fixtures(fixtures_dir):
         if f.superseded_by or f.stem in fx_module.WRONG_CLIP_FIXTURES:
             continue  # replaced in the corpus, or cut from footage it does not label
-        data = json.loads((fixtures_dir / f"{f.stem}.json").read_text())
+        data = json.loads((fixtures_dir / f"{f.stem}.json").read_text(encoding="utf-8"))
         for key in ("source_video", "source"):
             if data.get(key):
                 names.add(Path(data[key]).name)
@@ -216,14 +216,14 @@ def main() -> int:
                 )
                 if flagged:
                     path = args.fixtures / f"{slug}.json"
-                    data = json.loads(path.read_text())
+                    data = json.loads(path.read_text(encoding="utf-8"))
                     data["review"] = {
                         "status": REVIEW_NEEDED,
                         "derived_from": None,
                         "reviewed_at": None,
                         "note": args.note,
                     }
-                    path.write_text(json.dumps(data, indent=2, ensure_ascii=True) + "\n")
+                    path.write_text(json.dumps(data, indent=2, ensure_ascii=True) + "\n", encoding="utf-8")
     print(f"{n_ok} stage(s) {'promoted' if args.write else 'to promote'}")
     return 0
 

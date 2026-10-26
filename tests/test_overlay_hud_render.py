@@ -456,6 +456,7 @@ def test_plate_renders_a_stage_into_a_mov_the_trim_s_length(tmp_path: Path) -> N
         ],
         capture_output=True,
         text=True,
+        encoding="utf-8",
         check=True,
     ).stdout.strip()
     assert int(frames) == 90

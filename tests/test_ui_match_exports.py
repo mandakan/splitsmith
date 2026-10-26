@@ -843,7 +843,9 @@ def test_an_xfade_kind_on_the_fcpxml_path_is_rendered_as_zoom_with_an_anomaly(tm
         probe=_stub_probe,
     )
     assert "transition dissolve is not an FCP effect; the FCPXML uses zoom" in result.anomalies
-    assert "Blurs" in result.fcpxml_path.read_text() or "Zoom" in result.fcpxml_path.read_text()
+    assert "Blurs" in result.fcpxml_path.read_text(
+        encoding="utf-8"
+    ) or "Zoom" in result.fcpxml_path.read_text(encoding="utf-8")
 
 
 def test_a_sting_on_the_fcpxml_path_is_rendered_as_zoom_with_an_anomaly(tmp_path: Path) -> None:
@@ -1157,12 +1159,12 @@ def test_summary_hold_carries_the_stages_confirmed_reloads(
     row draws; an auto proposal never reaches it (spec 2026-10-08, part 2)."""
     captured = _capture_mp4(monkeypatch)
     stage = _one_stage_input(tmp_path)
-    doc = json.loads(stage.audit_path.read_text())
+    doc = json.loads(stage.audit_path.read_text(encoding="utf-8"))
     doc["events"] = [
         {"id": "evt-1", "kind": "reload", "start": 1.0, "end": 2.25, "source": "manual"},
         {"id": "evt-2", "kind": "reload", "start": 3.0, "end": 4.0, "source": "auto"},
     ]
-    stage.audit_path.write_text(json.dumps(doc))
+    stage.audit_path.write_text(json.dumps(doc), encoding="utf-8")
     match_exports_mod.export_match(
         stages=[stage],
         request=_card_request(summary_hold_seconds=3.0),
@@ -1182,9 +1184,9 @@ def test_summary_styles_reach_the_composition_with_the_stages_extras(
     read; the match summary its own style."""
     captured = _capture_mp4(monkeypatch)
     stage = _one_stage_input(tmp_path)
-    doc = json.loads(stage.audit_path.read_text())
+    doc = json.loads(stage.audit_path.read_text(encoding="utf-8"))
     doc["events"] = [{"id": "evt-1", "kind": "movement", "start": 0.1, "end": 0.4, "source": "manual"}]
-    stage.audit_path.write_text(json.dumps(doc))
+    stage.audit_path.write_text(json.dumps(doc), encoding="utf-8")
     match_exports_mod.export_match(
         stages=[stage],
         request=_card_request(
@@ -1476,12 +1478,12 @@ def test_without_the_breakdown_the_summaries_read_no_region(
     Draw is the first shot's time from the beep either way (#1528)."""
     captured = _capture_mp4(monkeypatch)
     stage = _one_stage_input(tmp_path)
-    doc = json.loads(stage.audit_path.read_text())
+    doc = json.loads(stage.audit_path.read_text(encoding="utf-8"))
     doc["events"] = [
         {"id": "evt-1", "kind": "reload", "start": 1.0, "end": 2.25, "source": "manual"},
         {"id": "evt-2", "kind": "draw", "start": 0.1, "end": 0.2, "source": "manual"},
     ]
-    stage.audit_path.write_text(json.dumps(doc))
+    stage.audit_path.write_text(json.dumps(doc), encoding="utf-8")
 
     def run(breakdown: bool):  # noqa: ANN202
         match_exports_mod.export_match(

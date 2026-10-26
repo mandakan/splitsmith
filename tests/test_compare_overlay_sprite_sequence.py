@@ -63,7 +63,7 @@ def test_concat_list_repeats_the_final_entry(tmp_path):
     panels = [_panel("ann", 0, 0)]
     sequence = _sequence([_state(panels, 0.0, 2.0)], tmp_path)
     list_path = overlay_sprites.write_concat_list(sequence, tmp_path / "sprites.txt", frame_rate=(30, 1))
-    lines = [ln for ln in list_path.read_text().splitlines() if ln.strip()]
+    lines = [ln for ln in list_path.read_text(encoding="utf-8").splitlines() if ln.strip()]
     assert lines[0].startswith("file ")
     assert lines[1] == "option framerate 30/1"
     assert lines[2] == "duration 2"
@@ -174,7 +174,7 @@ def test_a_shot_in_the_last_frame_still_reaches_the_concat_list(tmp_path):
         tmp_path,
     )
     list_path = overlay_sprites.write_concat_list(sequence, tmp_path / "s.txt", frame_rate=(30, 1))
-    files = [ln for ln in list_path.read_text().splitlines() if ln.startswith("file ")]
+    files = [ln for ln in list_path.read_text(encoding="utf-8").splitlines() if ln.startswith("file ")]
     assert (
         files[-1] == f"file '{two_shots[0][0].resolve()}'"
     ), "the last shot's sprite is not the one left on screen at the end of the segment"
@@ -193,7 +193,7 @@ def test_a_collapsed_state_is_dropped_from_the_list_not_written_as_zero(tmp_path
         tmp_path,
     )
     list_path = overlay_sprites.write_concat_list(sequence, tmp_path / "s.txt", frame_rate=(30, 1))
-    text = list_path.read_text()
+    text = list_path.read_text(encoding="utf-8")
     assert "duration 0\n" not in text
     durations = [ln.split()[1] for ln in text.splitlines() if ln.startswith("duration")]
     assert len(durations) == 2
@@ -216,7 +216,7 @@ def test_a_collapsed_state_never_loses_a_shot(tmp_path):
         tmp_path,
     )
     list_path = overlay_sprites.write_concat_list(sequence, tmp_path / "s.txt", frame_rate=(30, 1))
-    files = [ln for ln in list_path.read_text().splitlines() if ln.startswith("file ")]
+    files = [ln for ln in list_path.read_text(encoding="utf-8").splitlines() if ln.startswith("file ")]
     # last real entry + the trailing repeat, both the 2-shot sprite
     assert files[-1] == f"file '{two_shots[0][0].resolve()}'"
     assert files[-2] == files[-1]
@@ -234,7 +234,7 @@ def test_the_list_pins_the_demuxer_framerate_on_every_entry(tmp_path):
         tmp_path,
     )
     list_path = overlay_sprites.write_concat_list(sequence, tmp_path / "s.txt", frame_rate=(30000, 1001))
-    lines = [ln for ln in list_path.read_text().splitlines() if ln.strip()]
+    lines = [ln for ln in list_path.read_text(encoding="utf-8").splitlines() if ln.strip()]
     files = [i for i, ln in enumerate(lines) if ln.startswith("file ")]
     assert files, "no entries written"
     for index in files:

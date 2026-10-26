@@ -331,6 +331,7 @@ def test_render_overlay_writes_real_prores_4444_alpha(tmp_path: Path) -> None:
         check=True,
         capture_output=True,
         text=True,
+        encoding="utf-8",
     )
     info = json.loads(proc.stdout)["streams"][0]
     assert info["codec_name"] == "prores"

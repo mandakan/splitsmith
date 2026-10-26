@@ -107,6 +107,7 @@ def fish_link(gcloud: str, email: str, attempts: int = 8) -> str | None:
             ],
             capture_output=True,
             text=True,
+            encoding="utf-8",
             timeout=60,
             check=False,
         )

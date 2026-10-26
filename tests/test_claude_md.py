@@ -13,13 +13,13 @@ _spec.loader.exec_module(check)
 
 
 def _repo(tmp_path: Path, root: str = "# Root\n", rules: dict[str, str] | None = None) -> Path:
-    (tmp_path / "CLAUDE.md").write_text(root)
+    (tmp_path / "CLAUDE.md").write_text(root, encoding="utf-8")
     rules_dir = tmp_path / ".claude" / "rules"
     rules_dir.mkdir(parents=True)
     for name, text in (rules or {}).items():
-        (rules_dir / name).write_text(text)
+        (rules_dir / name).write_text(text, encoding="utf-8")
     (tmp_path / "src").mkdir()
-    (tmp_path / "src" / "thing.py").write_text("")
+    (tmp_path / "src" / "thing.py").write_text("", encoding="utf-8")
     return tmp_path
 
 
@@ -59,7 +59,7 @@ def test_a_reference_to_a_missing_rule_file_fails(tmp_path: Path) -> None:
 def test_a_reference_into_docs_passes(tmp_path: Path) -> None:
     repo = _repo(tmp_path, root="See `cameras.md`.\n")
     (repo / "docs").mkdir()
-    (repo / "docs" / "cameras.md").write_text("")
+    (repo / "docs" / "cameras.md").write_text("", encoding="utf-8")
     assert check.problems(repo) == []
 
 

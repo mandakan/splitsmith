@@ -50,7 +50,7 @@ def _source(path: Path, *, seconds: float, color: str, fps: str = "30") -> Path:
         "-f", "lavfi", "-t", str(seconds), "-i", "sine=frequency=440:sample_rate=48000",
         "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", "-shortest", str(path),
     ]  # fmt: skip
-    done = subprocess.run(cmd, capture_output=True, text=True)
+    done = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8")
     assert done.returncode == 0, done.stderr[-2000:]
     return path
 
@@ -61,6 +61,7 @@ def _stream_seconds(path: Path, spec: str) -> float:
         [FFMPEG, "-hide_banner", "-i", str(path), "-map", spec, "-f", "null", "-"],
         capture_output=True,
         text=True,
+        encoding="utf-8",
     )
     assert done.returncode == 0, done.stderr[-2000:]
     stamps = re.findall(r"time=(\d+):(\d+):(\d+\.\d+)", done.stderr)
@@ -119,14 +120,16 @@ def _render(
     )
     out = tmp_path / name
     cmd = mp4_grid.build_stage_command(plan, canvas=canvas, output_path=out, ffmpeg_binary=FFMPEG)
-    done = subprocess.run(list(cmd), capture_output=True, text=True)
+    done = subprocess.run(list(cmd), capture_output=True, text=True, encoding="utf-8")
     assert done.returncode == 0, done.stderr[-3000:]
     return out
 
 
 def _video_size(path: Path) -> tuple[int, int]:
     """``(width, height)`` of the file's video stream, per ffmpeg itself."""
-    done = subprocess.run([FFMPEG, "-hide_banner", "-i", str(path)], capture_output=True, text=True)
+    done = subprocess.run(
+        [FFMPEG, "-hide_banner", "-i", str(path)], capture_output=True, text=True, encoding="utf-8"
+    )
     found = re.search(r"Video:.*?, (\d+)x(\d+)", done.stderr)
     assert found, done.stderr[-2000:]
     return int(found.group(1)), int(found.group(2))
@@ -209,7 +212,7 @@ def _red_then_green(path: Path) -> Path:
         "-filter_complex", "[0:v][1:v]concat=n=2:v=1:a=0[v]", "-map", "[v]", "-map", "2:a",
         "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", str(path),
     ]  # fmt: skip
-    done = subprocess.run(cmd, capture_output=True, text=True)
+    done = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8")
     assert done.returncode == 0, done.stderr[-2000:]
     return path
 
@@ -343,7 +346,7 @@ def _tone_source(path: Path, *, frequency: int, seconds: float = 4.0) -> Path:
         f"sine=frequency={frequency}:sample_rate=48000,volume=0.5",
         "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "pcm_s16le", "-shortest", str(path),
     ]  # fmt: skip
-    done = subprocess.run(cmd, capture_output=True, text=True)
+    done = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8")
     assert done.returncode == 0, done.stderr[-2000:]
     return path
 
@@ -366,6 +369,7 @@ def _mean_volume_db(path: Path, slot: int, *, bandpass: int | None = None) -> fl
         ],  # fmt: skip
         capture_output=True,
         text=True,
+        encoding="utf-8",
     )
     assert done.returncode == 0, done.stderr[-2000:]
     found = re.search(r"mean_volume: (-?[\d.]+) dB", done.stderr)
@@ -381,6 +385,7 @@ def _max_volume_db(path: Path, slot: int) -> float:
         ],  # fmt: skip
         capture_output=True,
         text=True,
+        encoding="utf-8",
     )
     assert done.returncode == 0, done.stderr[-2000:]
     found = re.search(r"max_volume: (-?[\d.]+) dB", done.stderr)
@@ -875,7 +880,9 @@ def test_an_empty_plan_set_raises_instead_of_indexing_off_the_end(tmp_path: Path
 
 def _audio_streams(path: Path) -> list[tuple[str, bool]]:
     """``(handler_name, is_default)`` per audio track, in container order."""
-    done = subprocess.run([FFMPEG, "-hide_banner", "-i", str(path)], capture_output=True, text=True)
+    done = subprocess.run(
+        [FFMPEG, "-hide_banner", "-i", str(path)], capture_output=True, text=True, encoding="utf-8"
+    )
     streams: list[tuple[str, bool]] = []
     for chunk in done.stderr.split("Stream #0:")[1:]:
         head = chunk.splitlines()[0]
@@ -1101,6 +1108,7 @@ def _declared_seconds(path: Path, stream: str) -> float:
         ],  # fmt: skip
         capture_output=True,
         text=True,
+        encoding="utf-8",
     )
     assert done.returncode == 0, done.stderr[-2000:]
     return float(done.stdout.strip())
@@ -1245,7 +1253,7 @@ def _marked_source(
           if gop_frames else []),
         "-c:a", "aac", "-ac", "2", str(path),
     ]  # fmt: skip
-    done = subprocess.run(cmd, capture_output=True, text=True)
+    done = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8")
     assert done.returncode == 0, done.stderr[-2000:]
     raw_video.unlink()
     raw_audio.unlink()
@@ -1362,6 +1370,7 @@ def test_a_seeked_tile_keeps_its_sound_on_its_picture(tmp_path: Path):
             ],  # fmt: skip
             capture_output=True,
             text=True,
+            encoding="utf-8",
         )
         assert done.returncode == 0, done.stderr[-2000:]
         shooters.append(
@@ -1559,7 +1568,9 @@ def test_half_a_frame_rate_is_rejected_rather_than_silently_derived():
 
 def _video_fps(path: Path) -> float:
     """The rate ffmpeg reports for the file's video stream."""
-    done = subprocess.run([FFMPEG, "-hide_banner", "-i", str(path)], capture_output=True, text=True)
+    done = subprocess.run(
+        [FFMPEG, "-hide_banner", "-i", str(path)], capture_output=True, text=True, encoding="utf-8"
+    )
     found = re.search(r"Video:.*?, (\d+(?:\.\d+)?) fps", done.stderr)
     assert found, done.stderr[-2000:]
     return float(found.group(1))
@@ -1682,7 +1693,10 @@ def test_a_transition_renders_edges_and_a_boundary_on_their_own_runner_and_trims
         "edge-stage2-head.mov",
         "boundary-000.mov",
     ]
-    names = [line.rsplit("/", 1)[-1].rstrip("'") for line in (work / "concat.txt").read_text().splitlines()]
+    names = [
+        line.rsplit("/", 1)[-1].rstrip("'")
+        for line in (work / "concat.txt").read_text(encoding="utf-8").splitlines()
+    ]
     assert names == ["stage1.mov", "boundary-000.mov", "stage2.mov"]
     stage_1, stage_2 = calls[0], calls[1]
     trim = "/trims/s.mp4"
@@ -1727,7 +1741,10 @@ def test_a_failed_edge_leaves_both_neighbours_untrimmed_and_reports_a_cut(tmp_pa
     )
     assert [c[-1].rsplit("/", 1)[-1] for c in edges] == ["edge-stage1-tail.mov"]
     assert [c[-1].rsplit("/", 1)[-1] for c in calls] == ["stage1.mov", "stage2.mov", "grid.mp4"]
-    names = [line.rsplit("/", 1)[-1].rstrip("'") for line in (work / "concat.txt").read_text().splitlines()]
+    names = [
+        line.rsplit("/", 1)[-1].rstrip("'")
+        for line in (work / "concat.txt").read_text(encoding="utf-8").splitlines()
+    ]
     assert names == ["stage1.mov", "stage2.mov"]
     assert _video_ss_t(calls[0], "/trims/s.mp4") == ("1", "11.5")
     assert _video_ss_t(calls[1], "/trims/s.mp4") == ("1", "11.5")
@@ -1787,7 +1804,10 @@ def test_a_stage_that_fails_after_a_boundary_keeps_elapsed_and_the_chapters_hone
             composition.Transition(from_stage_index=0, to_stage_index=1, kind="fade", duration_seconds=1.0),
         ),
     )
-    names = [line.rsplit("/", 1)[-1].rstrip("'") for line in (work / "concat.txt").read_text().splitlines()]
+    names = [
+        line.rsplit("/", 1)[-1].rstrip("'")
+        for line in (work / "concat.txt").read_text(encoding="utf-8").splitlines()
+    ]
     assert names == ["stage1.mov", "stage3.mov"]
     # Stage 1 was encoded 11.0 s long (its tail went to the dropped boundary).
     assert [(c.start_seconds, c.title) for c in result.chapters] == [(0.0, "Stage 1"), (11.0, "Stage 3")]
@@ -1850,7 +1870,10 @@ def test_a_sting_boundary_takes_the_clip_on_the_boundary_runner_only(tmp_path: P
     assert "start_mode=add" not in graph
     assert fake.frames_rendered == 30
     assert not any(token.endswith("_sting.mov") for cmd in (*calls, edges[0], edges[1]) for token in cmd)
-    names = [line.rsplit("/", 1)[-1].rstrip("'") for line in (work / "concat.txt").read_text().splitlines()]
+    names = [
+        line.rsplit("/", 1)[-1].rstrip("'")
+        for line in (work / "concat.txt").read_text(encoding="utf-8").splitlines()
+    ]
     assert names == ["stage1.mov", "boundary-000.mov", "stage2.mov"]
 
 

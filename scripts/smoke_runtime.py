@@ -76,7 +76,7 @@ def _run_fixture(
     cfg: EnsembleConfig,
     tol_ms: float,
 ) -> dict[str, object]:
-    truth = json.loads((FIXTURES_DIR / f"{fix.stem}.json").read_text())
+    truth = json.loads((FIXTURES_DIR / f"{fix.stem}.json").read_text(encoding="utf-8"))
     audio, sr = load_audio(FIXTURES_DIR / f"{fix.stem}.wav")
     truth_times = [float(s.get("time", 0.0)) for s in truth.get("shots", [])]
     expected_rounds = (truth.get("stage_rounds") or {}).get("expected")

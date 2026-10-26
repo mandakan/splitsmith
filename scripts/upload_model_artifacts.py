@@ -106,7 +106,7 @@ def _wrangler_put(
         print(f"  DRY-RUN: would run {' '.join(cmd)}")
         return
     print(f"  $ {' '.join(cmd)}")
-    result = subprocess.run(cmd, capture_output=True, text=True, check=False)
+    result = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", check=False)
     if result.returncode != 0:
         sys.stderr.write(result.stdout)
         sys.stderr.write(result.stderr)

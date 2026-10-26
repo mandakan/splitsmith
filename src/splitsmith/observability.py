@@ -224,7 +224,11 @@ def container_limits(cgroup_root: Path = _CGROUP_ROOT) -> dict[str, Any]:
     except (KeyError, ValueError):
         pass
     if vcpu is None:
-        v2 = (cgroup_root / "cpu.max").read_text().split() if (cgroup_root / "cpu.max").is_file() else []
+        v2 = (
+            (cgroup_root / "cpu.max").read_text(encoding="utf-8").split()
+            if (cgroup_root / "cpu.max").is_file()
+            else []
+        )
         if len(v2) == 2 and v2[0] != "max":
             vcpu = int(v2[0]) / int(v2[1])
         else:

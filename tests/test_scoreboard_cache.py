@@ -44,7 +44,7 @@ def http_client() -> SsiHttpClient:
 
 
 def _load_match_payload(*, scoring_completed: float) -> dict:
-    payload = json.loads(MATCH_FIXTURE.read_text())
+    payload = json.loads(MATCH_FIXTURE.read_text(encoding="utf-8"))
     payload["scoring_completed"] = scoring_completed
     return payload
 
@@ -174,7 +174,7 @@ def test_corrupt_cache_file_falls_back_to_inner(tmp_path: Path, http_client: Ssi
     # Pre-seed a corrupt file at the path the cache would write.
     corrupt = cache._match_cache_path(22, 27190)  # noqa: SLF001 -- test-only inspection
     corrupt.parent.mkdir(parents=True, exist_ok=True)
-    corrupt.write_text("not json {")
+    corrupt.write_text("not json {", encoding="utf-8")
 
     payload = _load_match_payload(scoring_completed=100.0)
     with respx.mock() as mock:
@@ -182,5 +182,5 @@ def test_corrupt_cache_file_falls_back_to_inner(tmp_path: Path, http_client: Ssi
         cache.get_match(22, 27190)
 
     # After the fetch, the corrupt file should be replaced with a valid envelope.
-    data = json.loads(corrupt.read_text())
+    data = json.loads(corrupt.read_text(encoding="utf-8"))
     assert data["version"] == 1

@@ -76,6 +76,7 @@ def validate_against_dtd(xml_path: Path, *, dtd: Path) -> None:
         ["xmllint", "--noout", "--dtdvalid", str(dtd), str(xml_path)],
         capture_output=True,
         text=True,
+        encoding="utf-8",
     )
     if proc.returncode != 0:
         raise AssertionError(

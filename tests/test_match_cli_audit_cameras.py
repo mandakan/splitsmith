@@ -61,7 +61,7 @@ def test_lists_stamped_and_suspect_audits_and_writes_nothing(tmp_path: Path) -> 
             4: {"beep_time": 5.0, "shots": []},  # nothing to strand
         },
     )
-    before = {p.name: p.read_text() for p in root.rglob("stage*.json")}
+    before = {p.name: p.read_text(encoding="utf-8") for p in root.rglob("stage*.json")}
 
     result = runner.invoke(app, ["match", "audit-cameras", str(root)])
 
@@ -71,4 +71,4 @@ def test_lists_stamped_and_suspect_audits_and_writes_nothing(tmp_path: Path) -> 
     assert "me stage 2: on another camera, audit on PHONE2.MOV, primary HEAD2.mp4" in out
     assert "stage 3" not in out and "stage 4" not in out
     assert "2 audit(s) to check" in out
-    assert {p.name: p.read_text() for p in root.rglob("stage*.json")} == before
+    assert {p.name: p.read_text(encoding="utf-8") for p in root.rglob("stage*.json")} == before

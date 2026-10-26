@@ -221,7 +221,7 @@ def build_signals(
             fixtures_skipped.append((fix, "missing_clap_or_pann_cache"))
             continue
 
-        truth = json.loads(truth_path.read_text())
+        truth = json.loads(truth_path.read_text(encoding="utf-8"))
         camera_block = truth.get("camera") or {}
         cam_class = camera_class_from_mount(camera_block.get("mount"))
         audio, sr = load_audio(wav_path)
@@ -379,7 +379,7 @@ def main() -> None:
     table, sidecar = build_signals(fixtures, args.tolerance_ms, skip_voter_e=args.skip_voter_e)
     pq.write_table(table, args.out)
     sidecar_path = args.out.with_suffix(".meta.json")
-    sidecar_path.write_text(json.dumps(sidecar, indent=2))
+    sidecar_path.write_text(json.dumps(sidecar, indent=2), encoding="utf-8")
 
     print(
         f"wrote {args.out}  ({sidecar['n_rows']} rows, "

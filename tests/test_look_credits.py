@@ -18,11 +18,11 @@ def _user_look(tmp_path: Path, *, credits: str | None, text: str | None = None) 
     ``credits`` set in its manifest and ``text`` in that file."""
     root = tmp_path / "looks" / "mine"
     shutil.copytree(looks.shipped_looks_dir() / "splitsmith", root)
-    manifest = json.loads((root / "look.json").read_text())
+    manifest = json.loads((root / "look.json").read_text(encoding="utf-8"))
     manifest["name"] = "mine"
     if credits is not None:
         manifest["credits"] = credits
-    (root / "look.json").write_text(json.dumps(manifest))
+    (root / "look.json").write_text(json.dumps(manifest), encoding="utf-8")
     if text is not None and credits is not None:
         (root / credits).write_text(text, encoding="utf-8")
     return root
@@ -50,7 +50,7 @@ def test_a_look_without_credits_has_none(user_looks: Path) -> None:
 def test_credits_outside_the_look_or_missing_are_none(user_looks: Path, name: str) -> None:
     (user_looks / "looks" / "outside.txt").parent.mkdir(parents=True, exist_ok=True)
     _user_look(user_looks, credits=name)
-    (user_looks / "looks" / "outside.txt").write_text("secret")
+    (user_looks / "looks" / "outside.txt").write_text("secret", encoding="utf-8")
     assert look_credits(looks.load_look("mine")) is None
 
 
@@ -82,12 +82,15 @@ def test_an_export_drawn_with_the_look_carries_its_credits(
     args = ["match", "export", str(root), "--shooter", "me", "--format", "mp4", "-o", str(out)]
     result = CliRunner().invoke(app, [*args, "--youtube-sidecar", "--theme", "mine"])
     assert result.exit_code == 0, result.output
-    description = json.loads(out.with_name("lt-youtube.json").read_text())["description"]
+    description = json.loads(out.with_name("lt-youtube.json").read_text(encoding="utf-8"))["description"]
     assert description.endswith("\n\nArt from Somewhere, BSD licence.")
 
     plain = CliRunner().invoke(app, [*args, "--youtube-sidecar"])
     assert plain.exit_code == 0, plain.output
-    assert "Somewhere" not in json.loads(out.with_name("lt-youtube.json").read_text())["description"]
+    assert (
+        "Somewhere"
+        not in json.loads(out.with_name("lt-youtube.json").read_text(encoding="utf-8"))["description"]
+    )
 
 
 def test_the_grid_sidecar_closes_with_the_credits_too() -> None:

@@ -52,7 +52,12 @@ def _run(*cmd: str, cwd: Path = ROOT) -> None:
 
 def _branch() -> str:
     out = subprocess.run(
-        ["git", "rev-parse", "--abbrev-ref", "HEAD"], cwd=ROOT, capture_output=True, text=True, check=True
+        ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        check=True,
     )
     return out.stdout.strip()
 

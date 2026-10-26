@@ -56,7 +56,7 @@ def _load_state() -> dict:
     if not path.is_file():
         return {}
     try:
-        return json.loads(path.read_text())
+        return json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         logger.warning("ignoring unreadable state at %s", path, exc_info=True)
         return {}
@@ -65,7 +65,7 @@ def _load_state() -> dict:
 def _save_state(state: dict) -> None:
     path = _state_path()
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(state, indent=2, sort_keys=True))
+    path.write_text(json.dumps(state, indent=2, sort_keys=True), encoding="utf-8")
 
 
 def _install_hint(binary: str) -> str:

@@ -49,7 +49,9 @@ def test_cli_writes_the_file_and_exits_2_without_env(tmp_path: Path, monkeypatch
     target = tmp_path / "oauth.py"
     target.write_text(OAUTH.read_text(encoding="utf-8"), encoding="utf-8")
     env = {"PATH": "/usr/bin:/bin"}
-    r = subprocess.run([sys.executable, str(SCRIPT), str(target)], env=env, capture_output=True, text=True)
+    r = subprocess.run(
+        [sys.executable, str(SCRIPT), str(target)], env=env, capture_output=True, text=True, encoding="utf-8"
+    )
     assert r.returncode == 2 and "must both be set" in r.stderr
     env.update(
         {
@@ -57,7 +59,9 @@ def test_cli_writes_the_file_and_exits_2_without_env(tmp_path: Path, monkeypatch
             "SPLITSMITH_YOUTUBE_CLIENT_SECRET": "sec",
         }
     )
-    r = subprocess.run([sys.executable, str(SCRIPT), str(target)], env=env, capture_output=True, text=True)
+    r = subprocess.run(
+        [sys.executable, str(SCRIPT), str(target)], env=env, capture_output=True, text=True, encoding="utf-8"
+    )
     assert r.returncode == 0, r.stderr
     assert 'BUILTIN_CLIENT_SECRET = "sec"' in target.read_text(encoding="utf-8")
     assert "sec" not in r.stdout  # the secret never reaches the CI log

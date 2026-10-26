@@ -1155,7 +1155,7 @@ def test_cancel_endpoint_aborts_running_trim(tmp_path: Path, monkeypatch) -> Non
         # terminate() when /cancel arrives.
         started.set()
         try:
-            runner(["sleep", "30"], check=True, capture_output=True, text=True)
+            runner(["sleep", "30"], check=True, capture_output=True, text=True, encoding="utf-8")
         except JobCancelled:
             cancel_observed.set()
             raise
@@ -2209,7 +2209,7 @@ def test_shot_detect_endpoint_writes_stage_rounds_into_audit_json(tmp_path: Path
 
     assert captured.get("expected_rounds") == 12
 
-    audit = _json.loads((_shooter_root / "audit" / "stage1.json").read_text())
+    audit = _json.loads((_shooter_root / "audit" / "stage1.json").read_text(encoding="utf-8"))
     assert audit["stage_rounds"]["expected"] == 12
     assert audit["stage_rounds"]["paper_targets"] == 6
 

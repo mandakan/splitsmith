@@ -19,7 +19,7 @@ GO3S_FIXTURE = "stage-shots-hostfinalen-xi-2026-stage1-s97dcec94"
 
 def _stage(name: str, gain: float = 1.0, lowpass_hz: float | None = None):
     audio, sr = load_audio(FIXTURES / f"{name}.wav")
-    truth = json.loads((FIXTURES / f"{name}.json").read_text())
+    truth = json.loads((FIXTURES / f"{name}.json").read_text(encoding="utf-8"))
     shots = detect_shots(
         audio,
         sr,

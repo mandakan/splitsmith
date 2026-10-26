@@ -139,7 +139,7 @@ def _moments(shots_ms: tuple[int, ...], *, events: bool) -> tuple[Moment, ...]:
 
 
 def _run(cmd: list[str]) -> None:
-    done = subprocess.run(cmd, capture_output=True, text=True)
+    done = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8")
     if done.returncode != 0:
         raise SystemExit(f"command failed: {' '.join(cmd[:3])}...\n{done.stderr[-2000:]}")
 

@@ -78,7 +78,7 @@ def _resolve_audio_paths(name: str, *, full: bool) -> tuple[Path, Path, float, f
         with wave_open(str(wav_path), "rb") as w:
             duration = w.getnframes() / w.getframerate()
         return wav_path, cache_path, 0.0, duration
-    truth = json.loads((FIXTURES_DIR / f"{name}.json").read_text())
+    truth = json.loads((FIXTURES_DIR / f"{name}.json").read_text(encoding="utf-8"))
     return (
         FIXTURES_DIR / f"{name}.wav",
         CACHE_DIR / f"{name}_pann.npz",

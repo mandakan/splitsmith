@@ -71,7 +71,7 @@ def test_a_symlinked_logo_or_book_is_never_read(tmp_path: Path) -> None:
     (tmp_path / "files" / "logo-000000000000.png").symlink_to(secret)
     assert run(store.logo_file("logo-000000000000.png")) is None
     real = tmp_path / "real.json"
-    real.write_text('{"entries": [{"shooter_id": 1}]}')
+    real.write_text('{"entries": [{"shooter_id": 1}]}', encoding="utf-8")
     (tmp_path / "shooter_book.json").symlink_to(real)
     assert run(store.list()) == []
 
@@ -104,7 +104,7 @@ def test_snapshot_leaves_out_a_logo_that_is_gone(tmp_path: Path) -> None:
 
 def test_one_malformed_entry_does_not_lose_the_book(tmp_path: Path) -> None:
     (tmp_path / "shooter_book.json").write_text(
-        '{"entries": [{"shooter_id": 1, "identity": {"accent": "red"}}, {"shooter_id": 2}]}'
+        '{"entries": [{"shooter_id": 1, "identity": {"accent": "red"}}, {"shooter_id": 2}]}', encoding="utf-8"
     )
     assert [e.shooter_id for e in run(JsonShooterBookStore(tmp_path).list())] == [2]
 

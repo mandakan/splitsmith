@@ -42,7 +42,8 @@ def test_yaml_override(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     path.write_text(
         "access:\n  default_tier: sharing\n  tiers:\n"
         "    full: [sync, share, create_match, raw_upload, hosted_compute]\n"
-        "    sharing: [sync, share]\n    club: [sync, share, hosted_compute]\n"
+        "    sharing: [sync, share]\n    club: [sync, share, hosted_compute]\n",
+        encoding="utf-8",
     )
     monkeypatch.setenv("SPLITSMITH_CONFIG", str(path))
     cfg = access_config()
@@ -90,7 +91,8 @@ def test_env_default_tier_applies_on_top_of_yaml_tiers(
     path.write_text(
         "access:\n  default_tier: full\n  tiers:\n"
         "    full: [sync, share, create_match, raw_upload, hosted_compute]\n"
-        "    club: [sync, share, hosted_compute]\n"
+        "    club: [sync, share, hosted_compute]\n",
+        encoding="utf-8",
     )
     monkeypatch.setenv("SPLITSMITH_CONFIG", str(path))
     monkeypatch.setenv("SPLITSMITH_ACCESS_DEFAULT_TIER", "club")

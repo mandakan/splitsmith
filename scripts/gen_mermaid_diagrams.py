@@ -188,7 +188,7 @@ def render_all() -> str:
         "",
     ]
     for spec_name, html_name in SPECS:
-        spec = json.loads((ROOT / spec_name).read_text())
+        spec = json.loads((ROOT / spec_name).read_text(encoding="utf-8"))
         kind = spec["diagram_type"]
         out += [f"## {spec['meta']['title']}", ""]
         out += [f"Interactive: [`{html_name}`]({html_name}) (source: `{spec_name}`)", ""]
@@ -209,11 +209,11 @@ def main() -> int:
     args = parser.parse_args()
     rendered = render_all()
     if args.check:
-        if not OUT.exists() or OUT.read_text() != rendered:
+        if not OUT.exists() or OUT.read_text(encoding="utf-8") != rendered:
             print(f"{OUT} is stale; run scripts/gen_mermaid_diagrams.py", file=sys.stderr)
             return 1
         return 0
-    OUT.write_text(rendered)
+    OUT.write_text(rendered, encoding="utf-8")
     return 0
 
 

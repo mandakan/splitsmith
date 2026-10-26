@@ -27,7 +27,7 @@ FIXTURES = Path(__file__).parent / "fixtures" / "scoreboard"
 
 
 def _load(name: str) -> Any:
-    return json.loads((FIXTURES / name).read_text())
+    return json.loads((FIXTURES / name).read_text(encoding="utf-8"))
 
 
 def _filter_by_dump(src: Any, dumped: Any) -> Any:

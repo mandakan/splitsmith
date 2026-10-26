@@ -170,7 +170,7 @@ def _voter_a_floor(fixtures: list[str], tolerance_ms: float) -> float:
         p = FIXTURES_DIR / f"{fix}.json"
         if not p.exists():
             continue
-        truth = json.loads(p.read_text())
+        truth = json.loads(p.read_text(encoding="utf-8"))
         if not truth.get("shots"):
             continue
         audio, sr = load_audio(FIXTURES_DIR / f"{fix}.wav")
@@ -189,7 +189,7 @@ def _compute_universe(fixtures: list[str], tolerance_ms: float, voter_a_floor: f
     universe = []
     per_fixture = {}
     for fix in fixtures:
-        truth = json.loads((FIXTURES_DIR / f"{fix}.json").read_text())
+        truth = json.loads((FIXTURES_DIR / f"{fix}.json").read_text(encoding="utf-8"))
         audio, sr = load_audio(FIXTURES_DIR / f"{fix}.wav")
         cfg_recall = ShotDetectConfig(recall_fallback="cwt", min_confidence=0.0)
         cfg_safe = ShotDetectConfig(recall_fallback="cwt", min_confidence=voter_a_floor)

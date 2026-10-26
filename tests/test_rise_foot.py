@@ -12,7 +12,9 @@ import pytest
 
 from splitsmith.rise_foot import rise_foot
 
-FIXTURE = json.loads((Path(__file__).parent / "fixtures" / "rise_foot" / "cases.json").read_text())
+FIXTURE = json.loads(
+    (Path(__file__).parent / "fixtures" / "rise_foot" / "cases.json").read_text(encoding="utf-8")
+)
 
 
 def build(case: dict) -> list[float]:

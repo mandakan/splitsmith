@@ -45,7 +45,7 @@ def _make_audit_json(audit_dir: Path, stage_number: int, *, shots: int = 2) -> P
         ],
     }
     out = audit_dir / f"stage{stage_number}.json"
-    out.write_text(json.dumps(payload, indent=2))
+    out.write_text(json.dumps(payload, indent=2), encoding="utf-8")
     return out
 
 
@@ -74,7 +74,7 @@ def test_list_templates_user_dir_overrides_builtin(tmp_path: Path) -> None:
     """A user template with the same id wins on collision."""
     user_dir = tmp_path / "custom_templates"
     user_dir.mkdir()
-    (user_dir / "match-recap.yaml").write_text("schema_version: 1\nname: Custom Recap\n")
+    (user_dir / "match-recap.yaml").write_text("schema_version: 1\nname: Custom Recap\n", encoding="utf-8")
     rows = export_tools.list_templates_tool(user_dir=str(user_dir))
     recap = next(r for r in rows if r["id"] == "match-recap")
     assert recap["source"] == "user"
@@ -453,13 +453,13 @@ def _export_match_with_overlay_on_disk(
             short_head=short_head,
             breakdown=drawn_with_breakdown,
         )
-        (exports_dir / "stage1_k-vallen_overlay.json").write_text(json.dumps(settings))
+        (exports_dir / "stage1_k-vallen_overlay.json").write_text(json.dumps(settings), encoding="utf-8")
     if after_record is not None:
         after_record()
     if record == "stale":
-        doc = json.loads(audit_path.read_text())
+        doc = json.loads(audit_path.read_text(encoding="utf-8"))
         doc["shots"][0]["ms_after_beep"] = 640
-        audit_path.write_text(json.dumps(doc))
+        audit_path.write_text(json.dumps(doc), encoding="utf-8")
     fake_result = type(
         "FakeMatchResult",
         (),
@@ -605,7 +605,7 @@ def test_export_match_drops_a_legacy_overlay_over_an_unreadable_audit(tmp_path: 
     they must not agree into stitching the overlay."""
     root, _src = _seed_export_project(tmp_path)
     (root / "audit").mkdir(exist_ok=True)
-    (root / "audit" / "stage1.json").write_text("{not json")
+    (root / "audit" / "stage1.json").write_text("{not json", encoding="utf-8")
     exports_dir = root / "exports"
     exports_dir.mkdir(exist_ok=True)
     (exports_dir / "stage1_k-vallen_trimmed.mp4").write_bytes(b"FAKE_TRIMMED_MP4")

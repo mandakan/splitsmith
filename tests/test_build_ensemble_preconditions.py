@@ -42,7 +42,7 @@ def test_missing_feature_caches_raise_builderror_naming_the_fix(
     # in its preflight, before any detection, and says how to fix it.
     stem = "stage-shots-hfo-masters-2026-stage1-s0fe3d797"
     (fixtures_dir / f"{stem}.json").write_text(
-        json.dumps({"beep_time": 1.0, "stage_time_seconds": 10.0, "shots": [{"time": 2.0}]})
+        json.dumps({"beep_time": 1.0, "stage_time_seconds": 10.0, "shots": [{"time": 2.0}]}), encoding="utf-8"
     )
     (fixtures_dir / f"{stem}.wav").write_bytes(b"")
     monkeypatch.setattr(mod, "FIXTURES_DIR", fixtures_dir)
@@ -74,10 +74,11 @@ def test_model_artifacts_block_carries_across_rebuilds(tmp_path: Path) -> None:
     mod = _build_mod()
     cal_path = tmp_path / "ensemble_calibration.json"
     cal_path.write_text(
-        json.dumps({"voter_a_floor": 0.1, "model_artifacts": {"pann_cnn14": {"sha256": "x"}}})
+        json.dumps({"voter_a_floor": 0.1, "model_artifacts": {"pann_cnn14": {"sha256": "x"}}}),
+        encoding="utf-8",
     )
     assert mod._carry_model_artifacts(cal_path) == {"pann_cnn14": {"sha256": "x"}}
     # No previous file / no block -> nothing to carry.
     assert mod._carry_model_artifacts(tmp_path / "missing.json") is None
-    cal_path.write_text(json.dumps({"voter_a_floor": 0.1}))
+    cal_path.write_text(json.dumps({"voter_a_floor": 0.1}), encoding="utf-8")
     assert mod._carry_model_artifacts(cal_path) is None

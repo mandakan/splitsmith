@@ -302,7 +302,7 @@ def main() -> None:
             },
         }
         args.json.parent.mkdir(parents=True, exist_ok=True)
-        args.json.write_text(json.dumps(payload, indent=2, default=str))
+        args.json.write_text(json.dumps(payload, indent=2, default=str), encoding="utf-8")
         print(f"\nWrote {args.json}")
 
 

@@ -44,8 +44,8 @@ def _project(tmp_path: Path) -> tuple[MatchProject, Path]:
     audit.mkdir(parents=True)
     manual = {"id": "evt-1", "kind": "movement", "start": 1.3, "end": 1.4, "source": "manual"}
     auto = dict(manual, id="evt-2", source="auto")
-    (audit / "stage1.json").write_text(json.dumps(_audit([manual])))
-    (audit / "stage2.json").write_text(json.dumps(_audit([auto])))
+    (audit / "stage1.json").write_text(json.dumps(_audit([manual])), encoding="utf-8")
+    (audit / "stage2.json").write_text(json.dumps(_audit([auto])), encoding="utf-8")
     return project, root
 
 
@@ -176,7 +176,7 @@ def test_a_trim_cut_for_another_beep_is_not_used(tmp_path, monkeypatch):
     project, root = _project(tmp_path)
     a = project.stage(1).primary().video_id
     sidecar = project.trimmed_path(root) / f"stage1_cam_{a}_trimmed.params.json"
-    sidecar.write_text(json.dumps({"beep_time": 11.5, "pre_buffer_seconds": 5.0}))
+    sidecar.write_text(json.dumps({"beep_time": 11.5, "pre_buffer_seconds": 5.0}), encoding="utf-8")
     monkeypatch.setattr(MatchProject, "stage_statuses", lambda self, **kw: {1: "audited", 2: "audited"})
     inputs = load_reel_inputs(project, root, label="Anna", probe=lambda p: META)
     assert inputs.readiness[0].state == "trim_missing"

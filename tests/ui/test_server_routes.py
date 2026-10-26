@@ -613,7 +613,7 @@ def test_load_env_files_picks_up_user_config_env(tmp_path: Path, monkeypatch: py
 
     home = tmp_path / "user-home"
     home.mkdir()
-    (home / ".env").write_text("SPLITSMITH_TEST_TOKEN=from-user-config\n")
+    (home / ".env").write_text("SPLITSMITH_TEST_TOKEN=from-user-config\n", encoding="utf-8")
     monkeypatch.setenv(user_config.ENV_HOME, str(home))
     monkeypatch.delenv(user_config.ENV_DISABLE, raising=False)
     monkeypatch.delenv("SPLITSMITH_TEST_TOKEN", raising=False)
@@ -962,13 +962,13 @@ def test_dev_review_queue_counts_walk_decisions(tmp_path: Path, monkeypatch: pyt
 
     _seed_review_state_fixtures(tmp_path / "fixtures")
     path = tmp_path / "fixtures" / "stage-shots-hfo-masters-2026-stage1-s0fe3d797.json"
-    doc = json.loads(path.read_text())
+    doc = json.loads(path.read_text(encoding="utf-8"))
     doc["audit_events"] = [
         {"kind": "walk_decided", "payload": {"stop": "a"}},
         {"kind": "walk_decided", "payload": {"stop": "b"}},
         {"kind": "marker_moved", "payload": {}},
     ]
-    path.write_text(json.dumps(doc))
+    path.write_text(json.dumps(doc), encoding="utf-8")
     monkeypatch.setattr(lab_core, "DEFAULT_FIXTURES_ROOT", tmp_path / "fixtures")
     client = _MatchClient(_match_create_app(project_root=tmp_path / "match", project_name="x"))
     pending = {i["slug"]: i for i in client.get("/api/dev/review-queue").json()["pending"]}
@@ -990,7 +990,7 @@ def test_dev_review_queue_puts_doubtful_shot_times_first(
         "stage-shots-hfo-masters-2026-stage2-s97dcec94-go3s",
     ):
         (fixtures / f"{slug}.json").write_text(
-            json.dumps({"anchor": {"fixture_slug": "a"}, "shots": [{"time": 5.5}]})
+            json.dumps({"anchor": {"fixture_slug": "a"}, "shots": [{"time": 5.5}]}), encoding="utf-8"
         )
         (fixtures / f"{slug}.wav").write_bytes(b"")
     (tmp_path / "build").mkdir()
@@ -1011,7 +1011,8 @@ def test_dev_review_queue_puts_doubtful_shot_times_first(
                     },
                 ],
             }
-        )
+        ),
+        encoding="utf-8",
     )
     monkeypatch.setattr(lab_core, "DEFAULT_FIXTURES_ROOT", fixtures)
     client = _MatchClient(_match_create_app(project_root=tmp_path / "match", project_name="x"))
@@ -1070,10 +1071,10 @@ def test_dev_review_confirm_records_the_walk_version(tmp_path: Path, monkeypatch
     path = tmp_path / "fixtures" / f"{slug}.json"
 
     assert client.post(f"/api/dev/review-queue/{slug}/confirm", json={"method": "walk-1"}).status_code == 200
-    assert json.loads(path.read_text())["review"]["method"] == "walk-1"
+    assert json.loads(path.read_text(encoding="utf-8"))["review"]["method"] == "walk-1"
 
     assert client.post(f"/api/dev/review-queue/{slug}/confirm").status_code == 200
-    assert "method" not in json.loads(path.read_text())["review"]
+    assert "method" not in json.loads(path.read_text(encoding="utf-8"))["review"]
 
 
 def test_dev_review_queue_names_the_source_video_only_when_it_is_on_disk(
@@ -1092,7 +1093,8 @@ def test_dev_review_queue_names_the_source_video_only_when_it_is_on_disk(
         ("stage-shots-hfo-masters-2026-stage2-s0fe3d797", "/Volumes/Gone/IMG_0002.MOV"),
     ):
         (fixtures / f"{slug}.json").write_text(
-            json.dumps({"promoted_at": "2026-08-14T12:38:39+00:00", "source_video": source, "shots": []})
+            json.dumps({"promoted_at": "2026-08-14T12:38:39+00:00", "source_video": source, "shots": []}),
+            encoding="utf-8",
         )
         (fixtures / f"{slug}.wav").write_bytes(b"")
     monkeypatch.setattr(lab_core, "DEFAULT_FIXTURES_ROOT", fixtures)
@@ -1421,7 +1423,7 @@ def test_match_export_redraws_a_short_head_overlay_drawn_before_the_fix(
         audit_revision=exports_mod.overlay_audit_revision(root / "shooters" / "me" / "audit" / "stage1.json"),
         short_head=3.0 if recorded == "short-head" else None,
     )
-    (exports_dir / "stage1_stage-1_overlay.json").write_text(_json.dumps(settings))
+    (exports_dir / "stage1_stage-1_overlay.json").write_text(_json.dumps(settings), encoding="utf-8")
 
     calls = _run_overlay_match_export(client, monkeypatch, request_style)
     assert bool(calls) is (recorded == "pre-fix")

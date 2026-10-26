@@ -58,7 +58,7 @@ def _is_head_go3s(fixture: str) -> bool:
     if not truth_path.exists():
         return False
     try:
-        truth = json.loads(truth_path.read_text())
+        truth = json.loads(truth_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return False
     cam = truth.get("camera") or {}

@@ -346,7 +346,7 @@ def test_collect_records_the_heuristic_ranking_whatever_the_default(tmp_path) ->
     fixtures = Path(__file__).resolve().parent / "fixtures"
     entry = load(fixtures / "beep_calibration" / "manifest.yaml").fixtures[1]
     manifest = tmp_path / "manifest.yaml"
-    manifest.write_text(yaml.safe_dump({"fixtures": [entry.model_dump(exclude_none=True)]}))
+    manifest.write_text(yaml.safe_dump({"fixtures": [entry.model_dump(exclude_none=True)]}), encoding="utf-8")
 
     [clip] = _script().collect(manifest, fixtures)
 

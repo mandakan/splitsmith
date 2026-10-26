@@ -66,14 +66,14 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--check", action="store_true", help="exit 1 when the committed block is stale")
     args = parser.parse_args()
-    current = DOC.read_text()
+    current = DOC.read_text(encoding="utf-8")
     updated = splice(current, render())
     if args.check:
         if updated != current:
             print(f"{DOC} is stale; run scripts/gen_er_diagram.py", file=sys.stderr)
             return 1
         return 0
-    DOC.write_text(updated)
+    DOC.write_text(updated, encoding="utf-8")
     return 0
 
 

@@ -50,7 +50,7 @@ def test_write_then_read_round_trip(tmp_path: Path) -> None:
     out = tmp_path / "splits.csv"
     write_splits_csv(shots, out)
 
-    text = out.read_text()
+    text = out.read_text(encoding="utf-8")
     lines = text.splitlines()
     assert lines[0] == ",".join(CSV_HEADER_WITH_MOVING)
     # First row uses 3 decimal places for time and split; moving is always
@@ -71,14 +71,14 @@ def test_write_then_read_round_trip(tmp_path: Path) -> None:
 def test_write_empty_list_emits_only_header(tmp_path: Path) -> None:
     out = tmp_path / "empty.csv"
     write_splits_csv([], out)
-    assert out.read_text().strip() == ",".join(CSV_HEADER_WITH_MOVING)
+    assert out.read_text(encoding="utf-8").strip() == ",".join(CSV_HEADER_WITH_MOVING)
     assert read_splits_csv(out) == []
 
 
 def test_read_accepts_legacy_header_without_moving(tmp_path: Path) -> None:
     """A splits CSV written before the ``moving`` column existed still reads."""
     out = tmp_path / "legacy.csv"
-    out.write_text(",".join(CSV_HEADER) + "\n" + "1,1.420,1.420,0.5500,0.920,draw\n")
+    out.write_text(",".join(CSV_HEADER) + "\n" + "1,1.420,1.420,0.5500,0.920,draw\n", encoding="utf-8")
     rows = read_splits_csv(out)
     assert len(rows) == 1
     assert rows[0].shot_number == 1
@@ -93,7 +93,7 @@ def test_moving_column_true_for_a_shot_inside_a_confirmed_movement_region(tmp_pa
     events = [StageEvent(id="evt-1", kind="movement", start=3.0, end=6.0, source="manual")]
     out = tmp_path / "moving.csv"
     write_splits_csv(shots, out, events=events)
-    lines = out.read_text().splitlines()
+    lines = out.read_text(encoding="utf-8").splitlines()
     assert lines[0] == ",".join(CSV_HEADER_WITH_MOVING)
     assert lines[1].endswith(",false")
     assert lines[2].endswith(",true")
@@ -113,7 +113,7 @@ def test_moving_column_ignores_an_unconfirmed_auto_proposal(tmp_path: Path) -> N
     # contract: filtering is the caller's job (events.confirmed), not this
     # module's.
     write_splits_csv(shots, out, events=events)
-    rows_text = out.read_text().splitlines()[1]
+    rows_text = out.read_text(encoding="utf-8").splitlines()[1]
     assert rows_text.endswith(",true")
 
 
@@ -129,7 +129,7 @@ def test_notes_with_commas_and_quotes_round_trip(tmp_path: Path) -> None:
 
 def test_read_rejects_unexpected_header(tmp_path: Path) -> None:
     out = tmp_path / "bad.csv"
-    out.write_text("foo,bar,baz\n1,2,3\n")
+    out.write_text("foo,bar,baz\n1,2,3\n", encoding="utf-8")
     with pytest.raises(ValueError, match="unexpected CSV header"):
         read_splits_csv(out)
 
@@ -141,7 +141,7 @@ def test_write_events_csv_writes_header_and_rows(tmp_path: Path) -> None:
     ]
     out = tmp_path / "events.csv"
     write_events_csv(events, out)
-    lines = out.read_text().splitlines()
+    lines = out.read_text(encoding="utf-8").splitlines()
     assert lines[0] == ",".join(EVENTS_CSV_HEADER)
     assert lines[1] == "evt-1,reload,8.050,9.470,1.420,manual,"
     assert lines[2] == "evt-2,movement,3.400,6.100,2.700,manual,to box B"
@@ -150,13 +150,13 @@ def test_write_events_csv_writes_header_and_rows(tmp_path: Path) -> None:
 def test_write_events_csv_writes_a_draw_like_any_region(tmp_path: Path) -> None:
     out = tmp_path / "events.csv"
     write_events_csv([StageEvent(id="evt-1", kind="draw", start=1.3, end=2.28, source="manual")], out)
-    assert out.read_text().splitlines()[1] == "evt-1,draw,1.300,2.280,0.980,manual,"
+    assert out.read_text(encoding="utf-8").splitlines()[1] == "evt-1,draw,1.300,2.280,0.980,manual,"
 
 
 def test_write_events_csv_with_no_events_still_writes_header_only(tmp_path: Path) -> None:
     out = tmp_path / "empty_events.csv"
     write_events_csv([], out)
-    assert out.read_text().strip() == ",".join(EVENTS_CSV_HEADER)
+    assert out.read_text(encoding="utf-8").strip() == ",".join(EVENTS_CSV_HEADER)
 
 
 def test_user_can_drop_rows_without_breaking_read(tmp_path: Path) -> None:
@@ -170,8 +170,8 @@ def test_user_can_drop_rows_without_breaking_read(tmp_path: Path) -> None:
     write_splits_csv(shots, out)
 
     # Drop the middle row (the "false positive").
-    lines = out.read_text().splitlines()
-    out.write_text("\n".join([lines[0], lines[1], lines[3]]) + "\n")
+    lines = out.read_text(encoding="utf-8").splitlines()
+    out.write_text("\n".join([lines[0], lines[1], lines[3]]) + "\n", encoding="utf-8")
 
     rows = read_splits_csv(out)
     assert [r.shot_number for r in rows] == [1, 3]

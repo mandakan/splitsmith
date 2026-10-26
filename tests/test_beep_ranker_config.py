@@ -15,7 +15,7 @@ REPORT = Path(__file__).resolve().parent / "fixtures" / "beep_calibration" / "ra
 def test_the_shipped_ranker_is_the_reports_final_fit() -> None:
     """Retraining means pasting the report's final_fit into BeepRankerConfig;
     a hand edit or a stale paste fails here."""
-    fit = json.loads(REPORT.read_text())["models"]["lr"]["final_fit"]
+    fit = json.loads(REPORT.read_text(encoding="utf-8"))["models"]["lr"]["final_fit"]
     shipped = BeepRankerConfig()
     assert shipped.model_version == fit["model_version"]
     assert list(shipped.features) == fit["features"]
@@ -53,7 +53,7 @@ def test_the_shipped_head_auto_trusts_no_wrong_beep_out_of_fold() -> None:
     here, not silently in the field."""
     from splitsmith.automation import AutomationSettings
 
-    report = json.loads(REPORT.read_text())["models"]["lr"]
+    report = json.loads(REPORT.read_text(encoding="utf-8"))["models"]["lr"]
     threshold = AutomationSettings().beep_low_confidence_threshold
     [at_threshold] = [b for b in report["final_head_bins"] if b["threshold"] == threshold]
     assert at_threshold["wrong"] == 0

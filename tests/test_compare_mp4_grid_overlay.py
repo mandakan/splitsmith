@@ -110,7 +110,7 @@ def _plan(tiles, *, rows=2, cols=2, duration=10.0):
 
 def _overlay(tmp_path, clocks=()):
     list_path = tmp_path / "sprites.txt"
-    list_path.write_text("file '/tmp/a.png'\nduration 10\nfile '/tmp/a.png'\n")
+    list_path.write_text("file '/tmp/a.png'\nduration 10\nfile '/tmp/a.png'\n", encoding="utf-8")
     return mp4_grid.StageOverlayPlan(
         sprite_list_path=list_path,
         font_path=tmp_path / "font.ttf",
@@ -589,6 +589,7 @@ def test_ffmpeg_parses_the_clock_filters(tmp_path):
         ],  # fmt: skip
         capture_output=True,
         text=True,
+        encoding="utf-8",
     )
     assert done.returncode == 0, done.stderr[-3000:]
 
@@ -727,7 +728,9 @@ def test_the_sprite_list_is_written_at_the_canvas_frame_rate(tmp_path):
         probe_runner=fake_ffmpeg_probe(),
         head_pad_seconds=1.0,
     )
-    lines = [ln for ln in (work / "sprites-stage1.txt").read_text().splitlines() if ln.strip()]
+    lines = [
+        ln for ln in (work / "sprites-stage1.txt").read_text(encoding="utf-8").splitlines() if ln.strip()
+    ]
     options = {ln for ln in lines if ln.startswith("option ")}
     assert options == {"option framerate 60000/1001"}, options
 
@@ -840,7 +843,11 @@ def test_the_head_pad_is_threaded_into_the_clock_not_hardcoded(tmp_path):
 
 def _sprite_entries(work: Path, stage: int = 1) -> list[tuple[Path, float]]:
     """``(png, duration)`` per entry of a written sprite concat list."""
-    lines = [ln for ln in (work / f"sprites-stage{stage}.txt").read_text().splitlines() if ln.strip()]
+    lines = [
+        ln
+        for ln in (work / f"sprites-stage{stage}.txt").read_text(encoding="utf-8").splitlines()
+        if ln.strip()
+    ]
     entries: list[tuple[Path, float]] = []
     current: Path | None = None
     for line in lines:
@@ -1402,7 +1409,9 @@ def test_a_head_cut_moves_the_clocks_by_the_cut(tmp_path):
 
     def listed_seconds(path):
         return sum(
-            float(line.split()[1]) for line in path.read_text().splitlines() if line.startswith("duration")
+            float(line.split()[1])
+            for line in path.read_text(encoding="utf-8").splitlines()
+            if line.startswith("duration")
         )
 
     assert listed_seconds(narrowed.sprite_list_path) == pytest.approx(
@@ -1464,7 +1473,7 @@ def test_a_tail_edge_keeps_the_tiles_overlay_and_clocks(tmp_path):
     ), "held from the first frame"
     durations = [
         float(line.split()[1])
-        for line in overlay.sprite_list_path.read_text().splitlines()
+        for line in overlay.sprite_list_path.read_text(encoding="utf-8").splitlines()
         if line.startswith("duration")
     ]
     assert durations and all(d >= 0 for d in durations)

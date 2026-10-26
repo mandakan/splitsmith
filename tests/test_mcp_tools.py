@@ -61,7 +61,7 @@ def test_probe_video_directory_raises(tmp_path: Path) -> None:
 def test_discover_videos_lists_top_level_only(tmp_path: Path) -> None:
     (tmp_path / "a.mp4").write_bytes(b"a")
     (tmp_path / "b.mov").write_bytes(b"b")
-    (tmp_path / "ignored.txt").write_text("not video")
+    (tmp_path / "ignored.txt").write_text("not video", encoding="utf-8")
     sub = tmp_path / "nested"
     sub.mkdir()
     (sub / "deep.mp4").write_bytes(b"deep")

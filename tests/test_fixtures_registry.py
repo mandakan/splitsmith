@@ -48,7 +48,7 @@ def _write_audit(
         "shooter": {"id": shooter_id},
         "stage_rounds": {"expected": expected_rounds} if expected_rounds is not None else {},
     }
-    (dir_ / f"{stem}.json").write_text(json.dumps(payload))
+    (dir_ / f"{stem}.json").write_text(json.dumps(payload), encoding="utf-8")
     if write_wav:
         (dir_ / f"{stem}.wav").write_bytes(b"RIFF\x00\x00\x00\x00WAVE")
 
@@ -90,12 +90,14 @@ def test_discovery_finds_audit_jsons_and_parses_metadata(tmp_path: Path) -> None
 def test_discovery_skips_non_audit_json_files(tmp_path: Path) -> None:
     _write_audit(tmp_path, "stage-shots-foo-2026-stage1-s12345678")
     # Non-audit lookalikes that must be ignored.
-    (tmp_path / "stage-shots-foo-2026-stage1.json.bak").write_text("{}")
-    (tmp_path / "stage-shots-foo-2026-stage1-s12345678-promotion-report.json").write_text("{}")
-    (tmp_path / "stage-shots-foo-2026-stage1.peaks-1200.json").write_text("{}")
-    (tmp_path / "stage-shots-foo-2026-stage1.json.before-promote").write_text("{}")
+    (tmp_path / "stage-shots-foo-2026-stage1.json.bak").write_text("{}", encoding="utf-8")
+    (tmp_path / "stage-shots-foo-2026-stage1-s12345678-promotion-report.json").write_text(
+        "{}", encoding="utf-8"
+    )
+    (tmp_path / "stage-shots-foo-2026-stage1.peaks-1200.json").write_text("{}", encoding="utf-8")
+    (tmp_path / "stage-shots-foo-2026-stage1.json.before-promote").write_text("{}", encoding="utf-8")
     # A real .json that's not an audit (missing beep_time).
-    (tmp_path / "stage-shots-bogus-2026-stage1.json").write_text(json.dumps({"shots": []}))
+    (tmp_path / "stage-shots-bogus-2026-stage1.json").write_text(json.dumps({"shots": []}), encoding="utf-8")
     fx = registry.all_fixtures(tmp_path)
     assert [f.stem for f in fx] == ["stage-shots-foo-2026-stage1-s12345678"]
 
@@ -193,9 +195,9 @@ def test_superseded_fixture_is_left_out_of_training_but_still_discovered(tmp_pat
     new = "stage-shots-new-2026-stage1-s12345678"
     _write_audit(tmp_path, old)
     _write_audit(tmp_path, new)
-    data = json.loads((tmp_path / f"{old}.json").read_text())
+    data = json.loads((tmp_path / f"{old}.json").read_text(encoding="utf-8"))
     data["superseded_by"] = new
-    (tmp_path / f"{old}.json").write_text(json.dumps(data))
+    (tmp_path / f"{old}.json").write_text(json.dumps(data), encoding="utf-8")
     monkeypatch.setattr(registry, "FIXTURES_DIR", tmp_path)
     registry.all_fixtures.cache_clear()
 

@@ -99,7 +99,11 @@ def _sessions_started() -> int:
 
 def _container_logs(service: str) -> str:
     out = subprocess.run(
-        _compose("logs", "--no-color", service), capture_output=True, text=True, env=_compose_env()
+        _compose("logs", "--no-color", service),
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        env=_compose_env(),
     )
     return out.stdout + out.stderr
 
@@ -291,6 +295,7 @@ def test_api_shutdown_closes_its_pooled_connections_cleanly(hosted_stack: None) 
             _compose("logs", "--no-color", "--since", since, "postgres"),
             capture_output=True,
             text=True,
+            encoding="utf-8",
             env=_compose_env(),
         )
         logs = out.stdout + out.stderr

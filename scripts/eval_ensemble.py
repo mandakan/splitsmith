@@ -164,7 +164,7 @@ def main() -> None:
     # at conf ~0.018 that the old floor would silently drop.
     min_pos_conf = float("inf")
     for fix in fixtures:
-        truth = json.loads((FIXTURES_DIR / f"{fix}.json").read_text())
+        truth = json.loads((FIXTURES_DIR / f"{fix}.json").read_text(encoding="utf-8"))
         audio, sr = load_audio(FIXTURES_DIR / f"{fix}.wav")
         cfg_recall = ShotDetectConfig(recall_fallback="cwt", min_confidence=0.0)
         all_shots = detect_shots(audio, sr, truth["beep_time"], truth["stage_time_seconds"], cfg_recall)
@@ -180,7 +180,7 @@ def main() -> None:
     universe = []  # list of dicts
     all_misses: list[dict] = []  # candidate-generator misses (linked-but-shifted audits)
     for fix in fixtures:
-        truth = json.loads((FIXTURES_DIR / f"{fix}.json").read_text())
+        truth = json.loads((FIXTURES_DIR / f"{fix}.json").read_text(encoding="utf-8"))
         audio, sr = load_audio(FIXTURES_DIR / f"{fix}.wav")
         cfg_recall = ShotDetectConfig(recall_fallback="cwt", min_confidence=0.0)
         cfg_safe = ShotDetectConfig(recall_fallback="cwt", min_confidence=voter_a_floor)
@@ -321,7 +321,7 @@ def main() -> None:
         # Cache stage_rounds.expected per fixture (if present in JSON).
         expected_by_fixture: dict[str, int | None] = {}
         for fix in fixtures:
-            truth = json.loads((FIXTURES_DIR / f"{fix}.json").read_text())
+            truth = json.loads((FIXTURES_DIR / f"{fix}.json").read_text(encoding="utf-8"))
             rounds = truth.get("stage_rounds", {})
             expected_by_fixture[fix] = rounds.get("expected") if isinstance(rounds, dict) else None
         per_fixture_indices: dict[str, list[int]] = {}
@@ -395,7 +395,7 @@ def main() -> None:
     camera_id_by_fixture: dict[str, str] = {}
     for fix in fixtures:
         try:
-            d = json.loads((FIXTURES_DIR / f"{fix}.json").read_text())
+            d = json.loads((FIXTURES_DIR / f"{fix}.json").read_text(encoding="utf-8"))
             camera_id_by_fixture[fix] = d.get("camera", {}).get("id") or "unknown"
         except Exception:
             camera_id_by_fixture[fix] = "unknown"

@@ -31,7 +31,7 @@ def _seed_project(tmp_path: Path) -> Path:
     audio = project.audio_path(root)
     audio.mkdir(parents=True, exist_ok=True)
     (audio / "stage1_primary.wav").write_bytes(b"\x00" * 1024)
-    (audio / "stage1_primary.peaks-2048.json").write_text("[]")
+    (audio / "stage1_primary.peaks-2048.json").write_text("[]", encoding="utf-8")
 
     trimmed = project.trimmed_path(root)
     trimmed.mkdir(parents=True, exist_ok=True)
@@ -39,13 +39,13 @@ def _seed_project(tmp_path: Path) -> Path:
 
     exp = project.exports_path(root)
     exp.mkdir(parents=True, exist_ok=True)
-    (exp / "stage1_one.fcpxml").write_text("<fcpxml/>")
+    (exp / "stage1_one.fcpxml").write_text("<fcpxml/>", encoding="utf-8")
     (exp / "stage1_one_overlay.mov").write_bytes(b"\x00" * 4096)
     (exp / "stage1_one_trimmed.mp4").write_bytes(b"\x00" * 4096)
 
     audit = project.audit_path(root)
     audit.mkdir(parents=True, exist_ok=True)
-    (audit / "stage1.json").write_text("{}")
+    (audit / "stage1.json").write_text("{}", encoding="utf-8")
 
     raw = project.raw_path(root)
     raw.mkdir(parents=True, exist_ok=True)

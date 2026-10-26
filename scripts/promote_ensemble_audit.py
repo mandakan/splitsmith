@@ -71,8 +71,8 @@ def main() -> None:
     if not canonical.exists():
         raise SystemExit(f"canonical fixture not found: {canonical}")
 
-    ens_data = json.loads(args.ensemble.read_text())
-    canon_data = json.loads(canonical.read_text())
+    ens_data = json.loads(args.ensemble.read_text(encoding="utf-8"))
+    canon_data = json.loads(canonical.read_text(encoding="utf-8"))
 
     if not args.no_backup:
         backup = canonical.with_name(canonical.name + ".before-promote")
@@ -85,7 +85,7 @@ def main() -> None:
     if "_candidates_pending_audit" in ens_data:
         canon_data["_candidates_pending_audit"] = ens_data["_candidates_pending_audit"]
 
-    canonical.write_text(json.dumps(canon_data, indent=2) + "\n")
+    canonical.write_text(json.dumps(canon_data, indent=2) + "\n", encoding="utf-8")
 
     n_shots = len(canon_data["shots"])
     n_cands = len(canon_data.get("_candidates_pending_audit", {}).get("candidates", []))

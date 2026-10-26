@@ -693,10 +693,10 @@ def test_a_scan_from_before_fingerprints_never_moves_a_placed_clip(tmp_path: Pat
     copy = _copy_elsewhere(tmp_path, shared / "from-carol" / "IMG_0001.MOV", "alice-stage1.mov")
     view = _scan(client, base, copy.parent)
     record_path = root / footage_sort_api.SORT_DIR / f"{view['scan_id']}.json"
-    record = json.loads(record_path.read_text())
+    record = json.loads(record_path.read_text(encoding="utf-8"))
     for clip in record["clips"]:
         clip.pop("fingerprint", None)
-    record_path.write_text(json.dumps(record))
+    record_path.write_text(json.dumps(record), encoding="utf-8")
     alice_root = match_model.Match.shooter_root(root, "alice")
     alice = MatchProject.load(alice_root)
     for video in alice.all_videos():

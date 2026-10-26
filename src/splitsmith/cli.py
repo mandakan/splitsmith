@@ -987,7 +987,8 @@ def audit_prep(
             },
             indent=2,
         )
-        + "\n"
+        + "\n",
+        encoding="utf-8",
     )
     console.print(f"  fixture json: {fixture_json}  ({len(candidates)} candidates)")
 

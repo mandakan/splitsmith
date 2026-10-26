@@ -408,7 +408,7 @@ def test_detect_shots_writes_audit_json_and_seeds_shots(tmp_path: Path) -> None:
 
     audit_file = root / "audit" / "stage1.json"
     assert audit_file.exists()
-    payload = json.loads(audit_file.read_text())
+    payload = json.loads(audit_file.read_text(encoding="utf-8"))
     assert len(payload["shots"]) == 3
     # Source provenance lets the user filter ``audit_events`` by where a run came from.
     last_event = payload["audit_events"][-1]
@@ -439,7 +439,7 @@ def test_detect_shots_preserves_curated_shots_by_default(tmp_path: Path) -> None
             {"shot_number": 2, "time": 5.91, "source": "manual"},
         ],
     }
-    audit_file.write_text(json.dumps(curated, indent=2))
+    audit_file.write_text(json.dumps(curated, indent=2), encoding="utf-8")
     fake_result = _fake_ensemble_result([5.5, 6.1, 6.9])
 
     with (
@@ -455,7 +455,7 @@ def test_detect_shots_preserves_curated_shots_by_default(tmp_path: Path) -> None
     ):
         result = detect_tools.detect_shots_for_stage(str(root), stage_number=1)
 
-    payload = json.loads(audit_file.read_text())
+    payload = json.loads(audit_file.read_text(encoding="utf-8"))
     assert len(payload["shots"]) == 2  # curated list preserved
     assert payload["_candidates_pending_audit"]["candidates"]
     assert result["shots_seeded"] is False
@@ -474,7 +474,8 @@ def test_detect_shots_reset_wipes_existing_shots(tmp_path: Path) -> None:
                 "beep_time": 5.0,
                 "shots": [{"shot_number": 1, "time": 5.42, "source": "manual"}],
             }
-        )
+        ),
+        encoding="utf-8",
     )
     fake_result = _fake_ensemble_result([5.5, 6.1])
 
@@ -491,7 +492,7 @@ def test_detect_shots_reset_wipes_existing_shots(tmp_path: Path) -> None:
     ):
         result = detect_tools.detect_shots_for_stage(str(root), stage_number=1, reset=True)
 
-    payload = json.loads((root / "audit" / "stage1.json").read_text())
+    payload = json.loads((root / "audit" / "stage1.json").read_text(encoding="utf-8"))
     # Reset cleared the manual shot, then seeded the 2 detected ones.
     assert len(payload["shots"]) == 2
     assert all(s["source"] == "detected" for s in payload["shots"])
@@ -527,7 +528,7 @@ def test_detect_shots_backfills_base_fields_over_a_beep_confirm_stub(tmp_path: P
     ):
         detect_tools.detect_shots_for_stage(str(root), stage_number=1)
 
-    payload = json.loads(audit_file.read_text())
+    payload = json.loads(audit_file.read_text(encoding="utf-8"))
     assert payload["beep_time"] == pytest.approx(5.0)
     assert payload["stage_number"] == 1
     assert payload["stage_name"] == "One"
@@ -575,7 +576,7 @@ def test_detect_shots_keeps_the_beep_the_shots_are_timed_from(
     ):
         detect_tools.detect_shots_for_stage(str(root), stage_number=1)
 
-    payload = json.loads(audit_file.read_text())
+    payload = json.loads(audit_file.read_text(encoding="utf-8"))
     assert payload["beep_time"] == pytest.approx(beep)
     assert payload["stage_name"] == "One"
 
@@ -647,7 +648,7 @@ def test_detect_shots_reset_applies_the_servers_reset_rule(tmp_path: Path) -> No
 
     result = _detect_via_mcp(root, wav, _fake_ensemble_result([5.6, 6.2]), reset=True)
 
-    doc = json.loads(audit_file.read_text())
+    doc = json.loads(audit_file.read_text(encoding="utf-8"))
     assert doc["events"] == [manual]
     assert "events_seeded" not in doc
     deleted = [e["payload"] for e in doc["audit_events"] if e["kind"] == "marker_deleted"]
@@ -693,7 +694,7 @@ def test_detect_shots_without_reset_numbers_past_the_high_water_mark(tmp_path: P
 
     _detect_via_mcp(root, wav, _fake_ensemble_result([5.6, 6.2]))
 
-    doc = json.loads(audit_file.read_text())
+    doc = json.loads(audit_file.read_text(encoding="utf-8"))
     assert [c["candidate_number"] for c in doc["_candidates_pending_audit"]["candidates"]] == [4, 5]
     assert [s["candidate_number"] for s in doc["shots"]] == [3]
     assert doc["events_seeded"] == SEED_VERSION
@@ -717,7 +718,7 @@ def test_detect_shots_keeps_an_edit_saved_while_detection_ran(tmp_path: Path) ->
 
     result = _detect_via_mcp(root, wav, _detect_while_the_user_edits)
 
-    doc = json.loads(audit_file.read_text())
+    doc = json.loads(audit_file.read_text(encoding="utf-8"))
     assert doc["shots"] == curated
     assert result["shots_seeded"] is False
 
@@ -762,7 +763,7 @@ def test_detect_shots_logs_an_audit_doc_that_is_not_an_object(
         "expected an object, found list" in r.getMessage() and str(audit_file) in r.getMessage()
         for r in caplog.records
     )
-    assert len(json.loads(audit_file.read_text())["shots"]) == 1
+    assert len(json.loads(audit_file.read_text(encoding="utf-8"))["shots"]) == 1
     assert (audit_file.parent / "stage1.json.bak").read_text(encoding="utf-8") == "[1, 2]"
 
 
@@ -894,7 +895,8 @@ def test_detect_shots_passes_expected_rounds_through_to_ensemble(tmp_path: Path)
                 "shots": [],
                 "stage_rounds": {"expected": 7},
             }
-        )
+        ),
+        encoding="utf-8",
     )
     fake_result = _fake_ensemble_result([5.5], expected_rounds=7)
 

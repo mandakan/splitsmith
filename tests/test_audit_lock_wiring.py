@@ -130,7 +130,9 @@ def test_the_remerge_save_merges_under_the_lock(tmp_path: Path, monkeypatch) -> 
     with _match_context(project_root):
         server_mod._save_audit_with_remerge(state, "me", 1, merge=merge, default=dict)
     assert held == [True]
-    on_disk = json.loads((project_root / "shooters" / "me" / "audit" / "stage1.json").read_text())
+    on_disk = json.loads(
+        (project_root / "shooters" / "me" / "audit" / "stage1.json").read_text(encoding="utf-8")
+    )
     assert on_disk["probe"] is True
 
 
@@ -192,10 +194,10 @@ def test_the_shot_id_migration_stamps_under_the_lock(tmp_path: Path, monkeypatch
 
     _, project_root = _seed_match_export_project(tmp_path, stage_count=1)
     path = project_root / "shooters" / "me" / "audit" / "stage1.json"
-    doc = json.loads(path.read_text())
+    doc = json.loads(path.read_text(encoding="utf-8"))
     for shot in doc["shots"]:
         shot.pop("id", None)
-    path.write_text(json.dumps(doc))
+    path.write_text(json.dumps(doc), encoding="utf-8")
     probe = _ProbeLock()
     held: list[bool] = []
     real_write = run_mod.atomic_write_json

@@ -41,7 +41,7 @@ def main(out_path: Path) -> None:
     out: dict[str, dict] = {}
     for fx in sorted(Path("tests/fixtures").glob("stage-shots-*.json")):
         wav = fx.with_suffix(".wav")
-        d = json.loads(fx.read_text())
+        d = json.loads(fx.read_text(encoding="utf-8"))
         if not wav.exists() or not d.get("shots") or d.get("stage_time_seconds") is None:
             continue
         audio, sr = load_audio(wav)

@@ -372,9 +372,9 @@ def test_the_overlay_cli_threads_the_choice(tmp_path: Path, monkeypatch: pytest.
     from .test_overlay_render import _write_audit
 
     audit = _write_audit(tmp_path)
-    doc = json.loads(audit.read_text())
+    doc = json.loads(audit.read_text(encoding="utf-8"))
     doc["events"] = [{"id": "evt-1", "kind": "reload", "start": 0.1, "end": 0.4, "source": "manual"}]
-    audit.write_text(json.dumps(doc))
+    audit.write_text(json.dumps(doc), encoding="utf-8")
     seen: dict[str, Any] = {}
     tiles: list = []
 

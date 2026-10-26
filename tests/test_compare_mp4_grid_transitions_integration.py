@@ -38,6 +38,7 @@ def _streams(path: Path, *, ffprobe: str) -> list[tuple[str, str]]:
         [ffprobe, "-v", "error", "-show_streams", "-of", "json", str(path)],
         capture_output=True,
         text=True,
+        encoding="utf-8",
     )
     assert done.returncode == 0, done.stderr[-2000:]
     streams = json.loads(done.stdout)["streams"]

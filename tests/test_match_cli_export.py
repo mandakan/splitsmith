@@ -215,19 +215,19 @@ def _overlay_on_disk(
             short_head=short_head,
             breakdown=drawn_with_breakdown,
         )
-        exports_mod.overlay_settings_file(exports, base).write_text(json.dumps(settings))
+        exports_mod.overlay_settings_file(exports, base).write_text(json.dumps(settings), encoding="utf-8")
     if change == "audit":
-        doc = json.loads(audit_path.read_text())
+        doc = json.loads(audit_path.read_text(encoding="utf-8"))
         doc["shots"][0]["ms_after_beep"] = 640
-        audit_path.write_text(json.dumps(doc))
+        audit_path.write_text(json.dumps(doc), encoding="utf-8")
     elif change in ("palette", "font"):
         manifest_path = copy / "splitsmith" / "look.json"
-        manifest = json.loads(manifest_path.read_text())
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
         if change == "palette":
             manifest["colors"]["accent"] = [10, 200, 90]
         else:
             manifest["fonts"]["mono"] = "roboto-mono"
-        manifest_path.write_text(json.dumps(manifest))
+        manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
     result = runner.invoke(app, ["match", "export", str(root), "--shooter", "me", "--format", "mp4", *args])
     assert result.exit_code == exit_code, result.output
     return captured["comp"].stages[0], strip_ansi(result.output)
@@ -284,7 +284,9 @@ def _redraws(monkeypatch: pytest.MonkeyPatch, *, fail: bool = False) -> list[Any
             hud_data=overlay_data_identity(request.overlay_theme, request.overlay_variant, hud_extras),
             breakdown=request.breakdown,
         )
-        exports_mod.overlay_settings_file(exports_dir, base).write_text(json.dumps(settings))
+        exports_mod.overlay_settings_file(exports_dir, base).write_text(
+            json.dumps(settings), encoding="utf-8"
+        )
         return None
 
     monkeypatch.setattr(exports_mod, "export_stage", fake_export_stage)
@@ -576,9 +578,9 @@ def test_thumbnail_is_grabbed_from_the_render_and_moves_with_the_output(
     assert video.name == thumb.name.replace("-thumbnail.jpg", ".mp4")
     assert at == youtube_sidecar.thumbnail_time_seconds(captured["comp"]) == 2.0
     assert out.with_name("lt-thumbnail.jpg").read_bytes() == b"jpg"
-    sidecar = json.loads(out.with_name("lt-youtube.json").read_text())
+    sidecar = json.loads(out.with_name("lt-youtube.json").read_text(encoding="utf-8"))
     assert sidecar["thumbnail_path"].endswith("-thumbnail.jpg")
-    assert "THUMBNAIL" in out.with_name("lt-youtube.txt").read_text()
+    assert "THUMBNAIL" in out.with_name("lt-youtube.txt").read_text(encoding="utf-8")
     assert "thumbnail not written" not in strip_ansi(result.output)
 
 
@@ -597,7 +599,7 @@ def test_youtube_sidecar_embeds_chapter_atoms_in_the_mp4(
     result = runner.invoke(app, [*args, "--youtube-sidecar", "--title-page", "--titles", "slate"])
     assert result.exit_code == 0, result.output
     chapters = captured["kwargs"]["chapters"]
-    sidecar = json.loads(out.with_name("lt-youtube.json").read_text())
+    sidecar = json.loads(out.with_name("lt-youtube.json").read_text(encoding="utf-8"))
     assert [(c.start_seconds, c.title) for c in chapters] == [
         (c["start_seconds"], c["title"]) for c in sidecar["chapters"]
     ]
@@ -624,7 +626,7 @@ def test_description_lead_opens_the_sidecar_description(
         ],  # fmt: skip
     )
     assert result.exit_code == 0, result.output
-    description = json.loads(out.with_name("lt-youtube.json").read_text())["description"]
+    description = json.loads(out.with_name("lt-youtube.json").read_text(encoding="utf-8"))["description"]
     assert description.startswith("Production Optics, head cam.\n\n")
     assert "0:00 " in description
 
@@ -636,7 +638,7 @@ def test_reclassify_rejudges_auto_intervals_and_keeps_manual_ones(tmp_path: Path
     --dry-run writes nothing."""
     root = _seed(tmp_path)
     audit = root / "shooters" / "me" / "audit" / "stage1.json"
-    doc = json.loads(audit.read_text())
+    doc = json.loads(audit.read_text(encoding="utf-8"))
     doc["shots"] = [
         {
             "shot_number": 1,
@@ -659,12 +661,12 @@ def test_reclassify_rejudges_auto_intervals_and_keeps_manual_ones(tmp_path: Path
             "interval_class_source": "manual",
         },
     ]
-    audit.write_text(json.dumps(doc))
+    audit.write_text(json.dumps(doc), encoding="utf-8")
 
     dry = runner.invoke(app, ["match", "reclassify", str(root), "--shooter", "me", "--dry-run"])
     assert dry.exit_code == 0, dry.output
     assert "1 intervals moved (nothing written)" in strip_ansi(dry.output)
-    assert json.loads(audit.read_text())["shots"][1]["interval_class"] == "transition"
+    assert json.loads(audit.read_text(encoding="utf-8"))["shots"][1]["interval_class"] == "transition"
 
     result = runner.invoke(app, ["match", "reclassify", str(root), "--shooter", "me"])
     assert result.exit_code == 0, result.output
@@ -674,7 +676,7 @@ def test_reclassify_rejudges_auto_intervals_and_keeps_manual_ones(tmp_path: Path
         "stage 1 Speed: first_shot=1 transition=1 reload=1 -> first_shot=1 split=1 reload=1  (1 moved)"
         in text
     )
-    written = json.loads(audit.read_text())
+    written = json.loads(audit.read_text(encoding="utf-8"))
     assert [s["interval_class"] for s in written["shots"]] == ["first_shot", "split", "reload"]
     assert written["shots"][2]["interval_class_source"] == "manual"
     assert written["audit_events"][-1]["kind"] == "coach_reclassify"
@@ -683,13 +685,13 @@ def test_reclassify_rejudges_auto_intervals_and_keeps_manual_ones(tmp_path: Path
 def test_reclassify_notes_a_corrupt_events_list_and_classifies_without_it(tmp_path: Path) -> None:
     root = _seed(tmp_path)
     audit = root / "shooters" / "me" / "audit" / "stage1.json"
-    doc = json.loads(audit.read_text())
+    doc = json.loads(audit.read_text(encoding="utf-8"))
     doc["shots"] = [
         {"shot_number": 1, "ms_after_beep": 1500},
         {"shot_number": 2, "ms_after_beep": 3800},  # 2.3 s: movement
     ]
     doc["events"] = [{"id": "evt-1", "kind": "movement", "start": 2.0, "end": 1.0, "source": "manual"}]
-    audit.write_text(json.dumps(doc))
+    audit.write_text(json.dumps(doc), encoding="utf-8")
 
     result = runner.invoke(app, ["match", "reclassify", str(root), "--shooter", "me"])
     assert result.exit_code == 0, result.output
@@ -698,7 +700,10 @@ def test_reclassify_notes_a_corrupt_events_list_and_classifies_without_it(tmp_pa
     # The validation detail keeps its bracketed parts rather than being
     # swallowed as rich markup.
     assert "[type=" in text
-    assert [s["interval_class"] for s in json.loads(audit.read_text())["shots"]] == ["first_shot", "movement"]
+    assert [s["interval_class"] for s in json.loads(audit.read_text(encoding="utf-8"))["shots"]] == [
+        "first_shot",
+        "movement",
+    ]
 
 
 # --- --youtube-upload (issue #1000) -----------------------------------------
@@ -912,7 +917,7 @@ def test_reclassify_reads_confirmed_regions_only(tmp_path: Path, source: str, ex
     confirmed makes it a reload."""
     root = _seed(tmp_path)
     audit = root / "shooters" / "me" / "audit" / "stage1.json"
-    doc = json.loads(audit.read_text())
+    doc = json.loads(audit.read_text(encoding="utf-8"))
     doc["shots"] = [
         {
             "shot_number": 1,
@@ -928,8 +933,8 @@ def test_reclassify_reads_confirmed_regions_only(tmp_path: Path, source: str, ex
         },
     ]
     doc["events"] = [{"id": "evt-1", "kind": "reload", "start": 1.5, "end": 3.8, "source": source}]
-    audit.write_text(json.dumps(doc))
+    audit.write_text(json.dumps(doc), encoding="utf-8")
 
     result = runner.invoke(app, ["match", "reclassify", str(root), "--shooter", "me"])
     assert result.exit_code == 0, result.output
-    assert json.loads(audit.read_text())["shots"][1]["interval_class"] == expected
+    assert json.loads(audit.read_text(encoding="utf-8"))["shots"][1]["interval_class"] == expected

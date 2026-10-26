@@ -360,8 +360,8 @@ def test_plan_includes_beep_review_artifacts(tmp_path: Path) -> None:
     out = shooter_root / "beep_review"
     out.mkdir()
     (out / "vid1.m4a").write_bytes(b"aac")
-    (out / "vid1.peaks.json").write_text("{}")
-    (out / "notes.txt").write_text("ignored")  # only .m4a / .peaks.json enter the plan
+    (out / "vid1.peaks.json").write_text("{}", encoding="utf-8")
+    (out / "notes.txt").write_text("ignored", encoding="utf-8")  # only .m4a / .peaks.json enter the plan
 
     plan = build_push_plan(root, sync_state=SyncState())
     keys = {m.remote_key for m in plan.media}
@@ -377,7 +377,7 @@ def test_plan_skips_unchanged_beep_review_artifacts(tmp_path: Path) -> None:
     out = shooter_root / "beep_review"
     out.mkdir()
     (out / "vid1.m4a").write_bytes(b"aac")
-    (out / "vid1.peaks.json").write_text("{}")
+    (out / "vid1.peaks.json").write_text("{}", encoding="utf-8")
 
     first_plan = build_push_plan(root, sync_state=SyncState())
     beep_keys = {m.remote_key for m in first_plan.media if "beep_review" in m.remote_key}

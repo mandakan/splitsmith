@@ -188,7 +188,9 @@ def test_save_and_load_scoreboard_identity(_isolated_user_config: Path) -> None:
     assert loaded.base_url == "https://shootnscoreit.com"
 
     # Schema version is stamped on write.
-    on_disk = json.loads((_isolated_user_config / user_config.SCOREBOARD_FILENAME).read_text())
+    on_disk = json.loads(
+        (_isolated_user_config / user_config.SCOREBOARD_FILENAME).read_text(encoding="utf-8")
+    )
     assert on_disk["schema_version"] == user_config.SCHEMA_VERSION
 
 
@@ -203,9 +205,9 @@ def test_clear_scoreboard_identity(_isolated_user_config: Path) -> None:
 
 def test_malformed_files_are_ignored(_isolated_user_config: Path) -> None:
     _isolated_user_config.mkdir(parents=True, exist_ok=True)
-    (_isolated_user_config / user_config.PROJECTS_FILENAME).write_text("not json{{{")
-    (_isolated_user_config / user_config.SCOREBOARD_FILENAME).write_text("also bad")
-    (_isolated_user_config / user_config.CONFIG_FILENAME).write_text(": : :\n: : :")
+    (_isolated_user_config / user_config.PROJECTS_FILENAME).write_text("not json{{{", encoding="utf-8")
+    (_isolated_user_config / user_config.SCOREBOARD_FILENAME).write_text("also bad", encoding="utf-8")
+    (_isolated_user_config / user_config.CONFIG_FILENAME).write_text(": : :\n: : :", encoding="utf-8")
 
     assert user_config.get_recent_projects() == []
     assert user_config.load_scoreboard_identity() is None
@@ -241,7 +243,9 @@ def test_global_prefs_round_trip(_isolated_user_config: Path) -> None:
     assert loaded.last_scoreboard_url is not None
 
     # Stored as YAML for human-editability.
-    on_disk = yaml.safe_load((_isolated_user_config / user_config.CONFIG_FILENAME).read_text())
+    on_disk = yaml.safe_load(
+        (_isolated_user_config / user_config.CONFIG_FILENAME).read_text(encoding="utf-8")
+    )
     assert on_disk["theme"] == "dark"
 
 
@@ -270,7 +274,7 @@ def test_record_project_open_swallows_write_errors(
     project.mkdir()
     user_config.record_project_open(project, "Original")
     target = _isolated_user_config / user_config.PROJECTS_FILENAME
-    original = target.read_text()
+    original = target.read_text(encoding="utf-8")
 
     def boom(*_a: object, **_kw: object) -> None:
         raise OSError("simulated disk full")
@@ -279,14 +283,14 @@ def test_record_project_open_swallows_write_errors(
     # The write swallows the OSError and logs; the file stays intact.
     user_config.record_project_open(project, "Updated")
 
-    assert target.read_text() == original
+    assert target.read_text(encoding="utf-8") == original
 
 
 def test_recent_project_last_opened_at_is_iso(_isolated_user_config: Path, tmp_path: Path) -> None:
     project = tmp_path / "m"
     project.mkdir()
     user_config.record_project_open(project, "M")
-    raw = json.loads((_isolated_user_config / user_config.PROJECTS_FILENAME).read_text())
+    raw = json.loads((_isolated_user_config / user_config.PROJECTS_FILENAME).read_text(encoding="utf-8"))
     ts = raw["projects"][0]["last_opened_at"]
     # Round-trips through datetime so the SPA can parse it as ISO 8601.
     assert datetime.fromisoformat(ts.replace("Z", "+00:00"))

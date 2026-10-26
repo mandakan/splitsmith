@@ -116,7 +116,7 @@ def test_select_fixtures_reads_the_event_match_and_refuses_unknown_ones(build, m
         ("stage-shots-blacksmith-2026-stage1-sabc", "blacksmith-handgun-open-2026:1:sabc"),
         ("stage-shots-tallmilan-2026-stage1-sabc", "tallmilan-2026:1:sabc"),
     ]:
-        (tmp_path / f"{stem}.json").write_text(json.dumps({"event_id": event}))
+        (tmp_path / f"{stem}.json").write_text(json.dumps({"event_id": event}), encoding="utf-8")
     monkeypatch.setattr(build, "FIXTURES_DIR", tmp_path)
     monkeypatch.setattr(
         build,
@@ -210,8 +210,8 @@ def test_bundle_manifest_round_trips_lists_and_verifies(tmp_path) -> None:
     root = tmp_path / "models"
     folder = root / "reaudit"
     (folder / "heldout").mkdir(parents=True)
-    (folder / "ensemble_calibration.json").write_text("{}")
-    (folder / "heldout" / "report.json").write_text("{}")
+    (folder / "ensemble_calibration.json").write_text("{}", encoding="utf-8")
+    (folder / "heldout" / "report.json").write_text("{}", encoding="utf-8")
     manifest = mb.ModelManifest(
         name="reaudit",
         version="v1",
@@ -227,6 +227,6 @@ def test_bundle_manifest_round_trips_lists_and_verifies(tmp_path) -> None:
     assert mb.verify(folder, read) == []
     assert [m.name for _d, m in mb.list_bundles(root)] == ["reaudit"]
 
-    (folder / "ensemble_calibration.json").write_text('{"changed": true}')
+    (folder / "ensemble_calibration.json").write_text('{"changed": true}', encoding="utf-8")
     assert mb.verify(folder, read) == ["ensemble_calibration.json: changed"]
     assert mb.list_bundles(tmp_path / "nowhere") == []

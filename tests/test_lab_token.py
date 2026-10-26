@@ -90,7 +90,7 @@ def test_review_refuses_a_lan_bind(monkeypatch: pytest.MonkeyPatch, tmp_path) ->
     called: list[dict] = []
     monkeypatch.setattr("splitsmith.ui.server.serve", lambda **kw: called.append(kw))
     fixture = tmp_path / "f.json"
-    fixture.write_text("{}")
+    fixture.write_text("{}", encoding="utf-8")
     fixture.with_suffix(".wav").write_bytes(b"")
     r = CliRunner().invoke(
         cli.app, ["review", "--fixture", str(fixture), "--no-browser", "--host", "0.0.0.0"], env=_PLAIN_ENV

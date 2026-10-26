@@ -61,7 +61,7 @@ def locked(final: Path, purpose: str = "") -> Iterator[None]:
     on POSIX, a lock on byte 0 on Windows (``msvcrt`` locks belong to the
     handle, so a second open in the same thread blocks there too)."""
     final.parent.mkdir(parents=True, exist_ok=True)
-    with lock_path(final, purpose).open("a") as lock:
+    with lock_path(final, purpose).open("a", encoding="utf-8") as lock:
         if sys.platform != "win32":
             import fcntl
 

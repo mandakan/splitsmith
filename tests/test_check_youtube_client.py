@@ -8,12 +8,13 @@ SCRIPT = Path(__file__).parents[1] / "desktop" / "scripts" / "check_youtube_clie
 def _fake_install(root: Path, client_id: str, client_secret: str) -> Path:
     pkg = root / "splitsmith" / "youtube"
     pkg.mkdir(parents=True)
-    (root / "splitsmith" / "__init__.py").write_text("")
-    (pkg / "__init__.py").write_text("")
+    (root / "splitsmith" / "__init__.py").write_text("", encoding="utf-8")
+    (pkg / "__init__.py").write_text("", encoding="utf-8")
     (pkg / "oauth.py").write_text(
         "import httpx_that_is_not_installed  # the check must not import the module\n"
         f'BUILTIN_CLIENT_ID = "{client_id}"\n'
-        f'BUILTIN_CLIENT_SECRET = "{client_secret}"\n'
+        f'BUILTIN_CLIENT_SECRET = "{client_secret}"\n',
+        encoding="utf-8",
     )
     return root
 
@@ -24,6 +25,7 @@ def _run(site: Path) -> subprocess.CompletedProcess[str]:
         env={"PYTHONPATH": str(site)},
         capture_output=True,
         text=True,
+        encoding="utf-8",
     )
 
 

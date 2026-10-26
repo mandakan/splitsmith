@@ -418,7 +418,7 @@ def render_reel(
             owned.__exit__(None, None, None)
 
     listing = work_dir / "segments.txt"
-    listing.write_text("".join(f"file '{path}'\n" for path, _ in segments))
+    listing.write_text("".join(f"file '{path}'\n" for path, _ in segments), encoding="utf-8")
     # The reel lands under its name only whole: history and the share page
     # serve it by that name, so a failed step must leave the previous reel.
     # The partial sits beside it (one filesystem for the rename) and keeps

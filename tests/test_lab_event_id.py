@@ -109,8 +109,8 @@ def test_list_fixtures_groups_multi_cam_siblings_by_event_id(tmp_path: Path) -> 
 
     headcam_path = fixtures / "stage-shots-blacksmith-2026-stage6.json"
     phone_path = fixtures / "stage-shots-blacksmith-2026-stage6-apple-iphone17pro.json"
-    headcam_path.write_text(json.dumps(base_payload))
-    phone_path.write_text(json.dumps(base_payload))
+    headcam_path.write_text(json.dumps(base_payload), encoding="utf-8")
+    phone_path.write_text(json.dumps(base_payload), encoding="utf-8")
     (fixtures / "stage-shots-blacksmith-2026-stage6.wav").write_bytes(b"")
     (fixtures / "stage-shots-blacksmith-2026-stage6-apple-iphone17pro.wav").write_bytes(b"")
 
@@ -128,8 +128,10 @@ def test_list_fixtures_distinct_shooters_get_distinct_events(tmp_path: Path) -> 
     fixtures.mkdir()
     me = {"shots": [], "shooter": {"id": "ssi-1", "ssi_shooter_id": 1, "name": "Me"}}
     friend = {"shots": [], "shooter": {"id": "ssi-2", "ssi_shooter_id": 2, "name": "Friend"}}
-    (fixtures / "stage-shots-blacksmith-2026-stage6.json").write_text(json.dumps(me))
-    (fixtures / "stage-shots-blacksmith-2026-stage6-friend.json").write_text(json.dumps(friend))
+    (fixtures / "stage-shots-blacksmith-2026-stage6.json").write_text(json.dumps(me), encoding="utf-8")
+    (fixtures / "stage-shots-blacksmith-2026-stage6-friend.json").write_text(
+        json.dumps(friend), encoding="utf-8"
+    )
     (fixtures / "stage-shots-blacksmith-2026-stage6.wav").write_bytes(b"")
     (fixtures / "stage-shots-blacksmith-2026-stage6-friend.wav").write_bytes(b"")
 
@@ -147,7 +149,9 @@ def test_list_fixtures_legacy_fixture_defaults_shooter_to_self(tmp_path: Path) -
     """Pre-#149 fixture with no shooter block resolves to ``...:self``."""
     fixtures = tmp_path / "fixtures"
     fixtures.mkdir()
-    (fixtures / "stage-shots-blacksmith-2026-stage6.json").write_text(json.dumps({"shots": []}))
+    (fixtures / "stage-shots-blacksmith-2026-stage6.json").write_text(
+        json.dumps({"shots": []}), encoding="utf-8"
+    )
     (fixtures / "stage-shots-blacksmith-2026-stage6.wav").write_bytes(b"")
 
     records = list_fixtures(fixtures)

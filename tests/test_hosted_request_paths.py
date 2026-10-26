@@ -60,7 +60,7 @@ def test_hosted_bind_never_loads_a_folder_by_path(
     client, _mid, _slug = native_match
     folder = tmp_path / "foreign-match"
     match_model.Match.init(folder, name="Foreign")
-    (folder / ".env").write_text("SPLITSMITH_BIND_PROBE=loaded\n")
+    (folder / ".env").write_text("SPLITSMITH_BIND_PROBE=loaded\n", encoding="utf-8")
     os.environ.pop("SPLITSMITH_BIND_PROBE", None)
     try:
         resp = client.post("/api/me/recent-projects/bind", json={"path": str(folder)})

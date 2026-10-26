@@ -37,7 +37,8 @@ def _write_audit(
                 "beep_time": 3.0,
                 "shots": shots,
             }
-        )
+        ),
+        encoding="utf-8",
     )
     return path
 
@@ -139,7 +140,7 @@ def test_partially_classified_legacy_audit_is_healed_in_memory(tmp_path):
     assert statistic_splits(partial_tile.shots) == statistic_splits(full_tile.shots)
 
     # The heal must not touch the file on disk.
-    assert json.loads(partial.read_text())["shots"][2].get("interval_class") is None
+    assert json.loads(partial.read_text(encoding="utf-8"))["shots"][2].get("interval_class") is None
 
 
 def test_cleared_manual_class_suppresses_the_heal(tmp_path):
@@ -150,9 +151,9 @@ def test_cleared_manual_class_suppresses_the_heal(tmp_path):
     # that rewrote the other shots' stale auto classes, so the overlay's
     # average split disagreed with the same stage's coach page.
     path = _write_audit(tmp_path / "ann", 1, [1200, 1450, 1700], classes=["movement", "movement", None])
-    doc = json.loads(path.read_text())
+    doc = json.loads(path.read_text(encoding="utf-8"))
     doc["shots"][2]["interval_class_source"] = "manual"
-    path.write_text(json.dumps(doc))
+    path.write_text(json.dumps(doc), encoding="utf-8")
 
     data = overlay_data.load_overlay_data([_bundle(tmp_path, "ann", audit=path)])
     tile = data[("ann", 1)]
@@ -167,7 +168,7 @@ def test_valid_json_that_is_not_an_object_degrades_and_warns(tmp_path, caplog, p
     root = tmp_path / "cy"
     (root / "audit").mkdir(parents=True)
     bad = root / "audit" / "stage1.json"
-    bad.write_text(payload)
+    bad.write_text(payload, encoding="utf-8")
     data = overlay_data.load_overlay_data([_bundle(tmp_path, "cy", audit=bad)])
     assert data[("cy", 1)].shots == ()
     assert any("stage1.json" in r.getMessage() for r in caplog.records)
@@ -200,7 +201,7 @@ def test_corrupt_audit_degrades_and_warns(tmp_path, caplog):
     root = tmp_path / "cy"
     (root / "audit").mkdir(parents=True)
     bad = root / "audit" / "stage1.json"
-    bad.write_text("{not json")
+    bad.write_text("{not json", encoding="utf-8")
     data = overlay_data.load_overlay_data([_bundle(tmp_path, "cy", audit=bad)])
     assert data[("cy", 1)].shots == ()
     assert any("stage1.json" in r.getMessage() for r in caplog.records)
@@ -256,7 +257,7 @@ def test_stub_audit_is_treated_as_no_audit(tmp_path):
     root = tmp_path / "ann"
     (root / "audit").mkdir(parents=True)
     stub = root / "audit" / "stage1.json"
-    stub.write_text(json.dumps({"detection": "none", "shots": [], "audit_events": []}))
+    stub.write_text(json.dumps({"detection": "none", "shots": [], "audit_events": []}), encoding="utf-8")
     data = overlay_data.load_overlay_data([_bundle(tmp_path, "ann", audit=stub)])
     tile = data[("ann", 1)]
     assert tile.shots == ()
@@ -275,13 +276,13 @@ def test_confirmed_reloads_and_movement_reach_the_grid_tile(tmp_path, with_proje
     audit = _write_audit(
         root, 1, [1200, 1450, 1700, 2900], classes=["first_shot", "split", "split", "reload"]
     )
-    doc = json.loads(audit.read_text())
+    doc = json.loads(audit.read_text(encoding="utf-8"))
     doc["events"] = [
         {"id": "evt-1", "kind": "movement", "start": 1.3, "end": 1.8, "source": "manual"},
         {"id": "evt-2", "kind": "reload", "start": 1.7, "end": 2.8, "source": "manual"},
         {"id": "evt-3", "kind": "reload", "start": 0.1, "end": 0.2, "source": "auto"},
     ]
-    audit.write_text(json.dumps(doc))
+    audit.write_text(json.dumps(doc), encoding="utf-8")
     tile = overlay_data.load_overlay_data([_bundle(tmp_path, "ann", audit=audit)])[("ann", 1)]
     # Proves which of the two returns ran.
     assert (tile.stage_time_seconds is not None) is with_project
@@ -299,13 +300,13 @@ def test_the_grid_tiles_draw_is_the_timer_draw(tmp_path, with_project):
     if with_project:
         _write_project(root)
     audit = _write_audit(root, 1, [2310, 2600, 2900])
-    doc = json.loads(audit.read_text())
+    doc = json.loads(audit.read_text(encoding="utf-8"))
     doc["events"] = [{"id": "evt-1", "kind": "draw", "start": 1.33, "end": 2.31, "source": "manual"}]
-    audit.write_text(json.dumps(doc))
+    audit.write_text(json.dumps(doc), encoding="utf-8")
     tile = overlay_data.load_overlay_data([_bundle(tmp_path, "ann", audit=audit)])[("ann", 1)]
     assert tile.draw == pytest.approx(2.31)
     doc["events"][0]["source"] = "auto"
-    audit.write_text(json.dumps(doc))
+    audit.write_text(json.dumps(doc), encoding="utf-8")
     tile = overlay_data.load_overlay_data([_bundle(tmp_path, "ann", audit=audit)])[("ann", 1)]
     assert tile.draw == pytest.approx(2.31)
 
@@ -318,13 +319,13 @@ def test_without_the_breakdown_a_grid_tile_reads_no_region(tmp_path, with_projec
     if with_project:
         _write_project(root)
     audit = _write_audit(root, 1, [2310, 2600, 2900])
-    doc = json.loads(audit.read_text())
+    doc = json.loads(audit.read_text(encoding="utf-8"))
     doc["events"] = [
         {"id": "evt-1", "kind": "draw", "start": 1.33, "end": 2.31, "source": "manual"},
         {"id": "evt-2", "kind": "movement", "start": 2.4, "end": 2.8, "source": "manual"},
         {"id": "evt-3", "kind": "reload", "start": 2.4, "end": 2.8, "source": "manual"},
     ]
-    audit.write_text(json.dumps(doc))
+    audit.write_text(json.dumps(doc), encoding="utf-8")
     bundles = [_bundle(tmp_path, "ann", audit=audit)]
     tile = overlay_data.load_overlay_data(bundles, breakdown=False)[("ann", 1)]
     assert (tile.stage_time_seconds is not None) is with_project
@@ -412,7 +413,7 @@ def test_an_invalid_project_json_stays_loud(tmp_path):
     # scoring is exactly how it would go unnoticed.
     root = tmp_path / "ann"
     root.mkdir(parents=True, exist_ok=True)
-    (root / "project.json").write_text(json.dumps({"name": "ann", "stages": "not a list"}))
+    (root / "project.json").write_text(json.dumps({"name": "ann", "stages": "not a list"}), encoding="utf-8")
     with pytest.raises(Exception) as excinfo:
         overlay_data.load_overlay_data([_bundle(tmp_path, "ann")])
     assert not isinstance(excinfo.value, OSError)
@@ -441,7 +442,7 @@ def test_one_bad_audit_does_not_stop_the_other_stages(tmp_path):
     root = tmp_path / "ann"
     _write_audit(root, 1, [1000])
     _write_audit(root, 2, [1100, 1400])
-    (root / "audit" / "stage2.json").write_text("{not json")
+    (root / "audit" / "stage2.json").write_text("{not json", encoding="utf-8")
     _write_audit(root, 3, [1200])
     stages = {
         n: project_loader.CompareStageBundle(
@@ -508,6 +509,7 @@ def test_compare_does_not_reach_into_the_web_ui_layer() -> None:
         [sys.executable, "-c", probe],
         capture_output=True,
         text=True,
+        encoding="utf-8",
         cwd=Path(__file__).parent.parent,
     )
 

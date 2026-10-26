@@ -66,13 +66,13 @@ def test_the_render_file_is_named_by_what_it_draws(tmp_path: Path) -> None:
     """The render's ffmpeg argv names the file, so its name must move with
     its content: the segment cache keys on the argv (``rendering.md``)."""
     source = tmp_path / "warm.cube"
-    source.write_text(grade.write_cube(Lut(size=2, table=1.0 - grade.identity(2).table)))
+    source.write_text(grade.write_cube(Lut(size=2, table=1.0 - grade.identity(2).table)), encoding="utf-8")
     full = grade.materialize(ResolvedGrade(source=source, strength=1.0, label="warm"), tmp_path / "work")
     half = grade.materialize(ResolvedGrade(source=source, strength=0.5, label="warm"), tmp_path / "work")
     again = grade.materialize(ResolvedGrade(source=source, strength=1.0, label="warm"), tmp_path / "work")
     assert full == again and full != half
     assert full.name.startswith("grade-") and full.suffix == ".cube"
-    assert grade.parse_cube(full.read_text()).size == 2
+    assert grade.parse_cube(full.read_text(encoding="utf-8")).size == 2
 
 
 def test_the_filter_reads_the_file_with_tetrahedral_interpolation(tmp_path: Path) -> None:
@@ -83,19 +83,19 @@ def test_every_shipped_preset_is_a_valid_cube() -> None:
     names = grade.preset_names()
     assert {"vivid", "warm-film", "teal-orange", "cool-steel", "bleach-bypass", "faded", "noir"} <= set(names)
     for name in names:
-        lut = grade.parse_cube(grade.preset_path(name).read_text())
+        lut = grade.parse_cube(grade.preset_path(name).read_text(encoding="utf-8"))
         assert lut.size == 17 and float(lut.table.min()) >= 0.0 and float(lut.table.max()) <= 1.0
 
 
 def _look_with(root: Path, grade_block: object, *, lut: bool = False) -> Path:
     shutil.copytree(looks.shipped_looks_dir() / "splitsmith", root)
-    manifest = json.loads((root / "look.json").read_text())
+    manifest = json.loads((root / "look.json").read_text(encoding="utf-8"))
     manifest["name"] = root.name
     manifest["grade"] = grade_block
-    (root / "look.json").write_text(json.dumps(manifest))
+    (root / "look.json").write_text(json.dumps(manifest), encoding="utf-8")
     if lut:
         (root / "luts").mkdir()
-        (root / "luts" / "mine.cube").write_text(_cube(2, _identity_rows(2)))
+        (root / "luts" / "mine.cube").write_text(_cube(2, _identity_rows(2)), encoding="utf-8")
     return root
 
 
@@ -133,7 +133,7 @@ def test_a_choice_naming_nothing_real_is_refused(user_looks: Path, choice: str) 
 
 
 def test_a_looks_lut_outside_its_folder_is_refused(user_looks: Path, tmp_path: Path) -> None:
-    (tmp_path / "outside.cube").write_text(_cube(2, _identity_rows(2)))
+    (tmp_path / "outside.cube").write_text(_cube(2, _identity_rows(2)), encoding="utf-8")
     _look_with(user_looks / "sly", {"lut": "../../outside.cube"})
     with pytest.raises(GradeError, match="Look's folder"):
         grade.resolve_grade("look", looks.load_look("sly"))
@@ -144,7 +144,7 @@ def test_your_own_lut_is_checked_and_kept_content_named(
 ) -> None:
     monkeypatch.setattr(grade, "user_luts_dir", lambda: tmp_path / "luts")
     source = tmp_path / "My Film Look.CUBE"
-    source.write_text(grade.write_cube(Lut(size=2, table=1.0 - grade.identity(2).table)))
+    source.write_text(grade.write_cube(Lut(size=2, table=1.0 - grade.identity(2).table)), encoding="utf-8")
     name = grade.add_user_lut(source)
     assert grade.USER_LUT_RE.match(name) and name.startswith("my-film-look-")
     assert (tmp_path / "luts" / name).is_file()
@@ -154,7 +154,7 @@ def test_your_own_lut_is_checked_and_kept_content_named(
     assert resolved is not None and resolved.source == tmp_path / "luts" / name
 
     broken = tmp_path / "broken.cube"
-    broken.write_text("LUT_1D_SIZE 4\n")
+    broken.write_text("LUT_1D_SIZE 4\n", encoding="utf-8")
     with pytest.raises(GradeError, match="3D"):
         grade.add_user_lut(broken)
     assert grade.list_user_luts() == [name], "a refused file is never kept"
@@ -167,12 +167,12 @@ def test_lut_add_on_the_command_line(tmp_path: Path, monkeypatch: pytest.MonkeyP
 
     monkeypatch.setattr(grade, "user_luts_dir", lambda: tmp_path / "luts")
     source = tmp_path / "film.cube"
-    source.write_text(_cube(2, _identity_rows(2)))
+    source.write_text(_cube(2, _identity_rows(2)), encoding="utf-8")
     result = CliRunner().invoke(app, ["looks", "lut-add", str(source)])
     assert result.exit_code == 0, result.output
     assert "--grade user:film-" in result.output
     bad = tmp_path / "bad.cube"
-    bad.write_text("nonsense\n")
+    bad.write_text("nonsense\n", encoding="utf-8")
     assert CliRunner().invoke(app, ["looks", "lut-add", str(bad)]).exit_code == 2
 
 

@@ -73,7 +73,7 @@ def build_in_stage_rows(fix: str) -> list[dict]:
     wav_path = FIXTURES_DIR / f"{fix}.wav"
     clap_path = CACHE_DIR / f"{fix}_clap.npz"
     pann_path = CACHE_DIR / f"{fix}_pann.npz"
-    truth = json.loads(truth_path.read_text())
+    truth = json.loads(truth_path.read_text(encoding="utf-8"))
     audio, sr = load_audio(wav_path)
     cfg = ShotDetectConfig(recall_fallback="cwt", min_confidence=0.0)
     shots = detect_shots(audio, sr, truth["beep_time"], truth["stage_time_seconds"], cfg)
@@ -130,8 +130,8 @@ def build_mined_rows_for_fixture(fix: str, mined_npz: np.lib.npyio.NpzFile) -> l
     if not indices:
         return []
 
-    sidecar = json.loads(sidecar_path.read_text())
-    audit = json.loads((FIXTURES_DIR / f"{fix}.json").read_text())
+    sidecar = json.loads(sidecar_path.read_text(encoding="utf-8"))
+    audit = json.loads((FIXTURES_DIR / f"{fix}.json").read_text(encoding="utf-8"))
     beep_in_full = (
         float(audit["fixture_window_in_source"][0])
         + float(audit["beep_time"])

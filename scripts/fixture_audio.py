@@ -54,12 +54,12 @@ def key_for(digest: str) -> str:
 def load_manifest() -> dict[str, dict]:
     if not MANIFEST.exists():
         return {}
-    return json.loads(MANIFEST.read_text())["files"]
+    return json.loads(MANIFEST.read_text(encoding="utf-8"))["files"]
 
 
 def save_manifest(files: dict[str, dict]) -> None:
     body = {"version": 1, "files": dict(sorted(files.items()))}
-    MANIFEST.write_text(json.dumps(body, indent=2) + "\n")
+    MANIFEST.write_text(json.dumps(body, indent=2) + "\n", encoding="utf-8")
 
 
 def write_gitignore(names: list[str]) -> None:
@@ -67,7 +67,7 @@ def write_gitignore(names: list[str]) -> None:
     kept: list[str] = []
     inside = False
     if GITIGNORE.exists():
-        for line in GITIGNORE.read_text().splitlines():
+        for line in GITIGNORE.read_text(encoding="utf-8").splitlines():
             if line == _BEGIN:
                 inside = True
             elif line == _END:
@@ -77,7 +77,7 @@ def write_gitignore(names: list[str]) -> None:
     while kept and not kept[-1]:
         kept.pop()
     block = [_BEGIN, *[f"/{n}" for n in sorted(names)], _END]
-    GITIGNORE.write_text("\n".join([*kept, *([""] if kept else []), *block]) + "\n")
+    GITIGNORE.write_text("\n".join([*kept, *([""] if kept else []), *block]) + "\n", encoding="utf-8")
 
 
 def status(manifest: dict[str, dict] | None = None) -> dict[str, list[str]]:
@@ -161,7 +161,7 @@ def _object_exists(base_url: str, digest: str) -> bool:
 def _upload(path: Path, digest: str) -> None:
     cmd = ["npx", "--yes", "wrangler@4", "r2", "object", "put", f"{BUCKET}/{key_for(digest)}"]
     cmd += ["--file", str(path), "--content-type", "audio/wav", "--remote"]
-    subprocess.run(cmd, check=True, capture_output=True, text=True)
+    subprocess.run(cmd, check=True, capture_output=True, text=True, encoding="utf-8")
 
 
 def push(names: list[str], base_url: str = DEFAULT_URL) -> None:

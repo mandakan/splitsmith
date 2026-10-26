@@ -76,7 +76,7 @@ def test_the_sidecar_is_plain_json_beside_the_video(tmp_path: Path) -> None:
     _render(tmp_path, _transitioned_composition(tmp_path, kind=None), name="m", runner=_writes_output([]))
     path = tmp_path / "m-timeline.json"
     assert timeline_path(tmp_path / "m.mp4") == path
-    doc = json.loads(path.read_text())
+    doc = json.loads(path.read_text(encoding="utf-8"))
     assert doc["version"] == 1
     assert doc["items"][0] == {
         "kind": "stage",

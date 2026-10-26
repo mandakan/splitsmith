@@ -83,7 +83,7 @@ def test_index_search_root_walks_recursively_and_groups_basenames(tmp_path: Path
     root = tmp_path / "share"
     (root / "headcams").mkdir(parents=True)
     (root / "handhelds").mkdir(parents=True)
-    (root / "ignore-me.txt").write_text("not a video")
+    (root / "ignore-me.txt").write_text("not a video", encoding="utf-8")
     (root / "headcams" / "IMG_3131.MOV").write_bytes(b"")
     (root / "handhelds" / "IMG_3131.MOV").write_bytes(b"")  # same name, different dir
     (root / "handhelds" / "VID_001.mp4").write_bytes(b"")

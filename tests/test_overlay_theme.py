@@ -182,6 +182,7 @@ def test_overlay_theme_json_is_in_sync_with_css() -> None:
         [sys.executable, str(repo_root / "scripts" / "build_overlay_theme.py"), "--check"],
         capture_output=True,
         text=True,
+        encoding="utf-8",
     )
     assert proc.returncode == 0, f"overlay_theme.json drifted from index.css: {proc.stderr}"
 

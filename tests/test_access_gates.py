@@ -106,7 +106,7 @@ def test_downgrade_takes_effect_on_the_next_request(hosted_app, hosted_env) -> N
 
 def test_new_account_gets_the_default_tier(hosted_env, monkeypatch, tmp_path) -> None:  # noqa: ANN001
     cfg = tmp_path / "c.yaml"
-    cfg.write_text("access:\n  default_tier: sharing\n")
+    cfg.write_text("access:\n  default_tier: sharing\n", encoding="utf-8")
     monkeypatch.setenv("SPLITSMITH_CONFIG", str(cfg))
     from splitsmith.ui.server import create_app
     from tests.hosted_helpers import _CapturingSender

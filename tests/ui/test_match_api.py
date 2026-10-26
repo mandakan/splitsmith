@@ -738,7 +738,7 @@ def test_merge_execute_refuses_destination_with_existing_match(tmp_path: Path) -
 
     out = tmp_path / "merged"
     out.mkdir()
-    (out / "match.json").write_text("{}")
+    (out / "match.json").write_text("{}", encoding="utf-8")
 
     resp = client.post(
         "/api/match/merge/execute",

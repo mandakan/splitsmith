@@ -76,6 +76,7 @@ def _run_import_probe(entrypoint_import: str) -> set[str]:
         [sys.executable, "-c", script],
         capture_output=True,
         text=True,
+        encoding="utf-8",
         env=env,
         check=True,
     )

@@ -186,6 +186,7 @@ def test_alembic_prefers_the_migration_url(tmp_path: Path) -> None:
         cwd=REPO_ROOT,
         capture_output=True,
         text=True,
+        encoding="utf-8",
     )
     assert result.returncode == 0, result.stderr
     assert not runtime_db.exists()
@@ -240,10 +241,10 @@ def test_rotate_refuses_to_overwrite_and_leaves_no_file_on_failure(
     owner = make_url("postgresql+asyncpg://neondb_owner:pw@ep-a-1.example.neon.tech/neondb")
 
     existing = tmp_path / "exists.url"
-    existing.write_text("keep me")
+    existing.write_text("keep me", encoding="utf-8")
     with pytest.raises(SystemExit):
         script._rotate(owner, APP_ROLE, existing, pooled=True)
-    assert existing.read_text() == "keep me"
+    assert existing.read_text(encoding="utf-8") == "keep me"
 
     async def _boom(*_args: object) -> None:
         raise RuntimeError("alter failed")
@@ -269,7 +270,7 @@ def test_rotate_writes_the_url_with_owner_only_permissions(
     out = tmp_path / "app.url"
     script._rotate(owner, AGENT_ROLE, out, pooled=True)
 
-    written = make_url(out.read_text())
+    written = make_url(out.read_text(encoding="utf-8"))
     assert written.username == AGENT_ROLE
     assert out.stat().st_mode & 0o777 == 0o600
     assert statements == [password_statement(AGENT_ROLE, written.password or "")]
@@ -316,8 +317,8 @@ def test_rotate_direct_out_shares_the_password_on_the_direct_host(
     monkeypatch.setattr(script, "_run", _noop)
     owner = make_url("postgresql+asyncpg://neondb_owner:pw@ep-a-1.example.neon.tech/neondb")
     script._rotate(owner, APP_ROLE, tmp_path / "p.url", pooled=True, direct_out=tmp_path / "d.url")
-    pooled = make_url((tmp_path / "p.url").read_text())
-    direct = make_url((tmp_path / "d.url").read_text())
+    pooled = make_url((tmp_path / "p.url").read_text(encoding="utf-8"))
+    direct = make_url((tmp_path / "d.url").read_text(encoding="utf-8"))
     assert pooled.host == "ep-a-1-pooler.example.neon.tech"
     assert direct.host == "ep-a-1.example.neon.tech"
     assert pooled.password == direct.password

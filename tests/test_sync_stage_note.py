@@ -126,13 +126,13 @@ class _Desktop:
         return report
 
     def local(self) -> dict:
-        return json.loads(self.audit.read_text())
+        return json.loads(self.audit.read_text(encoding="utf-8"))
 
     def edit(self, **fields) -> None:
         time.sleep(0.01)
         doc = self.local()
         doc.update(fields)
-        self.audit.write_text(json.dumps(doc))
+        self.audit.write_text(json.dumps(doc), encoding="utf-8")
         now = time.time()
         os.utime(self.audit, (now, now))
 

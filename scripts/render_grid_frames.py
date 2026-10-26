@@ -300,6 +300,7 @@ def _extract(video: Path, index: int, destination: Path, *, ffmpeg: str) -> bool
         ],  # fmt: skip
         capture_output=True,
         text=True,
+        encoding="utf-8",
     )
     if done.returncode != 0:
         raise SystemExit(f"ffmpeg failed extracting frame {index}:\n{done.stderr[-2000:]}")
@@ -377,6 +378,7 @@ def _corpus_clips(
             ],  # fmt: skip
             capture_output=True,
             text=True,
+            encoding="utf-8",
         )
         if done.returncode != 0:
             raise SystemExit(f"ffmpeg failed normalizing {source.name}:\n{done.stderr[-2000:]}")

@@ -41,6 +41,7 @@ def _probe(path: Path) -> dict:
         ["ffprobe", "-v", "quiet", "-print_format", "json", "-show_format", str(path)],
         capture_output=True,
         text=True,
+        encoding="utf-8",
         check=True,
     ).stdout
     fmt = json.loads(out)["format"]
@@ -65,7 +66,7 @@ def _sorted_match(match_dir: Path) -> dict:
     shooters: list[dict] = []
     clips: dict[str, dict] = {}
     for pj in sorted(match_dir.glob("shooters/*/project.json")):
-        project = json.loads(pj.read_text())
+        project = json.loads(pj.read_text(encoding="utf-8"))
         name = project.get("competitor_name") or pj.parent.name
         key = _key(name)
         shooters.append(
@@ -109,7 +110,7 @@ def _unsorted(source_dir: Path, project_dir: Path, scorecards_json: Path) -> dic
         for c in sb["competitors"]
     ]
     keys = {s["key"] for s in shooters}
-    project = json.loads(next(project_dir.glob("shooters/*/project.json")).read_text())
+    project = json.loads(next(project_dir.glob("shooters/*/project.json")).read_text(encoding="utf-8"))
     owner = _key(project.get("competitor_name") or "")
     known = {
         Path(v["path"]).name: stage["stage_number"]

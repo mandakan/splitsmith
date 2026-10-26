@@ -150,8 +150,8 @@ def test_mine_one_excludes_in_stage_and_tags_outside(tmp_path: Path, monkeypatch
         "fixture_stem": "stage-shots-x",
         "full_window_in_source": [0.0, duration],
     }
-    (fixtures_dir / "stage-shots-x.json").write_text(json.dumps(audit))
-    (full_dir / "stage-shots-x_full.json").write_text(json.dumps(sidecar))
+    (fixtures_dir / "stage-shots-x.json").write_text(json.dumps(audit), encoding="utf-8")
+    (full_dir / "stage-shots-x_full.json").write_text(json.dumps(sidecar), encoding="utf-8")
 
     rows = miner.mine_one(
         "stage-shots-x",
@@ -203,8 +203,8 @@ def test_mine_all_writes_npz_and_report(tmp_path: Path, monkeypatch: pytest.Monk
         "fixture_stem": "stage-shots-x",
         "full_window_in_source": [0.0, duration],
     }
-    (fixtures_dir / "stage-shots-x.json").write_text(json.dumps(audit))
-    (full_dir / "stage-shots-x_full.json").write_text(json.dumps(sidecar))
+    (fixtures_dir / "stage-shots-x.json").write_text(json.dumps(audit), encoding="utf-8")
+    (full_dir / "stage-shots-x_full.json").write_text(json.dumps(sidecar), encoding="utf-8")
 
     rows = miner.mine_all(log=lambda _msg: None)
     assert rows
@@ -216,6 +216,6 @@ def test_mine_all_writes_npz_and_report(tmp_path: Path, monkeypatch: pytest.Monk
         "peak_amplitude",
         "region_tag",
     }
-    report = json.loads((full_dir / "_mining_report.json").read_text())
+    report = json.loads((full_dir / "_mining_report.json").read_text(encoding="utf-8"))
     assert report["n_total"] == len(rows)
     assert "stage-shots-x" in report["per_fixture"]

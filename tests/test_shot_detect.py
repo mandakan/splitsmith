@@ -18,7 +18,7 @@ def _load_fixture(
     stem: str = "stage-shots-tallmilan-2026-stage3-s97dcec94-pin",
 ) -> tuple[np.ndarray, int, dict]:
     audio, sr = load_audio(fixtures_dir / f"{stem}.wav")
-    truth = json.loads((fixtures_dir / f"{stem}.json").read_text())
+    truth = json.loads((fixtures_dir / f"{stem}.json").read_text(encoding="utf-8"))
     return audio, sr, truth
 
 

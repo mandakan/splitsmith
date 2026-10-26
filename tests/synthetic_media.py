@@ -94,7 +94,7 @@ def build_synthetic_video(destination: Path) -> Path:
         "-shortest",
         str(destination),
     ]
-    subprocess.run(cmd, check=True, capture_output=True, text=True)
+    subprocess.run(cmd, check=True, capture_output=True, text=True, encoding="utf-8")
     return destination
 
 
@@ -115,7 +115,7 @@ def build_color_video(destination: Path, *, color: str, seconds: float = 4.0) ->
         "-g", str(SYNTHETIC_GOP_FRAMES), "-keyint_min", str(SYNTHETIC_GOP_FRAMES), "-sc_threshold", "0",
         "-c:a", "aac", "-b:a", "128k", "-shortest", str(destination),
     ]  # fmt: skip
-    subprocess.run(cmd, check=True, capture_output=True, text=True)
+    subprocess.run(cmd, check=True, capture_output=True, text=True, encoding="utf-8")
     return destination
 
 
@@ -161,6 +161,7 @@ def build_gapped_audio_video(destination: Path) -> Path:
             check=True,
             capture_output=True,
             text=True,
+            encoding="utf-8",
         )
         parts.append(part)
     listing = destination.parent / f"{destination.stem}-parts.txt"
@@ -186,5 +187,6 @@ def build_gapped_audio_video(destination: Path) -> Path:
         check=True,
         capture_output=True,
         text=True,
+        encoding="utf-8",
     )
     return destination

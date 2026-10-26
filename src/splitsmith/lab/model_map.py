@@ -704,7 +704,7 @@ def load_model_map(shipped_calibration: Path, model_id: str = SHIPPED_ID) -> Mod
         fx.stem: (_read_json(FIXTURES_DIR / f"{fx.stem}.json") or {}).get("event_id") for fx in fixtures
     }
     try:
-        manifest = yaml.safe_load((RANKER_DIR / "manifest.yaml").read_text())
+        manifest = yaml.safe_load((RANKER_DIR / "manifest.yaml").read_text(encoding="utf-8"))
     except (OSError, yaml.YAMLError):
         manifest = None
     try:
