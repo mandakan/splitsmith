@@ -587,7 +587,7 @@ export interface HeadComparison {
   perMatch: { a: boolean; b: boolean };
 }
 
-/** A build from before model sets scored every column (plus PANN): its
+/** A build from before model sets scored every column, CLAP's included: its
  * heads line up with the ``clap`` set's. */
 const comparableSet = (set: string) => (set === "legacy" ? "clap" : set);
 

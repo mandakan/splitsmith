@@ -1,6 +1,6 @@
 """The slim wheel must not drag in the dev-only ML stack.
 
-``torch`` / ``transformers`` / ``panns_inference`` live in the ``dev``
+``torch`` / ``transformers`` live in the ``dev``
 group and are exercised only when building artifacts. If any of them
 resolves into a plain ``uv tool install splitsmith``, the user downloads
 gigabytes they never run -- the leak this asserts against.
@@ -25,7 +25,7 @@ from __future__ import annotations
 
 import sys
 
-FORBIDDEN = ("torch", "transformers", "panns_inference")
+FORBIDDEN = ("torch", "transformers")
 REQUIRED = ("onnxruntime", "librosa", "huggingface_hub", "numpy", "PIL")
 
 

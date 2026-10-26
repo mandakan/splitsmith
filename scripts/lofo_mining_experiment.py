@@ -44,7 +44,7 @@ NEG_CAP_RATIO = 5.0
 TIME_TOL_S = 1e-3
 
 # Production ensemble defaults (src/splitsmith/ensemble/api.py).
-CONSENSUS = 3
+CONSENSUS = 2  # 2-of-3 (A, B, C)
 APRIORI_BOOST = 1.0  # only applied when expected_rounds is set; not for these fixtures
 
 DEFAULT_FIXTURES = fixture_stems(mount="head", shooter_id="s97dcec94")
@@ -72,7 +72,6 @@ def build_in_stage_rows(fix: str) -> list[dict]:
     truth_path = FIXTURES_DIR / f"{fix}.json"
     wav_path = FIXTURES_DIR / f"{fix}.wav"
     clap_path = CACHE_DIR / f"{fix}_clap.npz"
-    pann_path = CACHE_DIR / f"{fix}_pann.npz"
     truth = json.loads(truth_path.read_text(encoding="utf-8"))
     audio, sr = load_audio(wav_path)
     cfg = ShotDetectConfig(recall_fallback="cwt", min_confidence=0.0)
@@ -83,10 +82,8 @@ def build_in_stage_rows(fix: str) -> list[dict]:
     labels = _label(cand_t, truth.get("shots", []), TOLERANCE_MS)
 
     clap = np.load(clap_path, allow_pickle=True)
-    pann = np.load(pann_path)
     sims = clap["text_sims"]
     clap_diff = feat.clap_diff_from_similarities(sims)
-    gunshot_prob = pann["gunshot_prob"]
 
     times = np.array(cand_t, dtype=np.float64)
     confidences = np.array([s.confidence for s in shots], dtype=np.float64)
@@ -105,7 +102,6 @@ def build_in_stage_rows(fix: str) -> list[dict]:
                 "hand_feats": hand[i].tolist(),
                 "clap_sims": [float(x) for x in sims[i]],
                 "clap_diff": float(clap_diff[i]),
-                "gunshot_prob": float(gunshot_prob[i]),
                 "confidence": float(shot.confidence),
                 "source": "in_stage",
             }
@@ -117,8 +113,7 @@ def build_mined_rows_for_fixture(fix: str, mined_npz: np.lib.npyio.NpzFile) -> l
     sidecar_path = FULL_DIR / f"{fix}_full.json"
     wav_path = FULL_DIR / f"{fix}_full.wav"
     clap_path = CACHE_DIR / f"{fix}_clap_full.npz"
-    pann_path = CACHE_DIR / f"{fix}_pann_full.npz"
-    if not all(p.exists() for p in (sidecar_path, wav_path, clap_path, pann_path)):
+    if not all(p.exists() for p in (sidecar_path, wav_path, clap_path)):
         return []
 
     fixtures = mined_npz["fixture"]
@@ -139,11 +134,9 @@ def build_mined_rows_for_fixture(fix: str, mined_npz: np.lib.npyio.NpzFile) -> l
     )
 
     clap = np.load(clap_path, allow_pickle=True)
-    pann = np.load(pann_path)
     clap_times = clap["times"].astype(np.float64)
     sims = clap["text_sims"]
     clap_diffs = feat.clap_diff_from_similarities(sims)
-    gunshot_probs = pann["gunshot_prob"]
 
     audio, sr = load_audio(wav_path)
     cand_t = np.array(times[indices], dtype=np.float64)
@@ -170,7 +163,6 @@ def build_mined_rows_for_fixture(fix: str, mined_npz: np.lib.npyio.NpzFile) -> l
                 "hand_feats": hand[k].tolist(),
                 "clap_sims": [float(x) for x in sims[j]],
                 "clap_diff": float(clap_diffs[j]),
-                "gunshot_prob": float(gunshot_probs[j]),
                 "confidence": float(cand_conf[k]),
                 "region_tag": str(region_tags[mi]),
                 "source": "mined",
@@ -229,8 +221,8 @@ def train_with_threshold(rows: list[dict]) -> tuple[GradientBoostingClassifier, 
     return final, threshold
 
 
-def calibrate_voters_abd(rows: list[dict]) -> tuple[float, float, float]:
-    """Mirror build_ensemble_artifacts: Voter A/B/D thresholds = min over positives.
+def calibrate_voters_ab(rows: list[dict]) -> tuple[float, float]:
+    """Mirror build_ensemble_artifacts: Voter A/B thresholds = min over positives.
 
     Operates on the in-stage training universe (mined negatives are intentionally
     excluded; they're label-0 so they couldn't lower a "min over positives"
@@ -238,11 +230,9 @@ def calibrate_voters_abd(rows: list[dict]) -> tuple[float, float, float]:
     """
     pos_conf = [r["confidence"] for r in rows if r["label"] == 1]
     pos_diff = [r["clap_diff"] for r in rows if r["label"] == 1]
-    pos_pann = [r["gunshot_prob"] for r in rows if r["label"] == 1]
     voter_a = max(0.0, min(pos_conf) - 1e-6) if pos_conf else 0.03
     voter_b = float(min(pos_diff)) if pos_diff else 0.0
-    voter_d = float(min(pos_pann)) if pos_pann else 0.0
-    return voter_a, voter_b, voter_d
+    return voter_a, voter_b
 
 
 def evaluate_ensemble(
@@ -251,9 +241,8 @@ def evaluate_ensemble(
     voter_a_floor: float,
     voter_b_threshold: float,
     voter_c_threshold: float,
-    voter_d_threshold: float,
 ) -> tuple[np.ndarray, np.ndarray]:
-    """Return (kept_mask, vote_total) for ``rows`` under 3-of-4 consensus.
+    """Return (kept_mask, vote_total) for ``rows`` under 2-of-3 consensus.
 
     No apriori boost applied: the calibration fixtures don't carry
     stage_rounds.expected, so production would skip the boost anyway.
@@ -263,14 +252,12 @@ def evaluate_ensemble(
     X = x_from(rows)
     confidences = np.array([r["confidence"] for r in rows], dtype=np.float64)
     clap_diffs = np.array([r["clap_diff"] for r in rows], dtype=np.float64)
-    gunshot_probs = np.array([r["gunshot_prob"] for r in rows], dtype=np.float64)
     gbdt_probs = clf.predict_proba(X)[:, 1]
 
     va = (confidences >= voter_a_floor).astype(np.int64)
     vb = (clap_diffs >= voter_b_threshold).astype(np.int64)
     vc = (gbdt_probs >= voter_c_threshold).astype(np.int64)
-    vd = (gunshot_probs >= voter_d_threshold).astype(np.int64)
-    vote_total = va + vb + vc + vd
+    vote_total = va + vb + vc
     kept = vote_total >= CONSENSUS
     return kept, vote_total
 
@@ -336,7 +323,7 @@ def run() -> None:
 
         clf_no, thr_no = train_with_threshold(train_in_stage)
         clf_y, thr_y = train_with_threshold(train_in_stage + train_mined)
-        a_floor, b_thr, d_thr = calibrate_voters_abd(train_in_stage)
+        a_floor, b_thr = calibrate_voters_ab(train_in_stage)
 
         # Evaluate on held-out.
         held_in = in_stage_by_fixture[held]
@@ -398,15 +385,15 @@ def run() -> None:
         agg_recall_y.append(in_pos_y / n_pos)
 
         # Full 4-voter ensemble (production: consensus=3, no apriori).
-        ens_kept_no_in, _ = evaluate_ensemble(held_in, clf_no, a_floor, b_thr, thr_no, d_thr)
-        ens_kept_y_in, _ = evaluate_ensemble(held_in, clf_y, a_floor, b_thr, thr_y, d_thr)
+        ens_kept_no_in, _ = evaluate_ensemble(held_in, clf_no, a_floor, b_thr, thr_no)
+        ens_kept_y_in, _ = evaluate_ensemble(held_in, clf_y, a_floor, b_thr, thr_y)
         ens_in_pos_no = int((ens_kept_no_in & (y_in == 1)).sum())
         ens_in_pos_y = int((ens_kept_y_in & (y_in == 1)).sum())
         ens_in_kept_no = int(ens_kept_no_in.sum())
         ens_in_kept_y = int(ens_kept_y_in.sum())
         if held_mined:
-            ens_kept_no_m, _ = evaluate_ensemble(held_mined, clf_no, a_floor, b_thr, thr_no, d_thr)
-            ens_kept_y_m, _ = evaluate_ensemble(held_mined, clf_y, a_floor, b_thr, thr_y, d_thr)
+            ens_kept_no_m, _ = evaluate_ensemble(held_mined, clf_no, a_floor, b_thr, thr_no)
+            ens_kept_y_m, _ = evaluate_ensemble(held_mined, clf_y, a_floor, b_thr, thr_y)
             ens_mined_no = int(ens_kept_no_m.sum())
             ens_mined_y = int(ens_kept_y_m.sum())
         else:

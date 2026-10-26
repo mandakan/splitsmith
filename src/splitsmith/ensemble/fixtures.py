@@ -7,8 +7,8 @@ its own ``DEFAULT_FIXTURES`` literal -- 11 separate lists across
 * New fixtures (e.g. shooter ``s0fe3d797``) had to be added to each list
   by hand; missing one silently shrank that script's corpus.
 * ``build_ensemble_artifacts.py`` listed ``tallmilan-2026-stage4-s97dcec94``
-  but neither ``extract_clap_features.py`` nor ``extract_audio_embeddings.py``
-  did, so the artifact build saw a fixture whose feature cache had never
+  but ``extract_clap_features.py`` did
+  not, so the artifact build saw a fixture whose feature cache had never
   been generated.
 
 This module replaces those literals with on-disk discovery: every audit

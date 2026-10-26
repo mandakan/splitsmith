@@ -187,7 +187,6 @@ def _make_minimal_ensemble_result():
             ensemble_score=3.0,
             score_c=0.9,
             clap_diff=0.5,
-            gunshot_prob=0.8,
             kept=True,
         )
     ]

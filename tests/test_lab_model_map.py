@@ -67,7 +67,9 @@ LEGACY_CAL = {
         }
     },
     "voter_c_onnx_artifacts": {"headcam": "voter_c_gbdt_headcam.onnx"},
-    "model_artifacts": {"pann_cnn14": {"filename": "pann.onnx", "sha256": "ab", "size_bytes": 3}},
+    "model_artifacts": {
+        "clap_audio_encoder": {"filename": "clap_audio.onnx", "sha256": "ab", "size_bytes": 3}
+    },
 }
 
 LEGACY_HELDOUT = {
@@ -191,7 +193,7 @@ def test_heads_carry_thresholds_cv_and_held_out_metrics() -> None:
     assert head["headcam"].heldout_matches == ["alpha-2026"]
     # No held-out block and no metrics for the class: still listed, empty.
     assert head["handheld"].heldout == [] and head["handheld"].cv is None
-    assert m.ensemble.artifacts[0].filename == "pann.onnx"
+    assert m.ensemble.artifacts[0].filename == "clap_audio.onnx"
 
 
 def test_every_head_names_its_set_and_the_default_set_comes_first() -> None:

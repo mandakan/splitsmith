@@ -37,7 +37,7 @@ class ModelArtifactsSpec(BaseModel):
     """The full ``model_artifacts`` block; entries keyed by slug.
 
     The slugs are the model identities the slim runtime asks for
-    (``clap_audio_encoder``, ``clap_text_embeddings``, ``pann_cnn14``,
+    (``clap_audio_encoder``, ``clap_text_embeddings``,
     ``clip_visual_encoder``). Extra keys are preserved so future
     artifacts (e.g. a fallback GBDT-only path) round-trip cleanly.
     """

@@ -2,16 +2,14 @@
 
 End-to-end maintainer workflow (issue #377 -- doc 02 + doc 03):
 
-1. Run ``scripts/export_pann_onnx.py`` and
-   ``scripts/export_clap_onnx.py`` to produce ``build/onnx-spike/``.
+1. Run ``scripts/export_clap_onnx.py`` to produce ``build/onnx-spike/``.
 2. Provide R2 credentials. Two paths:
    - **boto3 path (recommended, no size limit)**: set
      ``R2_ACCESS_KEY_ID`` + ``R2_SECRET_ACCESS_KEY`` env vars
      (create the keys at
      ``https://dash.cloudflare.com/?to=/:account/r2/api-tokens``).
      This routes uploads through R2's S3-compatible endpoint with
-     multipart support; needed for the PANN artifact which is
-     ~312 MiB (above wrangler's 300 MiB single-PUT cap).
+     multipart support, so no size limit applies.
    - **wrangler fallback**: run ``wrangler login`` once. Works for
      artifacts under 300 MiB.
 3. Run this script. It SHA256s each artifact, uploads to
@@ -30,7 +28,7 @@ that old SHAs stay reachable so older wheels keep working.
 Run:
     uv run python scripts/upload_model_artifacts.py
     uv run python scripts/upload_model_artifacts.py --dry-run
-    uv run python scripts/upload_model_artifacts.py --skip pann_cnn14
+    uv run python scripts/upload_model_artifacts.py --skip clap_text_embeddings
 """
 
 from __future__ import annotations
@@ -73,7 +71,6 @@ class ArtifactSpec:
 
 
 KNOWN_ARTIFACTS: tuple[ArtifactSpec, ...] = (
-    ArtifactSpec(slug="pann_cnn14", local_filename="pann_cnn14.onnx"),
     ArtifactSpec(slug="clap_audio_encoder", local_filename="clap_audio.onnx"),
     ArtifactSpec(slug="clap_text_embeddings", local_filename="clap_text_embeddings.npy"),
 )
@@ -127,8 +124,8 @@ def _s3_put(
         return
     print(f"  S3 PUT s3://{bucket}/{key}")
     # ``upload_file`` uses S3TransferManager which multipart-uploads
-    # files above 8 MiB by default. No special handling needed for the
-    # 300 MiB+ PANN artifact.
+    # files above 8 MiB by default, so no special handling is needed for
+    # a large artifact.
     s3_client.upload_file(
         Filename=str(file),
         Bucket=bucket,

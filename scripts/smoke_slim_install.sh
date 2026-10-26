@@ -109,11 +109,11 @@ uv pip install --python "$SMOKE_VENV/bin/python" "$WHEEL" --quiet --reinstall
 
 # --- sentinel: no torch trio ----------------------------------------
 
-echo "==> sentinel: torch / transformers / panns_inference must NOT be installed"
+echo "==> sentinel: torch / transformers must NOT be installed"
 "$SMOKE_VENV/bin/python" - <<'PY'
 import sys
 
-forbidden = ("torch", "transformers", "panns_inference")
+forbidden = ("torch", "transformers")
 for name in forbidden:
     try:
         __import__(name)

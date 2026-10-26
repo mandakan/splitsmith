@@ -1,7 +1,7 @@
 """ONNX execution-provider selection for ensemble inference (issue #796).
 
 One place decides which onnxruntime execution providers a session is built
-with, so the three loaders (CLAP audio, PANN, voter C / voter E graphs) share
+with, so the loaders (CLAP audio, voter C / voter E graphs) share
 identical CPU-vs-GPU behaviour instead of each hardcoding
 ``providers=["CPUExecutionProvider"]``.
 

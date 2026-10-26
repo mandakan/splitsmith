@@ -221,7 +221,7 @@ export interface paths {
          *     Reads the calibration JSON directly rather than going through
          *     ``_get_ensemble_runtime`` (issue #667): this is a metadata read,
          *     and building the full runtime would make a dropdown fetch pay
-         *     for the CLAP/PANN/voter-C session loads it never touches -- and
+         *     for the CLAP/voter-C session loads it never touches -- and
          *     would turn a missing model artifact into a 500 on a camera list
          *     that does not depend on any model.
          */

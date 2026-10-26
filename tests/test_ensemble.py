@@ -1,7 +1,7 @@
 """Unit tests for the 4-voter ensemble logic.
 
 The voters are pure functions over per-candidate signals -- testable
-without loading CLAP/PANN/GBDT. The end-to-end ``detect_shots_ensemble``
+without loading CLAP/GBDT. The end-to-end ``detect_shots_ensemble``
 test uses a stubbed ``EnsembleRuntime`` to exercise the wiring while
 side-stepping the heavy model paths.
 """
@@ -372,11 +372,6 @@ class _StubClapRuntime:
     """Mimics ``ClapRuntime`` for type-shape; never used by the stubs below."""
 
 
-@dataclass
-class _StubPannRuntime:
-    """Mimics ``PannRuntime`` for type-shape; never used by the stubs below."""
-
-
 class _StubGBDT:
     """``predict_proba`` always returns 0.95 for class 1, 0.05 for class 0."""
 
@@ -393,7 +388,6 @@ def _build_stub_runtime() -> EnsembleRuntime:
         calibration=cal,
         voter_c_model={"headcam": _StubGBDT(), "handheld": _StubGBDT()},
         clap=_StubClapRuntime(),  # type: ignore[arg-type]
-        pann=_StubPannRuntime(),  # type: ignore[arg-type]
         expected_prompts=tuple(CLAP_PROMPTS),
     )
 
@@ -422,11 +416,6 @@ def test_detect_shots_ensemble_full_universe_with_stubs(monkeypatch) -> None:
         ensemble_features,
         "compute_clap_similarities",
         lambda audio, sr, times, runtime: np.full((len(times), len(CLAP_PROMPTS)), 0.5, dtype=np.float32),
-    )
-    monkeypatch.setattr(
-        ensemble_features,
-        "compute_pann_gunshot_probs",
-        lambda audio, sr, times, runtime: np.full(len(times), 0.9, dtype=np.float32),
     )
 
     audio = np.zeros(48_000 * 20, dtype=np.float32)
@@ -485,11 +474,6 @@ def test_detect_shots_ensemble_apriori_boost_lifts_top_k(monkeypatch) -> None:
         "compute_clap_similarities",
         lambda audio, sr, times, runtime: np.zeros((len(times), len(CLAP_PROMPTS)), dtype=np.float32),
     )
-    monkeypatch.setattr(
-        ensemble_features,
-        "compute_pann_gunshot_probs",
-        lambda audio, sr, times, runtime: np.zeros(len(times), dtype=np.float32),
-    )
 
     audio = np.zeros(48_000 * 20, dtype=np.float32)
     result = detect_shots_ensemble(
@@ -540,11 +524,6 @@ def test_detect_shots_ensemble_within_stage_amp_floor_drops_quiet_headcam(
         "compute_clap_similarities",
         lambda audio, sr, times, runtime: np.full((len(times), len(CLAP_PROMPTS)), 0.5, dtype=np.float32),
     )
-    monkeypatch.setattr(
-        ensemble_features,
-        "compute_pann_gunshot_probs",
-        lambda audio, sr, times, runtime: np.full(len(times), 0.9, dtype=np.float32),
-    )
 
     audio = np.zeros(48_000 * 20, dtype=np.float32)
     result = detect_shots_ensemble(
@@ -590,11 +569,6 @@ def test_detect_shots_ensemble_within_stage_amp_floor_skipped_on_handheld(
         ensemble_features,
         "compute_clap_similarities",
         lambda audio, sr, times, runtime: np.full((len(times), len(CLAP_PROMPTS)), 0.5, dtype=np.float32),
-    )
-    monkeypatch.setattr(
-        ensemble_features,
-        "compute_pann_gunshot_probs",
-        lambda audio, sr, times, runtime: np.full(len(times), 0.9, dtype=np.float32),
     )
 
     audio = np.zeros(48_000 * 20, dtype=np.float32)
@@ -650,11 +624,6 @@ def test_detect_shots_ensemble_within_stage_amp_floor_uses_per_model_override(
         ensemble_features,
         "compute_clap_similarities",
         lambda audio, sr, times, runtime: np.full((len(times), len(CLAP_PROMPTS)), 0.5, dtype=np.float32),
-    )
-    monkeypatch.setattr(
-        ensemble_features,
-        "compute_pann_gunshot_probs",
-        lambda audio, sr, times, runtime: np.full(len(times), 0.9, dtype=np.float32),
     )
 
     audio = np.zeros(48_000 * 20, dtype=np.float32)
@@ -730,11 +699,6 @@ def test_detect_shots_ensemble_skips_voter_e_when_disabled(monkeypatch) -> None:
         "compute_clap_similarities",
         lambda audio, sr, times, runtime: np.full((len(times), len(CLAP_PROMPTS)), 0.5, dtype=np.float32),
     )
-    monkeypatch.setattr(
-        ensemble_features,
-        "compute_pann_gunshot_probs",
-        lambda audio, sr, times, runtime: np.full(len(times), 0.9, dtype=np.float32),
-    )
 
     audio = np.zeros(48_000 * 20, dtype=np.float32)
     result = detect_shots_ensemble(
@@ -793,11 +757,6 @@ def test_detect_shots_ensemble_voter_e_e_required_drops_low_score(monkeypatch, t
         ensemble_features,
         "compute_clap_similarities",
         lambda audio, sr, times, runtime: np.full((len(times), len(CLAP_PROMPTS)), 0.5, dtype=np.float32),
-    )
-    monkeypatch.setattr(
-        ensemble_features,
-        "compute_pann_gunshot_probs",
-        lambda audio, sr, times, runtime: np.full(len(times), 0.9, dtype=np.float32),
     )
     # Bypass real frame extraction + CLIP forward pass.
     monkeypatch.setattr(
@@ -871,11 +830,6 @@ def test_detect_shots_ensemble_voter_e_audio_strong_skips_veto(monkeypatch, tmp_
         ensemble_features,
         "compute_clap_similarities",
         lambda audio, sr, times, runtime: np.full((len(times), len(CLAP_PROMPTS)), 0.5, dtype=np.float32),
-    )
-    monkeypatch.setattr(
-        ensemble_features,
-        "compute_pann_gunshot_probs",
-        lambda audio, sr, times, runtime: np.full(len(times), 0.9, dtype=np.float32),
     )
     monkeypatch.setattr(
         ensemble_visual,
@@ -1061,11 +1015,6 @@ def test_detect_shots_ensemble_uses_per_class_thresholds(monkeypatch) -> None:
         ensemble_features,
         "compute_clap_similarities",
         lambda audio, sr, times, runtime: np.full((len(times), len(CLAP_PROMPTS)), 0.5, dtype=np.float32),
-    )
-    monkeypatch.setattr(
-        ensemble_features,
-        "compute_pann_gunshot_probs",
-        lambda audio, sr, times, runtime: np.full(len(times), 0.9, dtype=np.float32),
     )
 
     audio = np.zeros(48_000 * 20, dtype=np.float32)

@@ -82,8 +82,6 @@ class Candidate:
     t: float
     label: int
     features: dict[str, float]
-    pann_embedding: np.ndarray | None = None
-    pann_gunshot_prob: float | None = None
     clap_audio_emb: np.ndarray | None = None
     clap_text_sims: np.ndarray | None = None  # (P,)
     clap_prompts: list[str] | None = None
@@ -191,13 +189,6 @@ def _label_candidates(cand_times: list[float], gt_times: list[float], tolerance_
     return labels
 
 
-def _load_pann_cache(fixture: str) -> dict | None:
-    p = CACHE_DIR / f"{fixture}_pann.npz"
-    if not p.exists():
-        return None
-    return dict(np.load(p))
-
-
 def _load_clap_cache(fixture: str) -> dict | None:
     p = CACHE_DIR / f"{fixture}_clap.npz"
     if not p.exists():
@@ -210,7 +201,6 @@ def collect_candidates(
     tolerance_ms: float,
     config: ShotDetectConfig,
     *,
-    use_pann: bool = False,
     use_clap: bool = False,
 ) -> list[Candidate]:
     truth = json.loads((FIXTURES_DIR / f"{fixture}.json").read_text(encoding="utf-8"))
@@ -221,19 +211,6 @@ def collect_candidates(
     labels = _label_candidates(cand_t, gt_t, tolerance_ms)
 
     cwt_env = _cwt_max_envelope(audio, sr)
-
-    pann_cache = _load_pann_cache(fixture) if use_pann else None
-    if use_pann and pann_cache is None:
-        raise SystemExit(
-            f"--use-pann set but no cache for {fixture}; " f"run scripts/extract_audio_embeddings.py first"
-        )
-    if pann_cache is not None:
-        if pann_cache["embedding"].shape[0] != len(shots):
-            raise SystemExit(
-                f"{fixture}: PANN cache has {pann_cache['embedding'].shape[0]} rows but "
-                f"detector returned {len(shots)} candidates -- "
-                f"re-run extract_audio_embeddings.py --force"
-            )
 
     clap_cache = _load_clap_cache(fixture) if use_clap else None
     if use_clap and clap_cache is None:
@@ -260,8 +237,6 @@ def collect_candidates(
             confidence=shot.confidence,
             peak_amp=shot.peak_amplitude,
         )
-        emb = pann_cache["embedding"][i] if pann_cache is not None else None
-        gprob = float(pann_cache["gunshot_prob"][i]) if pann_cache is not None else None
         clap_aemb = clap_cache["audio_emb"][i] if clap_cache is not None else None
         clap_sims = clap_cache["text_sims"][i] if clap_cache is not None else None
         clap_prompts = [str(p) for p in clap_cache["prompts"].tolist()] if clap_cache is not None else None
@@ -271,8 +246,6 @@ def collect_candidates(
                 t=shot.scoring_time,
                 label=label,
                 features=feats,
-                pann_embedding=emb,
-                pann_gunshot_prob=gprob,
                 clap_audio_emb=clap_aemb,
                 clap_text_sims=clap_sims,
                 clap_prompts=clap_prompts,
@@ -290,24 +263,17 @@ def collect_candidates(
 def _to_xy(
     cands: list[Candidate],
     *,
-    use_pann: bool = False,
     use_clap: bool = False,
     clap_text_only: bool = False,
 ) -> tuple[np.ndarray, np.ndarray]:
     """Build (X, y). Hand features always included.
 
-    use_pann: append PANN gunshot_prob + 2048-dim embedding (2049 cols).
     use_clap: append CLAP per-prompt cosine sims + shot_minus_notshot (11 cols)
         -- if clap_text_only is False, also append the 512-dim audio embedding.
     """
     rows = []
     for c in cands:
         row = [c.features[k] for k in FEATURE_NAMES]
-        if use_pann:
-            if c.pann_embedding is None or c.pann_gunshot_prob is None:
-                raise RuntimeError("use_pann=True but candidate is missing PANN features")
-            row.append(c.pann_gunshot_prob)
-            row.extend(c.pann_embedding.tolist())
         if use_clap:
             if c.clap_text_sims is None or c.clap_prompts is None:
                 raise RuntimeError("use_clap=True but candidate is missing CLAP features")
@@ -349,12 +315,6 @@ def main() -> None:
         help="max-recall: cwt + min_confidence=0 (recommended for training input)",
     )
     p.add_argument(
-        "--use-pann",
-        action="store_true",
-        help="Concatenate PANNs CNN14 embedding + gunshot_prob to hand features. "
-        "Requires running scripts/extract_audio_embeddings.py first.",
-    )
-    p.add_argument(
         "--use-clap",
         action="store_true",
         help="Concatenate CLAP audio embedding + text-similarity scores. "
@@ -374,7 +334,6 @@ def main() -> None:
         config = ShotDetectConfig()
     print(f"detector config: {config.model_dump()}")
     print(f"label tolerance: +/-{args.tolerance_ms:.0f} ms")
-    print(f"PANN features: {'on' if args.use_pann else 'off'}")
     if args.use_clap:
         print(f"CLAP features: on ({'text-only' if args.clap_text_only else 'text + audio_emb'})")
     else:
@@ -389,7 +348,6 @@ def main() -> None:
             f,
             args.tolerance_ms,
             config,
-            use_pann=args.use_pann,
             use_clap=args.use_clap,
         )
 
@@ -409,12 +367,8 @@ def main() -> None:
         test = by_fix[held]
         if not train or not test:
             continue
-        Xtr, ytr = _to_xy(
-            train, use_pann=args.use_pann, use_clap=args.use_clap, clap_text_only=args.clap_text_only
-        )
-        Xte, yte = _to_xy(
-            test, use_pann=args.use_pann, use_clap=args.use_clap, clap_text_only=args.clap_text_only
-        )
+        Xtr, ytr = _to_xy(train, use_clap=args.use_clap, clap_text_only=args.clap_text_only)
+        Xte, yte = _to_xy(test, use_clap=args.use_clap, clap_text_only=args.clap_text_only)
         # If train has no positives or no negatives, can't fit meaningful classifier.
         if len(set(ytr.tolist())) < 2:
             print(f"{held:38s}  (train set has only one class; skipping)")
@@ -461,7 +415,6 @@ def main() -> None:
     print("\n=== 5-fold random CV (mixed across fixtures) ===")
     X, y = _to_xy(
         all_cands,
-        use_pann=args.use_pann,
         use_clap=args.use_clap,
         clap_text_only=args.clap_text_only,
     )
@@ -499,9 +452,6 @@ def main() -> None:
     print("\n=== Feature importance (full-dataset fit, top 20) ===")
     importances = clf_full.feature_importances_
     names = list(FEATURE_NAMES)
-    if args.use_pann:
-        names.append("pann_gunshot_prob")
-        names.extend(f"pann_emb_{i:04d}" for i in range(2048))
     if args.use_clap:
         # Pull prompts from any candidate's cache (all fixtures share them).
         any_clap = next((c for c in all_cands if c.clap_prompts is not None), None)

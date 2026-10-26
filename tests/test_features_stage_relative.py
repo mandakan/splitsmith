@@ -172,7 +172,6 @@ def _rows(fixture: str, n: int, seed: int, expected: int | None):
             "hand_feats": hand[i].tolist(),
             "clap_sims": sims[i].tolist(),
             "clap_diff": float(sims[i, 0]),
-            "gunshot_prob": float(abs(sims[i, 1])),
         }
         for i in range(n)
     ]
@@ -241,6 +240,5 @@ def test_old_width_artifact_fails_at_load(monkeypatch):
     monkeypatch.setattr(api, "load_calibration", stub_calibration)
     monkeypatch.setattr(api, "load_voter_c_model", lambda *_a, **_k: {"headcam": Narrow()})
     monkeypatch.setattr(api.feat, "load_clap_runtime", lambda: None)
-    monkeypatch.setattr(api.feat, "load_pann_runtime", lambda: None)
     with pytest.raises(RuntimeError, match=r"voter_c_gbdt_headcam\.onnx.*31.*55"):
         api.load_ensemble_runtime(with_voter_e=False)

@@ -4,7 +4,7 @@ Writes ``build/sweeps/signals.parquet`` -- one row per (fixture,
 candidate_idx) carrying every per-voter raw signal *and* the ground-
 truth label. The table is invariant under threshold / consensus
 sweeps, so ``run_sweep.py`` can replay millions of voter combinations
-over it in seconds without ever touching CLAP / PANN / the WAV files
+over it in seconds without ever touching CLAP / the WAV files
 again.
 
 What's included per row:
@@ -22,7 +22,6 @@ What's included per row:
   no match. ``score_c`` itself is in-sample: the shipped model was fitted
   on these same candidates. ``run_sweep.py --score-c`` picks which one to
   replay.
-* Voter D input -- ``gunshot_prob`` (PANN).
 * Voter E input -- ``voter_e_signal`` (CLIP probe P(shot)) when the
   source video can be located; ``NaN`` otherwise.
 * Stage prior -- ``expected_rounds`` from ``stage_rounds.expected`` if
@@ -31,10 +30,11 @@ What's included per row:
   and ``camera_class``.
 
 Re-run after adding new audited fixtures, changing the CLAP prompt
-bank, or retraining Voter C's GBDT. The ``CLAP`` and ``PANN`` caches
-under ``tests/fixtures/.cache/`` must already exist; build them with
-``scripts/extract_clap_features.py`` + ``scripts/extract_audio_embeddings.py``
-the same way the calibration pipeline expects.
+bank, or retraining Voter C's GBDT. The CLAP caches under
+``tests/fixtures/.cache/`` must already exist; build them with
+``scripts/extract_clap_features.py`` the same way the calibration
+pipeline expects. ``score_c`` is the ``clap`` model set's voter C, the
+set whose columns include every signal this table carries.
 
 Run:
     uv run python scripts/build_sweep_signals.py
@@ -190,7 +190,8 @@ def build_signals(
 ) -> tuple[pa.Table, dict]:
     """Produce the signals table + sidecar provenance dict."""
     cal = load_calibration()
-    voter_c_model = load_voter_c_model()
+    clap_set = cal.model_set("clap")
+    voter_c_model = load_voter_c_model(clap_set.voter_c_onnx_artifacts)
 
     visual_runtime: vis.VisualRuntime | None = None
     if not skip_voter_e and cal.voter_e_probe_artifact:
@@ -213,12 +214,11 @@ def build_signals(
         truth_path = FIXTURES_DIR / f"{fix}.json"
         wav_path = FIXTURES_DIR / f"{fix}.wav"
         clap_path = CACHE_DIR / f"{fix}_clap.npz"
-        pann_path = CACHE_DIR / f"{fix}_pann.npz"
         if not (truth_path.exists() and wav_path.exists()):
             fixtures_skipped.append((fix, "missing_fixture_files"))
             continue
-        if not (clap_path.exists() and pann_path.exists()):
-            fixtures_skipped.append((fix, "missing_clap_or_pann_cache"))
+        if not clap_path.exists():
+            fixtures_skipped.append((fix, "missing_clap_cache"))
             continue
 
         truth = json.loads(truth_path.read_text(encoding="utf-8"))
@@ -255,18 +255,16 @@ def build_signals(
         clap_sims = clap["text_sims"]
         clap_diff = feat.clap_diff_from_similarities(clap_sims)
 
-        pann = np.load(pann_path)
-        if pann["gunshot_prob"].shape[0] != len(shots):
-            raise SystemExit(f"{fix}: PANN cache stale; re-run extract_audio_embeddings.py --force")
-        gunshot_prob = pann["gunshot_prob"]
-
         tta_agreement = compute_tta_agreement(
             audio, sr, truth["beep_time"], truth["stage_time_seconds"], times
         )
         hand = feat.compute_hand_features(
             audio, sr, times, truth["beep_time"], confidences, peak_amps, tta_agreement
         )
-        x = feat.voter_c_feature_matrix(hand, clap_sims, clap_diff, camera_classes=cam_class)
+        x = feat.select_columns(
+            feat.voter_c_feature_matrix(hand, clap_sims, clap_diff, camera_classes=cam_class),
+            clap_set.columns,
+        )
         cls_key = cam_class if cam_class in voter_c_model else cal.default_camera_class
         score_c = voter_c_model[cls_key].predict_proba(x)[:, 1].astype(np.float64)
 
@@ -308,7 +306,6 @@ def build_signals(
                 "tta_agreement": float(tta_agreement[i]),
                 "clap_diff": float(clap_diff[i]),
                 "score_c": float(score_c[i]),
-                "gunshot_prob": float(gunshot_prob[i]),
                 "voter_e_signal": float(voter_e_signal[i]),
                 "voter_e_available": bool(voter_e_ok),
                 "expected_rounds": expected_rounds,

@@ -23,7 +23,6 @@ function candidate(
     peak_amplitude: 0.5,
     score_c: 0.4,
     clap_diff: 0.1,
-    gunshot_prob: 0.6,
     vote_a: 1,
     vote_b: 1,
     vote_c: 1,

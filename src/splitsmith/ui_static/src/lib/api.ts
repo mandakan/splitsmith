@@ -2620,7 +2620,6 @@ export interface LabEvalCandidate {
   peak_amplitude: number;
   score_c: number;
   clap_diff: number;
-  gunshot_prob: number;
   vote_a: number;
   vote_b: number;
   vote_c: number;

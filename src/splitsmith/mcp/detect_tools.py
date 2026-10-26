@@ -47,8 +47,8 @@ from .write_tools import _resolve_stage_video
 
 logger = logging.getLogger(__name__)
 
-# Lazy module-level cache for the ensemble runtime (CLAP / GBDT / PANN
-# weights, optionally CLIP for voter E). Loading takes ~5 s; subsequent
+# Lazy module-level cache for the ensemble runtime (GBDT and, under the
+# clap model set, CLAP weights; optionally CLIP for voter E). Loading takes ~5 s; subsequent
 # calls in the same process are free. Mirrors the HTTP server's
 # ``_get_ensemble_runtime`` so MCP clients pay the cost once per server
 # lifetime.
@@ -216,7 +216,7 @@ def detect_shots_for_stage(
 
     Mirror of ``POST /api/stages/{n}/shot-detect``: loads the audit
     audio (preferring the trim cache, falling back to the full
-    primary WAV), runs CLAP + GBDT + PANN consensus, and writes the
+    primary WAV), runs the ensemble (GBDT, plus CLAP under the clap model set), and writes the
     candidate universe + seeded ``shots[]`` into
     ``<project>/audit/stage<N>.json``. The file is the source of
     truth for the audit UI; the SPA + MCP both read / write it.
@@ -235,7 +235,7 @@ def detect_shots_for_stage(
     list).
 
     First call in a process loads the ensemble runtime (~5 s for
-    CLAP + GBDT + PANN weights, plus first-call download if not yet
+    the GBDT and, under the clap model set, CLAP weights, plus a first-call download if not yet
     cached). Subsequent calls reuse it. Voter E (CLIP image
     encoder, ~600 MB) requires ``SPLITSMITH_ENABLE_VOTER_E=1`` --
     matches the HTTP server.

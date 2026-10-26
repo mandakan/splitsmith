@@ -90,18 +90,14 @@ def main() -> int:
         lambda: tta.compute_tta_agreement(audio, sample_rate, beep_time, stage_time, base_candidates),
     )
 
-    # librosa.resample at the two rates features.py uses (CLAP_SR / PANN_SR)
+    # librosa.resample at the rate features.py uses (CLAP_SR)
     import librosa
 
-    from splitsmith.ensemble.features import CLAP_SR, PANN_SR
+    from splitsmith.ensemble.features import CLAP_SR
 
     _warm(
         "librosa.resample -> CLAP_SR",
         lambda: librosa.resample(audio, orig_sr=sample_rate, target_sr=CLAP_SR),
-    )
-    _warm(
-        "librosa.resample -> PANN_SR",
-        lambda: librosa.resample(audio, orig_sr=sample_rate, target_sr=PANN_SR),
     )
 
     print("Done.")

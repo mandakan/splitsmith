@@ -380,11 +380,11 @@ For pure regression-tracking ("is the current pipeline still good on
 this new stage?"), no rebuild is needed -- just add the fixture and
 hit Run eval.
 
-> **Heads up**: rebuild calibration requires the CLAP / PANN feature
-> caches under `tests/fixtures/.cache/`. If you've added a new fixture,
-> build its caches first via `scripts/extract_clap_features.py` and
-> `scripts/extract_audio_embeddings.py`. The build script will refuse
-> to proceed without them.
+> **Heads up**: rebuild calibration requires the CLAP feature caches
+> under `tests/fixtures/.cache/`. If you've added a new fixture, build
+> its caches first via `scripts/extract_clap_features.py` (or pass
+> `--extract` to the build). The build script will refuse to proceed
+> without them.
 
 ---
 

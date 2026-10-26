@@ -23,10 +23,9 @@ hand-feature / CLAP-prompt set. The fixture-builder script
 review-time variants under ``build/ensemble-review/``; this script is
 the production-time equivalent that ships its outputs in the wheel.
 
-CLAP and PANN feature caches under ``tests/fixtures/.cache/`` are
-expected to exist; build them first via
-``scripts/extract_clap_features.py`` and
-``scripts/extract_audio_embeddings.py``.
+CLAP feature caches under ``tests/fixtures/.cache/`` are expected to
+exist; build them first via ``scripts/extract_clap_features.py`` (or
+pass ``--extract``).
 
 Run:
     uv run python scripts/build_ensemble_artifacts.py
@@ -97,6 +96,9 @@ DATA_DIR = Path("src/splitsmith/data")
 #: out-of-fold probabilities ``build_sweep_signals.py`` joins onto the
 #: sweep. Build output, not a shipped artifact.
 HELDOUT_DIR = Path("build/ensemble_heldout")
+# The model_artifacts entries a rebuild carries forward: what the clap
+# model set downloads at runtime.
+CARRIED_ARTIFACT_SLUGS: tuple[str, ...] = (feat.CLAP_AUDIO_ARTIFACT_SLUG, feat.CLAP_TEXT_ARTIFACT_SLUG)
 
 
 class BuildError(RuntimeError):
@@ -153,7 +155,7 @@ def _build_universe(
     *,
     log: Callable[[str], None] = print,
 ):
-    """Per-fixture: detect at max recall, label, slot CLAP+PANN signals.
+    """Per-fixture: detect at max recall, label, slot the CLAP signals.
 
     Each universe row carries a ``camera_class`` tag derived from the
     fixture's ``camera.mount`` so the calibrator can stratify per-voter
@@ -167,16 +169,11 @@ def _build_universe(
         truth_path = FIXTURES_DIR / f"{fix}.json"
         wav_path = FIXTURES_DIR / f"{fix}.wav"
         clap_path = CACHE_DIR / f"{fix}_clap.npz"
-        pann_path = CACHE_DIR / f"{fix}_pann.npz"
         if not truth_path.exists() or not wav_path.exists():
             log(f"  skip {fix}: missing fixture files")
             continue
-        if not clap_path.exists() or not pann_path.exists():
-            log(
-                f"  skip {fix}: CLAP/PANN cache missing -- run "
-                "extract_clap_features.py + extract_audio_embeddings.py "
-                "for this stem to include it."
-            )
+        if not clap_path.exists():
+            log(f"  skip {fix}: CLAP cache missing -- run extract_clap_features.py for it to include it.")
             continue
 
         truth = json.loads(truth_path.read_text(encoding="utf-8"))
@@ -206,11 +203,6 @@ def _build_universe(
             )
         sims = clap["text_sims"]
         clap_diff = feat.clap_diff_from_similarities(sims)
-
-        pann = np.load(pann_path)
-        if pann["gunshot_prob"].shape[0] != len(shots):
-            raise BuildError(f"{fix}: PANN cache stale; re-run extract_audio_embeddings.py --force")
-        gunshot_prob = pann["gunshot_prob"]
 
         times = np.array(cand_t, dtype=np.float64)
         confidences = np.array([s.confidence for s in shots], dtype=np.float64)
@@ -245,7 +237,6 @@ def _build_universe(
                     "confidence": float(shot.confidence),
                     "peak_amp": float(shot.peak_amplitude),
                     "clap_diff": float(clap_diff[i]),
-                    "gunshot_prob": float(gunshot_prob[i]),
                     "hand_feats": hand[i].tolist(),
                     "clap_sims": [float(x) for x in sims[i]],
                 }
@@ -441,8 +432,7 @@ def _load_mined_negatives(
         sidecar_path = FULL_DIR / f"{fix}_full.json"
         wav_path = FULL_DIR / f"{fix}_full.wav"
         clap_path = CACHE_DIR / f"{fix}_clap_full.npz"
-        pann_path = CACHE_DIR / f"{fix}_pann_full.npz"
-        if not all(p.exists() for p in (sidecar_path, wav_path, clap_path, pann_path)):
+        if not all(p.exists() for p in (sidecar_path, wav_path, clap_path)):
             skipped.append(fix)
             continue
 
@@ -463,14 +453,7 @@ def _load_mined_negatives(
         )
 
         clap = np.load(clap_path, allow_pickle=True)
-        pann = np.load(pann_path)
         clap_times = clap["times"].astype(np.float64)
-        if clap_times.shape != pann["gunshot_prob"].shape:
-            raise BuildError(
-                f"{fix}: full CLAP and PANN caches disagree on candidate count "
-                f"({clap_times.shape[0]} vs {pann['gunshot_prob'].shape[0]}); "
-                "rebuild both with --full --force."
-            )
         prompts_in_cache = [str(p) for p in clap["prompts"].tolist()]
         if tuple(prompts_in_cache) != feat.CLAP_PROMPTS:
             raise BuildError(
@@ -479,7 +462,6 @@ def _load_mined_negatives(
             )
         sims = clap["text_sims"]
         clap_diffs = feat.clap_diff_from_similarities(sims)
-        gunshot_probs = pann["gunshot_prob"]
 
         # Map mined times -> full-cache row indices. Same WAV + same config in
         # mine_negatives and the --full extractors, so an exact (or sub-ms)
@@ -523,7 +505,6 @@ def _load_mined_negatives(
                     "label": 0,
                     "confidence": float(cand_conf[k]),
                     "clap_diff": float(clap_diffs[ci]),
-                    "gunshot_prob": float(gunshot_probs[ci]),
                     "hand_feats": hand[k].tolist(),
                     "clap_sims": [float(x) for x in sims[ci]],
                     "region_tag": str(region_tags[kept_mined_idx[k]]),
@@ -731,7 +712,6 @@ def _fit_decoder(
                 "label": int(u["label"]),
                 "score_c": float(h["score_c_lomo"]),
                 "clap_diff": u["clap_diff"],
-                "gunshot_prob": u["gunshot_prob"],
                 "confidence": u["confidence"],
                 "peak_amp": u["peak_amp"],
                 "vote_b": int(u["clap_diff"] >= b_thr),
@@ -1202,18 +1182,22 @@ def _write_voter_e_parity_reference(
 def _carry_model_artifacts(cal_path: Path) -> dict | None:
     """Return the previous calibration's ``model_artifacts`` block, if any.
 
-    That block (slim-install download URLs + sha256 for the CLAP/PANN
-    ONNX exports) is curated by the export/upload scripts, not by this
-    build -- a calibration rebuild does not retrain those models, so
-    dropping the block breaks ``fetch-models`` on slim wheels (caught by
-    CI's slim-wheel smoke test on the 2026-08-17 retrain).
+    That block (slim-install download URLs + sha256 for the CLAP ONNX
+    exports) is curated by the export/upload scripts, not by this build --
+    a calibration rebuild does not retrain those models, so dropping the
+    block breaks ``fetch-models`` on slim wheels (caught by CI's
+    slim-wheel smoke test on the 2026-08-17 retrain). Only the artifacts a
+    model set downloads are carried; anything else (a retired model's
+    export) is dropped.
     """
     try:
         prev = json.loads(cal_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return None
     block = prev.get("model_artifacts")
-    return block if isinstance(block, dict) else None
+    if not isinstance(block, dict):
+        return None
+    return {slug: entry for slug, entry in block.items() if slug in CARRIED_ARTIFACT_SLUGS}
 
 
 def _event_match(stem: str) -> str | None:
@@ -1345,10 +1329,9 @@ def build_artifacts(
     if not universe:
         raise BuildError(
             "candidate universe is empty -- every fixture was skipped (see the "
-            "per-fixture log lines). Most common cause: missing CLAP/PANN "
+            "per-fixture log lines). Most common cause: missing CLAP "
             "feature caches under tests/fixtures/.cache -- run "
-            "`uv run python scripts/extract_clap_features.py` and "
-            "`uv run python scripts/extract_audio_embeddings.py`, then retrain."
+            "`uv run python scripts/extract_clap_features.py` (or pass --extract), then retrain."
         )
     n_total = len(universe)
     n_pos = sum(c["label"] for c in universe)
@@ -1568,7 +1551,7 @@ def build_artifacts(
         "decoder": decoder.model_dump() if decoder is not None else None,
         **mining_provenance,
     }
-    # A bundle shares the shipped CLAP / PANN exports, so it carries the
+    # A bundle shares the shipped CLAP exports, so it carries the
     # shipped block (its own folder has no previous calibration).
     carried = _carry_model_artifacts(cal_path if out_dir is None else DATA_DIR / "ensemble_calibration.json")
     if carried is not None:
@@ -1709,7 +1692,7 @@ def main() -> None:
     p.add_argument(
         "--extract",
         action="store_true",
-        help="Re-extract CLAP / PANN caches that are missing or were made from other audio.",
+        help="Re-extract CLAP caches that are missing or were made from other audio.",
     )
     args = p.parse_args()
     if any(v is not None for v in (args.name, args.version, args.description)) and args.out is None:

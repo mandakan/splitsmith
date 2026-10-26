@@ -52,7 +52,7 @@ config.yaml
 # Audit safety backups created before destructive fixture migrations.
 *.json.before-*
 
-# Cached PANN embeddings (regenerable via scripts/extract_audio_embeddings.py).
+# Cached CLAP features (regenerable via scripts/extract_clap_features.py).
 tests/fixtures/.cache/
 
 # Wide-window fixture audio + sidecars produced by

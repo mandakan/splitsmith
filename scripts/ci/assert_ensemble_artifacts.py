@@ -12,8 +12,8 @@ calibration the rest of the pipeline is built from.
 
 Cheap on purpose -- it needs neither ``fetch-models`` nor ffmpeg.
 ``Runtime.artifacts_dir`` defaults to the packaged ``splitsmith/data/``,
-so these files come out of the wheel itself; the 440 MiB R2 download is
-for the CLAP / PANN ONNX models, which this does not touch. That is what
+so these files come out of the wheel itself; the R2 download is
+for the CLAP ONNX models, which this does not touch. That is what
 lets it run on every PR rather than only behind the opt-in smoke job.
 
 Run with the interpreter whose resolve you want to test:

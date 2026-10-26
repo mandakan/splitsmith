@@ -322,11 +322,6 @@ def _stub_detection(monkeypatch, times, confidence):
         "compute_clap_similarities",
         lambda audio, sr, t, runtime: np.full((len(t), len(CLAP_PROMPTS)), 0.5, dtype=np.float32),
     )
-    monkeypatch.setattr(
-        ensemble_features,
-        "compute_pann_gunshot_probs",
-        lambda audio, sr, t, runtime: np.zeros(len(t), dtype=np.float32),
-    )
     runtime = _build_stub_runtime()
     # A decoder that reads only the detector confidence (logit = 10 * (c - 0.5)).
     model = _model(coef=[0, 0, 10.0, 0, 0], intercept=-5.0)

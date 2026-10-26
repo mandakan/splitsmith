@@ -24,7 +24,7 @@ from splitsmith.mcp import detect_tools
 
 def _fake_ensemble_result(times: list[float], consensus: int = 3, expected_rounds=None):
     """Build a small ``EnsembleResult`` for tests so we don't pull
-    CLAP / GBDT / PANN weights into CI.
+    CLAP / GBDT weights into CI.
 
     Mirrors the helper in ``test_ui_server.py``; duplicated here so
     these tests stay self-contained."""
@@ -45,7 +45,6 @@ def _fake_ensemble_result(times: list[float], consensus: int = 3, expected_round
             ensemble_score=3.0,
             score_c=0.9,
             clap_diff=0.5,
-            gunshot_prob=0.7,
             kept=True,
         )
         for i, t in enumerate(times)

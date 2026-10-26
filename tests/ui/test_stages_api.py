@@ -1272,7 +1272,7 @@ def test_retry_endpoint_reenqueues_failed_job_via_bare_path(tmp_path: Path, monk
 def test_shot_detect_endpoint_writes_candidates(tmp_path: Path, monkeypatch) -> None:
     """The shot-detect job runs the 3-voter ensemble on the audit clip and
     merges per-voter signals into <project>/audit/stage<N>.json. Heavy
-    models (CLAP, PANN, GBDT) are stubbed via the ensemble module entry
+    models (CLAP, GBDT) are stubbed via the ensemble module entry
     points so the test runs offline."""
     import json as _json
 
@@ -1310,7 +1310,7 @@ def test_shot_detect_endpoint_writes_candidates(tmp_path: Path, monkeypatch) -> 
 
     # Stub the audit-audio resolver so the test doesn't depend on ffmpeg.
     monkeypatch.setattr(audio_helpers, "ensure_audit_audio", lambda *a, **kw: FakeAudit())
-    # Skip CLAP/PANN/GBDT loading; the stub below ignores the runtime arg.
+    # Skip CLAP/GBDT loading; the stub below ignores the runtime arg.
     monkeypatch.setattr(server_module, "_get_ensemble_runtime", lambda: None)
     fake_result = _fake_ensemble_result(
         [
@@ -3931,7 +3931,7 @@ def test_beep_review_resets_on_redetect(tmp_path: Path, monkeypatch) -> None:
 
 def test_shot_detect_gated_on_beep_review(tmp_path: Path, monkeypatch) -> None:
     """Auto-detected beeps don't trigger the shot-detect ensemble until
-    the user reviews the beep (#71). Wasting CLAP / GBDT / PANN cycles
+    the user reviews the beep (#71). Wasting CLAP / GBDT cycles
     on an unconfirmed beep is the failure mode this gate prevents."""
     client, _ = _seed_project_with_primary(tmp_path)
     _stub_detect(monkeypatch, beep_time=12.453)

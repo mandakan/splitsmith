@@ -1,7 +1,7 @@
 """Calibration-build precondition failures must be loud and actionable.
 
 The rebuild_calibration hang (2026-08-17): every fixture was skipped for
-missing CLAP/PANN feature caches, the universe came out empty, and the
+missing CLAP feature caches, the universe came out empty, and the
 build bailed via ``raise SystemExit`` -- which a job-thread runner
 couldn't catch, so the job read "running" forever. These pin the two
 script-side halves of the fix: preconditions raise ``BuildError`` (a
@@ -37,7 +37,7 @@ def test_missing_feature_caches_raise_builderror_naming_the_fix(
     fixtures_dir = tmp_path / "fixtures"
     cache_dir = fixtures_dir / ".cache"
     fixtures_dir.mkdir()
-    # One real-looking fixture with audio but no CLAP/PANN cache -- the
+    # One real-looking fixture with audio but no CLAP cache -- the
     # exact state of a fresh checkout / cleaned cache. The build now stops
     # in its preflight, before any detection, and says how to fix it.
     stem = "stage-shots-hfo-masters-2026-stage1-s0fe3d797"
@@ -74,11 +74,29 @@ def test_model_artifacts_block_carries_across_rebuilds(tmp_path: Path) -> None:
     mod = _build_mod()
     cal_path = tmp_path / "ensemble_calibration.json"
     cal_path.write_text(
-        json.dumps({"voter_a_floor": 0.1, "model_artifacts": {"pann_cnn14": {"sha256": "x"}}}),
+        json.dumps({"voter_a_floor": 0.1, "model_artifacts": {"clap_audio_encoder": {"sha256": "x"}}}),
         encoding="utf-8",
     )
-    assert mod._carry_model_artifacts(cal_path) == {"pann_cnn14": {"sha256": "x"}}
+    assert mod._carry_model_artifacts(cal_path) == {"clap_audio_encoder": {"sha256": "x"}}
     # No previous file / no block -> nothing to carry.
     assert mod._carry_model_artifacts(tmp_path / "missing.json") is None
     cal_path.write_text(json.dumps({"voter_a_floor": 0.1}), encoding="utf-8")
     assert mod._carry_model_artifacts(cal_path) is None
+
+
+def test_the_carried_artifact_block_keeps_only_what_a_model_set_downloads(tmp_path) -> None:
+    """The shipped block named the retired PANN export; a rebuild must not carry it."""
+    b = _build_mod()
+    entry = {"filename": "x.onnx", "sha256": "ab", "size_bytes": 1, "url": "https://example.invalid/x"}
+    cal = {
+        "model_artifacts": {
+            "pann_cnn14": entry,
+            "clap_audio_encoder": entry,
+            "clap_text_embeddings": entry,
+        }
+    }
+    path = tmp_path / "ensemble_calibration.json"
+    path.write_text(json.dumps(cal), encoding="utf-8")
+    carried = b._carry_model_artifacts(path)
+    assert carried is not None
+    assert set(carried) == {"clap_audio_encoder", "clap_text_embeddings"}

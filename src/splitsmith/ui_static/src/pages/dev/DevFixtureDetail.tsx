@@ -902,7 +902,7 @@ function EvalStatusStrip({
       <Strip tone="beep">
         <Loader2 className="size-3.5 shrink-0 animate-spin text-beep" />
         <span>
-          Scoring this fixture -- CLAP + PANN + GBDT. The first run of a server
+          Scoring this fixture -- CLAP + GBDT. The first run of a server
           session loads the models, so it takes a moment.
         </span>
       </Strip>

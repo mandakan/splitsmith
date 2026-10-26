@@ -1,14 +1,12 @@
-"""Per-candidate feature extractors for the 4-voter ensemble.
+"""Per-candidate feature extractors for the ensemble.
 
-Three families of features:
+Two families of features:
 
 * **Hand-crafted** -- pure ``numpy`` derivatives of the audio (RMS,
   attack, reverb-tail, multi-resolution envelope ratios). Cheap;
   computed on every call.
 * **CLAP** -- per-prompt cosine similarity in CLAP's shared
   audio-text embedding space. Loaded once via ``load_clap_runtime``.
-* **PANN** -- AudioSet ``Gunshot, gunfire`` class probability. Loaded
-  once via ``load_pann_runtime``.
 
 The CLAP prompt bank lives here (not in calibration.py) because the
 trained GBDT classifier in voter C was fit on similarities to *these*
@@ -57,9 +55,6 @@ CLAP_SR = 48000  # CLAP-HTSAT native rate
 CLAP_MODEL_ID = "laion/clap-htsat-unfused"
 CLAP_WINDOW_S = 1.0  # 1 s window centred on each candidate
 
-PANN_SR = 32000  # PANN CNN14 native rate
-PANN_WINDOW_S = 1.0
-PANN_GUNSHOT_CLASS_INDEX = 427  # AudioSet ontology
 
 _HAND_FEATURE_NAMES: tuple[str, ...] = (
     "peak_amp",
@@ -162,20 +157,6 @@ class ClapRuntime:
     backend: Backend
     model: Any = None
     processor: Any = None
-
-
-@dataclass
-class PannRuntime:
-    """PANN gunshot-class inference state, backend-agnostic.
-
-    ``predict_gunshot_prob`` takes an ``(N, T_samples)`` float32 batch
-    at ``PANN_SR`` and returns an ``(N,)`` numpy vector of the AudioSet
-    ``Gunshot, gunfire`` class probability per row.
-    """
-
-    predict_gunshot_prob: Callable[[np.ndarray], np.ndarray]
-    backend: Backend
-    tagger: Any = None
 
 
 def _slice_window(audio: np.ndarray, sr: int, t: float, win_s: float) -> np.ndarray:
@@ -522,7 +503,7 @@ ENV_CLAP_TEXT_OVERRIDE = "SPLITSMITH_CLAP_TEXT"
 def _resolve_onnx_clap_paths() -> tuple[Path, Path]:
     """Locate the CLAP audio encoder ONNX + pre-baked text embeddings.
 
-    Order matches PANN's :func:`_resolve_onnx_pann_path`:
+    Order:
 
     1. ``SPLITSMITH_ONNX_CLAP`` / ``SPLITSMITH_CLAP_TEXT`` env vars --
        dev / test override (paths produced by ``export_clap_onnx.py``).
@@ -655,125 +636,6 @@ def clap_diff_from_similarities(sims: np.ndarray) -> np.ndarray:
     shot_mean = sims[:, :n_shot].mean(axis=1)
     not_mean = sims[:, n_shot:].mean(axis=1)
     return (shot_mean - not_mean).astype(np.float32)
-
-
-def _build_pann_runtime_torch() -> PannRuntime:
-    """Construct a torch-backed :class:`PannRuntime`. Dev / contributor path."""
-    from panns_inference import AudioTagging
-
-    tagger = AudioTagging(checkpoint_path=None, device="cpu")
-
-    def predict_gunshot_prob(batch: np.ndarray) -> np.ndarray:
-        clipwise, _embedding = tagger.inference(batch)
-        return np.asarray(clipwise, dtype=np.float32)[:, PANN_GUNSHOT_CLASS_INDEX].astype(np.float32)
-
-    return PannRuntime(
-        predict_gunshot_prob=predict_gunshot_prob,
-        backend=Backend.TORCH,
-        tagger=tagger,
-    )
-
-
-PANN_ARTIFACT_SLUG = "pann_cnn14"
-ENV_ONNX_PANN_OVERRIDE = "SPLITSMITH_ONNX_PANN"
-
-
-def _resolve_onnx_pann_path() -> Path:
-    """Locate the PANN ONNX artifact.
-
-    Order:
-    1. ``SPLITSMITH_ONNX_PANN`` env var -- dev / test override pointing
-       at a freshly exported file under ``build/onnx-spike/``.
-    2. The slim model registry -- ``ensemble_calibration.json`` must have
-       a ``model_artifacts.pann_cnn14`` block; the registry downloads
-       from R2 and SHA256-verifies. Raises clear errors if the block
-       isn't there yet (still in slim v1 rollout).
-    """
-    override = os.environ.get(ENV_ONNX_PANN_OVERRIDE)
-    if override:
-        path = Path(override)
-        if not path.is_file():
-            raise FileNotFoundError(f"{ENV_ONNX_PANN_OVERRIDE} points at {path}, which does not exist")
-        return path
-
-    from ..models import get_default_registry
-
-    registry = get_default_registry()
-    if registry is None:
-        raise RuntimeError(
-            "ONNX PANN backend selected but ensemble_calibration.json has no "
-            "model_artifacts block. Run `uv run python "
-            "scripts/export_pann_onnx.py` and paste the printed snippet into "
-            "src/splitsmith/data/ensemble_calibration.json, or point "
-            f"{ENV_ONNX_PANN_OVERRIDE} at a local export."
-        )
-    return registry.resolve(PANN_ARTIFACT_SLUG)
-
-
-def _build_pann_runtime_onnx() -> PannRuntime:
-    """Construct an onnxruntime-backed :class:`PannRuntime`.
-
-    Loads the consolidated single-file artifact produced by
-    ``scripts/export_pann_onnx.py``. Inference contract matches the
-    torch branch: ``(N, T)`` float32 audio at ``PANN_SR`` -> ``(N,)``
-    gunshot probability in numpy.
-    """
-    from .onnx_session import build_onnx_session
-
-    onnx_path = _resolve_onnx_pann_path()
-    session = build_onnx_session(onnx_path)
-    input_name = session.get_inputs()[0].name
-
-    def predict_gunshot_prob(batch: np.ndarray) -> np.ndarray:
-        audio = np.ascontiguousarray(batch.astype(np.float32, copy=False))
-        clipwise = session.run(None, {input_name: audio})[0]
-        return clipwise[:, PANN_GUNSHOT_CLASS_INDEX].astype(np.float32)
-
-    return PannRuntime(
-        predict_gunshot_prob=predict_gunshot_prob,
-        backend=Backend.ONNX,
-        tagger=None,
-    )
-
-
-def load_pann_runtime() -> PannRuntime:
-    """Load PANN through the selected backend.
-
-    First call on the torch path downloads ~80 MB to ``~/panns_data/``.
-    On the ONNX path, the consolidated ``pann_cnn14.onnx`` is resolved
-    via :func:`_resolve_onnx_pann_path` (env override or slim model
-    registry). Reuse the returned runtime across detections.
-    """
-    backend = select_backend()
-    if backend is Backend.TORCH:
-        return _build_pann_runtime_torch()
-    if backend is Backend.ONNX:
-        return _build_pann_runtime_onnx()
-    raise SplitsmithBackendError(f"Unknown backend {backend!r}")
-
-
-def compute_pann_gunshot_probs(
-    audio: np.ndarray,
-    sample_rate: int,
-    candidate_times: np.ndarray,
-    runtime: PannRuntime,
-) -> np.ndarray:
-    """Per-candidate ``Gunshot, gunfire`` class probability, shape ``(N,)``.
-
-    Inference goes through ``runtime.predict_gunshot_prob`` so this
-    function is backend-agnostic and free of ``import torch``.
-    """
-    if not len(candidate_times):
-        return np.zeros(0, dtype=np.float32)
-    if sample_rate != PANN_SR:
-        pann_audio = librosa.resample(audio.astype(np.float32), orig_sr=sample_rate, target_sr=PANN_SR)
-    else:
-        pann_audio = audio.astype(np.float32)
-    batch = np.stack(
-        [_slice_window(pann_audio, PANN_SR, float(t), PANN_WINDOW_S) for t in candidate_times],
-        axis=0,
-    )
-    return runtime.predict_gunshot_prob(batch)
 
 
 def voter_c_feature_matrix(

@@ -14,8 +14,6 @@ C. GBDT classifier: hand features + CLAP text similarities, 5-fold
    stratified CV held-out probabilities, threshold tuned for the
    --gbdt-target-recall (default 99 %; relaxed from 100 % so a single
    stubborn positive doesn't drag the threshold to ~0).
-D. PANNs zero-shot: AudioSet "Gunshot, gunfire" probability, threshold
-   = min(gunshot_prob over positives) -- 100 % recall by construction.
 
 Output
 ------
@@ -25,10 +23,9 @@ Output
   these are the "show first in the audit UI" rows.
 * Comparison vs baseline (CWT + min_confidence=0.03 alone).
 
-Dependencies: requires PANN + CLAP caches from the earlier extract scripts.
+Dependencies: requires the CLAP caches from extract_clap_features.py.
 
 Run:
-    uv run python scripts/extract_audio_embeddings.py   # if not cached
     uv run python scripts/extract_clap_features.py      # if not cached
     uv run python scripts/eval_ensemble.py
 """
@@ -209,17 +206,6 @@ def main() -> None:
         not_mean = sims[:, not_idx].mean(axis=1)
         diff = shot_mean - not_mean
 
-        pann_path = CACHE_DIR / f"{fix}_pann.npz"
-        if not pann_path.exists():
-            raise SystemExit(f"Missing PANN cache for {fix}. Run scripts/extract_audio_embeddings.py first.")
-        pann = np.load(pann_path)
-        if pann["gunshot_prob"].shape[0] != len(all_shots):
-            raise SystemExit(
-                f"{fix}: PANN cache has {pann['gunshot_prob'].shape[0]} rows but detector "
-                f"returned {len(all_shots)}. Re-run extract_audio_embeddings.py --force."
-            )
-        gunshot_prob = pann["gunshot_prob"]
-
         cand_times_arr = np.array([s.scoring_time for s in all_shots], dtype=np.float64)
         confs_arr = np.array([s.confidence for s in all_shots], dtype=np.float64)
         peaks_arr = np.array([s.peak_amplitude for s in all_shots], dtype=np.float64)
@@ -237,7 +223,6 @@ def main() -> None:
                     "label": labels[i],
                     "vote_a": int(round(shot.scoring_time, 6) in safe_times),
                     "clap_diff": float(diff[i]),
-                    "gunshot_prob": float(gunshot_prob[i]),
                     "hand_feats": feats_matrix[i].tolist(),
                     "clap_sims": list(sims[i]),
                 }
@@ -269,17 +254,6 @@ def main() -> None:
         f"Voter B (CLAP shot - notshot >= {clap_threshold:.4f}): kept {b_kept}, recall "
         f"{b_pos}/{n_pos} = {b_pos/n_pos*100:.1f}%, precision "
         f"{b_pos}/{b_kept} = {b_pos/b_kept*100:.1f}%"
-    )
-
-    # Voter D: PANN gunshot_prob >= calibrated threshold (auto-tuned for 100 % recall).
-    pos_pann = [c["gunshot_prob"] for c in universe if c["label"] == 1]
-    pann_threshold = min(pos_pann) if pos_pann else 0.0
-    d_kept = sum(1 for c in universe if c["gunshot_prob"] >= pann_threshold)
-    d_pos = sum(1 for c in universe if c["gunshot_prob"] >= pann_threshold and c["label"] == 1)
-    print(
-        f"Voter D (PANN gunshot_prob >= {pann_threshold:.4f}): kept {d_kept}, recall "
-        f"{d_pos}/{n_pos} = {d_pos/n_pos*100:.1f}%, precision "
-        f"{d_pos}/{d_kept} = {d_pos/d_kept*100:.1f}%"
     )
 
     # Voter C: GBDT 5-fold on hand + clap-sims + diff.
@@ -358,18 +332,17 @@ def main() -> None:
     for i, c in enumerate(universe):
         c["vote_b"] = int(c["clap_diff"] >= clap_threshold)
         c["vote_c"] = int(voter_c_adaptive[i]) if args.adaptive_voter_c else int(probs[i] >= threshold_c)
-        c["vote_d"] = int(c["gunshot_prob"] >= pann_threshold)
-        c["vote_total"] = c["vote_a"] + c["vote_b"] + c["vote_c"] + c["vote_d"]
+        c["vote_total"] = c["vote_a"] + c["vote_b"] + c["vote_c"]
 
-    print("\n=== Consensus levels (overall, N-of-4) ===")
+    print("\n=== Consensus levels (overall, N-of-3) ===")
     print(f"{'level':>10s} {'kept':>5s} {'recall':>8s} {'prec':>8s} {'F1':>6s}")
-    for lvl in [1, 2, 3, 4]:
+    for lvl in [1, 2, 3]:
         kept = sum(1 for c in universe if c["vote_total"] >= lvl)
         pos = sum(1 for c in universe if c["vote_total"] >= lvl and c["label"] == 1)
         rec = pos / n_pos if n_pos else 0.0
         prec = pos / kept if kept else 0.0
         f1 = (2 * rec * prec) / (rec + prec) if (rec + prec) else 0.0
-        label = f"{lvl}-of-4"
+        label = f"{lvl}-of-3"
         print(f"{label:>10s} {kept:5d} {rec*100:7.1f}% {prec*100:7.1f}% {f1:6.2f}")
 
     print("\nReference: baseline (cwt + min_confidence=0.03) =")
@@ -378,12 +351,12 @@ def main() -> None:
         f"{a_pos/a_kept*100:7.1f}% {(2*(a_pos/n_pos)*(a_pos/a_kept))/((a_pos/n_pos)+(a_pos/a_kept)):6.2f}"
     )
 
-    print("\n=== Per-fixture breakdown (consensus 3-of-4) ===")
+    print("\n=== Per-fixture breakdown (consensus 2-of-3) ===")
     print(f"{'fixture':38s} {'kept':>5s} {'recall':>8s} {'prec':>8s} {'gt':>4s}")
     for fix in fixtures:
         rows = [c for c in universe if c["fixture"] == fix]
-        kept = sum(1 for c in rows if c["vote_total"] >= 3)
-        pos = sum(1 for c in rows if c["vote_total"] >= 3 and c["label"] == 1)
+        kept = sum(1 for c in rows if c["vote_total"] >= 2)
+        pos = sum(1 for c in rows if c["vote_total"] >= 2 and c["label"] == 1)
         gt = sum(c["label"] for c in rows)
         rec = pos / gt if gt else 0.0
         prec = pos / kept if kept else 0.0
@@ -402,13 +375,13 @@ def main() -> None:
 
     camera_classes = sorted({camera_id_by_fixture[f] for f in fixtures})
     if len(camera_classes) > 1:
-        print("\n=== Per-camera-class breakdown (consensus 3-of-4) ===")
+        print("\n=== Per-camera-class breakdown (consensus 2-of-3) ===")
         print(f"{'camera':20s} {'fixtures':>8s} {'gt':>4s} {'kept':>5s} {'recall':>8s} {'prec':>8s}")
         for cam in camera_classes:
             cam_fixes = [f for f in fixtures if camera_id_by_fixture[f] == cam]
             cam_rows = [c for c in universe if camera_id_by_fixture.get(c["fixture"], "unknown") == cam]
-            c_kept = sum(1 for c in cam_rows if c["vote_total"] >= 3)
-            c_pos = sum(1 for c in cam_rows if c["vote_total"] >= 3 and c["label"] == 1)
+            c_kept = sum(1 for c in cam_rows if c["vote_total"] >= 2)
+            c_pos = sum(1 for c in cam_rows if c["vote_total"] >= 2 and c["label"] == 1)
             c_gt = sum(c["label"] for c in cam_rows)
             c_rec = c_pos / c_gt * 100 if c_gt else 0.0
             c_prec = c_pos / c_kept * 100 if c_kept else 0.0
@@ -419,15 +392,12 @@ def main() -> None:
         [c for c in universe if c["vote_total"] == 1],
         key=lambda c: (c["fixture"], c["t"]),
     )
-    print(
-        f"{'fixture':38s} {'t':>9s} {'label':>5s} {'A':>2s} {'B':>2s} {'C':>2s} {'D':>2s} "
-        f"{'clap_diff':>10s} {'pann_p':>8s}"
-    )
+    print(f"{'fixture':38s} {'t':>9s} {'label':>5s} {'A':>2s} {'B':>2s} {'C':>2s} " f"{'clap_diff':>10s}")
     for c in disagreements[: args.show_disagreements]:
         print(
             f"{c['fixture']:38s} {c['t']:9.4f} {c['label']:5d} {c['vote_a']:2d} "
-            f"{c['vote_b']:2d} {c['vote_c']:2d} {c['vote_d']:2d} "
-            f"{c['clap_diff']:10.4f} {c['gunshot_prob']:8.4f}"
+            f"{c['vote_b']:2d} {c['vote_c']:2d} "
+            f"{c['clap_diff']:10.4f}"
         )
     if len(disagreements) > args.show_disagreements:
         print(f"  ... and {len(disagreements) - args.show_disagreements} more")

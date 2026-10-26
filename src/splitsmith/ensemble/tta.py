@@ -15,7 +15,7 @@ Why this is in voter C's feature space, not a stand-alone voter:
   envelope artefacts barely above the smoothed threshold -- drop out under
   one or more perturbations.
 * Used as a voter C feature, the GBDT decides how much weight to give
-  agreement vs. the existing CLAP/PANN/hand signals. As a stand-alone soft
+  agreement vs. the existing CLAP/hand signals. As a stand-alone soft
   veto it would drop borderline real shots in busy fixtures (the issue's
   "soft veto" path is deferred until the feature path validates).
 

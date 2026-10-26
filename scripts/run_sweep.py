@@ -2,9 +2,9 @@
 
 Reads the per-candidate signal table written by ``build_sweep_signals.py``
 and evaluates *every* combination of the parameters in the supplied YAML
-grid. Because the underlying raw signals (clap_diff, gunshot_prob,
-score_c, ...) don't change as thresholds or consensus shift, this script
-is pure numpy and finishes in seconds for grids with thousands of points.
+grid. Because the underlying raw signals (clap_diff, score_c, ...) don't
+change as thresholds or consensus shift, this script is pure numpy and
+finishes in seconds for grids with thousands of points.
 
 Output: ``build/sweeps/runs.parquet`` -- one row per
 ``(run_id, param_combo, fixture)`` plus an ``__all__`` aggregate row per
@@ -397,7 +397,6 @@ def main() -> None:
         "confidence": raw_cols["confidence"].astype(np.float64),
         "clap_diff": raw_cols["clap_diff"].astype(np.float64),
         "score_c": _score_c_column(raw_cols, args.score_c),
-        "gunshot_prob": raw_cols["gunshot_prob"].astype(np.float64),
         "voter_e_signal": raw_cols["voter_e_signal"].astype(np.float64),
         "expected_rounds": raw_cols["expected_rounds"],
         "audit_count": raw_cols["audit_count"],

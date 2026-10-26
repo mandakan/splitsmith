@@ -14,7 +14,7 @@ Several artifacts ship with the package, all written by
   named by ``voter_e_probe_artifact``. Optional.
 
 The model artifacts are ONNX graphs run through ``onnxruntime``, the
-same path CLAP and PANN use (issue #649). They used to be pickled
+same path CLAP uses (issue #649). They used to be pickled
 scikit-learn estimators, which bound the shipped artifact to whatever
 scikit-learn version the *installing* user resolved; ONNX removes that
 coupling. There is deliberately no joblib fallback.
@@ -101,9 +101,8 @@ class ClassThresholds(BaseModel):
     slice of the calibration universe. Voter C uses the shared GBDT but
     its operating threshold is picked from per-class CV predictions to
     hit ``voter_c_target_recall`` *on this class*, so a class with a
-    different score distribution doesn't drag the cutoff with it. The
-    PANN gunshot probability is now a feature column on voter C rather
-    than a separate vote, so there is no voter_d threshold.
+    different score distribution doesn't drag the cutoff with it. There
+    is no voter D: its signal was folded into voter C and then retired.
     """
 
     voter_a_floor: float
@@ -362,7 +361,7 @@ class OnnxProbaModel:
     """
 
     def __init__(self, path: Path) -> None:
-        # Imported lazily, matching ``features.py``'s PANN/CLAP branches:
+        # Imported lazily, matching ``features.py``'s CLAP branches:
         # onnxruntime pulls in native libraries and nothing should pay
         # for that at import time.
         from .onnx_session import build_onnx_session

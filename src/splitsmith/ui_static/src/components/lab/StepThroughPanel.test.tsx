@@ -52,7 +52,6 @@ function candidate(n: number, voteTotal: number): LabEvalFixture["candidates"][n
     peak_amplitude: 0.5,
     score_c: 0.6,
     clap_diff: 0.02,
-    gunshot_prob: 0.7,
     vote_a: 1,
     vote_b: 1,
     vote_c: voteTotal > 2 ? 1 : 0,

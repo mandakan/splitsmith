@@ -1534,8 +1534,8 @@ def tenant_looks_provider(tenant: TenantContext) -> looks_module.UserLooksProvid
     return provide
 
 
-# Module-level cache for the 4-voter ensemble runtime (issue #31). Heavy
-# (CLAP ~600 MB, PANN ~80 MB), so it is loaded on the first shot-detect
+# Module-level cache for the ensemble runtime (issue #31). Heavy under the
+# clap model set (CLAP ~600 MB), so it is loaded on the first shot-detect
 # call and reused for subsequent calls. The threading lock guards against
 # two shot-detect jobs colliding on first init when the model weights
 # haven't downloaded yet.
@@ -1591,7 +1591,7 @@ def _get_ensemble_runtime() -> ensemble_module.EnsembleRuntime:
     model weights into the test process.
 
     Voter E (issue #183) adds a CLIP image-encoder load on top of the
-    existing CLAP/PANN/GBDT models. Skip it unless the operator has
+    existing CLAP/GBDT models. Skip it unless the operator has
     opted in via ``SPLITSMITH_ENABLE_VOTER_E=1`` so the default install
     doesn't pay ~600 MB of memory and the first-call download.
     """
@@ -3549,7 +3549,7 @@ def register_job_bodies(state: AppState) -> None:
                 # Shot detection is primary-only AND gated on ``beep_reviewed``
                 # (#71): the flag is True because the user confirmed it or the
                 # auto-trust gate cleared (#219 layer 3b). Saves the CLAP /
-                # GBDT / PANN ensemble work when the beep is wrong. Layered
+                # GBDT ensemble work when the beep is wrong. Layered
                 # automation gate (#215): users can disable the auto-trigger
                 # globally or per project. Worker callbacks run with no event
                 # loop; ``run_sync`` bridges to the async JobBackend.
@@ -3809,7 +3809,7 @@ def register_job_bodies(state: AppState) -> None:
             is None
         ):
             # Same gate as the detect-then-trim path (#71): don't burn
-            # CLAP / GBDT / PANN cycles on a beep the user hasn't
+            # CLAP / GBDT cycles on a beep the user hasn't
             # confirmed. Manual entries pre-set ``beep_reviewed`` to True
             # so this still runs; the auto-detect / select-candidate path
             # leaves it False until the user's explicit "Mark reviewed"
@@ -3932,7 +3932,7 @@ def register_job_bodies(state: AppState) -> None:
 
         ``_candidates_pending_audit.candidates`` carries every candidate
         annotated with per-voter signals (vote_a/b/c/d, ensemble_score,
-        score_c, clap_diff, gunshot_prob) so the audit UI can render the
+        score_c, clap_diff) so the audit UI can render the
         decision trail. ``shots[]`` is seeded from the consensus subset
         unless it is already populated -- the user retains authority. If
         ``reset`` is True, ``shots[]`` is wiped first so the user can
@@ -10526,7 +10526,7 @@ def create_app(
         Reads the calibration JSON directly rather than going through
         ``_get_ensemble_runtime`` (issue #667): this is a metadata read,
         and building the full runtime would make a dropdown fetch pay
-        for the CLAP/PANN/voter-C session loads it never touches -- and
+        for the CLAP/voter-C session loads it never touches -- and
         would turn a missing model artifact into a 500 on a camera list
         that does not depend on any model.
         """
@@ -11110,7 +11110,7 @@ def create_app(
     # Lab: fixture management + ensemble eval + tuning
     # ----------------------------------------------------------------------
     #
-    # End-user-visible only via the /lab route in the SPA. Heavy CLAP/PANN
+    # End-user-visible only via the /lab route in the SPA. Heavy CLAP
     # runtime is loaded once on first /api/lab/eval call and cached on the
     # FastAPI app instance so subsequent eval / rescore calls amortise it.
     # The whole block is gated on ``lab_enabled`` so end-user installs

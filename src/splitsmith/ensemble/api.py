@@ -34,7 +34,7 @@ from .tta import compute_tta_agreement
 #: (the escape hatch), "1" forces the whole-stage decoder (A/B runs).
 ENV_STAGE_DECODER = "SPLITSMITH_STAGE_DECODER"
 # The set the runtime scores until it resolves one per call: ``clap`` is
-# today's columns minus PANN, so detection behaves as it did.
+# every voter C column, as detection scored before model sets.
 _RUNTIME_MODEL_SET = "clap"
 
 
@@ -172,13 +172,6 @@ class EnsembleCandidate(BaseModel):
     ensemble_score: float
     score_c: float
     clap_diff: float
-    gunshot_prob: float = Field(
-        description=(
-            "PANN ``Gunshot, gunfire`` class probability. Folded into "
-            "voter C as a feature; surfaced here for audit-trail "
-            "interpretability."
-        ),
-    )
     voter_e_signal: float = Field(
         default=0.0,
         description=(
@@ -227,7 +220,6 @@ class EnsembleRuntime:
     # stub without building an ONNX graph.
     voter_c_model: dict[str, Any]
     clap: feat.ClapRuntime
-    pann: feat.PannRuntime
     # Track the prompt list the calibration was built against so we can
     # warn if the on-package CLAP prompt bank ever drifts.
     expected_prompts: tuple[str, ...] = field(default_factory=tuple)
@@ -260,7 +252,6 @@ def load_ensemble_runtime(*, with_voter_e: bool = True) -> EnsembleRuntime:
             "scripts/build_ensemble_artifacts.py."
         )
     clap = feat.load_clap_runtime()
-    pann = feat.load_pann_runtime()
 
     visual: vis.VisualRuntime | None = None
     if with_voter_e and calibration.voter_e_probe_artifact:
@@ -275,7 +266,6 @@ def load_ensemble_runtime(*, with_voter_e: bool = True) -> EnsembleRuntime:
         calibration=calibration,
         voter_c_model=voter_c_model,
         clap=clap,
-        pann=pann,
         expected_prompts=tuple(calibration.clap_prompts),
         visual=visual,
     )
@@ -358,7 +348,6 @@ def detect_shots_ensemble(
     )
     clap_sims = feat.compute_clap_similarities(audio, sample_rate, times, runtime.clap)
     clap_diff = feat.clap_diff_from_similarities(clap_sims)
-    gunshot_prob = feat.compute_pann_gunshot_probs(audio, sample_rate, times, runtime.pann)
     voter_c_x = feat.voter_c_feature_matrix(hand, clap_sims, clap_diff, camera_classes=camera_class)
     cls_key = camera_class if camera_class in runtime.voter_c_model else cal.default_camera_class
     score_c = runtime.voter_c_model[cls_key].predict_proba(voter_c_x)[:, 1].astype(np.float64)
@@ -476,7 +465,6 @@ def detect_shots_ensemble(
                 ensemble_score=round(float(ensemble_score[i]), 2),
                 score_c=round(float(score_c[i]), 4),
                 clap_diff=round(float(clap_diff[i]), 4),
-                gunshot_prob=round(float(gunshot_prob[i]), 4),
                 voter_e_signal=round(float(voter_e_signal[i]), 4),
                 kept=bool(keep_mask[i]),
                 decoder_prob=None if decoder_probs is None else round(float(decoder_probs[i]), 4),

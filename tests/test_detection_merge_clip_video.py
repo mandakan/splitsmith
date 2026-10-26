@@ -8,7 +8,7 @@ from splitsmith.detection_merge import merge_detection_into
 
 _FIELDS = (
     "peak_amplitude confidence vote_a vote_b vote_c vote_e vote_total apriori_boost ensemble_score "
-    "score_c clap_diff gunshot_prob voter_e_signal"
+    "score_c clap_diff voter_e_signal"
 ).split()
 
 
