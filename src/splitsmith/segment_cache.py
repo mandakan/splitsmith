@@ -49,6 +49,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
+from . import fs_atomic
 from .runtime import escape_filter_value
 
 logger = logging.getLogger(__name__)
@@ -196,7 +197,7 @@ class SegmentCache:
 
     def commit(self, partial: Path, key: str, *, suffix: str = _SUFFIX) -> Path:
         final = self.path_for(key, suffix=suffix)
-        partial.replace(final)
+        fs_atomic.replace(partial, final)
         return final
 
     def evict(self, *, keep: set[str]) -> None:

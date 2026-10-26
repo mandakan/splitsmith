@@ -32,7 +32,7 @@ from typing import Literal
 
 from pydantic import BaseModel
 
-from .. import raw_link
+from .. import fs_atomic, raw_link
 from ..match_project import MatchProject, RawVideo, StageVideo
 from ..storage import Storage
 from .audio import trimmed_video_path, video_audio_path, video_audit_audio_path
@@ -472,7 +472,7 @@ def _try_replace(src: Path, dst: Path) -> None:
         return
     try:
         dst.parent.mkdir(parents=True, exist_ok=True)
-        src.replace(dst)
+        fs_atomic.replace(src, dst)
     except OSError as exc:
         logger.debug("move_shooter: cache rename %s -> %s skipped: %s", src, dst, exc)
 

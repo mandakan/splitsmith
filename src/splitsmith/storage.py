@@ -36,6 +36,7 @@ from typing import BinaryIO, Protocol
 
 from pydantic import BaseModel
 
+from . import fs_atomic
 from .observability import STORAGE_IO
 
 
@@ -196,7 +197,7 @@ class FilesystemStorage:
         try:
             with os.fdopen(fd, "wb") as f:
                 f.write(data)
-            Path(tmp_name).replace(target)
+            fs_atomic.replace(Path(tmp_name), target)
         except Exception:
             # Best-effort cleanup; if the rename succeeded the temp
             # is already gone. Suppress because we want to re-raise
@@ -224,7 +225,7 @@ class FilesystemStorage:
                         break
                     out.write(chunk)
                     total += len(chunk)
-            Path(tmp_name).replace(target)
+            fs_atomic.replace(Path(tmp_name), target)
         except Exception:
             try:
                 Path(tmp_name).unlink()

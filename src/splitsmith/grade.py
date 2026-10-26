@@ -25,6 +25,7 @@ from pathlib import Path
 import numpy as np
 from PIL import Image
 
+from . import fs_atomic
 from .looks import Look
 from .runtime import quote_filter_value
 from .user_config import user_config_dir
@@ -170,7 +171,7 @@ def materialize(resolved: ResolvedGrade, work_dir: Path) -> Path:
     if not out.exists():
         partial = out.with_name(f".{out.name}.partial")
         partial.write_text(text, encoding="utf-8")
-        partial.replace(out)
+        fs_atomic.replace(partial, out)
     return out
 
 
@@ -280,7 +281,7 @@ def add_user_lut_bytes(data: bytes, stem: str) -> str:
     if not out.exists():
         partial = folder / f".{name}.partial"
         partial.write_bytes(data)
-        partial.replace(out)
+        fs_atomic.replace(partial, out)
     return name
 
 
@@ -364,5 +365,5 @@ def preview_png(
     cache_dir.mkdir(parents=True, exist_ok=True)
     partial = path.with_name(f".{path.name}.partial")
     partial.write_bytes(data)
-    partial.replace(path)
+    fs_atomic.replace(partial, path)
     return data

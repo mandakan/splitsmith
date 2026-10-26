@@ -31,7 +31,7 @@ from rich.console import Console
 from rich.markup import escape
 from rich.table import Table
 
-from . import camera_select, match_model, match_trims, user_config
+from . import camera_select, fs_atomic, match_model, match_trims, user_config
 from .composition import XFADE_KINDS
 from .config import Config
 from .division import competitor_division
@@ -1370,7 +1370,7 @@ def audit_clocks(
                 )
                 tmp = audit_path.with_suffix(".json.tmp")
                 tmp.write_text(json.dumps(moved, indent=2), encoding="utf-8")
-                tmp.replace(audit_path)
+                fs_atomic.replace(tmp, audit_path)
     verb = "moved" if fix else "to move (run with --fix)"
     console.print(f"{found} audit(s) {verb}" if found else "every audit is on its clip's clock")
 

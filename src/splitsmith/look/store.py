@@ -37,6 +37,7 @@ from typing import Protocol
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from .. import fs_atomic
 from ..fonts import check as check_fonts
 from ..fonts import normalize as normalize_fonts
 from ..looks import (
@@ -176,7 +177,7 @@ def _write_atomic(path: Path, text: str) -> None:
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as handle:
             handle.write(text)
-        Path(tmp).replace(path)
+        fs_atomic.replace(Path(tmp), path)
     except BaseException:
         Path(tmp).unlink(missing_ok=True)
         raise
@@ -345,7 +346,7 @@ def materialize(stored: Iterable[StoredLook], cache_root: Path) -> Path:
             (staging / s.name / MANIFEST_FILE).write_text(
                 _dump(manifest_for(s.name, s.body)), encoding="utf-8"
             )
-        staging.replace(target)
+        fs_atomic.replace(staging, target)
     except OSError:
         shutil.rmtree(staging, ignore_errors=True)
         if not target.is_dir():

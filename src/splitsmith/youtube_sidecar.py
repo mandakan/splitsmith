@@ -29,6 +29,7 @@ from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from . import fs_atomic
 from .composition import Composition, Marker, Segment, Stage
 
 
@@ -141,7 +142,7 @@ def write_sidecar(sidecar: YouTubeSidecar, output_path: Path) -> None:
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as f:
             f.write(sidecar.model_dump_json(indent=2))
-        tmp.replace(output_path)
+        fs_atomic.replace(tmp, output_path)
     except Exception:
         tmp.unlink(missing_ok=True)
         raise

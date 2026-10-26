@@ -9,6 +9,8 @@ from collections.abc import Callable
 from contextlib import AbstractContextManager, nullcontext
 from pathlib import Path
 
+from splitsmith import fs_atomic
+
 from ...export_runs import LOG_FILENAME
 from ...match_model import MATCH_FILE, Match
 from ...match_project import PROJECT_FILE, audit_docs_on_disk
@@ -44,7 +46,7 @@ def _write(path: Path, doc: Doc, *, backup: bool) -> None:
             bak = path.with_suffix(path.suffix + ".bak")
             bak.unlink(missing_ok=True)
             path.replace(bak)
-        tmp.replace(path)
+        fs_atomic.replace(tmp, path)
     except OSError:
         tmp.unlink(missing_ok=True)
         raise

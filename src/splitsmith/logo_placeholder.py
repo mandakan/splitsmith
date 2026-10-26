@@ -15,6 +15,7 @@ from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageFont
 
+from . import fs_atomic
 from .fonts import DEFAULTS, font
 
 #: Bump when the picture changes; it is part of every placeholder's name.
@@ -85,7 +86,7 @@ def placeholder_logo(label: str, cache_dir: Path) -> Path:
         cache_dir.mkdir(parents=True, exist_ok=True)
         tmp = path.with_suffix(".tmp")
         tmp.write_bytes(placeholder_png(label))
-        tmp.replace(path)
+        fs_atomic.replace(tmp, path)
     return path
 
 

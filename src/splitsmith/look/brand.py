@@ -18,6 +18,7 @@ import hashlib
 import io
 from pathlib import Path
 
+from .. import fs_atomic
 from ..composition import BrandMark
 from ..identity import LOGO_MAX_BYTES, LOGO_MAX_SIDE
 from ..looks import BRAND_DIR, BRAND_FILE_RE, Look
@@ -74,7 +75,7 @@ def save_brand_logo(root: Path, data: bytes) -> str:
     if not target.is_file():
         partial = folder / f".{name}.part"
         partial.write_bytes(data)
-        partial.replace(target)
+        fs_atomic.replace(partial, target)
     return name
 
 

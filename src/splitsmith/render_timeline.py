@@ -20,6 +20,8 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
+from . import fs_atomic
+
 TIMELINE_VERSION = 1
 
 
@@ -48,7 +50,7 @@ def write_timeline(path: Path, entries: tuple[TimelineEntry, ...]) -> None:
     doc = {"version": TIMELINE_VERSION, "items": [asdict(e) for e in entries]}
     partial = path.with_name(f".{path.name}.partial")
     partial.write_text(json.dumps(doc, indent=2) + "\n", encoding="utf-8")
-    partial.replace(path)
+    fs_atomic.replace(partial, path)
 
 
 def read_timeline(path: Path) -> tuple[TimelineEntry, ...]:

@@ -36,6 +36,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Literal
 
+from . import fs_atomic
 from .config import Config, TrimResult, WebTrimConfig
 from .derived import locked
 from .media_check import valid_mp4, valid_mp4_cached
@@ -390,7 +391,7 @@ def write_web_rendition(
             check = valid_mp4(partial)
             if not check.ok:
                 raise FFmpegError(f"web rendition failed its check: {check.reason}")
-            partial.replace(web)
+            fs_atomic.replace(partial, web)
         finally:
             if partial.exists():
                 partial.unlink()

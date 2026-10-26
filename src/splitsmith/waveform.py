@@ -25,6 +25,7 @@ from pathlib import Path
 import numpy as np
 from pydantic import BaseModel, Field
 
+from . import fs_atomic
 from .beep import detect as beep_detect
 
 
@@ -131,7 +132,7 @@ def _write_cache(cf: Path, result: PeaksResult, st: os.stat_result) -> None:
     tmp = cf.with_name(f"{cf.name}.{os.getpid()}-{uuid.uuid4().hex[:8]}.tmp")
     record = {**result.model_dump(mode="json"), "source_size": st.st_size, "source_mtime_ns": st.st_mtime_ns}
     tmp.write_text(json.dumps(record, indent=2) + "\n", encoding="utf-8")
-    tmp.replace(cf)
+    fs_atomic.replace(tmp, cf)
 
 
 def ensure_peaks(audio_path: Path, bins: int) -> PeaksResult:
