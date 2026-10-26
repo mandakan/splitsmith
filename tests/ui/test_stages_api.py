@@ -4435,7 +4435,9 @@ def test_shot_detect_detects_with_the_preferred_set_and_records_the_one_it_got(
     resp = client.post("/api/shooters/me/stages/1/shot-detect")
     final = _wait_for_job(client, resp.json()["id"])
     assert final["status"] == "succeeded", final
-    assert asked and set(asked) == {"clap"}
+    # One load per detection: the job's cold phase asks for clap once and
+    # hands the set it got to the compute backend, which must not ask again.
+    assert asked == ["clap"]
     assert scored_with == ["base"]
     saved = _json.loads((_shooter_root / "audit" / "stage1.json").read_text(encoding="utf-8"))
     assert saved["_candidates_pending_audit"]["_model_set"] == "base"

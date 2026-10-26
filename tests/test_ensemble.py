@@ -1156,6 +1156,7 @@ def test_clap_requested_without_artifacts_runs_base_and_says_so(monkeypatch, cap
     def _missing():
         raise ModelError("clap_audio_encoder: not cached and no network")
 
+    monkeypatch.setattr(feat, "clap_artifacts_present", lambda: True)
     monkeypatch.setattr(feat, "load_clap_runtime", _missing)
     monkeypatch.setattr(api, "load_calibration", stub_calibration)
     loaded: list[list[str]] = []
@@ -1181,6 +1182,7 @@ def test_a_missing_clap_file_on_disk_also_falls_back(monkeypatch) -> None:
     def _gone():
         raise FileNotFoundError("clap_audio.onnx")
 
+    monkeypatch.setattr(feat, "clap_artifacts_present", lambda: True)
     monkeypatch.setattr(feat, "load_clap_runtime", _gone)
     monkeypatch.setattr(api, "load_calibration", stub_calibration)
     monkeypatch.setattr(api, "load_voter_c_model", lambda artifacts: {cls: StubGBDT() for cls in artifacts})
@@ -1193,8 +1195,27 @@ def test_other_errors_while_loading_clap_propagate(monkeypatch) -> None:
     def _drift():
         raise RuntimeError("prompt bank drift")
 
+    monkeypatch.setattr(feat, "clap_artifacts_present", lambda: True)
     monkeypatch.setattr(feat, "load_clap_runtime", _drift)
     monkeypatch.setattr(api, "load_calibration", stub_calibration)
     monkeypatch.setattr(api, "load_voter_c_model", lambda artifacts: {cls: StubGBDT() for cls in artifacts})
     with pytest.raises(RuntimeError, match="prompt bank"):
         api.load_ensemble_runtime(model_set="clap", with_voter_e=False)
+
+
+def test_clap_before_its_artifacts_are_downloaded_runs_base_without_fetching(monkeypatch, caplog) -> None:
+    """Detection never blocks on a download: with the CLAP files not yet
+    cached it detects with base and does not try to load CLAP at all."""
+    from splitsmith.ensemble import api
+
+    def _would_download():
+        raise AssertionError("loading CLAP here would download it inline")
+
+    monkeypatch.setattr(feat, "clap_artifacts_present", lambda: False)
+    monkeypatch.setattr(feat, "load_clap_runtime", _would_download)
+    monkeypatch.setattr(api, "load_calibration", stub_calibration)
+    monkeypatch.setattr(api, "load_voter_c_model", lambda artifacts: {cls: StubGBDT() for cls in artifacts})
+    with caplog.at_level("WARNING"):
+        runtime = api.load_ensemble_runtime(model_set="clap", with_voter_e=False)
+    assert runtime.model_set == "base"
+    assert "clap_audio_encoder" in caplog.text

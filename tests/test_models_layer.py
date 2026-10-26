@@ -477,6 +477,8 @@ def test_create_app_auto_submits_model_download_when_missing(
     monkeypatch.setattr(registry_mod, "_default_registry", registry)
     # ``tests/conftest.py`` switches the hook off for every other test.
     monkeypatch.delenv("SPLITSMITH_NO_MODEL_PREFETCH", raising=False)
+    # Only the clap model set downloads anything.
+    monkeypatch.setenv("SPLITSMITH_MODEL_SET", "clap")
     # Don't actually fetch anything; just record that the worker was called.
     invoked: list[str] = []
     monkeypatch.setattr(
@@ -645,3 +647,92 @@ def test_artifact_assertion_passes_a_consistent_set(tmp_path: Path) -> None:
     _artifact_set(tmp_path, clap_headcam_width=feat.VOTER_C_FEATURE_DIM)
     proc = _run_assert(tmp_path)
     assert proc.returncode == 0, proc.stdout + proc.stderr
+
+
+def test_startup_prefetch_is_silent_under_base(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """The default model set downloads nothing, so boot submits no job even
+    while the CLAP artifacts are missing (spec 2026-10-26)."""
+    from splitsmith.ui import server as server_mod
+    from splitsmith.ui.server import create_app
+
+    spec, _artifact, _payload = _make_spec()
+    monkeypatch.setattr(registry_mod, "_default_registry", ModelRegistry(spec, root=tmp_path / "cache"))
+    monkeypatch.delenv("SPLITSMITH_NO_MODEL_PREFETCH", raising=False)
+    monkeypatch.delenv("SPLITSMITH_MODEL_SET", raising=False)
+    invoked: list[str] = []
+    monkeypatch.setattr(server_mod, "_run_model_download_job", lambda handle: invoked.append(handle.id))
+
+    from tests.conftest import scaffold_match
+
+    _root, _ = scaffold_match(tmp_path, name="x")
+    app = create_app(project_root=_root, project_name="x")
+    state = app.state.splitsmith_state
+    state.jobs.wait_for_drain(timeout_s=2.0)
+    assert invoked == []
+    assert [j.kind for j in asyncio.run(state.jobs.list())] == []
+
+
+@pytest.mark.parametrize(("model_set", "missing"), [("base", []), ("clap", ["clap_audio_encoder"])])
+def test_models_status_reports_only_what_the_model_set_needs(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, model_set: str, missing: list[str]
+) -> None:
+    """Under base nothing is missing, so the SPA draws no download overlay."""
+    from fastapi.testclient import TestClient
+
+    from splitsmith.ui.server import create_app
+
+    spec, _artifact, _payload = _make_spec()
+    monkeypatch.setattr(registry_mod, "_default_registry", ModelRegistry(spec, root=tmp_path / "cache"))
+    monkeypatch.setenv("SPLITSMITH_MODEL_SET", model_set)
+
+    from tests.conftest import scaffold_match
+
+    _root, _ = scaffold_match(tmp_path, name="x")
+    body = TestClient(create_app(project_root=_root, project_name="x")).get("/api/models/status").json()
+    assert body["model_set"] == model_set
+    assert body["missing"] == missing
+    assert body["artifacts"][0]["state"] == "missing"
+
+
+def test_clap_artifacts_count_as_present_only_when_every_one_is_verified(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from splitsmith.ensemble import backend
+    from splitsmith.ensemble import features as feat
+
+    monkeypatch.setattr(feat, "select_backend", lambda: backend.Backend.ONNX)
+    monkeypatch.delenv("SPLITSMITH_ONNX_CLAP", raising=False)
+    monkeypatch.delenv("SPLITSMITH_CLAP_TEXT", raising=False)
+    monkeypatch.setattr(registry_mod, "get_default_registry", lambda: None)
+    assert feat.clap_artifacts_present() is False  # no model_artifacts block at all
+
+    spec, artifact, payload = _make_spec()
+    registry = ModelRegistry(spec, root=tmp_path / "cache")
+    monkeypatch.setattr(registry_mod, "get_default_registry", lambda: registry)
+    assert feat.clap_artifacts_present() is False  # the spec names a CLAP slug that is not cached
+    dest = cache_mod.artifact_path(artifact, root=tmp_path / "cache")
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    dest.write_bytes(payload)
+    # The fixture spec has only the audio encoder; the text embeddings slug is absent.
+    assert feat.clap_artifacts_present() is False
+    payloads = {"clap_audio_encoder": b"audio", "clap_text_embeddings": b"text"}
+    both = ModelArtifactsSpec.model_validate(
+        {
+            slug: {
+                "filename": f"{slug}.bin",
+                "sha256": _sha256(data),
+                "size_bytes": len(data),
+                "url": f"https://example.test/{slug}",
+            }
+            for slug, data in payloads.items()
+        }
+    )
+    full = ModelRegistry(both, root=tmp_path / "cache2")
+    monkeypatch.setattr(registry_mod, "get_default_registry", lambda: full)
+    for slug, data in payloads.items():
+        art = both.artifact(slug)
+        assert art is not None
+        path = cache_mod.artifact_path(art, root=tmp_path / "cache2")
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(data)
+    assert feat.clap_artifacts_present() is True

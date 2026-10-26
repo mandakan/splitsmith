@@ -2960,8 +2960,22 @@ def _run_model_download_job(handle: JobHandle) -> None:
     )
 
 
+def _required_model_artifacts() -> tuple[str, list[str]]:
+    """The requested model set and the registry slugs it needs to run
+    (``ModelSet.requires_artifacts``): none for ``base``. A calibration that
+    cannot be read needs nothing here; detection reports that itself."""
+    model_set = _requested_model_set()
+    try:
+        required = list(ensemble_module.load_calibration().model_set(model_set).requires_artifacts)
+    except Exception:  # noqa: BLE001 -- never break boot or a status poll on this
+        logger.exception("could not read the calibration's model sets")
+        required = []
+    return model_set, required
+
+
 async def _maybe_submit_model_download(state: AppState) -> None:
-    """Kick off the slim-artifact prefetch on startup when anything is missing.
+    """Kick off the slim-artifact prefetch on startup when anything the
+    requested model set needs is missing (nothing for ``base``, the default).
 
     No-op when the registry is unavailable (older calibrations without
     a ``model_artifacts`` block, or the torch dev install), when every
@@ -2969,7 +2983,7 @@ async def _maybe_submit_model_download(state: AppState) -> None:
     still active (idempotent across reloads of an embedded host).
     ``SPLITSMITH_NO_MODEL_PREFETCH=1`` skips it entirely: the subprocess
     tests of the embedded entrypoint boot against an empty config dir
-    and must not each start a 430 MB download that the drain then has
+    and must not each start a 120 MB download that the drain then has
     to cancel (that is what made the SIGTERM test time out on CI).
     """
     if os.environ.get("SPLITSMITH_NO_MODEL_PREFETCH", "").lower() in {"1", "true", "yes", "on"}:
@@ -2981,7 +2995,8 @@ async def _maybe_submit_model_download(state: AppState) -> None:
         return
     if registry is None:
         return
-    missing = [s for s in registry.status() if s.state != "present"]
+    _model_set, required = _required_model_artifacts()
+    missing = [s for s in registry.status() if s.slug in required and s.state != "present"]
     if not missing:
         return
     if await state.jobs.find_active(kind="model_download") is not None:
@@ -4102,13 +4117,19 @@ def register_job_bodies(state: AppState) -> None:
         # means the heavy weight load never hides inside ``ensemble_infer``.
         # The set is read once per job, so a preference flipped mid-job
         # takes effect on the next detection, never halfway through this one.
-        model_set = _requested_model_set()
-        cold = not _ensemble_runtime_is_warm(model_set)
+        requested = _requested_model_set()
+        cold = not _ensemble_runtime_is_warm(requested)
         handle.timer.set_meta(cold_model_load=cold, expected_rounds=expected_rounds)
         if cold:
-            handle.update(progress=0.35, message=f"Loading the {model_set} detection model...")
+            handle.update(progress=0.35, message=f"Loading the {requested} detection model...")
             with handle.timer.phase("cold_model_load"):
-                _get_ensemble_runtime(model_set)
+                runtime = _get_ensemble_runtime(requested)
+        else:
+            runtime = _get_ensemble_runtime(requested)
+        # The set that actually loaded: a clap request whose files are not
+        # downloaded yet runs base. The backend is asked for that set, so it
+        # never retries clap a second time inside ``ensemble_infer``.
+        model_set = getattr(runtime, "model_set", requested)
 
         handle.update(progress=0.4, message=f"Detecting shots ({model_set} model)...")
         with handle.timer.phase("ensemble_infer"):
@@ -10262,11 +10283,16 @@ def create_app(
                 "active_job": None,
             }
         statuses = registry.status()
-        missing = [s.slug for s in statuses if s.state == "missing"]
-        mismatched = [s.slug for s in statuses if s.state == "mismatched"]
+        # Only what the requested model set needs counts as missing, so
+        # under base (no download) the SPA draws no download overlay.
+        model_set, required = _required_model_artifacts()
+        missing = [s.slug for s in statuses if s.state == "missing" and s.slug in required]
+        mismatched = [s.slug for s in statuses if s.state == "mismatched" and s.slug in required]
         active_job = await state.jobs.find_active(kind="model_download")
         return {
             "available": True,
+            "model_set": model_set,
+            "required": required,
             "cache_root": str(registry.root),
             "artifacts": [
                 {

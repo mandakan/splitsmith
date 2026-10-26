@@ -538,6 +538,28 @@ def _resolve_onnx_clap_paths() -> tuple[Path, Path]:
     )
 
 
+def clap_artifacts_present() -> bool:
+    """Can CLAP load without downloading anything?
+
+    The torch backend (a dev install) loads from the Hugging Face cache and
+    counts as present; so do the ``SPLITSMITH_ONNX_CLAP`` /
+    ``SPLITSMITH_CLAP_TEXT`` overrides. On the ONNX backend both CLAP
+    artifacts must be cached and verified in the model registry; a
+    calibration without a ``model_artifacts`` block has none. Never
+    downloads (``ModelRegistry.status``)."""
+    if select_backend() is Backend.TORCH:
+        return True
+    if os.environ.get(ENV_ONNX_CLAP_OVERRIDE) and os.environ.get(ENV_CLAP_TEXT_OVERRIDE):
+        return True
+    from ..models import registry as registry_mod
+
+    registry = registry_mod.get_default_registry()
+    if registry is None:
+        return False
+    states = {s.slug: s.state for s in registry.status()}
+    return all(states.get(slug) == "present" for slug in (CLAP_AUDIO_ARTIFACT_SLUG, CLAP_TEXT_ARTIFACT_SLUG))
+
+
 def _build_clap_runtime_onnx() -> ClapRuntime:
     """Construct an onnxruntime-backed :class:`ClapRuntime`.
 

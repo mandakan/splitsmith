@@ -262,13 +262,22 @@ def _load_runtime(name: str, *, with_voter_e: bool) -> EnsembleRuntime:
     """The runtime for set ``name`` exactly (no env resolution, so the
     fallback below cannot resolve back to ``clap``).
 
-    Under ``clap``, a CLAP artifact that is missing, unreachable or fails
-    verification (``ModelError``) or a file that cannot be read
-    (``OSError``) loads ``base`` instead, with a warning; detection never
-    blocks on a download, and the result's ``model_set`` says which set ran.
-    Any other error propagates."""
+    Under ``clap``, artifacts not yet downloaded (checked without
+    downloading, ``features.clap_artifacts_present``), or a CLAP load that
+    fails verification (``ModelError``) or cannot read a file (``OSError``),
+    loads ``base`` instead, with a warning; detection never blocks on a
+    download, and the result's ``model_set`` says which set ran. Any other
+    error propagates."""
     clap: feat.ClapRuntime | None = None
     if name == "clap":
+        if not feat.clap_artifacts_present():
+            # Loading would download inline and hold the registry lock the
+            # download job uses: detection must never wait on that.
+            logger.warning(
+                "the clap model set needs %s, which are not downloaded yet; detecting with base",
+                ", ".join((feat.CLAP_AUDIO_ARTIFACT_SLUG, feat.CLAP_TEXT_ARTIFACT_SLUG)),
+            )
+            return _load_runtime("base", with_voter_e=with_voter_e)
         try:
             clap = feat.load_clap_runtime()
         except (ModelError, OSError) as exc:
