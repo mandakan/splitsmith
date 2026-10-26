@@ -170,3 +170,35 @@ def test_a_raw_dir_outside_the_project_follows_its_pointer(tmp_path: Path) -> No
     assert video.path.is_absolute()
     assert project.resolve_video_path(root, video.path) == src
     assert project.source_present(root, video.path)
+
+
+def test_a_move_onto_a_namesake_pointer_to_another_source_is_blocked(tmp_path: Path) -> None:
+    root, slug_a, slug_b = _two_shooter_match(tmp_path)
+    root_a = match_model.Match.shooter_root(root, slug_a)
+    root_b = match_model.Match.shooter_root(root, slug_b)
+    proj_a, proj_b = MatchProject.load(root_a), MatchProject.load(root_b)
+    mine = _clip(tmp_path, "cam-a", b"alice's", name="GH01.MP4")
+    theirs = _clip(tmp_path, "cam-b", b"bob's", name="GH01.MP4")
+    video = proj_a.register_video(mine, root_a)
+    proj_a.assign_video(video.path, to_stage_number=1, role="primary")
+    proj_b.register_video(theirs, root_b)
+    proj_a.save(root_a)
+    proj_b.save(root_b)
+
+    load_tgt, save_tgt, load_src, clear_src = _local_audit_closures(proj_a, root_a, proj_b, root_b)
+    outcome = move_shooter(
+        source_project=proj_a,
+        source_root=root_a,
+        target_project=proj_b,
+        target_root=root_b,
+        video_paths=["raw/GH01.MP4"],
+        load_target_audit=load_tgt,
+        save_target_audit=save_tgt,
+        load_source_audit=load_src,
+        clear_source_audit=clear_src,
+        storage=None,
+    )
+
+    assert [b.code for b in outcome.blocked] == ["filename_collision"]
+    assert raw_link.target(proj_a.raw_path(root_a) / "GH01.MP4") == mine
+    assert raw_link.target(proj_b.raw_path(root_b) / "GH01.MP4") == theirs

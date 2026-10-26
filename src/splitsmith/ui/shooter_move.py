@@ -333,7 +333,7 @@ def _blocks_for(
         name = Path(path_str).name
         dst_raw = target_project.raw_path(target_root) / name
         src_raw = source_project.raw_path(source_root) / name
-        if dst_raw.exists() and not _same_raw_target(dst_raw, src_raw):
+        if raw_link.present(dst_raw) and not _same_raw_target(dst_raw, src_raw):
             return [
                 MoveShooterBlocked(
                     video_path=path_str,
