@@ -1,0 +1,140 @@
+name: Windows probe
+
+# Not a gate. Splitsmith has never run on Windows; this shows what breaks
+# there so the port can be sized and tracked. Test failures never turn a
+# job red (the run's summary carries them); a job goes red only when the
+# environment itself cannot be set up, which is a finding too, and
+# ``continue-on-error`` keeps even that from failing the run.
+#
+# Two views, because the suite alone shows one line: a POSIX-only import
+# on the conftest path stops collection everywhere. The import sweep
+# imports every module on its own and names the frame that raised.
+#
+# Python 3.12, the version the desktop bundle ships, not CI's 3.11.
+# PYTHONUTF8 is deliberately left unset: the bundle would run without it,
+# and an encoding failure is something this probe should show.
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - "site/**"
+      - "docs/**"
+      - "**/*.md"
+      - "wrangler.toml"
+      - ".github/workflows/deploy-marketing.yml"
+  pull_request:
+    branches: ["**"]
+    paths:
+      - ".github/workflows/windows-probe.yml"
+      - "scripts/ci/windows_probe.py"
+  workflow_dispatch:
+
+concurrency:
+  group: windows-probe-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  imports:
+    name: import every module
+    runs-on: windows-latest
+    continue-on-error: true
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+      - uses: astral-sh/setup-uv@v4
+        with:
+          enable-cache: true
+      - name: Sync dependencies
+        run: uv sync --frozen --all-groups --python 3.12
+      - name: Import sweep
+        run: uv run python scripts/ci/windows_probe.py imports --out imports.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: windows-imports
+          path: imports.json
+          if-no-files-found: ignore
+
+  test:
+    name: python tests ${{ matrix.shard }}/4 (windows)
+    runs-on: windows-latest
+    continue-on-error: true
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
+    steps:
+      - uses: actions/checkout@v5
+      - uses: astral-sh/setup-uv@v4
+        with:
+          enable-cache: true
+      - name: Sync dependencies
+        run: uv sync --frozen --all-groups --python 3.12
+      - name: Install ffmpeg + ffprobe
+        # Chocolatey's build, not ours: no Windows build of the pinned
+        # ffmpeg exists yet. Good enough for the integration tests.
+        run: |
+          choco install ffmpeg -y --no-progress
+          ffmpeg -version | head -1
+      - name: Install Chromium for the overlay rasterizer
+        run: uv run playwright install chromium --only-shell
+      - name: Cache the fixture WAVs the tests read
+        uses: actions/cache@v4
+        with:
+          path: tests/fixtures/*.wav
+          key: fixture-audio-win-${{ hashFiles('tests/fixtures/audio.lock.json', 'tests/fixtures/audio.ci.txt') }}
+      - name: Fetch the fixture WAVs the tests read
+        run: uv run python scripts/fixture_audio.py fetch --only tests/fixtures/audio.ci.txt
+      - name: Warm numba/librosa JIT cache
+        continue-on-error: true
+        run: uv run python scripts/warm_numba_cache.py
+      - name: Run unit + integration tests
+        # Always exits 0: the failures are the output, read by the summary.
+        # No SPLITSMITH_REQUIRE_INTEGRATION either: a skip here is a
+        # finding to list, not a reason to stop.
+        env:
+          SPLITSMITH_TEST_SHARD: ${{ matrix.shard }}/4
+        run: |
+          mkdir -p probe
+          set +e
+          uv run pytest -q --continue-on-collection-errors \
+            --junitxml=probe/shard-${{ matrix.shard }}.xml \
+            > probe/shard-${{ matrix.shard }}.log 2>&1
+          echo "pytest exited $?"
+          tail -30 probe/shard-${{ matrix.shard }}.log
+          exit 0
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: windows-tests-${{ matrix.shard }}
+          path: probe/
+          if-no-files-found: ignore
+
+  summary:
+    name: summary
+    needs: [imports, test]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - name: Write the run summary
+        run: |
+          mkdir -p artifacts/junit artifacts/logs
+          find artifacts -path 'artifacts/windows-tests-*' -name '*.xml' -exec cp {} artifacts/junit/ \;
+          find artifacts -path 'artifacts/windows-tests-*' -name '*.log' -exec cp {} artifacts/logs/ \;
+          python3 scripts/ci/windows_probe.py summary \
+            --junit-dir artifacts/junit \
+            --imports artifacts/windows-imports/imports.json \
+            --logs-dir artifacts/logs >> "$GITHUB_STEP_SUMMARY"

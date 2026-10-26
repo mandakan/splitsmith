@@ -12,6 +12,7 @@ paths:
   - "functions/**"
   - "scripts/ci/**"
   - ".github/workflows/desktop*.yml"
+  - ".github/workflows/windows-probe.yml"
   - ".github/workflows/publish-pypi.yml"
   - ".github/workflows/release-please.yml"
   - "src/splitsmith/ui/embedded.py"
@@ -137,3 +138,13 @@ function only. **No auto-update.**
 - `StartupWMClass` is `splitsmith-desktop` because the window class comes from
   package.json `name`. **Don't add `productName` to package.json** (it would move
   the macOS userData dir); `electron-builder.yml`'s own `productName` is fine.
+
+## Windows (not shipped)
+
+There is no Windows build. `windows-probe.yml` runs the suite on
+`windows-latest` (Python 3.12, as the bundle ships) on every push to main and
+reports what breaks in the run summary; it is not a gate, and test failures
+never turn it red. `scripts/ci/windows_probe.py` also imports every module on
+its own, because one POSIX-only import on the conftest path stops collection
+and hides everything behind it. `PYTHONUTF8` stays unset there on purpose: the
+bundle would run without it.
