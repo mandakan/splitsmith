@@ -55,7 +55,7 @@ def main() -> None:
         truth_path = FIXTURES_DIR / f"{fix}.json"
         if not truth_path.exists():
             continue
-        truth = json.loads(truth_path.read_text())
+        truth = json.loads(truth_path.read_text(encoding="utf-8"))
         audio, sr = load_audio(FIXTURES_DIR / f"{fix}.wav")
         det_cfg = ShotDetectConfig(recall_fallback="cwt", min_confidence=0.0)
         shots = detect_shots(audio, sr, truth["beep_time"], truth["stage_time_seconds"], det_cfg)

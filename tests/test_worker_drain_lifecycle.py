@@ -127,11 +127,13 @@ def test_worker_env_states_the_task_timeout_deploy_app_sets() -> None:
     to one and not the other lets the drain overrun into a kill."""
     import yaml
 
-    workflow = (_ROOT / ".github" / "workflows" / "deploy-app.yml").read_text()
+    workflow = (_ROOT / ".github" / "workflows" / "deploy-app.yml").read_text(encoding="utf-8")
     match = re.search(r"--args=worker,--one-shot.*?--task-timeout (\d+)", workflow, re.S)
     assert match, "the worker job's --task-timeout flag moved"
     for env in ("staging", "production"):
-        values = yaml.safe_load((_ROOT / "deploy" / "cloudrun" / f"{env}-worker.env.yaml").read_text())
+        values = yaml.safe_load(
+            (_ROOT / "deploy" / "cloudrun" / f"{env}-worker.env.yaml").read_text(encoding="utf-8")
+        )
         assert values[queue_mod.WORKER_TASK_TIMEOUT_ENV] == match.group(1)
 
 

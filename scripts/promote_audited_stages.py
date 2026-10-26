@@ -42,7 +42,7 @@ def _known_sources(fixtures_dir: Path) -> set[str]:
     for f in fx_module.all_fixtures(fixtures_dir):
         if f.superseded_by or f.stem in fx_module.WRONG_CLIP_FIXTURES:
             continue  # replaced in the corpus, or cut from footage it does not label
-        data = json.loads((fixtures_dir / f"{f.stem}.json").read_text())
+        data = json.loads((fixtures_dir / f"{f.stem}.json").read_text(encoding="utf-8"))
         for key in ("source_video", "source"):
             if data.get(key):
                 names.add(Path(data[key]).name)
@@ -64,7 +64,7 @@ def _last_saved(audit: Path) -> str | None:
     """When the audit was last saved in the app (ISO, UTC), or None."""
     if not audit.exists():
         return None
-    doc = json.loads(audit.read_text())
+    doc = json.loads(audit.read_text(encoding="utf-8"))
     saves = [e.get("ts") for e in doc.get("audit_events") or [] if e.get("kind") == "save" and e.get("ts")]
     return max(saves) if saves else None
 
@@ -74,7 +74,7 @@ def _stale_reason(fixture: Path, audit: Path) -> str | None:
     was saved after it was promoted."""
     if not fixture.exists():
         return f"no fixture named {fixture.stem} (its fixture has another name)"
-    data = json.loads(fixture.read_text())
+    data = json.loads(fixture.read_text(encoding="utf-8"))
     if data.get("anchor"):
         return "the fixture is a snap; use promote_secondary_angles.py --resnap"
     promoted = data.get("promoted_at")
@@ -94,7 +94,7 @@ def _utc(ts: str) -> str:
 def _audited(audit: Path) -> bool:
     if not audit.exists():
         return False
-    doc = json.loads(audit.read_text())
+    doc = json.loads(audit.read_text(encoding="utf-8"))
     saved = any(e.get("kind") == "save" for e in doc.get("audit_events") or [])
     return bool(doc.get("shots")) and saved
 
@@ -216,14 +216,14 @@ def main() -> int:
                 )
                 if flagged:
                     path = args.fixtures / f"{slug}.json"
-                    data = json.loads(path.read_text())
+                    data = json.loads(path.read_text(encoding="utf-8"))
                     data["review"] = {
                         "status": REVIEW_NEEDED,
                         "derived_from": None,
                         "reviewed_at": None,
                         "note": args.note,
                     }
-                    path.write_text(json.dumps(data, indent=2, ensure_ascii=True) + "\n")
+                    path.write_text(json.dumps(data, indent=2, ensure_ascii=True) + "\n", encoding="utf-8")
     print(f"{n_ok} stage(s) {'promoted' if args.write else 'to promote'}")
     return 0
 

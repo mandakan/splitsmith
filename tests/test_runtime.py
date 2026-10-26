@@ -221,7 +221,7 @@ def test_calibration_loader_uses_runtime_artifacts_dir(
 
 
 def _make_executable(path: Path) -> None:
-    path.write_text("#!/bin/sh\nexit 0\n")
+    path.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
     path.chmod(0o755)
 
 
@@ -244,7 +244,7 @@ def test_executable_dir_used_when_no_meipass(monkeypatch: pytest.MonkeyPatch, tm
     bin_dir = tmp_path / "venv-bin"
     bin_dir.mkdir()
     fake_exe = bin_dir / "python-fake"
-    fake_exe.write_text("")
+    fake_exe.write_text("", encoding="utf-8")
     fake_exe.chmod(0o755)
     _make_executable(bin_dir / "ffmpeg")
     _make_executable(bin_dir / "ffprobe")
@@ -286,7 +286,7 @@ def test_falls_back_to_bare_name_when_no_bundle(monkeypatch: pytest.MonkeyPatch,
     empty_dir = tmp_path / "no-binaries"
     empty_dir.mkdir()
     fake_exe = empty_dir / "python-fake"
-    fake_exe.write_text("")
+    fake_exe.write_text("", encoding="utf-8")
     fake_exe.chmod(0o755)
     monkeypatch.setattr(sys, "executable", str(fake_exe))
 
@@ -301,10 +301,10 @@ def test_non_executable_candidate_is_skipped(monkeypatch: pytest.MonkeyPatch, tm
     bin_dir = tmp_path / "venv-bin"
     bin_dir.mkdir()
     fake_exe = bin_dir / "python-fake"
-    fake_exe.write_text("")
+    fake_exe.write_text("", encoding="utf-8")
     fake_exe.chmod(0o755)
     not_executable = bin_dir / "ffmpeg"
-    not_executable.write_text("")
+    not_executable.write_text("", encoding="utf-8")
     not_executable.chmod(0o644)
     monkeypatch.setattr(sys, "executable", str(fake_exe))
 

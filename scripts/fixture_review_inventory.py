@@ -32,7 +32,7 @@ def _edge_fraction(fixtures: Path, stem: str, data: dict) -> float | None:
     report_path = fixtures / f"{stem}-promotion-report.json"
     if not report_path.exists():
         return None
-    report = json.loads(report_path.read_text())
+    report = json.loads(report_path.read_text(encoding="utf-8"))
     counts = report.get("counts") or {}
     total = counts.get("anchor_shots") or 0
     if not total:
@@ -60,7 +60,7 @@ def main() -> int:
         if f.superseded_by:
             # Replaced in the corpus by a newer audit; nothing to review.
             continue
-        data = json.loads((args.fixtures / f"{f.stem}.json").read_text())
+        data = json.loads((args.fixtures / f"{f.stem}.json").read_text(encoding="utf-8"))
         wav = args.fixtures / f"{f.stem}.wav"
         spread = None
         moves: list[dict] = []
@@ -93,7 +93,7 @@ def main() -> int:
         entries.append(entry)
     entries.sort(key=lambda e: (-e["priority"], e["slug"]))
     args.out.parent.mkdir(parents=True, exist_ok=True)
-    args.out.write_text(json.dumps({"version": 1, "fixtures": entries}, indent=2) + "\n")
+    args.out.write_text(json.dumps({"version": 1, "fixtures": entries}, indent=2) + "\n", encoding="utf-8")
     needs = sum(1 for e in entries if e["review_status"] == "needs_review")
     print(f"{len(entries)} fixtures, {needs} need review, {missing_audio} without audio; wrote {args.out}")
     for e in entries[:10]:

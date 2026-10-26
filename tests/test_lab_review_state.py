@@ -18,7 +18,7 @@ from splitsmith.lab.core import FixtureRecord, list_fixtures
 
 
 def _write_fixture(root: Path, slug: str, payload: dict) -> None:
-    (root / f"{slug}.json").write_text(json.dumps(payload))
+    (root / f"{slug}.json").write_text(json.dumps(payload), encoding="utf-8")
     (root / f"{slug}.wav").write_bytes(b"")
 
 
@@ -100,7 +100,7 @@ def test_confirm_review_stamps_and_clears_pending(tmp_path: Path) -> None:
     assert rec.review_confirmed_at == stamp
     assert rec.needs_review is False
     # The payload's shots survived the rewrite.
-    assert json.loads(path.read_text())["shots"] == [{"time": 5.5}]
+    assert json.loads(path.read_text(encoding="utf-8"))["shots"] == [{"time": 5.5}]
 
 
 def test_confirm_review_marks_the_timing_reviewed(tmp_path: Path) -> None:
@@ -128,7 +128,7 @@ def test_confirm_review_marks_the_timing_reviewed(tmp_path: Path) -> None:
 
     stamp = confirm_review(path)
 
-    data = json.loads(path.read_text())
+    data = json.loads(path.read_text(encoding="utf-8"))
     assert data["review"]["status"] == "reviewed"
     assert data["review"]["reviewed_at"] == stamp
     assert data["review"]["derived_from"] == "x"
@@ -171,7 +171,8 @@ def test_list_fixtures_carries_the_inventory_priority(tmp_path: Path) -> None:
     build = tmp_path / "build"
     build.mkdir()
     (build / "fixture_review_inventory.json").write_text(
-        json.dumps({"version": 1, "fixtures": [{"slug": slug, "priority": 140.5, "reasons": ["why"]}]})
+        json.dumps({"version": 1, "fixtures": [{"slug": slug, "priority": 140.5, "reasons": ["why"]}]}),
+        encoding="utf-8",
     )
     (rec,) = list_fixtures(fixtures)
     assert rec.review_priority == 140.5
@@ -225,7 +226,8 @@ def test_run_eval_routes_the_fixture_camera_class(tmp_path: Path, monkeypatch: p
                 "shots": [{"shot_number": 1, "time": 1.5}],
                 "camera": {"mount": "hand", "make": "Apple", "model": "iPhone 17 Pro"},
             }
-        )
+        ),
+        encoding="utf-8",
     )
     with wave.open(str(fixtures / f"{slug}.wav"), "wb") as w:
         w.setnchannels(1)

@@ -249,7 +249,7 @@ class JsonShooterBookStore:
             logger.warning("shooter book: the fill from existing matches failed (%s)", exc)
             return
         folder.mkdir(parents=True, exist_ok=True)
-        (folder / BACKFILL_MARKER).write_text(_now().isoformat())
+        (folder / BACKFILL_MARKER).write_text(_now().isoformat(), encoding="utf-8")
 
     def _dir(self) -> Path | None:
         return self._root if self._root is not None else account_dir()

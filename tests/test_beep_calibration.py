@@ -266,7 +266,7 @@ def test_committed_manifest_references_existing_wavs(fixtures_dir: Path) -> None
         pytest.skip("calibration manifest not built yet")
     manifest = load_manifest(manifest_path)
     assert manifest.fixtures, "manifest is empty -- run build_beep_calibration.py"
-    lock = json.loads((fixtures_dir / "audio.lock.json").read_text())
+    lock = json.loads((fixtures_dir / "audio.lock.json").read_text(encoding="utf-8"))
     in_r2 = set(lock.get("files", lock))
     for entry in manifest.fixtures:
         clip = fixtures_dir / entry.clip_wav
@@ -326,7 +326,7 @@ def test_rebuild_keeps_full_track_references_whose_wavs_are_on_another_machine(t
 
     (tmp_path / "full").mkdir()
     audit = {"beep_time": 0.5, "camera": {"mount": "head", "id": "go3s"}}
-    (tmp_path / "s1.json").write_text(json.dumps(audit))
+    (tmp_path / "s1.json").write_text(json.dumps(audit), encoding="utf-8")
     (tmp_path / "s1.wav").write_bytes(b"")
     existing = BeepCalibrationManifest(
         fixtures=[

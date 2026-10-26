@@ -214,7 +214,7 @@ def main() -> int:
         if path.name.startswith("_tmp_"):
             continue
         try:
-            probes.append(json.loads(path.read_text()))
+            probes.append(json.loads(path.read_text(encoding="utf-8")))
         except json.JSONDecodeError as exc:
             print(f"  skipping {path.name}: {exc}", file=sys.stderr)
 
@@ -226,7 +226,7 @@ def main() -> int:
     agg = aggregate(probes)
 
     report_path = probe_dir / "REPORT.md"
-    report_path.write_text(render_report(per_fixture, agg))
+    report_path.write_text(render_report(per_fixture, agg), encoding="utf-8")
     print(f"Wrote {report_path.relative_to(REPO_ROOT)}", file=sys.stderr)
 
     print("\n=== aggregate ROC AUC ===")

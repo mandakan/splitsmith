@@ -139,10 +139,10 @@ def two_pass_detect(
 
 
 def evaluate(name: str, **kw) -> dict:
-    truth = json.loads((FIX / f"{name}.json").read_text())
+    truth = json.loads((FIX / f"{name}.json").read_text(encoding="utf-8"))
     audio, sr = load_audio(FIX / f"{name}.wav")
     pre_path = FIX / f"{name}.json.before-rise-foot"
-    gt_src = json.loads(pre_path.read_text()) if pre_path.exists() else truth
+    gt_src = json.loads(pre_path.read_text(encoding="utf-8")) if pre_path.exists() else truth
     gt = sorted(s["time"] for s in gt_src.get("shots", []))
     pass1, extras = two_pass_detect(audio, sr, truth["beep_time"], truth["stage_time_seconds"], **kw)
     all_t = sorted(pass1 + extras)

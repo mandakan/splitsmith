@@ -174,6 +174,7 @@ def test_transcode_proxy_produces_smaller_valid_mp4(tmp_path, synthetic_source_v
             check=True,
             capture_output=True,
             text=True,
+            encoding="utf-8",
         ).stdout
     )["streams"]
     video = next(s for s in streams if s["codec_type"] == "video")
@@ -201,6 +202,7 @@ def test_transcode_proxy_produces_smaller_valid_mp4(tmp_path, synthetic_source_v
         check=True,
         capture_output=True,
         text=True,
+        encoding="utf-8",
     ).stdout.split()
     keyframe_indices = [i for i, flag in enumerate(frames) if flag.strip() == "1"]
     assert len(keyframe_indices) >= 2, f"expected a dense GOP, got {keyframe_indices}"
@@ -318,6 +320,7 @@ def _frame_digest(path: Path) -> str:
         check=True,
         capture_output=True,
         text=True,
+        encoding="utf-8",
     ).stdout
     return hashlib.sha256(
         "\n".join(ln for ln in out.splitlines() if not ln.startswith("#")).encode()

@@ -28,10 +28,10 @@ def user_looks(tmp_path: Path):
 
 def _graded_look(root: Path, grade_block: object) -> None:
     shutil.copytree(looks.shipped_looks_dir() / "splitsmith", root)
-    manifest = json.loads((root / "look.json").read_text())
+    manifest = json.loads((root / "look.json").read_text(encoding="utf-8"))
     manifest["name"] = root.name
     manifest["grade"] = grade_block
-    (root / "look.json").write_text(json.dumps(manifest))
+    (root / "look.json").write_text(json.dumps(manifest), encoding="utf-8")
 
 
 def _export(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *args: str) -> tuple[Any, Any]:
@@ -86,7 +86,9 @@ def test_a_looks_broken_grade_is_a_note_and_the_render_goes_on(
     _graded_look(user_looks / "broken", {"lut": "luts/mine.cube"})
     if unreadable:
         (user_looks / "broken" / "luts").mkdir()
-        (user_looks / "broken" / "luts" / "mine.cube").write_text("LUT_3D_INPUT_RANGE 0 4\nLUT_3D_SIZE 2\n")
+        (user_looks / "broken" / "luts" / "mine.cube").write_text(
+            "LUT_3D_INPUT_RANGE 0 4\nLUT_3D_SIZE 2\n", encoding="utf-8"
+        )
     result, comp = _export(tmp_path, monkeypatch, "--theme", "broken")
     assert result.exit_code == 0, result.output
     assert comp.grade is None

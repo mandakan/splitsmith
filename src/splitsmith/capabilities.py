@@ -67,6 +67,7 @@ def _gpu_name(runner: Runner) -> str | None:
             ["nvidia-smi", "--query-gpu=name", "--format=csv,noheader"],
             capture_output=True,
             text=True,
+            encoding="utf-8",
         )
     except (FileNotFoundError, OSError):
         return None

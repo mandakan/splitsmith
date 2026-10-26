@@ -30,7 +30,9 @@ def test_default_config_has_spec_values() -> None:
 
 def test_config_yaml_override(tmp_path: Path) -> None:
     yaml_file = tmp_path / "config.yaml"
-    yaml_file.write_text("shot_detect:\n  min_gap_ms: 100\noutput:\n  trim_buffer_seconds: 3.0\n")
+    yaml_file.write_text(
+        "shot_detect:\n  min_gap_ms: 100\noutput:\n  trim_buffer_seconds: 3.0\n", encoding="utf-8"
+    )
     cfg = Config.load(yaml_file)
     assert cfg.shot_detect.min_gap_ms == 100
     assert cfg.output.trim_buffer_seconds == 3.0
@@ -63,7 +65,7 @@ def test_shot_confidence_bounds() -> None:
 
 
 def test_competitor_stages_parses_example() -> None:
-    raw = json.loads((EXAMPLES_DIR / "tallmilan-2026.json").read_text())
+    raw = json.loads((EXAMPLES_DIR / "tallmilan-2026.json").read_text(encoding="utf-8"))
     competitor = CompetitorStages.model_validate(raw["competitors"][0])
     assert competitor.club == "Sample IPSC Club"
     assert competitor.division == "Production Optics"

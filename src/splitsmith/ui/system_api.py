@@ -65,7 +65,9 @@ def _probe() -> bool:
 
 def _run_install(argv: list[str], handle: JobHandle) -> int:
     """Run ``argv`` streaming its output lines into the job message. Test seam."""
-    proc = subprocess.Popen(argv, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+    proc = subprocess.Popen(
+        argv, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding="utf-8"
+    )
     handle.attach_subprocess(proc)
     try:
         assert proc.stdout is not None

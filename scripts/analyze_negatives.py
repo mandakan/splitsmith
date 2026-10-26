@@ -51,7 +51,7 @@ def _stage_group(fixture_slug: str, fixtures_dir: Path = FIXTURES_DIR) -> str:
     ``"stage-shots-"`` prefix from the relevant slug).
     """
     try:
-        data = json.loads((fixtures_dir / f"{fixture_slug}.json").read_text())
+        data = json.loads((fixtures_dir / f"{fixture_slug}.json").read_text(encoding="utf-8"))
         anchor = data.get("anchor") or {}
         base = anchor.get("fixture_slug") or fixture_slug
     except Exception:
@@ -100,7 +100,7 @@ def _label(cand_t, truth_shots, tol_ms):
 def _build_universe(fixtures, tol_ms):
     universe = []
     for fix in fixtures:
-        truth = json.loads((FIXTURES_DIR / f"{fix}.json").read_text())
+        truth = json.loads((FIXTURES_DIR / f"{fix}.json").read_text(encoding="utf-8"))
         audio, sr = load_audio(FIXTURES_DIR / f"{fix}.wav")
         cfg = ShotDetectConfig(recall_fallback="cwt", min_confidence=0.0)
         shots = detect_shots(audio, sr, truth["beep_time"], truth["stage_time_seconds"], cfg)

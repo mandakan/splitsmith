@@ -88,7 +88,10 @@ def _ok_runner(calls: list[tuple[str, ...]]):
 
 
 def _concat_names(work: Path) -> list[str]:
-    return [line.rsplit("/", 1)[-1].rstrip("'") for line in (work / "concat.txt").read_text().splitlines()]
+    return [
+        line.rsplit("/", 1)[-1].rstrip("'")
+        for line in (work / "concat.txt").read_text(encoding="utf-8").splitlines()
+    ]
 
 
 # --- the card segment ---------------------------------------------------------

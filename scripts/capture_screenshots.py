@@ -251,7 +251,7 @@ def main() -> int:
             file=sys.stderr,
         )
         return 1
-    match_id = json.loads(match_json.read_text())["match_id"]
+    match_id = json.loads(match_json.read_text(encoding="utf-8"))["match_id"]
 
     args.output.mkdir(parents=True, exist_ok=True)
     port = args.port or find_free_port()
@@ -270,7 +270,7 @@ def main() -> int:
             # Read the log file (never proc.stdout.read() -- blocks to EOF on
             # a live process and hangs).
             try:
-                tail = log_path.read_text(errors="replace")[-4000:]
+                tail = log_path.read_text(errors="replace", encoding="utf-8")[-4000:]
             except OSError:
                 tail = "(log file unreadable)"
             print(f"[capture] {e}\n--- server log tail ---\n{tail}", file=sys.stderr)

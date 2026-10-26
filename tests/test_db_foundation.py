@@ -215,6 +215,7 @@ def test_migration_creates_users_table_on_clean_sqlite(tmp_path) -> None:
         cwd=repo_root,
         capture_output=True,
         text=True,
+        encoding="utf-8",
     )
     assert result.returncode == 0, result.stderr
 

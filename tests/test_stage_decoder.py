@@ -141,7 +141,7 @@ def test_the_calibration_carries_a_decoder_and_loads_without_one() -> None:
     decoder block round-trips it."""
     model = _model()
     shipped = Path(splitsmith.__file__).parent / "data" / "ensemble_calibration.json"
-    base = json.loads(shipped.read_text())
+    base = json.loads(shipped.read_text(encoding="utf-8"))
     base.pop("decoder", None)
     assert EnsembleCalibration.model_validate(base).decoder is None
     cal = EnsembleCalibration.model_validate({**base, "decoder": model.model_dump()})

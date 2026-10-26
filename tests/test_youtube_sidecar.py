@@ -190,7 +190,7 @@ def test_title_page_and_summary_holds_shift_chapters_and_captions(tmp_path: Path
 
     srt = tmp_path / "c.srt"
     youtube_sidecar.write_srt(comp, srt)
-    blocks = srt.read_text().strip().split("\n\n")
+    blocks = srt.read_text(encoding="utf-8").strip().split("\n\n")
     # Shot 1 is 1s after the beep; the beep sits at the visible head (pad
     # covers the whole 5s lead), so the caption lands 6s into stage 0's
     # action: 6 + 6 = 12s, and 20 + 6 = 26s for stage 1.
@@ -219,7 +219,7 @@ def test_build_sidecar_round_trips_through_json(tmp_path: Path) -> None:
     sidecar = youtube_sidecar.build_sidecar(comp)
     out = tmp_path / "match-youtube.json"
     youtube_sidecar.write_sidecar(sidecar, out)
-    parsed = json.loads(out.read_text())
+    parsed = json.loads(out.read_text(encoding="utf-8"))
     assert parsed["title"] == "Bromma Spring"
     # Description has chapter lines we can validate.
     assert "0:00 Stage 1 -- Skipper" in parsed["description"]
@@ -262,7 +262,7 @@ def test_write_srt_emits_one_block_per_visible_shot(tmp_path: Path) -> None:
     comp = _two_stage_composition(tmp_path)
     out = tmp_path / "match.srt"
     youtube_sidecar.write_srt(comp, out)
-    blocks = [b for b in out.read_text().split("\n\n") if b.strip()]
+    blocks = [b for b in out.read_text(encoding="utf-8").split("\n\n") if b.strip()]
     # Stage A has 2 shots at +1.0s and +1.3s; Stage B has 1 shot at
     # +0.8s. All inside the visible windows -> 3 captions.
     assert len(blocks) == 3
@@ -297,7 +297,7 @@ def test_write_srt_skips_shots_outside_visible_window(tmp_path: Path) -> None:
     comp = composition.from_stage_compositions(stages, project_name="m")
     out = tmp_path / "match.srt"
     youtube_sidecar.write_srt(comp, out)
-    blocks = [b for b in out.read_text().split("\n\n") if b.strip()]
+    blocks = [b for b in out.read_text(encoding="utf-8").split("\n\n") if b.strip()]
     assert len(blocks) == 1
     assert "Shot 1" in blocks[0]
 
@@ -321,7 +321,7 @@ def test_write_srt_handles_empty_composition(tmp_path: Path) -> None:
     out = tmp_path / "match.srt"
     youtube_sidecar.write_srt(comp, out)
     assert out.exists()
-    assert out.read_text() == ""
+    assert out.read_text(encoding="utf-8") == ""
 
 
 # --- chapter markers in FCPXML --------------------------------------------

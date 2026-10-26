@@ -35,7 +35,7 @@ def corpus() -> dict[tuple, list[dict]]:
     for path in sorted(FIXTURES.glob("stage-shots-*.json")):
         if path.name.endswith("-promotion-report.json"):
             continue
-        data = json.loads(path.read_text())
+        data = json.loads(path.read_text(encoding="utf-8"))
         if "beep_time" not in data or data.get("superseded_by"):
             continue
         if review_status(data) != REVIEWED:
@@ -130,7 +130,7 @@ def main() -> None:
             f"tone {'yes' if r['tone_found'] else 'no'})  {r['ref']} -> {r['other']}"
         )
     if args.json:
-        args.json.write_text(json.dumps({"report": report, "rows": rows}, indent=2))
+        args.json.write_text(json.dumps({"report": report, "rows": rows}, indent=2), encoding="utf-8")
 
 
 if __name__ == "__main__":

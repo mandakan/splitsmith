@@ -104,7 +104,7 @@ def _embed_fixture(
     wav_path = FIXTURES_DIR / f"{fixture}.wav"
     if not truth_path.exists() or not wav_path.exists():
         return None, np.zeros(0), np.zeros(0), [], 0.0
-    truth = json.loads(truth_path.read_text())
+    truth = json.loads(truth_path.read_text(encoding="utf-8"))
     source_video_str = truth.get("source_video") or ""
     if not source_video_str:
         return None, np.zeros(0), np.zeros(0), [], 0.0
@@ -241,7 +241,7 @@ def main() -> int:
         for fixture in audited_fixtures:
             truth_path = FIXTURES_DIR / f"{fixture}.json"
             try:
-                truth = json.loads(truth_path.read_text())
+                truth = json.loads(truth_path.read_text(encoding="utf-8"))
             except (OSError, json.JSONDecodeError):
                 continue
             cam = truth.get("camera") or {}

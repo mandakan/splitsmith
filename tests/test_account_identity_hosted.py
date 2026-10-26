@@ -110,9 +110,9 @@ def test_the_app_store_fills_from_the_recent_matches(tmp_path: Path, monkeypatch
     state = AppState()
     entries = asyncio.run(state.shooter_book.list())
     assert [e.shooter_id for e in entries] == [42]
-    assert json.loads((user_config.user_config_dir() / "account" / "shooter_book.json").read_text())[
-        "entries"
-    ]
+    assert json.loads(
+        (user_config.user_config_dir() / "account" / "shooter_book.json").read_text(encoding="utf-8")
+    )["entries"]
 
 
 def test_a_local_fill_that_fails_leaves_no_marker_and_is_tried_again(tmp_path: Path) -> None:

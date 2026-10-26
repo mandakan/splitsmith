@@ -83,7 +83,7 @@ def test_save_is_noop_in_local_mode(tmp_path: Path) -> None:
     proj = MatchProject.init(shooter_root, name="alpha")
     proj.competitor_name = "Local"
     proj.save(shooter_root)  # _state_store is None -> file write
-    assert json.loads((shooter_root / PROJECT_FILE).read_text())["competitor_name"] == "Local"
+    assert json.loads((shooter_root / PROJECT_FILE).read_text(encoding="utf-8"))["competitor_name"] == "Local"
 
 
 def test_project_doc_round_trips_api_worker_api(tmp_path: Path) -> None:

@@ -49,7 +49,14 @@ def _publish(dest: Path, cmd: list[str], *, timeout: float, what: str) -> None:
 
     def make(partial: Path) -> None:
         try:
-            subprocess.run([*cmd, str(partial)], check=True, capture_output=True, text=True, timeout=timeout)
+            subprocess.run(
+                [*cmd, str(partial)],
+                check=True,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                timeout=timeout,
+            )
         except subprocess.TimeoutExpired as exc:
             raise ThumbnailError(f"ffmpeg timed out extracting {what}") from exc
         except subprocess.CalledProcessError as exc:

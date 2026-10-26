@@ -213,7 +213,7 @@ def collect_candidates(
     use_pann: bool = False,
     use_clap: bool = False,
 ) -> list[Candidate]:
-    truth = json.loads((FIXTURES_DIR / f"{fixture}.json").read_text())
+    truth = json.loads((FIXTURES_DIR / f"{fixture}.json").read_text(encoding="utf-8"))
     audio, sr = load_audio(FIXTURES_DIR / f"{fixture}.wav")
     shots = detect_shots(audio, sr, truth["beep_time"], truth["stage_time_seconds"], config)
     cand_t = [s.scoring_time for s in shots]

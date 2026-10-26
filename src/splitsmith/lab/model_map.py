@@ -572,7 +572,7 @@ def gbdt_hyperparameters(script_source: str) -> dict[str, Any]:
 
 def _read_json(path: Path) -> dict[str, Any] | None:
     try:
-        data = json.loads(path.read_text())
+        data = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return None
     return data if isinstance(data, dict) else None
@@ -581,7 +581,12 @@ def _read_json(path: Path) -> dict[str, Any] | None:
 def _git(repo: Path, *args: str) -> str | None:
     try:
         res = subprocess.run(
-            ["git", "-C", str(repo), *args], capture_output=True, text=True, timeout=20, check=False
+            ["git", "-C", str(repo), *args],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            timeout=20,
+            check=False,
         )
     except (OSError, subprocess.TimeoutExpired):
         return None
@@ -699,11 +704,11 @@ def load_model_map(shipped_calibration: Path, model_id: str = SHIPPED_ID) -> Mod
         fx.stem: (_read_json(FIXTURES_DIR / f"{fx.stem}.json") or {}).get("event_id") for fx in fixtures
     }
     try:
-        manifest = yaml.safe_load((RANKER_DIR / "manifest.yaml").read_text())
+        manifest = yaml.safe_load((RANKER_DIR / "manifest.yaml").read_text(encoding="utf-8"))
     except (OSError, yaml.YAMLError):
         manifest = None
     try:
-        script = BUILD_SCRIPT.read_text()
+        script = BUILD_SCRIPT.read_text(encoding="utf-8")
     except OSError:
         script = ""
     sizes: dict[str, int] = {}

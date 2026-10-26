@@ -381,7 +381,10 @@ def test_the_render_encodes_the_match_summary_before_the_closing_card(tmp_path) 
     result = mp4_render.render_mp4(
         comp, output_path=tmp_path / "m.mp4", work_dir=work, runner=runner, rasterizer=fake
     )
-    names = [line.rsplit("/", 1)[-1].rstrip("'") for line in (work / "concat.txt").read_text().splitlines()]
+    names = [
+        line.rsplit("/", 1)[-1].rstrip("'")
+        for line in (work / "concat.txt").read_text(encoding="utf-8").splitlines()
+    ]
     assert names[-2:] == ["match_summary.mp4", "closing.mp4"]
     html = next(call for call in fake.calls if "Stockholm Open" in call and "Avg split" in call)
     assert "&lt;b&gt;" in html and "<b>" not in html

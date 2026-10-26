@@ -28,7 +28,7 @@ def _collect(shard: str | None) -> list[str]:
         env["SPLITSMITH_TEST_SHARD"] = shard
     argv = [sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider", "-n", "0", "--collect-only"]
     argv += _TARGETS
-    out = subprocess.run(argv, cwd=REPO_ROOT, env=env, capture_output=True, text=True)
+    out = subprocess.run(argv, cwd=REPO_ROOT, env=env, capture_output=True, text=True, encoding="utf-8")
     assert out.returncode == 0, out.stdout + out.stderr
     return [line for line in out.stdout.splitlines() if "::" in line]
 
@@ -56,6 +56,7 @@ def test_a_test_lands_in_the_same_shard_in_every_process() -> None:
         cwd=REPO_ROOT,
         capture_output=True,
         text=True,
+        encoding="utf-8",
     )
     assert len(first) == 1
     assert again.stdout.strip() == str(first)

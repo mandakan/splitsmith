@@ -613,7 +613,7 @@ def _seed_cleanup_project(tmp_path: Path) -> tuple[_MatchClient, Path]:
 
     audit = project.audit_path(_shooter_root)
     audit.mkdir(parents=True, exist_ok=True)
-    (audit / "stage1.json").write_text("{}")
+    (audit / "stage1.json").write_text("{}", encoding="utf-8")
 
     app = _match_create_app(project_root=root, project_name="Cleanup")
     return _MatchClient(app), root
@@ -679,7 +679,7 @@ def _seed_review_state_fixtures(fixtures_root: Path) -> None:
     fixtures_root.mkdir(parents=True)
 
     def write(slug: str, payload: dict) -> None:
-        (fixtures_root / f"{slug}.json").write_text(json.dumps(payload))
+        (fixtures_root / f"{slug}.json").write_text(json.dumps(payload), encoding="utf-8")
         (fixtures_root / f"{slug}.wav").write_bytes(b"")
 
     write(

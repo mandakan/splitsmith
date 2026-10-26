@@ -76,13 +76,13 @@ def test_resolve_project_root_requires_project_json(tmp_path: Path) -> None:
 def test_resolve_project_root_passes_when_project_json_exists(tmp_path: Path) -> None:
     root = tmp_path / "match"
     root.mkdir()
-    (root / "project.json").write_text("{}")
+    (root / "project.json").write_text("{}", encoding="utf-8")
     assert resolve_project_root(root) == root.resolve()
 
 
 def test_resolve_project_root_rejects_non_directory(tmp_path: Path) -> None:
     f = tmp_path / "not_a_dir"
-    f.write_text("hi")
+    f.write_text("hi", encoding="utf-8")
     with pytest.raises(FileNotFoundError, match="not a directory"):
         resolve_project_root(f)
 
@@ -95,7 +95,7 @@ def test_resolve_project_root_honours_sandbox(monkeypatch: pytest.MonkeyPatch, t
     sandbox.mkdir()
     outside = tmp_path / "outside_match"
     outside.mkdir()
-    (outside / "project.json").write_text("{}")
+    (outside / "project.json").write_text("{}", encoding="utf-8")
     monkeypatch.setenv(ALLOWED_ROOT_ENV, str(sandbox))
     with pytest.raises(SandboxError):
         resolve_project_root(outside)

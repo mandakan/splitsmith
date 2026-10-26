@@ -21,7 +21,7 @@ def test_fractions_follow_out_time(monkeypatch: pytest.MonkeyPatch) -> None:
     with fp.ffmpeg_progress(10.0, seen.append, interval_s=0.01) as extra:
         assert extra[0] == "-progress" and extra[-1] == "-nostats"
         path = Path(extra[1])
-        with path.open("a") as out:
+        with path.open("a", encoding="utf-8") as out:
             out.write("frame=1\nout_time_us=2500000\nprogress=continue\n")
             out.flush()
             _wait_for(lambda: 0.25 in seen)

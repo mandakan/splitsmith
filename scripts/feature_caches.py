@@ -53,7 +53,7 @@ def stamp(path: Path, wav_sha256: str) -> None:
 
 def candidate_times(stem: str) -> np.ndarray:
     """The candidate times the build and the extractors both detect."""
-    truth = json.loads((FIXTURES_DIR / f"{stem}.json").read_text())
+    truth = json.loads((FIXTURES_DIR / f"{stem}.json").read_text(encoding="utf-8"))
     audio, sr = load_audio(FIXTURES_DIR / f"{stem}.wav")
     shots = detect_shots(
         audio,

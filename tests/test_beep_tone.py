@@ -116,7 +116,7 @@ def test_a_corrected_beep_sits_on_its_tone() -> None:
     wav = FIXTURES / f"{stem}.wav"
     if not wav.exists() or not (FIXTURES / f"{stem}.json").exists():
         pytest.skip("fixture not here (scripts/fixture_audio.py fetch)")
-    beep = json.loads((FIXTURES / f"{stem}.json").read_text())["beep_time"]
+    beep = json.loads((FIXTURES / f"{stem}.json").read_text(encoding="utf-8"))["beep_time"]
     audio, sr = beep_detect.load_audio(wav)
     lo, hi = beep_tone.tone_band(audio, sr, beep)
     assert lo < 2700 < hi
@@ -128,7 +128,7 @@ def _fixture(stem: str) -> tuple[np.ndarray, int, float]:
     wav = FIXTURES / f"{stem}.wav"
     if not wav.exists() or not (FIXTURES / f"{stem}.json").exists():
         pytest.skip("fixture not here (scripts/fixture_audio.py fetch)")
-    beep = float(json.loads((FIXTURES / f"{stem}.json").read_text())["beep_time"])
+    beep = float(json.loads((FIXTURES / f"{stem}.json").read_text(encoding="utf-8"))["beep_time"])
     audio, sr = beep_detect.load_audio(wav)
     return audio, sr, beep
 

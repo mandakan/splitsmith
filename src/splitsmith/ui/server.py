@@ -1575,7 +1575,7 @@ def _trim_wav_to_clip(src_wav: Path, dst_wav: Path, start_s: float, end_s: float
         str(dst_wav),
     ]
     try:
-        subprocess.run(cmd, check=True, capture_output=True, text=True)
+        subprocess.run(cmd, check=True, capture_output=True, text=True, encoding="utf-8")
     except subprocess.CalledProcessError as exc:
         raise RuntimeError(
             f"ffmpeg trim failed (exit {exc.returncode}): {exc.stderr or exc.stdout!r}"
@@ -7510,7 +7510,7 @@ def _reveal_in_file_manager(resolved: Path) -> None:
         cmd = ["xdg-open", str(parent)]
         check_exit = True
     try:
-        proc = subprocess.run(cmd, check=False, capture_output=True, text=True)
+        proc = subprocess.run(cmd, check=False, capture_output=True, text=True, encoding="utf-8")
     except OSError as exc:
         raise HTTPException(status_code=500, detail=f"failed to launch file manager: {exc}") from exc
     if check_exit and proc.returncode != 0:
@@ -12622,7 +12622,9 @@ def _macos_network_volumes() -> set[str]:
     ``/Volumes`` falls through to ``"removable"``.
     """
     try:
-        result = subprocess.run(["/sbin/mount"], capture_output=True, text=True, timeout=1.0)
+        result = subprocess.run(
+            ["/sbin/mount"], capture_output=True, text=True, encoding="utf-8", timeout=1.0
+        )
     except (OSError, subprocess.TimeoutExpired):
         return set()
     if result.returncode != 0:

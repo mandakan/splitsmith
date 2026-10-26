@@ -271,7 +271,7 @@ class TestEditMatchStages:
 
         assert resp.status_code == 200
         assert resp.json()["renamed"] == [2]
-        assert json.loads(audit_file.read_text())["shots"] == [1.0, 2.0]
+        assert json.loads(audit_file.read_text(encoding="utf-8"))["shots"] == [1.0, 2.0]
 
     def test_removing_a_stage_keeps_later_stages_audits_byte_identical(self, tmp_path: Path) -> None:
         client, state = _seeded_match(tmp_path, stages=5, shooters=["me"])

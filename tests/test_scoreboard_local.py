@@ -62,7 +62,7 @@ def test_get_match_round_trips_to_wire_shape(client: LocalJsonScoreboard) -> Non
     """The same JSON loaded online should equal the loaded-then-dumped local copy."""
     import json as _json
 
-    raw = _json.loads(FIXTURE.read_text())
+    raw = _json.loads(FIXTURE.read_text(encoding="utf-8"))
     dumped = client.get_match(FIXTURE_CT, FIXTURE_ID).model_dump(by_alias=True, exclude_none=False)
     # Strip keys the model defaulted-None for fields the wire didn't carry.
     present = {k: v for k, v in dumped.items() if not (v is None and k not in raw)}

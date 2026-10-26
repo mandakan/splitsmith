@@ -93,8 +93,8 @@ def mine_one(
         log(f"  SKIP {stem}: missing audit / full wav / sidecar")
         return []
 
-    audit = json.loads(audit_path.read_text())
-    sidecar = json.loads(full_json.read_text())
+    audit = json.loads(audit_path.read_text(encoding="utf-8"))
+    sidecar = json.loads(full_json.read_text(encoding="utf-8"))
     audio, sr = load_audio(full_wav)
     duration = audio.size / sr
 
@@ -179,7 +179,7 @@ def write_outputs(all_rows: list[dict], log: Callable[[str], None]) -> None:
             for stem, rows in sorted(by_fixture.items())
         },
     }
-    REPORT_PATH.write_text(json.dumps(report, indent=2) + "\n")
+    REPORT_PATH.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
     log(f"Wrote {REPORT_PATH}")
 
 

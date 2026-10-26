@@ -354,7 +354,7 @@ def test_load_spec_from_calibration_returns_none_when_block_missing(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     fake = tmp_path / "calibration.json"
-    fake.write_text(json.dumps({"version": 1}))
+    fake.write_text(json.dumps({"version": 1}), encoding="utf-8")
 
     class _FakeRuntime:
         def artifact(self, name):  # noqa: ARG002
@@ -382,7 +382,8 @@ def test_load_spec_from_calibration_returns_spec_when_block_present(
                     }
                 }
             }
-        )
+        ),
+        encoding="utf-8",
     )
 
     class _FakeRuntime:

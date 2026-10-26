@@ -60,7 +60,7 @@ def test_two_accounts_with_the_same_match_id_get_separate_folders(
     assert len(roots) == 1
     first_exports = roots[0] / "shooters" / SLUG / "exports"
     first_exports.mkdir(parents=True)
-    (first_exports / "stage1.csv").write_text("first account's export\n")
+    (first_exports / "stage1.csv").write_text("first account's export\n", encoding="utf-8")
     assert client.get(f"/api/matches/{MID}/shooters/{SLUG}/exports/file/stage1.csv").status_code == 200
 
     _adopt(client, sender, "second@example.com")

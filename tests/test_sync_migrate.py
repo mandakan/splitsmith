@@ -35,7 +35,7 @@ def _legacy_files(sh: Path, stage: int, video: StageVideo) -> list[Path]:
     files = [t / f"stage{stage}_cam_{lid}_trimmed.mp4", t / f"stage{stage}_cam_{lid}_web.mp4"]
     for f in files:
         f.write_bytes(tiny_mp4())
-    (t / f"stage{stage}_cam_{lid}_trimmed.params.json").write_text("{}")
+    (t / f"stage{stage}_cam_{lid}_trimmed.params.json").write_text("{}", encoding="utf-8")
     return files
 
 

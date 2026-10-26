@@ -59,7 +59,7 @@ def iter_target_fixtures(only: str | None) -> Iterable[Path]:
         if only and only not in name:
             continue
         try:
-            data = json.loads(path.read_text())
+            data = json.loads(path.read_text(encoding="utf-8"))
         except json.JSONDecodeError:
             continue
         camera = data.get("camera") or {}
@@ -98,7 +98,7 @@ def extract_frame(video: Path, source_time: float, dest: Path) -> bool:
         "-y",
         str(dest),
     ]
-    result = subprocess.run(cmd, capture_output=True, text=True)
+    result = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8")
     if result.returncode != 0 or not dest.exists():
         print(
             f"    ffmpeg failed at t={source_time:.3f} for {video.name}: " f"{result.stderr.strip()[:200]}",
@@ -166,7 +166,7 @@ def probe_fixture(
     neg_feats: torch.Tensor,
     device: str,
 ) -> dict:
-    data = json.loads(fixture_path.read_text())
+    data = json.loads(fixture_path.read_text(encoding="utf-8"))
     candidates = ((data.get("_candidates_pending_audit") or {}).get("candidates")) or []
     window = data.get("fixture_window_in_source") or [0.0, 0.0]
     src_offset = float(window[0])
@@ -270,11 +270,11 @@ def main() -> int:
 
     for fixture_path in fixtures:
         if args.limit:
-            data = json.loads(fixture_path.read_text())
+            data = json.loads(fixture_path.read_text(encoding="utf-8"))
             cands = ((data.get("_candidates_pending_audit") or {}).get("candidates")) or []
             data["_candidates_pending_audit"]["candidates"] = cands[: args.limit]
             tmp = OUT_DIR / f"_tmp_{fixture_path.name}"
-            tmp.write_text(json.dumps(data))
+            tmp.write_text(json.dumps(data), encoding="utf-8")
             try:
                 report = probe_fixture(tmp, model, processor, pos_feats, neg_feats, args.device)
                 report["fixture"] = fixture_path.name
@@ -283,7 +283,7 @@ def main() -> int:
         else:
             report = probe_fixture(fixture_path, model, processor, pos_feats, neg_feats, args.device)
         out_path = OUT_DIR / f"{fixture_path.stem}.json"
-        out_path.write_text(json.dumps(report, indent=2))
+        out_path.write_text(json.dumps(report, indent=2), encoding="utf-8")
         print(f"  wrote {out_path.relative_to(REPO_ROOT)}", file=sys.stderr)
 
     return 0

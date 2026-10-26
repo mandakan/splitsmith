@@ -57,7 +57,7 @@ def load_sources(path: Path = SOURCES_YAML) -> dict:
             f"sources map missing: {path}. Seed it from each fixture's audit JSON "
             "'source' field before running."
         )
-    return yaml.safe_load(path.read_text()) or {}
+    return yaml.safe_load(path.read_text(encoding="utf-8")) or {}
 
 
 def resolve_video(stem: str, sources: dict) -> Path:
@@ -144,7 +144,7 @@ def run_ffmpeg_extract(
         str(dst),
     ]
     try:
-        runner(cmd, check=True, capture_output=True, text=True)
+        runner(cmd, check=True, capture_output=True, text=True, encoding="utf-8")
     except FileNotFoundError as exc:
         raise ExtractError(f"ffmpeg binary not found: {ffmpeg_binary}") from exc
     except subprocess.CalledProcessError as exc:
@@ -169,7 +169,7 @@ def extract_one(
     audit_path = FIXTURES_DIR / f"{stem}.json"
     if not audit_path.exists():
         raise ExtractError(f"{stem}: audit JSON missing at {audit_path}")
-    audit = json.loads(audit_path.read_text())
+    audit = json.loads(audit_path.read_text(encoding="utf-8"))
     fws = audit.get("fixture_window_in_source")
     if not (isinstance(fws, list) and len(fws) == 2):
         raise ExtractError(
@@ -183,7 +183,7 @@ def extract_one(
     if out_wav.exists() and not overwrite:
         log(f"  {stem}: cached -> {out_wav}")
         if out_json.exists():
-            return json.loads(out_json.read_text())
+            return json.loads(out_json.read_text(encoding="utf-8"))
 
     PROBE_CACHE_DIR.mkdir(parents=True, exist_ok=True)
     try:
@@ -220,7 +220,7 @@ def extract_one(
         "sample_rate": SAMPLE_RATE,
         "extracted_seconds": duration,
     }
-    out_json.write_text(json.dumps(sidecar, indent=2) + "\n")
+    out_json.write_text(json.dumps(sidecar, indent=2) + "\n", encoding="utf-8")
     log(f"  {stem}: {duration:.1f}s @ {SAMPLE_RATE} Hz -> {out_wav.name}")
     return sidecar
 

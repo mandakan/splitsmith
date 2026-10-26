@@ -293,6 +293,7 @@ def _probe_seconds(path: Path) -> float:
         ["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", str(path)],
         capture_output=True,
         text=True,
+        encoding="utf-8",
         check=True,
     )
     return float(out.stdout.strip())
@@ -328,13 +329,13 @@ def test_clips_at_different_rates_stitch(tmp_path):
         out = tmp_path / f"seg{i}.mp4"
         clip = ReelClip(f"c{i}", source, 0.5, 1.0, speed=speed, freeze_seconds=0.3, sfx=sfx)
         proc = subprocess.run(
-            clip_command(clip, sequence=UP, output_path=out), capture_output=True, text=True
+            clip_command(clip, sequence=UP, output_path=out), capture_output=True, text=True, encoding="utf-8"
         )
         assert proc.returncode == 0, proc.stderr[-2000:]
         assert _probe_seconds(out) == pytest.approx(clip.out_seconds, abs=0.07)
         outs.append(out)
     listing = tmp_path / "list.txt"
-    listing.write_text("".join(f"file '{p}'\n" for p in outs))
+    listing.write_text("".join(f"file '{p}'\n" for p in outs), encoding="utf-8")
     final = tmp_path / "reel.mp4"
     subprocess.run(
         [
@@ -361,6 +362,8 @@ def test_clips_at_different_rates_stitch(tmp_path):
     # The shipped stems decode and mix over it without changing its length.
     mixed = tmp_path / "mixed.mp4"
     cues = (SfxCue("slowmo", 1.3), SfxCue("braam", 0.2), SfxCue("sting", 3.0), SfxCue("impact", 0.0))
-    proc = subprocess.run(sfx_mix_command(final, cues, output_path=mixed), capture_output=True, text=True)
+    proc = subprocess.run(
+        sfx_mix_command(final, cues, output_path=mixed), capture_output=True, text=True, encoding="utf-8"
+    )
     assert proc.returncode == 0, proc.stderr[-2000:]
     assert _probe_seconds(mixed) == pytest.approx(_probe_seconds(final), abs=0.05)

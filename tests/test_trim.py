@@ -403,6 +403,7 @@ def test_trim_integration_real_ffmpeg(tmp_path: Path, synthetic_source_video: Pa
         check=True,
         capture_output=True,
         text=True,
+        encoding="utf-8",
     )
     actual = float(probe.stdout.strip())
     # Stream-copy with -ss before -i snaps to the nearest keyframe; allow generous slack.
@@ -446,6 +447,7 @@ def test_trim_audit_mode_emits_short_gop(tmp_path: Path, synthetic_source_video:
         check=True,
         capture_output=True,
         text=True,
+        encoding="utf-8",
     )
     keyframe_times: list[float] = []
     current_t: float | None = None

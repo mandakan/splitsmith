@@ -83,13 +83,13 @@ def write_manifest(folder: Path, manifest: ModelManifest) -> Path:
     """Write ``model.json`` with the bundle's file list taken from disk."""
     manifest = manifest.model_copy(update={"files": bundle_files(folder)})
     path = folder / MANIFEST_NAME
-    path.write_text(manifest.model_dump_json(indent=2) + "\n")
+    path.write_text(manifest.model_dump_json(indent=2) + "\n", encoding="utf-8")
     return path
 
 
 def read_manifest(folder: Path) -> ModelManifest | None:
     try:
-        return ModelManifest.model_validate_json((folder / MANIFEST_NAME).read_text())
+        return ModelManifest.model_validate_json((folder / MANIFEST_NAME).read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return None
 
@@ -117,7 +117,7 @@ def list_bundles(root: Path | None = None) -> list[tuple[Path, ModelManifest]]:
 
 def calibration_of(folder: Path) -> dict | None:
     try:
-        data = json.loads((folder / CALIBRATION_NAME).read_text())
+        data = json.loads((folder / CALIBRATION_NAME).read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return None
     return data if isinstance(data, dict) else None

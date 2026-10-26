@@ -396,7 +396,7 @@ def test_republish_resets_the_old_mirror_and_starts_a_sync(tmp_path: Path, monke
 
     _synced(project_root, {"match": 4, "project/me": 7})
     (project_root / "sync_base").mkdir()
-    (project_root / "sync_base" / "match.json").write_text("{}")
+    (project_root / "sync_base" / "match.json").write_text("{}", encoding="utf-8")
     update_auto_prefs(
         project_root, lambda p: setattr(p, "hosted_deleted_at", datetime(2026, 9, 27, tzinfo=UTC))
     )

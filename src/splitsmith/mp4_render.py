@@ -1141,6 +1141,7 @@ def _has_audio_stream(path: Path) -> bool:
             ],
             capture_output=True,
             text=True,
+            encoding="utf-8",
             check=True,
         )
     except (OSError, subprocess.CalledProcessError):
@@ -1228,7 +1229,7 @@ def _grab_backdrop(
 
 def _run(cmd: tuple[str, ...], *, runner: Runner) -> None:
     try:
-        runner(list(cmd), check=True, capture_output=True, text=True)
+        runner(list(cmd), check=True, capture_output=True, text=True, encoding="utf-8")
     except FileNotFoundError as exc:
         raise FFmpegError(f"ffmpeg binary not found: {cmd[0]}") from exc
     except subprocess.CalledProcessError as exc:

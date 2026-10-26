@@ -136,7 +136,7 @@ def test_extract_one_writes_sidecar_with_window(tmp_path: Path, monkeypatch: pyt
         "beep_time": 0.5,
         "stage_time_seconds": 42.76,
     }
-    (fixtures_dir / "stage-shots-x.json").write_text(json.dumps(audit))
+    (fixtures_dir / "stage-shots-x.json").write_text(json.dumps(audit), encoding="utf-8")
     src = tmp_path / "VID_X.mp4"
     src.write_bytes(b"")
     sources = {"video_dir": str(tmp_path), "fixtures": {"stage-shots-x": "VID_X.mp4"}}

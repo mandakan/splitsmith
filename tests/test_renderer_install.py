@@ -37,13 +37,13 @@ def test_the_check_reads_the_pinned_revisions_install_marker(
     folder = tmp_path / f"chromium_headless_shell-{_pinned_revision()}"
     folder.mkdir()
     assert raster.renderer_installed() is False, "a half-finished install has no marker"
-    (folder / "INSTALLATION_COMPLETE").write_text("")
+    (folder / "INSTALLATION_COMPLETE").write_text("", encoding="utf-8")
     assert raster.renderer_installed() is True
     # Another revision's install is not this Playwright's (the DMG pinned a
     # newer one than the folder a user had).
     other = tmp_path / "other"
     (other / "chromium_headless_shell-1").mkdir(parents=True)
-    (other / "chromium_headless_shell-1" / "INSTALLATION_COMPLETE").write_text("")
+    (other / "chromium_headless_shell-1" / "INSTALLATION_COMPLETE").write_text("", encoding="utf-8")
     monkeypatch.setenv("PLAYWRIGHT_BROWSERS_PATH", str(other))
     assert raster.renderer_installed() is False
 

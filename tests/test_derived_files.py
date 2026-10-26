@@ -192,7 +192,7 @@ def test_trim_and_derived_import_where_there_is_no_fcntl() -> None:
     # Windows has no fcntl; a module-level import of it stopped every module
     # that reaches trim or derived (the CLI, the server, the test conftest).
     code = "import sys; sys.modules['fcntl'] = None; import splitsmith.derived, splitsmith.trim"
-    result = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True)
+    result = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, encoding="utf-8")
     assert result.returncode == 0, result.stderr
 
 

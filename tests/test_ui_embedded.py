@@ -46,7 +46,7 @@ def test_handle_reflects_resolved_runtime(monkeypatch: pytest.MonkeyPatch, tmp_p
     from splitsmith import runtime as runtime_module
 
     fake_ffmpeg = tmp_path / "fake-ffmpeg"
-    fake_ffmpeg.write_text("#!/bin/sh\nexit 0\n")
+    fake_ffmpeg.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
     fake_ffmpeg.chmod(0o755)
 
     monkeypatch.setenv("SPLITSMITH_FFMPEG", str(fake_ffmpeg))
@@ -123,6 +123,7 @@ def test_shutdown_route_exits_main(tmp_path: Path) -> None:
         stderr=subprocess.PIPE,
         stdout=subprocess.PIPE,
         text=True,
+        encoding="utf-8",
     )
     try:
         banner_line = _read_banner(proc, deadline_s=90.0)
@@ -156,6 +157,7 @@ def test_sigterm_to_main_exits_clean(tmp_path: Path) -> None:
         stderr=subprocess.PIPE,
         stdout=subprocess.PIPE,
         text=True,
+        encoding="utf-8",
     )
     try:
         # Both numbers below are hang guards, not assertions. What this

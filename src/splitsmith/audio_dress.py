@@ -320,7 +320,7 @@ def dress_export(
         export, placed, output_path=partial, ffmpeg_binary=ffmpeg_binary, audio_bitrate=audio_bitrate
     )
     try:
-        runner(list(cmd), check=True, capture_output=True, text=True)
+        runner(list(cmd), check=True, capture_output=True, text=True, encoding="utf-8")
         partial.replace(out)
     except subprocess.CalledProcessError as exc:
         partial.unlink(missing_ok=True)

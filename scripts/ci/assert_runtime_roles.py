@@ -148,7 +148,7 @@ def main() -> int:
     with tempfile.TemporaryDirectory() as tmp:
         out = Path(tmp) / "app.url"
         db_roles._rotate(owner, APP_ROLE, out, pooled=False)
-        app_url = out.read_text()
+        app_url = out.read_text(encoding="utf-8")
 
     asyncio.run(_check(owner_url, app_url))
     print("OK: the runtime roles write rows and nothing else, and RLS binds them.")

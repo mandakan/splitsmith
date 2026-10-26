@@ -80,6 +80,7 @@ def _probe_available_encoders(ffmpeg_binary: str = "ffmpeg") -> frozenset[str]:
             check=True,
             capture_output=True,
             text=True,
+            encoding="utf-8",
         )
     except (FileNotFoundError, subprocess.CalledProcessError):
         return frozenset()
@@ -135,7 +136,7 @@ def _nvenc_encode_usable(ffmpeg_binary: str, runner: Runner) -> bool:
         "-",
     ]
     try:
-        completed = runner(cmd, capture_output=True, text=True)
+        completed = runner(cmd, capture_output=True, text=True, encoding="utf-8")
     except (FileNotFoundError, OSError):
         return False
     return getattr(completed, "returncode", 1) == 0
@@ -308,7 +309,7 @@ def trim_video(
     cmd.append(str(output_path))
 
     try:
-        completed = runner(cmd, check=True, capture_output=True, text=True)
+        completed = runner(cmd, check=True, capture_output=True, text=True, encoding="utf-8")
     except FileNotFoundError as exc:
         raise FFmpegError(f"ffmpeg binary not found: {ffmpeg_binary}") from exc
     except subprocess.CalledProcessError as exc:
@@ -449,7 +450,7 @@ def transcode_web_trim(
         str(output_path),
     ]
     try:
-        runner(cmd, check=True, capture_output=True, text=True)
+        runner(cmd, check=True, capture_output=True, text=True, encoding="utf-8")
     except FileNotFoundError as exc:
         raise FFmpegError(f"ffmpeg binary not found: {ffmpeg_binary}") from exc
     except subprocess.CalledProcessError as exc:

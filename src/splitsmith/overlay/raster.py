@@ -403,7 +403,12 @@ def _pids_with(marker: str) -> list[int]:
         return found
     try:
         listing = subprocess.run(
-            ["ps", "-axo", "pid=,command="], capture_output=True, text=True, timeout=10, check=False
+            ["ps", "-axo", "pid=,command="],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            timeout=10,
+            check=False,
         ).stdout
     except (OSError, subprocess.SubprocessError):
         return []

@@ -202,7 +202,7 @@ _CGROUP_V1_UNLIMITED = 1 << 60
 
 def _read_ints(path: Path) -> list[int] | None:
     try:
-        return [int(v) for v in path.read_text().split() if v != "max"] or None
+        return [int(v) for v in path.read_text(encoding="utf-8").split() if v != "max"] or None
     except (OSError, ValueError):
         return None
 
@@ -224,7 +224,11 @@ def container_limits(cgroup_root: Path = _CGROUP_ROOT) -> dict[str, Any]:
     except (KeyError, ValueError):
         pass
     if vcpu is None:
-        v2 = (cgroup_root / "cpu.max").read_text().split() if (cgroup_root / "cpu.max").is_file() else []
+        v2 = (
+            (cgroup_root / "cpu.max").read_text(encoding="utf-8").split()
+            if (cgroup_root / "cpu.max").is_file()
+            else []
+        )
         if len(v2) == 2 and v2[0] != "max":
             vcpu = int(v2[0]) / int(v2[1])
         else:
@@ -247,9 +251,9 @@ def container_limits(cgroup_root: Path = _CGROUP_ROOT) -> dict[str, Any]:
 def _process_uptime_s() -> float:
     """Seconds since this process started (/proc), else since this import."""
     try:
-        fields = Path("/proc/self/stat").read_text().rsplit(")", 1)[1].split()
+        fields = Path("/proc/self/stat").read_text(encoding="utf-8").rsplit(")", 1)[1].split()
         start_ticks = int(fields[19])  # field 22 overall; 2 consumed by the split
-        boot_uptime = float(Path("/proc/uptime").read_text().split()[0])
+        boot_uptime = float(Path("/proc/uptime").read_text(encoding="utf-8").split()[0])
         return max(0.0, boot_uptime - start_ticks / os.sysconf("SC_CLK_TCK"))
     except (OSError, ValueError, IndexError, AttributeError):
         return time.monotonic() - _IMPORT_MONOTONIC

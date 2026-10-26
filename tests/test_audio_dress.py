@@ -74,7 +74,7 @@ def test_a_malformed_cue_is_refused(cue: dict) -> None:
 def _look(tmp_path: Path, cues: list[dict], files: dict[str, bytes]) -> Path:
     root = tmp_path / "look"
     (root / "sounds").mkdir(parents=True)
-    (root / "look.json").write_text(json.dumps({"name": "x", "sounds": {"cues": cues}}))
+    (root / "look.json").write_text(json.dumps({"name": "x", "sounds": {"cues": cues}}), encoding="utf-8")
     for name, data in files.items():
         (root / "sounds" / name).write_bytes(data)
     return root
@@ -89,7 +89,7 @@ def test_a_sound_outside_the_looks_sounds_folder_is_refused(tmp_path: Path) -> N
 
 def test_a_look_without_a_sound_map_has_an_empty_one(tmp_path: Path) -> None:
     """Its templates may declare every sound, so no map is no error."""
-    (tmp_path / "look.json").write_text(json.dumps({"name": "x"}))
+    (tmp_path / "look.json").write_text(json.dumps({"name": "x"}), encoding="utf-8")
     assert load_sound_map(tmp_path) == SoundMap()
 
 
@@ -160,12 +160,12 @@ def test_dressing_places_sound_on_the_item_and_keeps_the_video(tmp_path: Path) -
     copied = subprocess.run(
         ["ffprobe", "-v", "error", "-select_streams", "v", "-show_entries", "stream=codec_name,nb_frames",
          "-of", "csv=p=0", str(out)],
-        check=True, capture_output=True, text=True,
+        check=True, capture_output=True, text=True, encoding="utf-8",
     ).stdout.strip()  # fmt: skip
     assert copied == "h264,180"
     comment = subprocess.run(
         ["ffprobe", "-v", "error", "-show_entries", "format_tags=comment", "-of", "csv=p=0", str(out)],
-        check=True, capture_output=True, text=True,
+        check=True, capture_output=True, text=True, encoding="utf-8",
     ).stdout.strip()  # fmt: skip
     assert comment == "Art from Somewhere.", "the Look's credits stay in the dressed file"
 
@@ -225,9 +225,9 @@ def test_a_stage_without_its_hud_is_named_when_the_look_draws_one(tmp_path: Path
     """The export went out with a stage missing the HUD the Look draws (a
     stale overlay left out): the dress pass says so, it never fixes it."""
     root = _look(tmp_path, [{"on": "stage", "play": "a.wav", "at": "beep"}], {"a.wav": b"x"})
-    manifest = json.loads((root / "look.json").read_text())
+    manifest = json.loads((root / "look.json").read_text(encoding="utf-8"))
     manifest["slots"] = {"overlay": {"doom": "hud.html"}}
-    (root / "look.json").write_text(json.dumps(manifest))
+    (root / "look.json").write_text(json.dumps(manifest), encoding="utf-8")
     export = tmp_path / "m.mp4"
     with_hud = TimelineEntry(
         kind="stage", name="stage_000", stage_index=0, start=0, end=5, beep=0, overlay=True

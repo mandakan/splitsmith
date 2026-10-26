@@ -58,7 +58,7 @@ def main() -> None:
     skipped: list[str] = []
     for fix in fixtures:
         fp = FIXTURES_DIR / f"{fix}.json"
-        truth = json.loads(fp.read_text())
+        truth = json.loads(fp.read_text(encoding="utf-8"))
         audio, sr = load_audio(FIXTURES_DIR / f"{fix}.wav")
         # Match audit-prep / snapshot test: default ShotDetectConfig (no CWT
         # fallback, no min_confidence override). The eval pipelines use a
@@ -108,7 +108,7 @@ def main() -> None:
             else:
                 shot["candidate_number"] = new_cn
         truth["_candidates_pending_audit"] = _candidates_block(shots, truth["beep_time"])
-        fp.write_text(json.dumps(truth, indent=2) + "\n")
+        fp.write_text(json.dumps(truth, indent=2) + "\n", encoding="utf-8")
 
     if skipped:
         print(f"\nSkipped {len(skipped)} fixture(s): {', '.join(skipped)}")

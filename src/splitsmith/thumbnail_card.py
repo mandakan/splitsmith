@@ -137,6 +137,7 @@ def grab_frame(
         check=True,
         capture_output=True,
         text=True,
+        encoding="utf-8",
     )
     if not out.is_file() or out.stat().st_size == 0:
         raise OSError(f"no frame at {at_seconds:.3f} s in {video.name}")

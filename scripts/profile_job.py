@@ -50,6 +50,7 @@ def classify_camera(clip: Path) -> str:
         check=True,
         capture_output=True,
         text=True,
+        encoding="utf-8",
     ).stdout.strip()
     width = int(out.split(",")[0])
     return "handheld" if width >= 3840 else "headcam"
@@ -77,6 +78,7 @@ def extract_audio(clip: Path) -> tuple[np.ndarray, int]:
             check=True,
             capture_output=True,
             text=True,
+            encoding="utf-8",
         )
         audio, sr = sf.read(str(wav), dtype="float32")
     return audio, sr
@@ -103,7 +105,7 @@ def main() -> None:
     ap.add_argument("--repeat", type=int, default=2)
     args = ap.parse_args()
 
-    audit = json.loads((args.project / "audit" / f"stage{args.stage}.json").read_text())
+    audit = json.loads((args.project / "audit" / f"stage{args.stage}.json").read_text(encoding="utf-8"))
     beep = float(audit["beep_time"])
     stage_time = float(audit["stage_time_seconds"])
     expected = (audit.get("stage_rounds") or {}).get("expected")

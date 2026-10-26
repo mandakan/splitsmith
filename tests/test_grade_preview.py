@@ -17,7 +17,7 @@ from splitsmith.grade import Lut, ResolvedGrade
 
 def _inverting(tmp_path: Path) -> ResolvedGrade:
     source = tmp_path / "invert.cube"
-    source.write_text(grade.write_cube(Lut(size=2, table=1.0 - grade.identity(2).table)))
+    source.write_text(grade.write_cube(Lut(size=2, table=1.0 - grade.identity(2).table)), encoding="utf-8")
     return ResolvedGrade(source=source, strength=1.0, label="invert")
 
 

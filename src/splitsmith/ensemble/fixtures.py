@@ -120,7 +120,7 @@ def _scan(fixtures_dir: Path) -> Iterator[Fixture]:
         if not _looks_like_audit_json(json_path):
             continue
         try:
-            data = json.loads(json_path.read_text())
+            data = json.loads(json_path.read_text(encoding="utf-8"))
         except (json.JSONDecodeError, OSError):
             continue
         if "beep_time" not in data:

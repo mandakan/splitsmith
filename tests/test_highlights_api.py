@@ -16,14 +16,14 @@ SHOOTER = Path("shooters") / "me"
 
 def _broken_down(root: Path, n: int, *, sources: tuple[str, ...] = ("manual",)) -> None:
     path = root / SHOOTER / "audit" / f"stage{n}.json"
-    doc = json.loads(path.read_text())
+    doc = json.loads(path.read_text(encoding="utf-8"))
     doc["audit_events"] = [{"kind": "save"}]  # what makes a stage audited
     doc["events_seeded"] = 4
     doc["events"] = [
         {"id": f"evt-{i}", "kind": "movement", "start": 0.6 + i, "end": 0.9 + i, "source": s}
         for i, s in enumerate(sources)
     ]
-    path.write_text(json.dumps(doc))
+    path.write_text(json.dumps(doc), encoding="utf-8")
 
 
 def _trimmed(root: Path) -> None:

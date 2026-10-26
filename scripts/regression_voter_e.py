@@ -101,7 +101,7 @@ def main() -> int:
         if any(skip in p.name for skip in ("peaks", "promotion-report", "iphone")):
             continue
         try:
-            d = json.loads(p.read_text())
+            d = json.loads(p.read_text(encoding="utf-8"))
         except json.JSONDecodeError:
             continue
         cam = d.get("camera") or {}
@@ -118,7 +118,7 @@ def main() -> int:
 
     rows: list[dict] = []
     for fixture_path in fixtures:
-        truth = json.loads(fixture_path.read_text())
+        truth = json.loads(fixture_path.read_text(encoding="utf-8"))
         wav = FIXTURES_DIR / f"{fixture_path.stem}.wav"
         if not wav.exists():
             continue

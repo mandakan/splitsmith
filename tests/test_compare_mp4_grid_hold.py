@@ -176,7 +176,7 @@ def _overlay_plan(
     tmp_path: Path, *, clocks: tuple[mp4_grid.TileClock, ...] = ()
 ) -> mp4_grid.StageOverlayPlan:
     list_path = tmp_path / "sprites.txt"
-    list_path.write_text("file '/tmp/a.png'\nduration 12.5\nfile '/tmp/a.png'\n")
+    list_path.write_text("file '/tmp/a.png'\nduration 12.5\nfile '/tmp/a.png'\n", encoding="utf-8")
     return mp4_grid.StageOverlayPlan(
         sprite_list_path=list_path,
         font_path=tmp_path / "font.ttf",

@@ -260,7 +260,7 @@ def render_media(source: Path) -> None:
         "-shortest",
         str(source),
     ]
-    subprocess.run(cmd, check=True, capture_output=True, text=True)
+    subprocess.run(cmd, check=True, capture_output=True, text=True, encoding="utf-8")
 
 
 def cut_trimmed(source: Path, dest: Path) -> None:
@@ -295,7 +295,7 @@ def cut_trimmed(source: Path, dest: Path) -> None:
         "128k",
         str(dest),
     ]
-    subprocess.run(cmd, check=True, capture_output=True, text=True)
+    subprocess.run(cmd, check=True, capture_output=True, text=True, encoding="utf-8")
 
 
 def distinct_copy(source: Path, dest: Path, tag: str, *, media: bool) -> None:
@@ -323,7 +323,7 @@ def distinct_copy(source: Path, dest: Path, tag: str, *, media: bool) -> None:
         f"comment={tag}",
         str(dest),
     ]
-    subprocess.run(cmd, check=True, capture_output=True, text=True)
+    subprocess.run(cmd, check=True, capture_output=True, text=True, encoding="utf-8")
 
 
 def seed_shooter(

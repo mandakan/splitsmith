@@ -59,7 +59,7 @@ def _corpus(fixtures_dir: Path) -> list[AnchorFixture]:
     for f in fx_module.all_fixtures(fixtures_dir):
         if f.superseded_by or f.stem in fx_module.WRONG_CLIP_FIXTURES:
             continue  # replaced in the corpus, or wrong footage: neither an anchor nor a claimed angle
-        data = json.loads((fixtures_dir / f"{f.stem}.json").read_text())
+        data = json.loads((fixtures_dir / f"{f.stem}.json").read_text(encoding="utf-8"))
         source = data.get("source_video") or data.get("source")
         if not source:
             continue
@@ -96,7 +96,7 @@ def _trim(ffmpeg: str):
             "pcm_s16le",
             str(dst),
         ]
-        subprocess.run(cmd, check=True, capture_output=True, text=True)
+        subprocess.run(cmd, check=True, capture_output=True, text=True, encoding="utf-8")
 
     return trim
 
@@ -146,7 +146,7 @@ def main() -> int:
 
     def stale(snap: AnchorFixture, anchor: AnchorFixture) -> bool:
         def load(stem: str) -> dict:
-            return json.loads((args.fixtures / f"{stem}.json").read_text())
+            return json.loads((args.fixtures / f"{stem}.json").read_text(encoding="utf-8"))
 
         data = load(snap.stem)
         return snap_is_stale(data, load(anchor.stem), beep_now=snap_beep_now(data, beeps))
@@ -174,7 +174,7 @@ def main() -> int:
 
     OUT_DIR.mkdir(parents=True, exist_ok=True)
     out = OUT_DIR / ("result.json" if args.write else "plan.json")
-    out.write_text(json.dumps(results, indent=2) + "\n")
+    out.write_text(json.dumps(results, indent=2) + "\n", encoding="utf-8")
     print(f"wrote {out}")
     written = [r["slug"] for r in results if r["status"] == "written"]
     if written:
@@ -211,7 +211,7 @@ def _promote(p: PlannedPromotion, ctx, args, runtime, ffmpeg: str) -> dict:
         audio, sr = beep_detect.load_audio(wav)
         result = promote_from_anchor(
             PromoteFromAnchorRequest(
-                anchor_data=json.loads(anchor_path.read_text()),
+                anchor_data=json.loads(anchor_path.read_text(encoding="utf-8")),
                 primary_audio=anchor_audio,
                 primary_sr=anchor_sr,
                 secondary_audio=audio,

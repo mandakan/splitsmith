@@ -78,7 +78,7 @@ def main() -> int:
     for path in sorted(probe_dir.glob("stage-shots-*.json")):
         if path.name.startswith("_tmp_"):
             continue
-        sidecars.append((path, json.loads(path.read_text())))
+        sidecars.append((path, json.loads(path.read_text(encoding="utf-8"))))
     if not sidecars:
         print(f"No probe sidecars in {probe_dir}", file=sys.stderr)
         return 1
@@ -181,7 +181,7 @@ def main() -> int:
         for r in probe.get("candidates") or []:
             cn = int(r["candidate_number"])
             r["clip_probe_score"] = scores.get(cn)
-        path.write_text(json.dumps(probe, indent=2))
+        path.write_text(json.dumps(probe, indent=2), encoding="utf-8")
     print(f"Wrote clip_probe_score into {len(sidecars)} sidecars", file=sys.stderr)
 
     return 0

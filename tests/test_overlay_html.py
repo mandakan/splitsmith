@@ -721,7 +721,11 @@ def test_overlay_html_stays_a_leaf_and_pulls_in_no_compare_module() -> None:
         "import splitsmith.overlay.render"
     )
     result = subprocess.run(
-        [sys.executable, "-c", probe], capture_output=True, text=True, cwd=Path(__file__).parent.parent
+        [sys.executable, "-c", probe],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        cwd=Path(__file__).parent.parent,
     )
     assert result.returncode == 0, result.stderr
 

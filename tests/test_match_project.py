@@ -439,7 +439,7 @@ def test_atomic_write_no_partial_file_on_crash(tmp_path: Path) -> None:
     target = tmp_path / "config.json"
 
     # Start with a valid file the writer would otherwise overwrite.
-    target.write_text('{"version": 1}\n')
+    target.write_text('{"version": 1}\n', encoding="utf-8")
 
     class BoomError(RuntimeError):
         pass
@@ -460,7 +460,7 @@ def test_atomic_write_no_partial_file_on_crash(tmp_path: Path) -> None:
             project_module._json_default = original_default
 
     # Original file untouched.
-    assert json.loads(target.read_text()) == {"version": 1}
+    assert json.loads(target.read_text(encoding="utf-8")) == {"version": 1}
     # No leftover .tmp file in the directory.
     leftovers = [p for p in tmp_path.iterdir() if p.name.startswith(".config.json.")]
     assert leftovers == []
@@ -511,7 +511,7 @@ def test_datetime_round_trips_as_iso8601(tmp_path: Path) -> None:
     project = MatchProject.init(root, name="DT Match")
     project.save(root)
 
-    raw = json.loads((root / PROJECT_FILE).read_text())
+    raw = json.loads((root / PROJECT_FILE).read_text(encoding="utf-8"))
     # ISO-8601 is parseable.
     parsed = datetime.fromisoformat(raw["created_at"])
     assert parsed.tzinfo is not None  # we always store UTC
@@ -522,7 +522,7 @@ def test_project_file_ends_with_newline(tmp_path: Path) -> None:
     root = tmp_path / "match-nl"
     project = MatchProject.init(root, name="NL Match")
     project.save(root)
-    contents = (root / PROJECT_FILE).read_text()
+    contents = (root / PROJECT_FILE).read_text(encoding="utf-8")
     assert contents.endswith("\n")
 
 
@@ -1471,7 +1471,7 @@ def test_register_video_rejects_non_video(tmp_path: Path) -> None:
     root = tmp_path / "match-bad"
     project = MatchProject.init(root, name="Bad Match")
     bad = tmp_path / "notes.txt"
-    bad.write_text("not a video")
+    bad.write_text("not a video", encoding="utf-8")
     with pytest.raises(ValueError):
         project.register_video(bad, root)
 
@@ -1790,7 +1790,7 @@ def test_atomic_write_uses_same_directory_for_tmp(tmp_path: Path) -> None:
         _tempfile.mkstemp = real_mkstemp  # type: ignore[assignment]
 
     assert seen_dirs == [tmp_path]
-    assert json.loads(target.read_text()) == {"hello": "world"}
+    assert json.loads(target.read_text(encoding="utf-8")) == {"hello": "world"}
 
     # Touch ``original_mkstemp`` so flake8 doesn't flag it; harmless.
     _ = original_mkstemp
@@ -1817,7 +1817,8 @@ def test_swap_primary_warns_when_shots_audited(tmp_path: Path) -> None:
                 "stage_name": "S1",
                 "shots": [{"shot_number": 1, "candidate_number": 1, "time": 1.0, "ms_after_beep": 100}],
             }
-        )
+        ),
+        encoding="utf-8",
     )
     assert project.primary_swap_warns(root, stage_number=1) is True
 
@@ -1840,7 +1841,8 @@ def test_swap_primary_does_not_warn_for_pending_candidates_only(tmp_path: Path) 
                     "candidates": [{"candidate_number": 1, "time": 1.0, "ms_after_beep": 0}]
                 },
             }
-        )
+        ),
+        encoding="utf-8",
     )
     assert project.primary_swap_warns(root, stage_number=1) is False
 
@@ -1868,7 +1870,8 @@ def test_swap_primary_backs_up_audit_and_clears_processed(tmp_path: Path) -> Non
                 "stage_name": "S1",
                 "shots": [{"shot_number": 1, "candidate_number": 1, "time": 1.0, "ms_after_beep": 100}],
             }
-        )
+        ),
+        encoding="utf-8",
     )
 
     new_primary = project.swap_primary(Path("raw/b.mp4"), root=root, stage_number=1, backup_audit=True)
@@ -1884,7 +1887,7 @@ def test_swap_primary_backs_up_audit_and_clears_processed(tmp_path: Path) -> Non
     assert not audit.exists()
     backups = list((root / "audit").glob("stage1.pre-swap-*.json"))
     assert len(backups) == 1
-    assert json.loads(backups[0].read_text())["shots"][0]["time"] == 1.0
+    assert json.loads(backups[0].read_text(encoding="utf-8"))["shots"][0]["time"] == 1.0
 
 
 def _two_camera_stage(root: Path, *, b_reviewed: bool) -> MatchProject:
@@ -1943,7 +1946,7 @@ def test_swapping_in_the_current_primary_changes_nothing(tmp_path: Path) -> None
     project = _two_camera_stage(root, b_reviewed=True)
     audit = root / "audit" / "stage1.json"
     shot = {"shot_number": 1, "candidate_number": 1, "time": 1.0, "ms_after_beep": 100}
-    audit.write_text(json.dumps({"stage_number": 1, "stage_name": "S1", "shots": [shot]}))
+    audit.write_text(json.dumps({"stage_number": 1, "stage_name": "S1", "shots": [shot]}), encoding="utf-8")
 
     same = project.swap_primary(Path("raw/a.mp4"), root=root, stage_number=1)
 
@@ -1960,17 +1963,19 @@ def test_swap_primary_never_overwrites_a_backup(tmp_path: Path) -> None:
     project = _two_camera_stage(root, b_reviewed=True)
     audit = root / "audit" / "stage1.json"
     bak = root / "audit" / "stage1.json.bak"
-    bak.write_text('{"older": true}')
+    bak.write_text('{"older": true}', encoding="utf-8")
     shot = {"shot_number": 1, "candidate_number": 1, "time": 1.0, "ms_after_beep": 100}
-    audit.write_text(json.dumps({"stage_number": 1, "stage_name": "S1", "shots": [shot]}))
+    audit.write_text(json.dumps({"stage_number": 1, "stage_name": "S1", "shots": [shot]}), encoding="utf-8")
 
     project.swap_primary(Path("raw/b.mp4"), root=root, stage_number=1)
-    audit.write_text(json.dumps({"stage_number": 1, "stage_name": "S1", "shots": [shot, shot]}))
+    audit.write_text(
+        json.dumps({"stage_number": 1, "stage_name": "S1", "shots": [shot, shot]}), encoding="utf-8"
+    )
     project.swap_primary(Path("raw/a.mp4"), root=root, stage_number=1)
 
     backups = sorted((root / "audit").glob("stage1.pre-swap-*.json"))
-    assert [len(json.loads(p.read_text())["shots"]) for p in backups] == [1, 2]
-    assert json.loads(bak.read_text()) == {"older": True}
+    assert [len(json.loads(p.read_text(encoding="utf-8"))["shots"]) for p in backups] == [1, 2]
+    assert json.loads(bak.read_text(encoding="utf-8")) == {"older": True}
 
 
 def test_swap_primary_skips_backup_when_no_audit(tmp_path: Path) -> None:

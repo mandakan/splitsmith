@@ -35,13 +35,15 @@ def test_import_keeps_timestamps_and_skips_known(tmp_path: Path) -> None:
                 {"email": "me@x.se", "ts": "2025-09-27T19:06:40.000Z"},
                 {"email": "erik@x.se", "ts": 1759100000000},
             ]
-        )
+        ),
+        encoding="utf-8",
     )
     out = subprocess.run(
         [sys.executable, "scripts/import_waitlist.py", str(dump)],
         env={"SPLITSMITH_DATABASE_URL": url, "PATH": ""},
         capture_output=True,
         text=True,
+        encoding="utf-8",
         check=True,
     )
     assert "imported 1, skipped 2" in out.stdout
@@ -78,13 +80,15 @@ def test_invalid_entries_are_skipped_and_counted(tmp_path: Path) -> None:
                 {"email": "a" * 317 + "@x.se", "ts": "2025-09-27T19:06:40.000Z"},  # over 320 chars
                 {"email": "missing-ts@x.se"},  # no "ts" key at all
             ]
-        )
+        ),
+        encoding="utf-8",
     )
     out = subprocess.run(
         [sys.executable, "scripts/import_waitlist.py", str(dump)],
         env={"SPLITSMITH_DATABASE_URL": url, "PATH": ""},
         capture_output=True,
         text=True,
+        encoding="utf-8",
         check=True,
     )
     assert "imported 1, skipped 4" in out.stdout

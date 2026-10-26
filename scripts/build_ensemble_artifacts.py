@@ -178,7 +178,7 @@ def _build_universe(
             )
             continue
 
-        truth = json.loads(truth_path.read_text())
+        truth = json.loads(truth_path.read_text(encoding="utf-8"))
         camera_block = truth.get("camera") or {}
         cam_class = camera_class_from_mount(camera_block.get("mount"))
         cam_make = camera_block.get("make")
@@ -454,8 +454,8 @@ def _load_mined_negatives(
         # Hardest survivors first: descending Voter A confidence.
         ordered = sorted(indices, key=lambda i: -confidences[i])[:cap]
 
-        sidecar = json.loads(sidecar_path.read_text())
-        audit = json.loads((FIXTURES_DIR / f"{fix}.json").read_text())
+        sidecar = json.loads(sidecar_path.read_text(encoding="utf-8"))
+        audit = json.loads((FIXTURES_DIR / f"{fix}.json").read_text(encoding="utf-8"))
         beep_in_full = (
             float(audit["fixture_window_in_source"][0])
             + float(audit["beep_time"])
@@ -580,7 +580,7 @@ def _event_groups(fixture: str) -> tuple[str, str]:
     on that bay, who share its acoustics -- so no fold trains on a stage
     it is scored on (#1045).
     """
-    event_id = json.loads((FIXTURES_DIR / f"{fixture}.json").read_text())["event_id"]
+    event_id = json.loads((FIXTURES_DIR / f"{fixture}.json").read_text(encoding="utf-8"))["event_id"]
     match, stage, _shooter = event_id.split(":")
     return match, f"{match}:{stage}"
 
@@ -743,7 +743,7 @@ def _fit_decoder(
     stages: dict[str, dict] = {}
     for fix in {r["fixture"] for r in rows}:
         u = next(r for r in universe if r["fixture"] == fix)
-        truth = json.loads((FIXTURES_DIR / f"{fix}.json").read_text())
+        truth = json.loads((FIXTURES_DIR / f"{fix}.json").read_text(encoding="utf-8"))
         stages[fix] = {
             "truth": sorted(float(s["time"]) for s in truth.get("shots", [])),
             "beep": u["beep_time"],
@@ -771,7 +771,7 @@ def _write_decoder_only(
     taken at that calibration's own thresholds, as the runtime computes it."""
     if not cal_path.exists():
         raise BuildError(f"{cal_path}: no calibration to add a decoder to")
-    cal = json.loads(cal_path.read_text())
+    cal = json.loads(cal_path.read_text(encoding="utf-8"))
     shipped = cal.get("thresholds_by_camera_class") or {}
     thresholds = {
         cls: {"voter_b_threshold": shipped.get(cls, {}).get("voter_b_threshold", cal["voter_b_threshold"])}
@@ -781,7 +781,7 @@ def _write_decoder_only(
     if decoder is None:
         raise BuildError("the decoder could not be fitted (needs at least two matches)")
     cal["decoder"] = decoder.model_dump()
-    cal_path.write_text(json.dumps(cal, indent=2) + "\n")
+    cal_path.write_text(json.dumps(cal, indent=2) + "\n", encoding="utf-8")
     log(f"Wrote the decoder into {cal_path} (nothing else changed)")
     return cal
 
@@ -815,7 +815,8 @@ def _write_heldout(
             },
             indent=2,
         )
-        + "\n"
+        + "\n",
+        encoding="utf-8",
     )
     pq.write_table(pa.Table.from_pylist(rows), out / "voter_c_oof.parquet")
     for cls, r in report.items():
@@ -950,7 +951,7 @@ def _build_visual_universe(
         wav_path = FIXTURES_DIR / f"{fix}.wav"
         if not truth_path.exists() or not wav_path.exists():
             continue
-        truth = json.loads(truth_path.read_text())
+        truth = json.loads(truth_path.read_text(encoding="utf-8"))
         camera_block = truth.get("camera") or {}
         cam_class = camera_class_from_mount(camera_block.get("mount"))
         # v0 limit: only build Voter E features for the default class
@@ -1203,7 +1204,7 @@ def _carry_model_artifacts(cal_path: Path) -> dict | None:
     CI's slim-wheel smoke test on the 2026-08-17 retrain).
     """
     try:
-        prev = json.loads(cal_path.read_text())
+        prev = json.loads(cal_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return None
     block = prev.get("model_artifacts")
@@ -1213,7 +1214,9 @@ def _carry_model_artifacts(cal_path: Path) -> dict | None:
 def _event_match(stem: str) -> str | None:
     """The match a fixture's ``event_id`` names (the fold key), else its stem's."""
     try:
-        event_id = json.loads((FIXTURES_DIR / f"{stem}.json").read_text()).get("event_id") or ""
+        event_id = (
+            json.loads((FIXTURES_DIR / f"{stem}.json").read_text(encoding="utf-8")).get("event_id") or ""
+        )
     except (OSError, json.JSONDecodeError):
         return None
     return event_id.split(":")[0] if event_id.count(":") == 2 else None
@@ -1268,7 +1271,11 @@ def _git_sha() -> str | None:
 
     try:
         res = subprocess.run(
-            ["git", "rev-parse", "--short=12", "HEAD"], capture_output=True, text=True, timeout=10
+            ["git", "rev-parse", "--short=12", "HEAD"],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            timeout=10,
         )
     except OSError:
         return None
@@ -1562,7 +1569,7 @@ def build_artifacts(
     if carried is not None:
         cal["model_artifacts"] = carried
         log("Carried model_artifacts block forward from the previous calibration.")
-    cal_path.write_text(json.dumps(cal, indent=2) + "\n")
+    cal_path.write_text(json.dumps(cal, indent=2) + "\n", encoding="utf-8")
     log(f"Wrote {cal_path}")
 
     if out_dir is not None:

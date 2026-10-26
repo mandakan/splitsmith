@@ -62,7 +62,7 @@ def _run_nested_pytest(
     # ``-n0`` and not "omit the flag": the repo's ``addopts`` carries
     # ``-n auto``, so a nested run inherits it unless it is overridden.
     argv += ["-n", "0" if numprocesses is None else str(numprocesses)]
-    return subprocess.run(argv, cwd=REPO_ROOT, env=env, capture_output=True, text=True)
+    return subprocess.run(argv, cwd=REPO_ROOT, env=env, capture_output=True, text=True, encoding="utf-8")
 
 
 def test_skipped_integration_test_passes_the_build_without_the_gate() -> None:

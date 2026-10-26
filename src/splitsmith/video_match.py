@@ -134,7 +134,9 @@ def read_format_tags(path: Path, *, ffprobe_binary: str = "ffprobe", timeout: fl
         str(path),
     ]
     try:
-        completed = subprocess.run(cmd, check=True, capture_output=True, text=True, timeout=timeout)
+        completed = subprocess.run(
+            cmd, check=True, capture_output=True, text=True, encoding="utf-8", timeout=timeout
+        )
         payload = json.loads(completed.stdout)
     except (subprocess.SubprocessError, OSError, json.JSONDecodeError):
         return {}

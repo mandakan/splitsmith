@@ -23,13 +23,13 @@ from splitsmith.ui.server import create_app
 
 def _seed_project(root: Path, *, name: str = "Test Match") -> MatchProject:
     project = MatchProject.init(root, name=name)
-    (project.audit_path(root) / "stage1.json").write_text('{"shots": []}')
-    (root / "scoreboard" / "match.json").write_text('{"id": "abc"}')
+    (project.audit_path(root) / "stage1.json").write_text('{"shots": []}', encoding="utf-8")
+    (root / "scoreboard" / "match.json").write_text('{"id": "abc"}', encoding="utf-8")
     (project.trimmed_path(root) / "stage1_trimmed.mp4").write_bytes(b"\x00" * 1024)
-    (project.exports_path(root) / "stage1.fcpxml").write_text("<fcpxml/>")
+    (project.exports_path(root) / "stage1.fcpxml").write_text("<fcpxml/>", encoding="utf-8")
     (project.raw_path(root) / "source.mp4").write_bytes(b"\x00" * 4096)
     (project.audio_path(root) / "stage1.wav").write_bytes(b"\x00" * 2048)
-    (project.probes_path(root) / "cache.json").write_text('{"probed": true}')
+    (project.probes_path(root) / "cache.json").write_text('{"probed": true}', encoding="utf-8")
     (project.thumbs_path(root) / "x.jpg").write_bytes(b"\x00" * 128)
     return project
 
@@ -102,8 +102,10 @@ def test_round_trip_restores_project(tmp_path: Path) -> None:
     assert imported.project_root == dest_root / "match"
     assert imported.project_name == "Restored Match"
     assert (imported.project_root / PROJECT_FILE).exists()
-    assert (imported.project_root / "audit" / "stage1.json").read_text() == '{"shots": []}'
-    assert (imported.project_root / "scoreboard" / "match.json").read_text() == '{"id": "abc"}'
+    assert (imported.project_root / "audit" / "stage1.json").read_text(encoding="utf-8") == '{"shots": []}'
+    assert (imported.project_root / "scoreboard" / "match.json").read_text(
+        encoding="utf-8"
+    ) == '{"id": "abc"}'
     # Regeneratable dirs and caches were intentionally excluded from the
     # default archive, so they don't reappear after restore.
     assert not (imported.project_root / "trimmed").exists()
@@ -137,7 +139,7 @@ def test_round_trip_carries_the_export_history(tmp_path: Path) -> None:
                 artifacts=[export_runs.ExportArtifact(filename=f"stage{n}.csv", kind="csv")],
             ),
         )
-    (src / export_runs.LOG_FILENAME).write_text(json.dumps(doc))
+    (src / export_runs.LOG_FILENAME).write_text(json.dumps(doc), encoding="utf-8")
 
     result = export_project(src, tmp_path / "out")
     assert export_runs.LOG_FILENAME in result.included
@@ -146,7 +148,7 @@ def test_round_trip_carries_the_export_history(tmp_path: Path) -> None:
     assert export_runs.LOG_FILENAME in manifest["included"]
 
     imported = import_project(result.archive_path, tmp_path / "imported")
-    restored = json.loads((imported.project_root / export_runs.LOG_FILENAME).read_text())
+    restored = json.loads((imported.project_root / export_runs.LOG_FILENAME).read_text(encoding="utf-8"))
     assert export_runs.load_log(restored) == export_runs.load_log(doc)
     assert [r.run_id for r in export_runs.load_log(restored).runs] == ["b" * 32, "a" * 32]
 
@@ -171,7 +173,7 @@ def test_import_overwrite_replaces_existing(tmp_path: Path) -> None:
     dest = tmp_path / "imported"
     import_project(result.archive_path, dest)
     stray = dest / "match" / "audit" / "stale.json"
-    stray.write_text("stale")
+    stray.write_text("stale", encoding="utf-8")
     assert stray.exists()
 
     import_project(result.archive_path, dest, overwrite=True)

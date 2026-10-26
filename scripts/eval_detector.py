@@ -38,7 +38,7 @@ FIXTURES_DIR = Path("tests/fixtures")
 
 
 def evaluate_one(name: str, *, tolerance_ms: float, config: ShotDetectConfig | None = None) -> dict:
-    truth = json.loads((FIXTURES_DIR / f"{name}.json").read_text())
+    truth = json.loads((FIXTURES_DIR / f"{name}.json").read_text(encoding="utf-8"))
     audio, sr = load_audio(FIXTURES_DIR / f"{name}.wav")
     config = config or ShotDetectConfig()
     shots = detect_shots(audio, sr, truth["beep_time"], truth["stage_time_seconds"], config)

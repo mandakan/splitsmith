@@ -98,7 +98,7 @@ def test_export_stage_writes_csv_and_report(tmp_path: Path) -> None:
     # CSV name must match the CLI slug.
     assert result.csv_path.name == "stage1_stage-1-h1_splits.csv"
     # CSV content sanity.
-    rows = list(csv.reader(result.csv_path.open()))
+    rows = list(csv.reader(result.csv_path.open(encoding="utf-8")))
     assert rows[0] == [
         "shot_number",
         "time_from_start",
@@ -824,12 +824,12 @@ def test_summary_card_carries_the_stages_confirmed_reloads(
 
     monkeypatch.setattr(exports_mod.summary_card, "render_summary_card", fake_render)
     audit_path, exports_dir = _seed_stage_with_trim(tmp_path)
-    doc = json.loads(audit_path.read_text())
+    doc = json.loads(audit_path.read_text(encoding="utf-8"))
     doc["events"] = [
         {"id": "evt-1", "kind": "reload", "start": 1.0, "end": 2.25, "source": "manual"},
         {"id": "evt-2", "kind": "reload", "start": 3.0, "end": 4.0, "source": "auto"},
     ]
-    audit_path.write_text(json.dumps(doc))
+    audit_path.write_text(json.dumps(doc), encoding="utf-8")
     _export(audit_path, exports_dir)
     assert [(r.event_id, r.duration) for r in captured["data"].reloads] == [("evt-1", 1.25)]
 
@@ -988,8 +988,8 @@ def test_the_overlay_style_reaches_the_renderer_and_is_recorded(
     assert captured["variant"] == "plate" and captured["hud_options"] == options
     record = exports_dir / "stage1_stage-1-h1_overlay.json"
     assert result.overlay_settings_path == record
-    assert json.loads(record.read_text())["variant"] == "plate"
-    assert json.loads(record.read_text())["options"]["position"] == "top-right"
+    assert json.loads(record.read_text(encoding="utf-8"))["variant"] == "plate"
+    assert json.loads(record.read_text(encoding="utf-8"))["options"]["position"] == "top-right"
 
 
 def test_a_fallback_is_recorded_as_classic_and_reported(
@@ -999,7 +999,7 @@ def test_a_fallback_is_recorded_as_classic_and_reported(
     export asking for the style re-renders rather than reusing it."""
     audit_path, exports_dir = _seed_stage_with_trim(tmp_path)
     result, _ = _overlay_export(audit_path, exports_dir, monkeypatch, fall_back=True, overlay_variant="plate")
-    record = json.loads((exports_dir / "stage1_stage-1-h1_overlay.json").read_text())
+    record = json.loads((exports_dir / "stage1_stage-1-h1_overlay.json").read_text(encoding="utf-8"))
     assert record["variant"] == "default" and record["options"] == {}
     assert any("fell back to Classic" in a for a in result.anomalies)
     assert not result.export_failures
@@ -1018,7 +1018,7 @@ def test_a_short_head_overlay_is_drawn_at_the_trims_own_beep(
     audit_path, exports_dir = _seed_stage_with_trim(tmp_path)
     _, captured = _overlay_export(audit_path, exports_dir, monkeypatch, beep_time_in_source=4.084)
     assert captured["beep_offset_seconds"] == pytest.approx(4.084)
-    record = json.loads((exports_dir / "stage1_stage-1-h1_overlay.json").read_text())
+    record = json.loads((exports_dir / "stage1_stage-1-h1_overlay.json").read_text(encoding="utf-8"))
     assert record["short_head"] == 4.084
 
 
@@ -1031,7 +1031,7 @@ def test_a_full_head_overlay_and_its_record_are_what_they_always_were(
     audit_path, exports_dir = _seed_stage_with_trim(tmp_path)
     _, captured = _overlay_export(audit_path, exports_dir, monkeypatch, beep_time_in_source=5.0)
     assert captured["beep_offset_seconds"] == 5.0
-    record = json.loads((exports_dir / "stage1_stage-1-h1_overlay.json").read_text())
+    record = json.loads((exports_dir / "stage1_stage-1-h1_overlay.json").read_text(encoding="utf-8"))
     assert "short_head" not in record
     assert exports_mod.overlay_record_matches(record, audit_revision=record["audit_revision"])
 
@@ -1138,7 +1138,7 @@ def test_read_overlay_settings_takes_a_missing_record_as_the_defaults(tmp_path: 
 
     assert exports_mod.read_overlay_settings(tmp_path / "nope.json") == LEGACY_OVERLAY_SETTINGS
     broken = tmp_path / "broken.json"
-    broken.write_text("{not json")
+    broken.write_text("{not json", encoding="utf-8")
     assert exports_mod.read_overlay_settings(broken) is None
 
 
@@ -1240,7 +1240,7 @@ def test_the_record_holds_the_audit_revision_read_before_the_render(
         beep_time_in_source=10.0,
         config=Config(),
     )
-    record = json.loads((exports_dir / "stage1_stage-1-h1_overlay.json").read_text())
+    record = json.loads((exports_dir / "stage1_stage-1-h1_overlay.json").read_text(encoding="utf-8"))
     assert record["audit_revision"] == before
     assert exports_mod.overlay_audit_revision(audit_path) != before
 
@@ -1478,7 +1478,7 @@ def test_export_stage_moving_column_true_inside_a_confirmed_movement_region(tmp_
         config=Config(),
     )
     assert result.csv_path is not None
-    rows = list(csv.reader(result.csv_path.open()))
+    rows = list(csv.reader(result.csv_path.open(encoding="utf-8")))
     assert rows[0][-1] == "moving"
     # Shot 1 at 0.5s is outside [3.0, 6.0]; shot 2 at 4.0s is inside.
     assert rows[1][-1] == "false"
@@ -1486,7 +1486,7 @@ def test_export_stage_moving_column_true_inside_a_confirmed_movement_region(tmp_
 
     events_csv = exports_dir / "stage1_stage-1-h1_events.csv"
     assert events_csv.exists()
-    events_rows = list(csv.reader(events_csv.open()))
+    events_rows = list(csv.reader(events_csv.open(encoding="utf-8")))
     assert events_rows[0] == ["id", "kind", "start", "end", "duration", "source", "note"]
     assert events_rows[1] == ["evt-1", "movement", "3.000", "6.000", "3.000", "manual", ""]
 
@@ -1527,7 +1527,7 @@ def test_export_stage_without_the_breakdown_reads_no_region(tmp_path: Path) -> N
         beep_time_in_source=10.0,
         config=Config(),
     )
-    rows = list(csv.reader(result.csv_path.open()))
+    rows = list(csv.reader(result.csv_path.open(encoding="utf-8")))
     assert [r[-1] for r in rows[1:]] == ["false", "false"]
     assert not (exports_dir / "stage1_stage-1-h1_events.csv").exists()
 
@@ -1594,7 +1594,7 @@ def test_export_stage_an_auto_only_proposal_writes_nothing_new(tmp_path: Path) -
         config=Config(),
     )
     assert result.csv_path is not None
-    rows = list(csv.reader(result.csv_path.open()))
+    rows = list(csv.reader(result.csv_path.open(encoding="utf-8")))
     assert rows[1][-1] == "false"  # shot at 4.0s is inside the region, but it's only auto
     assert not (exports_dir / "stage1_stage-1-h1_events.csv").exists()
 
@@ -1747,7 +1747,7 @@ def test_export_stage_corrupt_events_field_exports_moving_false_and_no_events_cs
         config=Config(),
     )
     assert result.csv_path is not None
-    rows = list(csv.reader(result.csv_path.open()))
+    rows = list(csv.reader(result.csv_path.open(encoding="utf-8")))
     assert rows[1][-1] == "false"
     assert result.events_csv_path is None
     assert not (exports_dir / "stage1_stage-1-h1_events.csv").exists()

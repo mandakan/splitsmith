@@ -283,8 +283,8 @@ def _local_state(recent_paths: list[str]) -> SimpleNamespace:
 def _make_match_dir(root: Path) -> Path:
     d = root / "mymatch"
     d.mkdir()
-    (d / MATCH_FILE).write_text("{}")
-    (d / "video.mp4").write_text("x")
+    (d / MATCH_FILE).write_text("{}", encoding="utf-8")
+    (d / "video.mp4").write_text("x", encoding="utf-8")
     return d
 
 
@@ -336,7 +336,7 @@ def test_local_rmtree_refuses_without_match_marker(tmp_path: Path) -> None:
     """The MATCH_FILE guard stops a stray path from nuking an unrelated dir."""
     not_a_match = tmp_path / "random"
     not_a_match.mkdir()
-    (not_a_match / "keep.txt").write_text("important")
+    (not_a_match / "keep.txt").write_text("important", encoding="utf-8")
     state = _local_state([str(not_a_match)])
 
     summary = asyncio.run(

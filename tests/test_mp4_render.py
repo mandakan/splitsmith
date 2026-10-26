@@ -325,7 +325,7 @@ def test_render_mp4_runs_per_stage_then_concat(tmp_path: Path) -> None:
     # steps, listing both temps in spine order.
     list_path = work / "concat.txt"
     assert list_path.exists()
-    contents = list_path.read_text()
+    contents = list_path.read_text(encoding="utf-8")
     assert "stage_000.mp4" in contents
     assert "stage_001.mp4" in contents
     # Spine order: A before B.
@@ -418,7 +418,7 @@ def test_a_repeat_render_encodes_nothing_and_stitches_the_cached_segments(tmp_pa
         progress=steps.append,
     )
     assert len(second) == 1 and _is_concat(second[0])
-    listed = (tmp_path / "w2" / "concat.txt").read_text()
+    listed = (tmp_path / "w2" / "concat.txt").read_text(encoding="utf-8")
     assert listed.count(str((tmp_path / "cache").resolve())) == 2
     assert [(s.label, s.status, s.index, s.total) for s in steps] == [
         ("A", "reused", 1, 3),
@@ -860,7 +860,7 @@ def test_render_mp4_splices_cards_and_clips_in_spine_order(tmp_path: Path) -> No
     result = mp4_render.render_mp4(
         comp, output_path=tmp_path / "m.mp4", work_dir=work, runner=runner, rasterizer=fake
     )
-    contents = (work / "concat.txt").read_text().splitlines()
+    contents = (work / "concat.txt").read_text(encoding="utf-8").splitlines()
     names = [line.rsplit("/", 1)[-1].rstrip("'") for line in contents]
     assert names == [
         "intro.mp4",
@@ -915,7 +915,10 @@ def test_render_mp4_skips_every_card_when_no_browser_launches(
     runner = MagicMock(side_effect=_ok)
     work = tmp_path / "work"
     result = mp4_render.render_mp4(comp, output_path=tmp_path / "m.mp4", work_dir=work, runner=runner)
-    names = [line.rsplit("/", 1)[-1].rstrip("'") for line in (work / "concat.txt").read_text().splitlines()]
+    names = [
+        line.rsplit("/", 1)[-1].rstrip("'")
+        for line in (work / "concat.txt").read_text(encoding="utf-8").splitlines()
+    ]
     assert names == ["intro.mp4", "stage_000.mp4", "stage_001.mp4", "outro.mp4"]
     assert len(result.degradations) == 1
     assert "boom" in result.degradations[0]
@@ -928,7 +931,10 @@ def test_render_mp4_lower_third_needs_no_extra_segment(tmp_path: Path) -> None:
     work = tmp_path / "work"
     fake = _FakeRasterizer()
     mp4_render.render_mp4(comp, output_path=tmp_path / "m.mp4", work_dir=work, runner=runner, rasterizer=fake)
-    names = [line.rsplit("/", 1)[-1].rstrip("'") for line in (work / "concat.txt").read_text().splitlines()]
+    names = [
+        line.rsplit("/", 1)[-1].rstrip("'")
+        for line in (work / "concat.txt").read_text(encoding="utf-8").splitlines()
+    ]
     assert names == [
         "intro.mp4",
         "title_page.mp4",
@@ -1275,7 +1281,10 @@ def _names(calls: list[list[str]]) -> list[str]:
 
 
 def _concat_names(work: Path) -> list[str]:
-    return [Path(line.split("'")[1]).name for line in (work / "concat.txt").read_text().splitlines()]
+    return [
+        Path(line.split("'")[1]).name
+        for line in (work / "concat.txt").read_text(encoding="utf-8").splitlines()
+    ]
 
 
 def test_transitions_keep_the_timeline_length(tmp_path: Path) -> None:
@@ -1507,7 +1516,10 @@ def test_render_mp4_holds_the_summary_after_the_stage(tmp_path: Path) -> None:
     result = mp4_render.render_mp4(
         comp, output_path=tmp_path / "m.mp4", work_dir=work, runner=runner, rasterizer=fake
     )
-    names = [line.rsplit("/", 1)[-1].rstrip("'") for line in (work / "concat.txt").read_text().splitlines()]
+    names = [
+        line.rsplit("/", 1)[-1].rstrip("'")
+        for line in (work / "concat.txt").read_text(encoding="utf-8").splitlines()
+    ]
     assert names == ["stage_000.mp4", "summary_000.mp4", "stage_001.mp4", "summary_001.mp4"]
     assert len(fake.calls) == 2
     assert "12.00" in fake.calls[0] and "Me" in fake.calls[0]
@@ -1538,7 +1550,10 @@ def test_summary_without_browser_or_frame_is_skipped_not_fatal(
     result = mp4_render.render_mp4(
         comp, output_path=tmp_path / "m.mp4", work_dir=work, runner=MagicMock(side_effect=_ok)
     )
-    names = [line.rsplit("/", 1)[-1].rstrip("'") for line in (work / "concat.txt").read_text().splitlines()]
+    names = [
+        line.rsplit("/", 1)[-1].rstrip("'")
+        for line in (work / "concat.txt").read_text(encoding="utf-8").splitlines()
+    ]
     assert names == ["stage_000.mp4", "stage_001.mp4"]
     assert len(result.degradations) == 1
     assert result.duration_seconds == pytest.approx(40.0)
@@ -1807,7 +1822,7 @@ def test_chapters_ride_the_stitch_as_a_metadata_input_and_leave_a_plain_render_a
     assert concat.index(str(meta)) > concat.index("concat")
     assert concat.index("-map") < concat.index("-c")
     # The last chapter ends where the stitched timeline does.
-    assert f"END={int(round(result.duration_seconds * 1000))}" in meta.read_text()
+    assert f"END={int(round(result.duration_seconds * 1000))}" in meta.read_text(encoding="utf-8")
     # Everything but the chapter slice is the plain argv.
     stripped = list(concat[: i - 2]) + list(concat[i + 4 :])
     assert [a for a in stripped if not a.endswith(".mp4") and "concat.txt" not in a] == [
@@ -1882,6 +1897,7 @@ def test_rendered_mp4_carries_the_chapter_atoms(tmp_path: Path) -> None:
             capture_output=True,
             check=True,
             text=True,
+            encoding="utf-8",
         ).stdout
     )
     chapters = probe["chapters"]

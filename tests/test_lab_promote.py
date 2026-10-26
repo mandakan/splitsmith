@@ -78,7 +78,7 @@ def test_promote_writes_supplied_provenance_fields(tmp_path: Path) -> None:
         )
     )
 
-    written = json.loads(Path(rec.audit_path).read_text())
+    written = json.loads(Path(rec.audit_path).read_text(encoding="utf-8"))
     # ``scrub_local_path`` strips ``/Users/<name>/matches/<match>/`` from
     # source_video for PII safety, leaving the project-relative tail.
     assert written["source_video"] == "raw/clip.MOV"
@@ -164,7 +164,7 @@ def test_promote_legacy_escape_hatch_skips_provenance_check(tmp_path: Path) -> N
             require_provenance=False,
         )
     )
-    written = json.loads(Path(rec.audit_path).read_text())
+    written = json.loads(Path(rec.audit_path).read_text(encoding="utf-8"))
     # No provenance fields end up on the fixture; that's the contract
     # for legacy / migration callers.
     assert "source_video" not in written or written["source_video"] is None
@@ -295,7 +295,7 @@ def test_lab_promote_endpoint_writes_full_provenance(tmp_path: Path, monkeypatch
     assert resp.status_code == 200, resp.text
     body = resp.json()
     fixture_json = Path(body["audit_path"])
-    written = json.loads(fixture_json.read_text())
+    written = json.loads(fixture_json.read_text(encoding="utf-8"))
 
     # source_video lands and resolves to the project's primary. Under
     # tmp_path (macOS /private/var/folders/...) ``scrub_local_path``
@@ -336,7 +336,7 @@ def test_promote_overrides_audit_json_provenance_with_request(tmp_path: Path) ->
             camera={"mount": "hand", "position": "shooter", "audio_source": "internal"},
         )
     )
-    written = json.loads(Path(rec.audit_path).read_text())
+    written = json.loads(Path(rec.audit_path).read_text(encoding="utf-8"))
     # ``/new/correct/path.mov`` doesn't match the user-home prefix so
     # scrub_local_path leaves it intact.
     assert written["source_video"] == "/new/correct/path.mov"
@@ -405,13 +405,13 @@ def test_lab_promote_drift_compares_each_row_with_its_audit(
     root = tmp_path / "match"
     _setup_promote_endpoint_project(root, camera_mount="hand")
     shooter_audit = root / "shooters" / "me" / "audit" / "stage1.json"
-    doc = json.loads(shooter_audit.read_text())
+    doc = json.loads(shooter_audit.read_text(encoding="utf-8"))
     doc["shots"] = [{"time": 2.0}, {"time": 2.4}, {"time": 2.9}]
     shooter_audit.write_text(json.dumps(doc), encoding="utf-8")
     fixtures_root = tmp_path / "fixtures-out"
     fixtures_root.mkdir()
     (fixtures_root / "stage-shots-x-stage1-t.json").write_text(
-        json.dumps({"shots": [{"time": 2.0}, {"time": 2.4}]})
+        json.dumps({"shots": [{"time": 2.0}, {"time": 2.4}]}), encoding="utf-8"
     )
     monkeypatch.setattr(lab_core, "DEFAULT_FIXTURES_ROOT", fixtures_root)
 

@@ -69,6 +69,7 @@ def test_write_motion_clip_writes_every_frame_with_alpha(tmp_path: Path) -> None
             ],
             capture_output=True,
             text=True,
+            encoding="utf-8",
             check=True,
         )
         .stdout.strip()

@@ -96,7 +96,9 @@ def _seed(tmp_path: Path, *, srt: bool = True, thumb: bool = True, category: str
     )
     youtube_sidecar.write_sidecar(sidecar, youtube_sidecar.sidecar_path_for(mp4))
     if srt:
-        youtube_sidecar.srt_path_for(mp4).write_text("1\n00:00:01,000 --> 00:00:01,500\nShot 1\n")
+        youtube_sidecar.srt_path_for(mp4).write_text(
+            "1\n00:00:01,000 --> 00:00:01,500\nShot 1\n", encoding="utf-8"
+        )
     if thumb:
         youtube_sidecar.thumbnail_path_for(mp4).write_bytes(b"\xff\xd8")
     return mp4
@@ -220,7 +222,7 @@ def test_sidecar_round_trips_an_upload_record(tmp_path: Path) -> None:
     sc = youtube_sidecar.YouTubeSidecar(title="t", description="d", upload=rec)
     path = tmp_path / "s-youtube.json"
     youtube_sidecar.write_sidecar(sc, path)
-    assert json.loads(path.read_text())["upload"]["video_id"] == "v"
+    assert json.loads(path.read_text(encoding="utf-8"))["upload"]["video_id"] == "v"
     assert youtube_sidecar.load_sidecar(path).upload == rec
 
 

@@ -235,7 +235,7 @@ def import_project(
         manifest_path = top / MANIFEST_NAME
         if manifest_path.exists():
             try:
-                manifest = json.loads(manifest_path.read_text())
+                manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
             except json.JSONDecodeError:
                 manifest = None
 

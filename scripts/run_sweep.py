@@ -126,7 +126,7 @@ def _git_short_sha() -> str:
 
 def _load_grid(path: str) -> dict[str, list[Any]]:
     """Load a YAML/JSON grid. Single values are wrapped in a list."""
-    text = sys.stdin.read() if path == "-" else Path(path).read_text()
+    text = sys.stdin.read() if path == "-" else Path(path).read_text(encoding="utf-8")
     raw = yaml.safe_load(text) or {}
     grid: dict[str, list[Any]] = {}
     for k, v in raw.items():

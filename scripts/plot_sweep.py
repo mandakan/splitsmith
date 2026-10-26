@@ -397,7 +397,7 @@ def _write_report(
             )
 
     report_path = out_dir / "report.md"
-    report_path.write_text("\n".join(lines) + "\n")
+    report_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
     return report_path
 
 
@@ -430,8 +430,10 @@ def main() -> None:
     shutil.copyfile(overview, latest_png)
     # Rewrite image paths inside the copied report so the "latest" pointer resolves
     # against the run-id directory rather than the cwd.
-    rewritten = report.read_text().replace("(", f"({run_id}/").replace(f"({run_id}/http", "(http")
-    latest_md.write_text(rewritten)
+    rewritten = (
+        report.read_text(encoding="utf-8").replace("(", f"({run_id}/").replace(f"({run_id}/http", "(http")
+    )
+    latest_md.write_text(rewritten, encoding="utf-8")
 
     # Also drop a tracked copy under docs/ so the README image works for
     # anyone cloning the repo without first running the pipeline. build/
@@ -447,8 +449,10 @@ def main() -> None:
     # (latest_overview.png) since we deliberately don't copy the
     # composite as ``overview.png`` -- it would shadow the run-specific
     # naming on subsequent rebuilds.
-    docs_report = report.read_text().replace("![overview](overview.png)", "![overview](latest_overview.png)")
-    (docs_dir / "latest_report.md").write_text(docs_report)
+    docs_report = report.read_text(encoding="utf-8").replace(
+        "![overview](overview.png)", "![overview](latest_overview.png)"
+    )
+    (docs_dir / "latest_report.md").write_text(docs_report, encoding="utf-8")
 
     print(f"run_id: {run_id}")
     print(f"plots: {out_dir}")

@@ -49,7 +49,7 @@ def signed_in_with_shooter(hosted_env: str, hosted_app: tuple[TestClient, _Captu
 def _outside_dir(tmp_path: Path) -> Path:
     outside = tmp_path / "outside"
     outside.mkdir()
-    (outside / "notes.txt").write_text("x\n")
+    (outside / "notes.txt").write_text("x\n", encoding="utf-8")
     (outside / "clip.mp4").write_bytes(b"\x00" * 64)
     (outside / "sub").mkdir()
     return outside

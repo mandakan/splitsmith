@@ -106,7 +106,7 @@ def _wrangler_put(
         print(f"  DRY-RUN: would run {' '.join(cmd)}")
         return
     print(f"  $ {' '.join(cmd)}")
-    result = subprocess.run(cmd, capture_output=True, text=True, check=False)
+    result = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", check=False)
     if result.returncode != 0:
         sys.stderr.write(result.stdout)
         sys.stderr.write(result.stderr)
@@ -159,7 +159,7 @@ def _make_s3_client(account_id: str):
 
 
 def _load_calibration(path: Path) -> dict:
-    return json.loads(path.read_text())
+    return json.loads(path.read_text(encoding="utf-8"))
 
 
 def _save_calibration(path: Path, payload: dict) -> None:
@@ -167,7 +167,7 @@ def _save_calibration(path: Path, payload: dict) -> None:
     # whole file every time the build script runs even when only the
     # ``model_artifacts`` block changed.
     serialised = json.dumps(payload, indent=2) + "\n"
-    path.write_text(serialised)
+    path.write_text(serialised, encoding="utf-8")
 
 
 def upload_all(

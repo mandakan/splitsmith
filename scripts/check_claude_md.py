@@ -70,7 +70,7 @@ def problems(repo: Path = REPO) -> list[str]:
     rule_names = {path.name for path in rule_files}
     for rule in rule_files:
         rel = rule.relative_to(repo)
-        globs = rule_globs(rule.read_text())
+        globs = rule_globs(rule.read_text(encoding="utf-8"))
         if not globs:
             found.append(f"{rel}: no `paths:` frontmatter, so it would load in every session")
             continue
@@ -79,10 +79,10 @@ def problems(repo: Path = REPO) -> list[str]:
                 found.append(f"{rel}: glob {pattern!r} matches no file")
 
     for doc in [root_doc, *rule_files]:
-        for number, line in enumerate(doc.read_text().splitlines(), start=1):
+        for number, line in enumerate(doc.read_text(encoding="utf-8").splitlines(), start=1):
             if not line.isascii():
                 found.append(f"{doc.relative_to(repo)}:{number}: non-ASCII character")
-        for name in sorted(set(_RULE_REF.findall(doc.read_text()))):
+        for name in sorted(set(_RULE_REF.findall(doc.read_text(encoding="utf-8")))):
             if name in rule_names or name in {"CLAUDE.md", "SPEC.md"}:
                 continue
             if next(repo.glob(f"docs/**/{name}"), None) is not None:

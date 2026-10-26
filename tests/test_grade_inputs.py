@@ -58,7 +58,7 @@ def test_a_looks_unparseable_lut_is_refused_when_resolved(user_looks: Path) -> N
     failed every export inside the render. Resolving reads it, so the
     request layer can make it a note."""
     root = _look_with(user_looks / "bad", {"lut": "luts/mine.cube"}, lut=True)
-    (root / "luts" / "mine.cube").write_text("LUT_3D_SIZE 2\n0 0 x\n")
+    (root / "luts" / "mine.cube").write_text("LUT_3D_SIZE 2\n0 0 x\n", encoding="utf-8")
     with pytest.raises(GradeError):
         grade.resolve_grade("look", looks.load_look("bad"))
 
@@ -72,7 +72,7 @@ def test_lut_add_follows_a_link_and_checks_size_first(
 ) -> None:
     monkeypatch.setattr(grade, "user_luts_dir", lambda: tmp_path / "luts")
     real = tmp_path / "real.cube"
-    real.write_text(_cube(2, _identity_rows(2)))
+    real.write_text(_cube(2, _identity_rows(2)), encoding="utf-8")
     link = tmp_path / "film.cube"
     link.symlink_to(real)
     assert grade.add_user_lut(link).startswith("film-")

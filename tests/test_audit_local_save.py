@@ -99,6 +99,6 @@ def test_two_concurrent_desktop_audit_writers_both_succeed(tmp_path: Path, monke
 
     assert errors == [], f"concurrent save_audit raised: {errors!r}"
     audit_dir = project_root / "shooters" / "me" / "audit"
-    assert json.loads((audit_dir / "stage1.json").read_text())["writer"] in (1, 2)
+    assert json.loads((audit_dir / "stage1.json").read_text(encoding="utf-8"))["writer"] in (1, 2)
     assert (audit_dir / "stage1.json.bak").exists()
     assert not list(audit_dir.glob("*.tmp"))

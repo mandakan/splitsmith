@@ -232,7 +232,7 @@ def test_models_are_the_shipped_one_and_every_bundle(tmp_path, monkeypatch) -> N
 
     folder = tmp_path / "reaudit"
     folder.mkdir()
-    (folder / mb.CALIBRATION_NAME).write_text(json.dumps(CAL))
+    (folder / mb.CALIBRATION_NAME).write_text(json.dumps(CAL), encoding="utf-8")
     mb.write_manifest(
         folder,
         mb.ModelManifest(
@@ -244,7 +244,7 @@ def test_models_are_the_shipped_one_and_every_bundle(tmp_path, monkeypatch) -> N
     )
     monkeypatch.setattr(mb, "MODELS_DIR", tmp_path)
     shipped = tmp_path / "shipped_cal.json"
-    shipped.write_text(json.dumps(CAL))
+    shipped.write_text(json.dumps(CAL), encoding="utf-8")
 
     sources = model_map.model_sources(shipped)
     assert list(sources) == ["shipped", "reaudit"]
@@ -259,6 +259,6 @@ def test_models_are_the_shipped_one_and_every_bundle(tmp_path, monkeypatch) -> N
 
 
 def test_gbdt_hyperparameters_are_read_from_the_build_script() -> None:
-    params = gbdt_hyperparameters(Path(BUILD_SCRIPT).read_text())
+    params = gbdt_hyperparameters(Path(BUILD_SCRIPT).read_text(encoding="utf-8"))
     assert set(params) >= {"n_estimators", "max_depth", "learning_rate"}
     assert gbdt_hyperparameters("nothing here") == {}

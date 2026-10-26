@@ -471,6 +471,7 @@ def cut_clip(source: Path, destination: Path, frames: int, *, ffmpeg: str) -> Pa
         ],  # fmt: skip
         capture_output=True,
         text=True,
+        encoding="utf-8",
     )
     assert done.returncode == 0, done.stderr[-2000:]
     return destination
@@ -482,6 +483,7 @@ def probe_seconds(path: Path, *, ffprobe: str) -> float:
         [ffprobe, "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", str(path)],
         capture_output=True,
         text=True,
+        encoding="utf-8",
     )
     assert done.returncode == 0, done.stderr[-2000:]
     return float(done.stdout.strip())

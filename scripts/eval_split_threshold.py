@@ -45,7 +45,7 @@ CANDIDATES = [round(0.35 + 0.025 * i, 3) for i in range(45)]
 
 
 def load_stage(path: Path) -> dict:
-    d = json.loads(path.read_text())
+    d = json.loads(path.read_text(encoding="utf-8"))
     shots = d.get("shots") or []
     with_ms = [s for s in shots if s.get("ms_after_beep") is not None]
     with_ms.sort(key=lambda s: float(s["ms_after_beep"]))

@@ -217,7 +217,7 @@ def load_spec_from_calibration() -> ModelArtifactsSpec | None:
         calibration_path = runtime.artifact("ensemble_calibration.json")
     except FileNotFoundError:
         return None
-    payload = json.loads(calibration_path.read_text())
+    payload = json.loads(calibration_path.read_text(encoding="utf-8"))
     block = payload.get("model_artifacts")
     if block is None:
         return None

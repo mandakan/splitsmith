@@ -193,15 +193,17 @@ def test_a_resnap_keeps_the_reasons_of_the_snap_it_replaces(tmp_path: Path) -> N
         "trim_wav": trim,
     }
     out = write_promoted_fixture(fixture_data=snap([31.0, 32.0]), **kwargs)
-    first = json.loads(out.read_text())
+    first = json.loads(out.read_text(encoding="utf-8"))
     first["_candidates_pending_audit"]["labels_by_time"] = {"6.000": "echo"}  # 31.0 on a clip from 25.0
     first["shots"][0]["subclass"] = "steel"
-    out.write_text(json.dumps(first))
+    out.write_text(json.dumps(first), encoding="utf-8")
 
     out = write_promoted_fixture(fixture_data=snap([31.01, 32.0]), overwrite=True, **kwargs)
-    written = json.loads(out.read_text())
+    written = json.loads(out.read_text(encoding="utf-8"))
     report = json.loads(
-        (tmp_path / "fx" / "stage-shots-m-2026-stage1-a-cam-promotion-report.json").read_text()
+        (tmp_path / "fx" / "stage-shots-m-2026-stage1-a-cam-promotion-report.json").read_text(
+            encoding="utf-8"
+        )
     )
 
     assert written["_candidates_pending_audit"]["labels_by_time"] == {"6.010": "echo"}

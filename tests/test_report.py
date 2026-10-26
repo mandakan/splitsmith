@@ -270,7 +270,7 @@ def test_write_report_writes_to_path(tmp_path: Path) -> None:
     out = tmp_path / "report.txt"
     write_report(analysis, None, out)
     assert out.exists()
-    assert "Stage 3" in out.read_text()
+    assert "Stage 3" in out.read_text(encoding="utf-8")
 
 
 def test_render_report_no_shots() -> None:

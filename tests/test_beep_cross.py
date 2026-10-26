@@ -23,7 +23,7 @@ def _clip(stem: str):
     if not wav.exists():
         pytest.skip(f"{wav.name} not fetched (scripts/fixture_audio.py fetch)")
     audio, sr = load_audio(wav)
-    beep = float(json.loads((FIXTURES / f"{stem}.json").read_text())["beep_time"])
+    beep = float(json.loads((FIXTURES / f"{stem}.json").read_text(encoding="utf-8"))["beep_time"])
     return audio, sr, beep
 
 

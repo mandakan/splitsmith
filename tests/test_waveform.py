@@ -138,7 +138,9 @@ def test_peaks_saved_without_a_source_record_are_computed_again(tmp_path: Path) 
     wav = tmp_path / "stage1_primary.wav"
     sf.write(wav, np.zeros(5 * 1000, dtype=np.float32), 1000)
     cache = waveform.cache_path(wav, 10)
-    cache.write_text(json.dumps({"duration": 2.0, "sample_rate": 1000, "bins": 10, "peaks": [0.0] * 10}))
+    cache.write_text(
+        json.dumps({"duration": 2.0, "sample_rate": 1000, "bins": 10, "peaks": [0.0] * 10}), encoding="utf-8"
+    )
 
     assert waveform.ensure_peaks(wav, bins=10).duration == pytest.approx(5.0)
 

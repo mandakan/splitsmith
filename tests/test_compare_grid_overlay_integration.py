@@ -801,6 +801,7 @@ def _stream_counts(path: Path) -> tuple[int, int]:
         [FFPROBE, "-v", "error", "-show_entries", "stream=codec_type", "-of", "csv=p=0", str(path)],
         capture_output=True,
         text=True,
+        encoding="utf-8",
     )
     assert done.returncode == 0, done.stderr[-2000:]
     kinds = done.stdout.split()
@@ -828,6 +829,7 @@ def _video_frames(path: Path) -> int:
         ],  # fmt: skip
         capture_output=True,
         text=True,
+        encoding="utf-8",
     )
     assert done.returncode == 0, done.stderr[-2000:]
     return int(done.stdout.strip())
@@ -856,6 +858,7 @@ def _decoded_audio_seconds(path: Path, stream: str) -> float:
         ],  # fmt: skip
         capture_output=True,
         text=True,
+        encoding="utf-8",
     )
     assert done.returncode == 0, done.stderr[-2000:]
     values = dict(line.split("=", 1) for line in done.stdout.strip().splitlines() if "=" in line)
@@ -905,6 +908,7 @@ def _frame_at_index(path: Path, index: int, tmp_path: Path, tag: str) -> Image.I
         ],  # fmt: skip
         capture_output=True,
         text=True,
+        encoding="utf-8",
     )
     assert done.returncode == 0, done.stderr[-2000:]
     return Image.open(png).convert("RGB")
@@ -1023,6 +1027,7 @@ def test_sprite_states_decode_at_the_boundaries_they_were_written_at(tmp_path: P
         ],  # fmt: skip
         capture_output=True,
         text=True,
+        encoding="utf-8",
     )
     assert done.returncode == 0, done.stderr[-2000:]
     decoded = [float(value) for value in re.findall(r"pts_time:([0-9.]+)", done.stderr)]

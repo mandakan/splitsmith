@@ -256,7 +256,7 @@ def main():
                 for pname, person in people.items():
                     html = fn(person, theme, cw, ch)
                     f = OUT / f"_{vname}-{pname}-{sname}.html"
-                    f.write_text(html)
+                    f.write_text(html, encoding="utf-8")
                     page.goto(f.as_uri())
                     page.evaluate("document.fonts.ready")
                     shot = page.screenshot(omit_background=True, type="png")

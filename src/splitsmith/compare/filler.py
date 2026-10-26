@@ -88,7 +88,7 @@ def ensure_filler(
         str(target),
     ]
     try:
-        runner(cmd, check=True, capture_output=True, text=True)
+        runner(cmd, check=True, capture_output=True, text=True, encoding="utf-8")
     except FileNotFoundError as exc:
         raise FillerRenderError(f"ffmpeg binary not found: {ffmpeg_binary}") from exc
     except subprocess.CalledProcessError as exc:

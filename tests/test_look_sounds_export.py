@@ -21,13 +21,13 @@ STAGE = TimelineEntry(
 
 def _look(root: Path, *, sounds: bool) -> Path:
     shutil.copytree(looks.shipped_looks_dir() / "splitsmith", root)
-    manifest = json.loads((root / "look.json").read_text())
+    manifest = json.loads((root / "look.json").read_text(encoding="utf-8"))
     manifest["name"] = root.name
     if sounds:
         manifest["sounds"] = {"cues": [{"on": "stage", "play": "go.wav", "at": "beep"}]}
         (root / "sounds").mkdir()
         (root / "sounds" / "go.wav").write_bytes(b"x")
-    (root / "look.json").write_text(json.dumps(manifest))
+    (root / "look.json").write_text(json.dumps(manifest), encoding="utf-8")
     return root
 
 
@@ -138,9 +138,9 @@ def _cli_export(
 
     loud = _look(tmp_path / "looks" / "loud", sounds=True)
     if sounds_block is not None:
-        manifest = json.loads((loud / "look.json").read_text())
+        manifest = json.loads((loud / "look.json").read_text(encoding="utf-8"))
         manifest["sounds"] = sounds_block
-        (loud / "look.json").write_text(json.dumps(manifest))
+        (loud / "look.json").write_text(json.dumps(manifest), encoding="utf-8")
     token = looks.set_user_looks_provider(lambda: tmp_path / "looks")
     monkeypatch.setattr(match_exports_mod, "dress_in_place", dress)
     try:

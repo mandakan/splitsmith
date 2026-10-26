@@ -23,7 +23,9 @@ pytestmark = pytest.mark.integration
 def test_every_curated_kind_is_an_xfade_transition_of_the_ffmpeg_on_path() -> None:
     ffmpeg = shutil.which("ffmpeg")
     assert ffmpeg
-    done = subprocess.run([ffmpeg, "-hide_banner", "-h", "filter=xfade"], capture_output=True, text=True)
+    done = subprocess.run(
+        [ffmpeg, "-hide_banner", "-h", "filter=xfade"], capture_output=True, text=True, encoding="utf-8"
+    )
     assert done.returncode == 0, done.stderr[-2000:]
     offered = set(re.findall(r"^\s+([a-z]+)\s+-?\d+\s", done.stdout, re.M))
     assert "fade" in offered, done.stdout[:2000]

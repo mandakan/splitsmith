@@ -171,7 +171,7 @@ def _hosted_sources_in_storage(
         (shooter_root / "raw" / f"VID{n}.mp4").unlink()
     client.app.state.splitsmith_state.storage = storage
     client.app.state.splitsmith_state.job_bodies.register("trim", lambda handle, **args: None)
-    match_id = json.loads((project_root / "match.json").read_text())["match_id"]
+    match_id = json.loads((project_root / "match.json").read_text(encoding="utf-8"))["match_id"]
     return client, project_root, storage, f"matches/{match_id}/shooters/me"
 
 

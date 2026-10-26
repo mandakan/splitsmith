@@ -32,14 +32,14 @@ def _fresh_worker_state(monkeypatch):
 
 
 def test_container_limits_read_cgroup_v2(tmp_path: Path) -> None:
-    (tmp_path / "cpu.max").write_text("400000 100000\n")
-    (tmp_path / "memory.max").write_text(f"{8 * 1024**3}\n")
+    (tmp_path / "cpu.max").write_text("400000 100000\n", encoding="utf-8")
+    (tmp_path / "memory.max").write_text(f"{8 * 1024**3}\n", encoding="utf-8")
     assert obs.container_limits(tmp_path) == {"vcpu": 4.0, "memory_mb": 8192}
 
 
 def test_container_limits_unlimited_falls_back_to_cpu_count(tmp_path: Path, monkeypatch) -> None:
-    (tmp_path / "cpu.max").write_text("max 100000\n")
-    (tmp_path / "memory.max").write_text("max\n")
+    (tmp_path / "cpu.max").write_text("max 100000\n", encoding="utf-8")
+    (tmp_path / "memory.max").write_text("max\n", encoding="utf-8")
     monkeypatch.setattr(obs.os, "cpu_count", lambda: 12)
     assert obs.container_limits(tmp_path) == {"vcpu": 12.0, "memory_mb": None}
 
@@ -52,7 +52,7 @@ def test_container_limits_without_cgroup_files(tmp_path: Path, monkeypatch) -> N
 def test_container_limits_prefer_the_deployed_size(tmp_path: Path, monkeypatch) -> None:
     """Cloud Run's sandbox shows no cgroup limits and the host's cores; the
     deploy's stated size wins over anything read from the system."""
-    (tmp_path / "cpu.max").write_text("800000 100000\n")
+    (tmp_path / "cpu.max").write_text("800000 100000\n", encoding="utf-8")
     monkeypatch.setenv(obs.WORKER_VCPU_ENV, "4")
     monkeypatch.setenv(obs.WORKER_MEMORY_MB_ENV, "8192")
     assert obs.container_limits(tmp_path) == {"vcpu": 4.0, "memory_mb": 8192}
@@ -60,19 +60,19 @@ def test_container_limits_prefer_the_deployed_size(tmp_path: Path, monkeypatch) 
 
 def test_container_limits_read_cgroup_v1(tmp_path: Path) -> None:
     (tmp_path / "cpu").mkdir()
-    (tmp_path / "cpu" / "cpu.cfs_quota_us").write_text("200000\n")
-    (tmp_path / "cpu" / "cpu.cfs_period_us").write_text("100000\n")
+    (tmp_path / "cpu" / "cpu.cfs_quota_us").write_text("200000\n", encoding="utf-8")
+    (tmp_path / "cpu" / "cpu.cfs_period_us").write_text("100000\n", encoding="utf-8")
     (tmp_path / "memory").mkdir()
-    (tmp_path / "memory" / "memory.limit_in_bytes").write_text(f"{4 * 1024**3}\n")
+    (tmp_path / "memory" / "memory.limit_in_bytes").write_text(f"{4 * 1024**3}\n", encoding="utf-8")
     assert obs.container_limits(tmp_path) == {"vcpu": 2.0, "memory_mb": 4096}
 
 
 def test_container_limits_v1_unlimited(tmp_path: Path, monkeypatch) -> None:
     (tmp_path / "cpu").mkdir()
-    (tmp_path / "cpu" / "cpu.cfs_quota_us").write_text("-1\n")
-    (tmp_path / "cpu" / "cpu.cfs_period_us").write_text("100000\n")
+    (tmp_path / "cpu" / "cpu.cfs_quota_us").write_text("-1\n", encoding="utf-8")
+    (tmp_path / "cpu" / "cpu.cfs_period_us").write_text("100000\n", encoding="utf-8")
     (tmp_path / "memory").mkdir()
-    (tmp_path / "memory" / "memory.limit_in_bytes").write_text("9223372036854771712\n")
+    (tmp_path / "memory" / "memory.limit_in_bytes").write_text("9223372036854771712\n", encoding="utf-8")
     monkeypatch.setattr(obs.os, "cpu_count", lambda: 6)
     assert obs.container_limits(tmp_path) == {"vcpu": 6.0, "memory_mb": None}
 
@@ -187,11 +187,13 @@ def test_worker_env_states_the_size_deploy_app_sets() -> None:
     import yaml
 
     root = Path(__file__).resolve().parents[1]
-    workflow = (root / ".github" / "workflows" / "deploy-app.yml").read_text()
+    workflow = (root / ".github" / "workflows" / "deploy-app.yml").read_text(encoding="utf-8")
     match = re.search(r"--args=worker,--one-shot.*?--cpu (\d+) --memory (\d+)Gi", workflow, re.S)
     assert match, "the worker job's --cpu / --memory flags moved"
     cpu, gib = match.groups()
     for env in ("staging", "production"):
-        values = yaml.safe_load((root / "deploy" / "cloudrun" / f"{env}-worker.env.yaml").read_text())
+        values = yaml.safe_load(
+            (root / "deploy" / "cloudrun" / f"{env}-worker.env.yaml").read_text(encoding="utf-8")
+        )
         assert values[obs.WORKER_VCPU_ENV] == cpu
         assert values[obs.WORKER_MEMORY_MB_ENV] == str(int(gib) * 1024)

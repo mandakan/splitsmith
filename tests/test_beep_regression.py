@@ -39,7 +39,7 @@ def _clip_audio(stem: str):
     fails."""
     entry = next(e for e in load_manifest(CALIBRATION_DIR / "manifest.yaml").fixtures if e.stem == stem)
     clip = FIXTURES_DIR / entry.clip_wav
-    lock = json.loads((FIXTURES_DIR / "audio.lock.json").read_text())
+    lock = json.loads((FIXTURES_DIR / "audio.lock.json").read_text(encoding="utf-8"))
     if not clip.exists() and clip.name in lock.get("files", lock):
         if os.environ.get("SPLITSMITH_REQUIRE_INTEGRATION") == "1":
             pytest.fail(
@@ -51,7 +51,7 @@ def _clip_audio(stem: str):
 
 
 def _pinned() -> list[str]:
-    baseline = json.loads((CALIBRATION_DIR / "baseline.json").read_text())
+    baseline = json.loads((CALIBRATION_DIR / "baseline.json").read_text(encoding="utf-8"))
     return sorted(r["stem"] for r in baseline["results"] if r["track"] == "clip" and r["correct_top1"])
 
 
@@ -72,7 +72,7 @@ def test_a_fixture_ranked_right_stays_ranked_right(stem: str) -> None:
 
 
 def _heuristic_results() -> list[dict]:
-    baseline = json.loads((CALIBRATION_DIR / "baseline_heuristic.json").read_text())
+    baseline = json.loads((CALIBRATION_DIR / "baseline_heuristic.json").read_text(encoding="utf-8"))
     return [r for r in baseline["results"] if r["track"] == "clip"]
 
 

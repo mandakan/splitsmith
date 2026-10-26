@@ -31,13 +31,13 @@ def bucket(fa, monkeypatch):
 
 def test_push_uploads_by_hash_records_and_ignores(fa, bucket, tmp_path):
     (tmp_path / "stage-shots-a.wav").write_bytes(b"RIFF-a")
-    (tmp_path / ".gitignore").write_text("*.peaks\n")
+    (tmp_path / ".gitignore").write_text("*.peaks\n", encoding="utf-8")
     fa.push(["stage-shots-a"])
     files = fa.load_manifest()
     digest = fa.sha256(tmp_path / "stage-shots-a.wav")
     assert files == {"stage-shots-a.wav": {"sha256": digest, "bytes": 6}}
     assert bucket == {digest: b"RIFF-a"}
-    ignore = (tmp_path / ".gitignore").read_text()
+    ignore = (tmp_path / ".gitignore").read_text(encoding="utf-8")
     assert "*.peaks" in ignore and "/stage-shots-a.wav" in ignore
 
 
@@ -53,7 +53,7 @@ def test_push_twice_keeps_one_managed_block(fa, bucket, tmp_path):
     for n in ("a", "b"):
         (tmp_path / f"stage-shots-{n}.wav").write_bytes(n.encode())
         fa.push([f"stage-shots-{n}.wav"])
-    ignore = (tmp_path / ".gitignore").read_text()
+    ignore = (tmp_path / ".gitignore").read_text(encoding="utf-8")
     assert ignore.count(fa._BEGIN) == 1
     assert "/stage-shots-a.wav" in ignore and "/stage-shots-b.wav" in ignore
 
@@ -99,7 +99,7 @@ def test_fetch_only_takes_the_named_wavs_and_reports_unknown_names(fa, tmp_path,
     manifest lacks is an error, never a silent skip."""
     fa.save_manifest({"a.wav": {"sha256": "1" * 64, "bytes": 1}, "b.wav": {"sha256": "2" * 64, "bytes": 1}})
     names = tmp_path / "ci.txt"
-    names.write_text("# read by the tests\na\n\nc.wav  # gone\n")
+    names.write_text("# read by the tests\na\n\nc.wav  # gone\n", encoding="utf-8")
     assert fa.read_names(names) == ["a.wav", "c.wav"]
 
     served = []

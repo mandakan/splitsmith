@@ -25,7 +25,8 @@ def _make_fixture(path: Path, candidates: list[dict]) -> None:
                 "_candidates_pending_audit": {"candidates": candidates},
             },
             indent=2,
-        )
+        ),
+        encoding="utf-8",
     )
 
 
@@ -34,7 +35,7 @@ def _make_candidates_csv(path: Path, rows: list[tuple[str, int, float, float]]) 
     lines = ["audit_keep,candidate_number,time_fixture_s,ms_after_beep"]
     for keep, n, t, ms in rows:
         lines.append(f"{keep},{n},{t},{ms}")
-    path.write_text("\n".join(lines) + "\n")
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
 def test_is_kept_recognizes_common_marks() -> None:
@@ -61,7 +62,7 @@ def test_read_kept_candidate_numbers_preserves_order(tmp_path: Path) -> None:
 
 def test_read_rejects_csv_without_audit_keep_column(tmp_path: Path) -> None:
     csv_path = tmp_path / "c.csv"
-    csv_path.write_text("candidate_number,time_fixture_s\n1,1.0\n")
+    csv_path.write_text("candidate_number,time_fixture_s\n1,1.0\n", encoding="utf-8")
     with pytest.raises(ValueError, match="audit_keep"):
         read_kept_candidate_numbers(csv_path)
 
@@ -89,7 +90,7 @@ def test_apply_audit_writes_shots_array(tmp_path: Path) -> None:
     n = apply_audit_to_fixture(csv_path, json_path)
     assert n == 2
 
-    data = json.loads(json_path.read_text())
+    data = json.loads(json_path.read_text(encoding="utf-8"))
     assert [s["shot_number"] for s in data["shots"]] == [1, 2]
     assert [s["candidate_number"] for s in data["shots"]] == [1, 3]
     assert data["shots"][0]["time"] == pytest.approx(1.0)
@@ -111,12 +112,12 @@ def test_apply_audit_rewrite_replaces_previous_shots(tmp_path: Path) -> None:
     )
     # First audit
     apply_audit_to_fixture(csv_path, json_path)
-    data1 = json.loads(json_path.read_text())
+    data1 = json.loads(json_path.read_text(encoding="utf-8"))
     assert len(data1["shots"]) == 1
     # Re-audit with a different selection
     _make_candidates_csv(csv_path, [("Y", 1, 1.0, 500), ("Y", 2, 1.2, 700)])
     apply_audit_to_fixture(csv_path, json_path)
-    data2 = json.loads(json_path.read_text())
+    data2 = json.loads(json_path.read_text(encoding="utf-8"))
     assert len(data2["shots"]) == 2
 
 
@@ -133,6 +134,6 @@ def test_apply_audit_raises_on_fixture_missing_candidates_block(tmp_path: Path) 
     csv_path = tmp_path / "c.csv"
     json_path = tmp_path / "f.json"
     _make_candidates_csv(csv_path, [("Y", 1, 1.0, 500)])
-    json_path.write_text(json.dumps({"beep_time": 0.5, "shots": []}) + "\n")
+    json_path.write_text(json.dumps({"beep_time": 0.5, "shots": []}) + "\n", encoding="utf-8")
     with pytest.raises(ValueError, match="candidates block"):
         apply_audit_to_fixture(csv_path, json_path)

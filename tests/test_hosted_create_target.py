@@ -32,7 +32,7 @@ EMAIL = "owner@example.com"
 
 def _archive(top: str, *, marker: bytes = b"from-archive\n") -> bytes:
     buf = io.BytesIO()
-    with tarfile.open(fileobj=buf, mode="w:gz") as tf:
+    with tarfile.open(fileobj=buf, mode="w:gz", encoding="utf-8") as tf:
         for name, data in (
             (f"{top}/project.json", json.dumps({"name": "imported"}).encode()),
             (f"{top}/marker.txt", marker),
@@ -90,11 +90,11 @@ def test_hosted_import_overwrite_never_touches_the_requested_dest(
     chosen = tmp_path / "chosen-dest"
     existing = chosen / "myproj"
     existing.mkdir(parents=True)
-    (existing / "keep.txt").write_text("keep\n")
+    (existing / "keep.txt").write_text("keep\n", encoding="utf-8")
 
     resp = _import(signed_in, _archive("myproj"), str(chosen), overwrite=True)
     assert resp.status_code == 200, resp.text
-    assert (existing / "keep.txt").read_text() == "keep\n"
+    assert (existing / "keep.txt").read_text(encoding="utf-8") == "keep\n"
     assert not (existing / "marker.txt").exists()
 
 
@@ -103,7 +103,7 @@ def test_hosted_import_refuses_a_target_that_resolves_outside_the_prefix(
 ) -> None:
     elsewhere = tmp_path / "elsewhere"
     elsewhere.mkdir()
-    (elsewhere / "keep.txt").write_text("keep\n")
+    (elsewhere / "keep.txt").write_text("keep\n", encoding="utf-8")
     tenant = _tenant_projects(hosted_env)
     tenant.mkdir(parents=True)
     (tenant / "myproj").symlink_to(elsewhere, target_is_directory=True)
@@ -112,7 +112,7 @@ def test_hosted_import_refuses_a_target_that_resolves_outside_the_prefix(
     assert resp.status_code == 400, resp.text
     # The refusal is the bound itself, not a later failure on the link.
     assert "outside the allowed folder" in resp.json()["detail"]
-    assert (elsewhere / "keep.txt").read_text() == "keep\n"
+    assert (elsewhere / "keep.txt").read_text(encoding="utf-8") == "keep\n"
     assert not (elsewhere / "marker.txt").exists()
 
 
@@ -179,9 +179,9 @@ def test_hosted_import_with_bind_never_loads_env_files_from_the_archive(
     match.shooters = ["me"]
     match.save(src)
     MatchProject.init(src, name="Imported")
-    (src / ".env").write_text("SPLITSMITH_IMPORT_ENV_PROBE=loaded\n")
+    (src / ".env").write_text("SPLITSMITH_IMPORT_ENV_PROBE=loaded\n", encoding="utf-8")
     buf = io.BytesIO()
-    with tarfile.open(fileobj=buf, mode="w:gz") as tf:
+    with tarfile.open(fileobj=buf, mode="w:gz", encoding="utf-8") as tf:
         tf.add(src, arcname="imported-match")
 
     os.environ.pop("SPLITSMITH_IMPORT_ENV_PROBE", None)
@@ -210,7 +210,7 @@ def test_hosted_import_with_bind_refuses_a_match_id_outside_the_shape(
     match.save(src)
     MatchProject.init(src, name="Odd")
     buf = io.BytesIO()
-    with tarfile.open(fileobj=buf, mode="w:gz") as tf:
+    with tarfile.open(fileobj=buf, mode="w:gz", encoding="utf-8") as tf:
         tf.add(src, arcname="odd-match")
 
     resp = signed_in.post(

@@ -84,7 +84,7 @@ def _compose_env() -> dict[str, str]:
 def _docker_compose_available() -> bool:
     if shutil.which("docker") is None:
         return False
-    probe = subprocess.run(["docker", "compose", "version"], capture_output=True, text=True)
+    probe = subprocess.run(["docker", "compose", "version"], capture_output=True, text=True, encoding="utf-8")
     return probe.returncode == 0
 
 
@@ -120,6 +120,7 @@ def hosted_stack() -> Iterator[None]:
         _compose("up", "-d", "--build"),
         capture_output=True,
         text=True,
+        encoding="utf-8",
         env=_compose_env(),
     )
     if up.returncode != 0:
@@ -136,6 +137,7 @@ def hosted_stack() -> Iterator[None]:
             _compose("down", "-v"),
             capture_output=True,
             text=True,
+            encoding="utf-8",
             check=False,
             env=_compose_env(),
         )
@@ -182,6 +184,7 @@ def test_recent_projects_round_trip_hits_postgres(hosted_stack: None) -> None:
         _compose("restart", "splitsmith"),
         capture_output=True,
         text=True,
+        encoding="utf-8",
         env=_compose_env(),
     )
     assert restart.returncode == 0, restart.stderr
@@ -303,6 +306,7 @@ def _psql_run(query: str, *, user: str = "splitsmith") -> subprocess.CompletedPr
         ),
         capture_output=True,
         text=True,
+        encoding="utf-8",
         env=_compose_env(),
     )
 

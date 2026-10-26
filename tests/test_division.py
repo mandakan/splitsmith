@@ -24,7 +24,7 @@ PRODUCTION_OPTICS = 727539
 
 
 def _match_data() -> MatchData:
-    return MatchData.model_validate(json.loads(FIXTURE.read_text()))
+    return MatchData.model_validate(json.loads(FIXTURE.read_text(encoding="utf-8")))
 
 
 def _pinned(competitor_id: int | None = OPEN_MAJOR, **kw: object) -> MatchProject:

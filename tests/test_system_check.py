@@ -15,7 +15,7 @@ from splitsmith import system_check
 
 
 def _make_fake_ffmpeg(path: Path) -> None:
-    path.write_text("#!/bin/sh\nexit 0\n")
+    path.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
     path.chmod(0o755)
 
 
@@ -63,7 +63,7 @@ def test_missing_binary_returns_install_hint(monkeypatch: pytest.MonkeyPatch, tm
     # State file must not record the negative result.
     state_path = system_check._state_path()
     if state_path.exists():
-        assert system_check.CACHE_KEY not in json.loads(state_path.read_text())
+        assert system_check.CACHE_KEY not in json.loads(state_path.read_text(encoding="utf-8"))
 
 
 def test_positive_result_is_cached(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -76,7 +76,7 @@ def test_positive_result_is_cached(monkeypatch: pytest.MonkeyPatch, tmp_path: Pa
     first = system_check.check_ffmpeg()
     assert first.ok is True
 
-    state = json.loads(system_check._state_path().read_text())
+    state = json.loads(system_check._state_path().read_text(encoding="utf-8"))
     assert system_check.CACHE_KEY in state
     entry = state[system_check.CACHE_KEY]
     assert entry["ok"] is True
@@ -124,7 +124,8 @@ def test_stale_cache_re_verifies(monkeypatch: pytest.MonkeyPatch, tmp_path: Path
                     "ts": time.time() - (system_check.CACHE_TTL_S + 60),
                 }
             }
-        )
+        ),
+        encoding="utf-8",
     )
 
     called: list[list[str]] = []
@@ -148,7 +149,7 @@ def test_negative_result_is_not_cached(monkeypatch: pytest.MonkeyPatch, tmp_path
     system_check.check_ffmpeg()
     state_path = system_check._state_path()
     if state_path.exists():
-        state = json.loads(state_path.read_text())
+        state = json.loads(state_path.read_text(encoding="utf-8"))
         assert system_check.CACHE_KEY not in state
 
 
