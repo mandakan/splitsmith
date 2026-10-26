@@ -1,6 +1,12 @@
 {
   "entries": [
     {
+      "id": "thin-detection",
+      "date": "2026-10-26",
+      "title": "Shot detection without a model download",
+      "body": "Detecting shots no longer downloads models first, so a new install finds shots straight away, even offline."
+    },
+    {
       "id": "export-progress",
       "date": "2026-10-25",
       "title": "See how long an export has left",
