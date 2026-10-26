@@ -223,7 +223,7 @@ def test_detect_beep_424_when_storage_lacks_the_key(tmp_path: Path) -> None:
     assert resp.status_code == 424, resp.text
     detail = resp.json()["detail"]
     assert detail["code"] == "source_unreachable"
-    assert detail["path"].endswith("shooters/me/raw/VID1.mp4")
+    assert Path(detail["path"]).as_posix().endswith("shooters/me/raw/VID1.mp4")
     assert storage.fetched == []
 
 
@@ -243,5 +243,5 @@ def test_match_export_preflight_424_when_storage_lacks_the_key(tmp_path: Path) -
     assert resp.status_code == 424, resp.text
     detail = resp.json()["detail"]
     assert detail["code"] == "source_unreachable"
-    assert detail["path"].endswith("shooters/me/raw/VID1.mp4")
+    assert Path(detail["path"]).as_posix().endswith("shooters/me/raw/VID1.mp4")
     assert storage.fetched == []

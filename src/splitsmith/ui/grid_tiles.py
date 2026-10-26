@@ -228,7 +228,7 @@ class HostedGridTiles:
                 str(part)
                 for part in (
                     "source-cut",
-                    cut.video.path,
+                    cut.video.path.as_posix(),
                     source.size if source else "",
                     source.last_modified.isoformat() if source and source.last_modified else "",
                     path.name,

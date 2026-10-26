@@ -393,9 +393,9 @@ def test_primary_collision_demotion(tmp_path: Path) -> None:
     primaries = [v for v in proj_b.stage(3).videos if v.role == "primary"]
     secondaries = [v for v in proj_b.stage(3).videos if v.role == "secondary"]
     assert len(primaries) == 1
-    assert str(primaries[0].path) == "raw/GH03B.MP4"
+    assert primaries[0].path.as_posix() == "raw/GH03B.MP4"
     assert len(secondaries) == 1
-    assert str(secondaries[0].path) == "raw/GH03A.MP4"
+    assert secondaries[0].path.as_posix() == "raw/GH03A.MP4"
 
     # No audit is carried to the target (moved video was demoted to secondary)...
     assert _read_audit(proj_b, root_b, 3) is None

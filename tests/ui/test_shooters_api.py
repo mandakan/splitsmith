@@ -3221,7 +3221,7 @@ def test_a_move_never_makes_a_camera_without_a_beep_the_primary_over_audit_work(
     assert refused.status_code == 409, refused.text
     assert refused.json()["detail"]["code"] == "primary_without_beep"
     project = MatchProject.load(shooter_root)
-    assert str(project.stages[0].primary().path) != "raw/HEAD.mp4", "nothing moved"
+    assert project.stages[0].primary().path.as_posix() != "raw/HEAD.mp4", "nothing moved"
 
     project_json = shooter_root / "project.json"
     doc = json.loads(project_json.read_text())
@@ -3357,7 +3357,7 @@ def test_make_primary_needs_the_new_cameras_beep_over_audit_work(tmp_path: Path,
 
     assert resp.status_code == 409, resp.text
     assert resp.json()["detail"]["code"] == "primary_without_beep"
-    assert str(MatchProject.load(shooter_root).stages[0].primary().path) == "raw/VID.mp4"
+    assert MatchProject.load(shooter_root).stages[0].primary().path.as_posix() == "raw/VID.mp4"
     assert (shooter_root / "audit" / "stage1.json").read_text() == before
     assert not list((shooter_root / "audit").glob("stage1.pre-swap-*.json"))
 
@@ -3441,7 +3441,7 @@ def test_make_primary_waits_for_the_new_cameras_trim(tmp_path: Path, monkeypatch
 
     assert resp.status_code == 409, resp.text
     assert resp.json()["detail"]["code"] == "primary_not_trimmed"
-    assert str(MatchProject.load(shooter_root).stages[0].primary().path) == "raw/VID.mp4"
+    assert MatchProject.load(shooter_root).stages[0].primary().path.as_posix() == "raw/VID.mp4"
     assert (shooter_root / "audit" / "stage1.json").read_text() == before
     kinds = [(j["kind"], j.get("video_id")) for j in client.get("/api/me/jobs").json()]
     assert ("trim", ids["head"]) in kinds

@@ -1192,7 +1192,7 @@ def test_init_placeholder_replaces_existing_placeholders_returning_videos(
     assert len(project.stages) == 5
     assert all(s.videos == [] for s in project.stages)
     assert len(project.unassigned_videos) == 1
-    assert str(project.unassigned_videos[0].path) == "raw/clip.mp4"
+    assert project.unassigned_videos[0].path.as_posix() == "raw/clip.mp4"
 
 
 def test_import_scoreboard_overlays_placeholders_preserving_videos(tmp_path: Path) -> None:
@@ -1232,7 +1232,7 @@ def test_import_scoreboard_overlays_placeholders_preserving_videos(tmp_path: Pat
     assert all(not s.placeholder for s in project.stages)
     assert project.stages[0].stage_name == "Real S1"
     assert len(project.stages[0].videos) == 1
-    assert str(project.stages[0].videos[0].path) == "raw/v1.mp4"
+    assert project.stages[0].videos[0].path.as_posix() == "raw/v1.mp4"
     assert project.stages[0].videos[0].role == "primary"
     assert len(project.stages[1].videos) == 1
 
@@ -1272,7 +1272,7 @@ def test_import_scoreboard_overlay_drops_extras_to_unassigned(tmp_path: Path) ->
     )
     assert len(project.stages) == 2
     assert len(project.unassigned_videos) == 1
-    assert str(project.unassigned_videos[0].path) == "raw/v3.mp4"
+    assert project.unassigned_videos[0].path.as_posix() == "raw/v3.mp4"
     assert project.unassigned_videos[0].role == "secondary"
 
 

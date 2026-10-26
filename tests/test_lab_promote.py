@@ -301,7 +301,7 @@ def test_lab_promote_endpoint_writes_full_provenance(tmp_path: Path, monkeypatch
     # tmp_path (macOS /private/var/folders/...) ``scrub_local_path``
     # leaves the absolute path intact -- scrub coverage is already in
     # the unit-level test above. Here we just confirm derivation.
-    assert written["source_video"].endswith("/raw/v.mp4")
+    assert Path(written["source_video"]).as_posix().endswith("/raw/v.mp4")
     # fixture_window_in_source = [max(0, beep - pre), beep + stage_time + post]
     # beep=1.0, pre=5.0, stage=10.0, post=5.0  ->  [0.0, 16.0]
     assert written["fixture_window_in_source"] == [0.0, 16.0]

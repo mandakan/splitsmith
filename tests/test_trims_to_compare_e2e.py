@@ -18,6 +18,8 @@ from __future__ import annotations
 
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
+from urllib.request import url2pathname
 from xml.etree import ElementTree as ET
 
 import pytest
@@ -200,7 +202,7 @@ def test_match_trims_then_compare_export_fills_every_tile(
     srcs = [rep.attrib["src"] for rep in root.iter("media-rep")]
     assert len(srcs) == 6
     for src in srcs:
-        trim = Path(src.removeprefix("file://"))
+        trim = Path(url2pathname(urlsplit(src).path))
         assert trim.exists(), f"grid references a trim that was never written: {trim}"
         assert trim.parent.name == "exports"
 
