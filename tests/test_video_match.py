@@ -524,3 +524,38 @@ def test_a_batch_copy_without_camera_clocks_is_not_one_run(tmp_path: Path) -> No
 
     assert result.matches == []
     assert result.ambiguous_stages == {1: [a, b]}
+
+
+def test_windows_takes_a_copied_clips_modified_time_not_its_creation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Python 3.12 reports ``st_birthtime`` on Windows, where it is the
+    file's creation time, and a copy there is created at the moment of the
+    copy (the modified time is kept). Preferring it stamped every copied
+    clip without container metadata with the copy time, so it matched no
+    stage. macOS keeps a file's birth time across a copy."""
+    import types
+
+    from splitsmith import video_match
+
+    clip = tmp_path / "VID.mp4"
+    clip.write_bytes(b"")
+    recorded = datetime(2026, 4, 12, 11, 27, 33, tzinfo=UTC)
+    copied = datetime(2026, 10, 27, 9, 0, 0, tzinfo=UTC)
+    real_stat = Path.stat
+
+    def stat(self: Path, **kwargs):  # noqa: ANN003
+        st = real_stat(self, **kwargs)
+        if self != clip:
+            return st
+        return types.SimpleNamespace(
+            st_mtime=recorded.timestamp(), st_birthtime=copied.timestamp(), st_size=st.st_size
+        )
+
+    monkeypatch.setattr(Path, "stat", stat)
+    monkeypatch.setattr(video_match, "embedded_recording_start", lambda _p: None)
+
+    monkeypatch.setattr(video_match.sys, "platform", "win32")
+    assert video_timestamp(clip, prefer_ctime=True) == recorded
+    monkeypatch.setattr(video_match.sys, "platform", "darwin")
+    assert video_timestamp(clip, prefer_ctime=True) == copied

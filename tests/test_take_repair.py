@@ -41,7 +41,7 @@ def _take(covers: tuple[int, ...] = (1, 2, 3)) -> MatchProject:
             original_filename="take.mp4",
             size_bytes=1,
             uploaded_at=datetime.now(UTC),
-            storage_path=str(TAKE),
+            storage_path=TAKE.as_posix(),
             covers_stages=list(covers),
         )
     )
@@ -65,13 +65,13 @@ def _beeps(project: MatchProject) -> dict[int, list[float | None]]:
 
 
 def test_a_healthy_take_has_no_damage() -> None:
-    assert _take().take_damage(str(TAKE)) == []
+    assert _take().take_damage(TAKE.as_posix()) == []
 
 
 def test_a_stage_listing_the_file_twice_is_damaged() -> None:
     project = _take()
     _role_change_damage(project)
-    assert project.take_damage(str(TAKE)) == [2]
+    assert project.take_damage(TAKE.as_posix()) == [2]
 
 
 def test_a_legitimate_remove_is_not_damage(tmp_path: Path) -> None:
@@ -79,20 +79,20 @@ def test_a_legitimate_remove_is_not_damage(tmp_path: Path) -> None:
     stage must not read as damage, or Repair would undo the user's edit."""
     project = _take()
     project.remove_video(TAKE, tmp_path, stage_number=3)
-    assert project.take_damage(str(TAKE)) == []
+    assert project.take_damage(TAKE.as_posix()) == []
 
 
 def test_a_legitimate_unassign_is_not_damage() -> None:
     project = _take()
     project.assign_video(TAKE, from_stage_number=3, to_stage_number=None)
-    assert project.take_damage(str(TAKE)) == []
+    assert project.take_damage(TAKE.as_posix()) == []
 
 
 def test_a_move_to_an_uncovered_stage_is_not_damage() -> None:
     project = _take(covers=(1, 2))
     project.stage(3).videos.clear()  # stage 3 is not part of the take
     project.assign_video(TAKE, from_stage_number=2, to_stage_number=3, role="secondary")
-    assert project.take_damage(str(TAKE)) == []
+    assert project.take_damage(TAKE.as_posix()) == []
 
 
 # --- repair ---------------------------------------------------------------------
@@ -104,7 +104,7 @@ def test_repair_keeps_the_stage_s_own_entry() -> None:
     project = _take()
     project.stage(2).videos[0].beep_reviewed = True
     _role_change_damage(project)
-    assert project.repair_take(str(TAKE)) == [2]
+    assert project.repair_take(TAKE.as_posix()) == [2]
     kept = [v for v in project.stage(2).videos if v.path == TAKE]
     assert [(v.beep_time, v.beep_reviewed) for v in kept] == [(200.0, True)]
     # The stage the intruder was taken from stays empty: the repair cannot
@@ -114,7 +114,7 @@ def test_repair_keeps_the_stage_s_own_entry() -> None:
 
 def test_repair_of_a_healthy_take_changes_nothing() -> None:
     project = _take()
-    assert project.repair_take(str(TAKE)) == []
+    assert project.repair_take(TAKE.as_posix()) == []
     assert _beeps(project) == {1: [100.0], 2: [200.0], 3: [300.0]}
 
 
@@ -154,7 +154,7 @@ def test_route_repairs_a_stage_listing_the_file_twice(tmp_path: Path) -> None:
     assert [[v["beep_time"] for v in stages[n]] for n in (1, 2, 3)] == [[], [200.0], [300.0]]
     # The kept entry shares its id with the dropped one; its trim survives.
     assert trim.read_bytes() == b"stage 2's good trim"
-    assert MatchProject.load(shooter_root).take_damage(str(TAKE)) == []
+    assert MatchProject.load(shooter_root).take_damage(TAKE.as_posix()) == []
 
 
 def test_route_on_a_healthy_take_is_a_no_op(tmp_path: Path) -> None:

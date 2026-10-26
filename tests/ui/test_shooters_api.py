@@ -14,6 +14,7 @@ import pytest
 import respx
 from fastapi.testclient import TestClient
 
+from splitsmith import raw_link
 from splitsmith.automation import AutomationOverride
 from splitsmith.match_project import MatchProject, StageEntry, StageVideo
 from splitsmith.thumbnail import ThumbnailError
@@ -1340,15 +1341,15 @@ def test_remove_video_unassigned(tmp_path: Path) -> None:
     )
     assert resp.status_code == 200
     registered_path = resp.json()["registered"][0]
-    raw_link = root / "shooters" / "me" / "raw" / "clip.mp4"
-    assert raw_link.is_symlink()
+    raw_entry = root / "shooters" / "me" / "raw" / "clip.mp4"
+    assert raw_link.is_link(raw_entry)
 
     resp = client.post("/api/shooters/me/videos/remove", json={"video_path": registered_path})
     assert resp.status_code == 200
     body = resp.json()
     assert body["plan"]["was_primary"] is False
     assert body["project"]["unassigned_videos"] == []
-    assert not raw_link.exists()
+    assert not raw_link.present(raw_entry)
     assert src.exists(), "original source must never be touched"
 
 

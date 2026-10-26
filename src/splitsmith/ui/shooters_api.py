@@ -1057,7 +1057,7 @@ def suggest_coverage(
             end_dt = start_dt + timedelta(seconds=duration)
         elif duration is not None:
             st = video_path.stat()
-            birth = getattr(st, "st_birthtime", None)
+            birth = vm.kept_birth_time(st)
             end_dt = (
                 datetime.fromtimestamp(birth, tz=UTC)
                 if birth is not None
