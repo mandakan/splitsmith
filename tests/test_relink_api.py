@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
+from splitsmith import raw_link
 from splitsmith.match_project import MatchProject, StageEntry, StageVideo
 from splitsmith.ui.server import create_app
 
@@ -151,7 +152,7 @@ def test_relink_apply_rewrites_symlinks(tmp_path: Path) -> None:
     # And the link on disk now resolves to the new target.
     # The symlink lives under the shooter's raw/ dir, not the match root.
     link = root / "shooters" / "me" / "raw" / "a.mp4"
-    assert link.resolve() == new_target.resolve()
+    assert raw_link.target(link).resolve() == new_target.resolve()  # type: ignore[union-attr]
 
 
 def test_relink_apply_rejects_missing_target(tmp_path: Path) -> None:

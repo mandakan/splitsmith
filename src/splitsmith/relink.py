@@ -28,6 +28,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal
 
+from . import raw_link
 from .match_project import VIDEO_EXTENSIONS, MatchProject
 
 LinkStatus = Literal["ok", "broken", "missing_link", "not_a_symlink"]
@@ -95,14 +96,15 @@ def _link_status(link_path: Path) -> tuple[LinkStatus, Path | None, bool, bool]:
     Uses ``os.path.islink`` semantics via ``Path.is_symlink`` -- a broken
     symlink is detected as a symlink whose target doesn't resolve.
     """
-    if not link_path.exists() and not link_path.is_symlink():
+    if not raw_link.present(link_path):
         return "missing_link", None, False, False
-    if link_path.is_symlink():
-        target = Path(link_path.readlink())
-        # Resolve relative targets against the link's parent so we report
-        # the actual file we're pointing at.
-        resolved = target if target.is_absolute() else (link_path.parent / target).resolve()
-        target_exists = resolved.exists()
+    if raw_link.is_link(link_path):
+        # A symlink or, on Windows, a pointer file (``raw_link``); a
+        # relative symlink target is resolved against the link's parent so
+        # we report the actual file we're pointing at.
+        target = raw_link.target(link_path)
+        assert target is not None
+        target_exists = target.exists()
         return ("ok" if target_exists else "broken"), target, True, target_exists
     # Plain file -- not a symlink. Could be a registered copy (link_mode
     # = "copy") or a stray. Either way relinking doesn't apply.
@@ -226,13 +228,13 @@ def apply_relink(
     for link_path, new_target in decisions:
         new_target_abs = new_target if new_target.is_absolute() else new_target.resolve()
         previous: Path | None = None
-        if link_path.is_symlink():
-            previous = Path(link_path.readlink())
-            link_path.unlink()
+        if raw_link.is_link(link_path):
+            previous = raw_link.target(link_path)
+            raw_link.remove_link(link_path)
         elif link_path.exists():
             raise ValueError(f"refusing to overwrite non-symlink at {link_path} (status not_a_symlink)")
         link_path.parent.mkdir(parents=True, exist_ok=True)
-        link_path.symlink_to(new_target_abs)
+        raw_link.make_link(link_path, new_target_abs)
         applied.append(
             AppliedRelink(
                 video_id="",  # filled in by callers that know the project

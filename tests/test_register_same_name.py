@@ -13,6 +13,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
+from splitsmith import raw_link
 from splitsmith.match_project import MatchProject, StageEntry
 
 
@@ -45,8 +46,8 @@ def test_same_name_different_clips_each_import(tmp_path: Path) -> None:
     assert second.path.as_posix() == "raw/IMG_1234-2.MOV"
     assert [v.path.as_posix() for v in project.stage(1).videos] == ["raw/IMG_1234.MOV"]
     assert [v.path.as_posix() for v in project.stage(2).videos] == ["raw/IMG_1234-2.MOV"]
-    assert (root / "raw" / "IMG_1234.MOV").resolve() == martin
-    assert (root / "raw" / "IMG_1234-2.MOV").resolve() == anton
+    assert raw_link.target(root / "raw" / "IMG_1234.MOV") == martin
+    assert raw_link.target(root / "raw" / "IMG_1234-2.MOV") == anton
 
 
 def test_a_third_same_name_clip_takes_the_next_free_name(tmp_path: Path) -> None:
@@ -102,4 +103,4 @@ def test_a_different_file_already_in_raw_is_not_adopted(tmp_path: Path) -> None:
 
     assert video.path.as_posix() == "raw/IMG_1234-2.MOV"
     assert (raw / "IMG_1234.MOV").read_bytes() == b"something the user put here"
-    assert (raw / "IMG_1234-2.MOV").resolve() == anton
+    assert raw_link.target(raw / "IMG_1234-2.MOV") == anton

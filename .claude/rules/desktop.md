@@ -18,6 +18,7 @@ paths:
   - "src/splitsmith/ui/embedded.py"
   - "src/splitsmith/ui/system_api.py"
   - "src/splitsmith/runtime.py"
+  - "src/splitsmith/raw_link.py"
   - "src/splitsmith/youtube/oauth.py"
   - "scripts/bake_youtube_client.py"
   - "pyproject.toml"
@@ -148,3 +149,10 @@ never turn it red. `scripts/ci/windows_probe.py` also imports every module on
 its own, because one POSIX-only import on the conftest path stops collection
 and hides everything behind it. `PYTHONUTF8` stays unset there on purpose: the
 bundle would run without it.
+
+"Reference in place" is a symlink on POSIX and a pointer file,
+`raw/<name>.ref` holding the source's path, on Windows (a symlink there
+needs Developer Mode); `raw/<name>` stays the stored, synced identity on
+both. Every reader or writer of a `raw/` entry goes through
+`splitsmith.raw_link`, and a confined (hosted) project never follows a
+pointer (`tests/test_raw_pointer_links.py` runs the pointer path on any host).

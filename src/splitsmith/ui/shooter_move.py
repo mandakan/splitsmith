@@ -32,6 +32,7 @@ from typing import Literal
 
 from pydantic import BaseModel
 
+from .. import raw_link
 from ..match_project import MatchProject, RawVideo, StageVideo
 from ..storage import Storage
 from .audio import trimmed_video_path, video_audio_path, video_audit_audio_path
@@ -332,7 +333,7 @@ def _blocks_for(
         name = Path(path_str).name
         dst_raw = target_project.raw_path(target_root) / name
         src_raw = source_project.raw_path(source_root) / name
-        if dst_raw.exists() and not _same_raw_target(dst_raw, src_raw):
+        if raw_link.present(dst_raw) and not _same_raw_target(dst_raw, src_raw):
             return [
                 MoveShooterBlocked(
                     video_path=path_str,
@@ -362,11 +363,12 @@ def _same_raw_target(dst: Path, src: Path) -> bool:
     to src; or both are real files that resolve to the same inode.
     """
     try:
-        if dst.is_symlink() and src.is_symlink():
-            return dst.readlink() == src.readlink()
-        if dst.is_symlink():
-            return dst.readlink().resolve() == src.resolve()
-        return dst.resolve() == src.resolve()
+        dst_target, src_target = raw_link.target(dst), raw_link.target(src)
+        if dst_target is not None and src_target is not None:
+            return dst_target == src_target
+        if dst_target is not None:
+            return dst_target.resolve() == raw_link.resolve(src).resolve()
+        return dst.resolve() == raw_link.resolve(src).resolve()
     except OSError:
         return False
 
@@ -384,28 +386,31 @@ def _relocate_raw(
     src_link = source_project.raw_path(source_root) / name
     dst_link = target_project.raw_path(target_root) / name
 
-    if not src_link.exists() and not src_link.is_symlink():
+    if not raw_link.present(src_link):
         # Source raw missing -- nothing to relocate; skip silently.
         logger.debug("move_shooter: raw not found at %s, skipping relocation", src_link)
         return
 
     dst_link.parent.mkdir(parents=True, exist_ok=True)
 
-    if dst_link.exists() or dst_link.is_symlink():
+    if raw_link.present(dst_link):
         # Already in place (e.g. collision guard passed because it's the
         # same target). Just drop the source link.
         try:
-            src_link.unlink()
+            if not raw_link.remove_link(src_link):
+                src_link.unlink()
         except OSError as exc:
             logger.warning("move_shooter: could not unlink source raw %s: %s", src_link, exc)
         return
 
-    if src_link.is_symlink():
-        # Symlink ingest: repoint, no bytes moved.
-        real_target = src_link.readlink()
+    if raw_link.is_link(src_link):
+        # Reference ingest (a symlink, or a pointer file on Windows): repoint,
+        # no bytes moved.
+        real_target = raw_link.target(src_link)
+        assert real_target is not None
         try:
-            dst_link.symlink_to(real_target)
-            src_link.unlink()
+            raw_link.make_link(dst_link, real_target)
+            raw_link.remove_link(src_link)
         except OSError as exc:
             logger.warning("move_shooter: symlink relink %s -> %s failed: %s", src_link, dst_link, exc)
     else:

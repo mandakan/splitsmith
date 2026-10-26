@@ -38,7 +38,7 @@ from typing import TYPE_CHECKING, Any, Literal
 
 from pydantic import BaseModel, Field, PrivateAttr, computed_field, model_validator
 
-from . import stage_details, video_match
+from . import raw_link, stage_details, video_match
 from .automation import AutomationOverride
 from .config import BeepCandidate, StageData, StageRounds, VideoMatchConfig
 from .export_naming import is_match_export, stage_file_base
@@ -1006,17 +1006,15 @@ class MatchAnalysis(BaseModel):
 def _raw_holds_source(dest: Path, source: Path) -> bool:
     """Whether the ``raw/`` entry at ``dest`` is ``source`` (#1124).
 
-    A symlink is compared by its target. A copy (``link_mode="copy"``,
+    A link (symlink or pointer, ``raw_link``) is compared by its target. A copy (``link_mode="copy"``,
     ``copy2`` keeps mtime) has no link back to its source, so it is
     compared by size and whole-second mtime: two different videos copied in
     with the same byte size and the same mtime second would be taken for
     one, which real camera files practically never are.
     """
-    if dest.is_symlink():
-        target = dest.readlink()
-        if not target.is_absolute():
-            target = dest.parent / target
-        return os.path.normpath(target) == os.path.normpath(source)
+    linked = raw_link.target(dest)
+    if linked is not None:
+        return os.path.normpath(linked) == os.path.normpath(source)
     if not dest.exists():
         return False
     try:
@@ -2220,15 +2218,15 @@ class MatchProject(BaseModel):
             return video
 
         # A slot that already holds this source is reused as it is; a free one
-        # gets a symlink (preferred) or a copy. ``_raw_slot`` never returns a
-        # slot holding a different file, so nothing the user placed there is
-        # clobbered.
-        if not dest.exists() and not dest.is_symlink():
+        # gets a link (a symlink, or on Windows a pointer file: ``raw_link``)
+        # or a copy. ``_raw_slot`` never returns a slot holding a different
+        # file, so nothing the user placed there is clobbered.
+        if not raw_link.present(dest):
             if link_mode == "symlink":
                 try:
-                    dest.symlink_to(source)
+                    raw_link.make_link(dest, source)
                 except OSError:
-                    # Fallback (Windows without dev mode, etc.): copy.
+                    # A filesystem with no symlinks: copy.
                     shutil.copy2(source, dest)
             else:
                 shutil.copy2(source, dest)
@@ -2283,7 +2281,7 @@ class MatchProject(BaseModel):
                 stored = dest.relative_to(root)
             except ValueError:
                 stored = dest
-            on_disk = dest.exists() or dest.is_symlink()
+            on_disk = raw_link.present(dest)
             if _raw_holds_source(dest, source):
                 return dest, stored
             if not on_disk and self.find_video(stored) is None:
@@ -2299,7 +2297,7 @@ class MatchProject(BaseModel):
         for video in self.all_videos():
             if video.fingerprint is not None:
                 continue
-            candidate = video.path if video.path.is_absolute() else root / video.path
+            candidate = raw_link.resolve(video.path if video.path.is_absolute() else root / video.path)
             try:
                 if not candidate.exists():
                     continue
@@ -2344,8 +2342,16 @@ class MatchProject(BaseModel):
         if self._confined and (video_path.is_absolute() or ".." in video_path.parts):
             return root / UNREACHABLE_SOURCE_DIR / (video_path.name or "source")
         if video_path.is_absolute():
-            return video_path
+            # A raw_dir outside the project stores the entry's absolute
+            # path; on Windows that entry is a pointer file too.
+            return raw_link.resolve(video_path)
         local = root / video_path
+        if not self._confined and not local.exists() and not local.is_symlink():
+            # Referenced in place through a pointer file (Windows). Never on
+            # a confined project: a pointer's text is an absolute path.
+            pointed = raw_link.target(local)
+            if pointed is not None:
+                return pointed
         if self._storage is not None:
             if not local.exists():
                 self._mirror_from_storage(self._storage, video_path.as_posix(), local)
@@ -2417,10 +2423,11 @@ class MatchProject(BaseModel):
         if self._confined and (video_path.is_absolute() or ".." in video_path.parts):
             return False
         if video_path.is_absolute():
-            return video_path.exists()
+            return raw_link.resolve(video_path).exists()
+        local = root / video_path if self._confined else raw_link.resolve(root / video_path)
         if self._storage is None:
-            return (root / video_path).exists()
-        if not durable and (root / video_path).exists():
+            return local.exists()
+        if not durable and local.exists():
             return True
         return self._storage.exists(video_path.as_posix())
 
@@ -2785,7 +2792,13 @@ class MatchProject(BaseModel):
             current_stage.videos = [v for v in current_stage.videos if v is not video]
 
         still_registered = any(v.path.as_posix() == video.path.as_posix() for v in self.all_videos())
-        raw_link = None if still_registered else self.resolve_video_path(root, video.path)
+        # The ``raw/`` entry itself, never what it resolves to: a pointer
+        # resolves to the source, which a removal must not touch.
+        raw_entry = None
+        if not still_registered:
+            raw_entry = (
+                self.resolve_video_path(root, video.path) if video.path.is_absolute() else root / video.path
+            )
 
         # Cache files are keyed per-video for every role (stage<N>_cam_<id>.*)
         # so swapping a primary cannot alias to a previous primary's cache.
@@ -2820,7 +2833,7 @@ class MatchProject(BaseModel):
 
         return RemovalPlan(
             video_path=video.path,
-            raw_link_path=raw_link,
+            raw_link_path=raw_entry,
             audio_cache_path=audio_cache,
             trimmed_cache_path=trimmed_cache,
             audit_path=audit_path,
