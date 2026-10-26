@@ -106,9 +106,9 @@ nothing, a named rule file does not exist, or a line is not ASCII.
 
 Beep detection is a learned ranker over per-run candidates, timed at the timer
 tone's start; a secondary camera's beep can also be placed from the primary's.
-Shot detection is a 3-voter ensemble (envelope onsets generate candidates; CLAP
-and a GBDT over CLAP/PANN features vote) with a whole-stage decoder choosing the
-final set. The rules live in `.claude/rules/beep-detection.md` and
+Shot detection is a 3-voter ensemble (envelope onsets generate candidates; a GBDT
+votes, and CLAP too in the opt-in `clap` model set; the default `base` set needs
+no model download) with a whole-stage decoder choosing the final set. The rules live in `.claude/rules/beep-detection.md` and
 `.claude/rules/shot-detection.md`, loaded with the files they cover.
 
 The beep job lives in `ui/server.py`: `_try_align_secondary_to_primary` places a
