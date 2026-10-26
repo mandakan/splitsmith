@@ -30,6 +30,8 @@ import io
 import json
 import types
 from pathlib import Path
+from urllib.parse import urlsplit
+from urllib.request import url2pathname
 
 import pytest
 from PIL import Image
@@ -77,7 +79,7 @@ class _RecordingPage:
         if url.startswith(look_sandbox.ORIGIN):
             return  # a template: the sandbox answers its requests, not a file read
         assert url.startswith("file://"), f"expected a file:// URL, got {url!r}"
-        path = Path(url[len("file://") :])
+        path = Path(url2pathname(urlsplit(url).path))
         self.goto_file_content = path.read_text(encoding="utf-8")
 
     def evaluate(self, expression: str, arg=None):  # noqa: ANN001
