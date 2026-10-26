@@ -395,7 +395,6 @@ def _x_from(universe: list[dict]) -> np.ndarray:
             np.array([r["hand_feats"] for r in rows], dtype=np.float64),
             np.array([r["clap_sims"] for r in rows], dtype=np.float64),
             np.array([r["clap_diff"] for r in rows], dtype=np.float64),
-            np.array([r["gunshot_prob"] for r in rows], dtype=np.float64),
             [r.get("camera_class", DEFAULT_CAMERA_CLASS) for r in rows],
         )
     return out
