@@ -25,7 +25,7 @@ from pydantic import AwareDatetime, BaseModel, Field, ValidationError
 from starlette.background import BackgroundTask
 from starlette.concurrency import run_in_threadpool
 
-from .. import audit_clock, camera_select, match_model, video_probe
+from .. import audit_clock, camera_select, match_model, raw_link, video_probe
 from .. import automation as automation_settings
 from .. import backup as backup_mod
 from .. import cleanup as cleanup_module
@@ -2530,8 +2530,8 @@ def remove_video(request: Request, slug: str, req: RemoveVideoRequest) -> JSONRe
     try:
         if plan.raw_link_path is None:
             pass
-        elif plan.raw_link_path.is_symlink():
-            plan.raw_link_path.unlink()
+        elif raw_link.is_link(plan.raw_link_path):
+            raw_link.remove_link(plan.raw_link_path)
         elif plan.raw_link_path.exists():
             # Treat as a copy splitsmith placed (link_mode="copy"). We
             # only delete files inside raw_dir; never anything beyond.

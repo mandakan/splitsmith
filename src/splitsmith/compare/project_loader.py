@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal
 
-from .. import camera_select, fcpxml_gen
+from .. import camera_select, fcpxml_gen, raw_link
 from ..export_naming import stage_file_base
 from ..fcpxml_gen import VideoMetadata
 from ..match_model import Match
@@ -228,7 +228,7 @@ def _current_audit_trim(
     )
     # The source as it sits on this disk, never mirrored down for this: a
     # relative path under the shooter root, or an absolute one (a drive).
-    source = video.path if video.path.is_absolute() else root / video.path
+    source = video.path if video.path.is_absolute() else raw_link.resolve(root / video.path)
     return trim if audit_trim_matches(trim, params, source=source) else None
 
 

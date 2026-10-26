@@ -39,6 +39,7 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
+from .. import raw_link
 from ..match_project import MatchProject
 from ..storage import Storage, StorageObject
 from . import audio as audio_helpers
@@ -109,7 +110,10 @@ class StoragePresence:
         """
         if project._storage is None or video_path.is_absolute() or ".." in video_path.parts:
             return project.source_present(root, video_path)
-        if (root / video_path).exists():
+        # A pointer file (Windows' reference in place) is followed only on an
+        # unconfined project, as ``MatchProject.resolve_video_path`` does.
+        local = root / video_path if project._confined else raw_link.resolve(root / video_path)
+        if local.exists():
             return True
         return self.has_key(video_path.as_posix())
 

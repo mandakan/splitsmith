@@ -17,7 +17,7 @@ from typing import Literal
 
 from pydantic import BaseModel
 
-from .. import automation
+from .. import automation, raw_link
 from ..match_model import load_match_or_legacy
 from ..match_project import MatchProject, StageEntry, StageVideo, is_stub_audit
 from .plan import AUDIT_FILENAME_RE
@@ -196,7 +196,7 @@ def present_sources_for(match_root: Path, projects: Mapping[str, MatchProject]) 
             continue
         for stage in project.stages:
             for video in stage.videos:
-                path = video.path if video.path.is_absolute() else root / video.path
+                path = video.path if video.path.is_absolute() else raw_link.resolve(root / video.path)
                 try:
                     if path.exists():
                         present.add((slug, video.video_id))

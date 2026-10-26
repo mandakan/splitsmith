@@ -15,6 +15,7 @@ from pathlib import Path
 
 import pytest
 
+from splitsmith import raw_link
 from splitsmith.match_project import MatchProject
 from splitsmith.storage import FilesystemStorage, StorageObject
 from splitsmith.ui.presence import StoragePresence
@@ -63,6 +64,27 @@ def test_source_present_answers_from_one_listing_of_the_raw_prefix(tmp_path: Pat
 
     assert storage.list_calls == ["raw/"]
     assert storage.exists_calls == []
+
+
+def test_a_pointer_to_a_local_source_wins_without_any_storage_call(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Windows' reference in place: raw/A.mp4.ref names the source.
+    monkeypatch.setattr(raw_link, "use_pointers", lambda: True)
+    storage = CountingStorage(tmp_path / "backing")
+    project, root = _project(tmp_path, storage)
+    (root / "raw").mkdir(parents=True, exist_ok=True)
+    source = tmp_path / "cam" / "A.mp4"
+    source.parent.mkdir()
+    source.write_bytes(b"a")
+    raw_link.make_link(root / "raw" / "A.mp4", source)
+    presence = StoragePresence(storage)
+
+    assert presence.source_present(project, root, Path("raw/A.mp4")) is True
+    assert storage.list_calls == []
+
+    project.confine_paths()  # hosted: a pointer's absolute path is never followed
+    assert StoragePresence(storage).source_present(project, root, Path("raw/A.mp4")) is False
 
 
 def test_local_copy_wins_without_any_storage_call(tmp_path: Path) -> None:
