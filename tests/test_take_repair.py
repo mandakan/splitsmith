@@ -104,7 +104,7 @@ def test_repair_keeps_the_stage_s_own_entry() -> None:
     project = _take()
     project.stage(2).videos[0].beep_reviewed = True
     _role_change_damage(project)
-    assert project.repair_take(str(TAKE)) == [2]
+    assert project.repair_take(TAKE.as_posix()) == [2]
     kept = [v for v in project.stage(2).videos if v.path == TAKE]
     assert [(v.beep_time, v.beep_reviewed) for v in kept] == [(200.0, True)]
     # The stage the intruder was taken from stays empty: the repair cannot
@@ -114,7 +114,7 @@ def test_repair_keeps_the_stage_s_own_entry() -> None:
 
 def test_repair_of_a_healthy_take_changes_nothing() -> None:
     project = _take()
-    assert project.repair_take(str(TAKE)) == []
+    assert project.repair_take(TAKE.as_posix()) == []
     assert _beeps(project) == {1: [100.0], 2: [200.0], 3: [300.0]}
 
 

@@ -3162,8 +3162,10 @@ def register_job_bodies(state: AppState) -> None:
                 raw.duration_seconds = float(duration)
         start_dt = raw.recorded_start
         if start_dt is None and duration:
+            from ..video_match import kept_birth_time
+
             st = source_path.stat()
-            birth = getattr(st, "st_birthtime", None)
+            birth = kept_birth_time(st)
             start_dt = (
                 datetime.fromtimestamp(birth, tz=UTC)
                 if birth is not None

@@ -31,8 +31,10 @@ the heuristic. Keep them pure (no I/O) -- I/O happens in
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import subprocess
+import sys
 from collections import defaultdict
 from collections.abc import Iterable, Mapping
 from datetime import UTC, datetime, timedelta
@@ -268,6 +270,18 @@ def _video_timestamp(path: Path, *, prefer_ctime: bool) -> datetime:
     return _stamp(path, prefer_ctime=prefer_ctime)[0]
 
 
+def kept_birth_time(st: os.stat_result) -> float | None:
+    """A file's birth time where it says when the clip was recorded, else None.
+
+    Only macOS keeps a birth time across a copy. On Windows (Python 3.12+
+    reports ``st_birthtime``) it is the moment the clip was copied there,
+    while the modified time survives the copy; Linux reports none.
+    """
+    if sys.platform != "darwin":
+        return None
+    return getattr(st, "st_birthtime", None)
+
+
 def _stamp(path: Path, *, prefer_ctime: bool) -> tuple[datetime, bool]:
     """:func:`_video_timestamp` plus whether the time came from the
     container (``True``) or the filesystem (``False``)."""
@@ -275,10 +289,8 @@ def _stamp(path: Path, *, prefer_ctime: bool) -> tuple[datetime, bool]:
     embedded = embedded_recording_start(path)
     if embedded is not None:
         return embedded, True
-    if prefer_ctime and getattr(st, "st_birthtime", None) is not None:
-        ts = st.st_birthtime
-    else:
-        ts = st.st_mtime
+    birth = kept_birth_time(st) if prefer_ctime else None
+    ts = birth if birth is not None else st.st_mtime
     return datetime.fromtimestamp(ts, tz=UTC), False
 
 
