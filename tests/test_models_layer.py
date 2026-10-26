@@ -584,3 +584,64 @@ def test_create_app_skips_model_download_when_all_present(
     body = client.get("/api/models/status").json()
     assert body["active_job"] is None
     assert [j.kind for j in asyncio.run(app.state.splitsmith_state.jobs.list())] == []
+
+
+def _tiny_graph(path: Path, n_features: int) -> None:
+    import numpy as np
+    from skl2onnx import to_onnx
+    from skl2onnx.common.data_types import FloatTensorType
+    from sklearn.ensemble import GradientBoostingClassifier
+
+    x = np.random.default_rng(0).random((12, n_features))
+    clf = GradientBoostingClassifier(n_estimators=2, max_depth=1).fit(x, [0, 1] * 6)
+    onx = to_onnx(
+        clf, initial_types=[("X", FloatTensorType([None, n_features]))], options={id(clf): {"zipmap": False}}
+    )
+    path.write_bytes(onx.SerializeToString())
+
+
+def _artifact_set(tmp_path: Path, *, clap_headcam_width: int) -> None:
+    from splitsmith.ensemble import features as feat
+
+    sets = {}
+    for name in feat.MODEL_SETS:
+        width = len(feat.model_set_columns(name))
+        graphs = {}
+        for cls in ("headcam", "handheld"):
+            graphs[cls] = f"voter_c_gbdt_{name}_{cls}.onnx"
+            actual = clap_headcam_width if (name, cls) == ("clap", "headcam") else width
+            _tiny_graph(tmp_path / graphs[cls], actual)
+        sets[name] = {"voter_c_feature_dim": width, "voter_c_onnx_artifacts": graphs}
+    (tmp_path / "ensemble_calibration.json").write_text(json.dumps({"model_sets": sets}), encoding="utf-8")
+
+
+def _run_assert(tmp_path: Path):
+    import os
+    import subprocess
+    import sys
+
+    return subprocess.run(
+        [sys.executable, "scripts/ci/assert_ensemble_artifacts.py"],
+        env={**os.environ, "SPLITSMITH_ARTIFACTS_DIR": str(tmp_path)},
+        cwd=Path(__file__).resolve().parents[1],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+    )
+
+
+def test_artifact_assertion_checks_every_set(tmp_path: Path) -> None:
+    from splitsmith.ensemble import features as feat
+
+    _artifact_set(tmp_path, clap_headcam_width=len(feat.model_set_columns("base")))
+    proc = _run_assert(tmp_path)
+    assert proc.returncode == 1, proc.stdout + proc.stderr
+    assert "clap" in proc.stderr and "headcam" in proc.stderr
+
+
+def test_artifact_assertion_passes_a_consistent_set(tmp_path: Path) -> None:
+    from splitsmith.ensemble import features as feat
+
+    _artifact_set(tmp_path, clap_headcam_width=feat.VOTER_C_FEATURE_DIM)
+    proc = _run_assert(tmp_path)
+    assert proc.returncode == 0, proc.stdout + proc.stderr
