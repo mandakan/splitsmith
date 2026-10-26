@@ -105,7 +105,7 @@ def test_assign_video_demotes_existing_primary(tmp_path: Path) -> None:
     _build_project(root, stages=[stage])
     write_tools.assign_video(str(root), "raw/new.mp4", stage_number=1, role="primary")
     after = MatchProject.load(root)
-    roles = {str(v.path): v.role for v in after.stages[0].videos}
+    roles = {v.path.as_posix(): v.role for v in after.stages[0].videos}
     assert roles["raw/new.mp4"] == "primary"
     assert roles["raw/old.mp4"] == "secondary"
 

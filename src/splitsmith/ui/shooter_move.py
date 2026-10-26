@@ -282,10 +282,10 @@ def move_shooter(
 def _registrations(project: MatchProject, path_str: str) -> list[tuple[object, StageVideo]]:
     """Every registration of ``path_str``: the tray first, then each stage."""
     found: list[tuple[object, StageVideo]] = [
-        (None, v) for v in project.unassigned_videos if str(v.path) == path_str
+        (None, v) for v in project.unassigned_videos if v.path.as_posix() == path_str
     ]
     for stage in project.stages:
-        found.extend((stage, v) for v in stage.videos if str(v.path) == path_str)
+        found.extend((stage, v) for v in stage.videos if v.path.as_posix() == path_str)
     return found
 
 
@@ -484,13 +484,13 @@ def _move_raw_video_entry(
     references the same ``storage_path`` (a raw may cover multiple stages
     and not all may have been requested for this move).
     """
-    storage_path = str(video.path)
+    storage_path = video.path.as_posix()
     rv = source_project.find_raw_video(storage_path)
     if rv is None:
         return
 
     # Check whether any remaining source StageVideo still references this raw.
-    still_referenced = any(str(v.path) == storage_path for v in source_project.all_videos())
+    still_referenced = any(v.path.as_posix() == storage_path for v in source_project.all_videos())
     if not still_referenced:
         source_project.raw_videos = [r for r in source_project.raw_videos if r.storage_path != storage_path]
 

@@ -223,12 +223,12 @@ class HostedGridTiles:
         cut = self._cuts.get(str(path))
         storage = project._storage
         if cut is not None:
-            source = storage.stat(str(cut.video.path)) if storage is not None else None
+            source = storage.stat(cut.video.path.as_posix()) if storage is not None else None
             return ":".join(
                 str(part)
                 for part in (
                     "source-cut",
-                    cut.video.path,
+                    cut.video.path.as_posix(),
                     source.size if source else "",
                     source.last_modified.isoformat() if source and source.last_modified else "",
                     path.name,

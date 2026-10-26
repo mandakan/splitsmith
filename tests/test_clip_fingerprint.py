@@ -84,7 +84,7 @@ def test_the_same_clip_at_a_second_path_is_not_registered_twice(tmp_path: Path) 
     again = project.register_video(_write(tmp_path / "nas" / "match" / "stage1-anna.mov", data), root)
     assert again is first
     assert project.unassigned_videos == []
-    assert [str(v.path) for v in project.stage(1).videos] == [str(first.path)]
+    assert [v.path.as_posix() for v in project.stage(1).videos] == [first.path.as_posix()]
 
 
 def test_backfill_fills_videos_registered_before_fingerprints(tmp_path: Path) -> None:

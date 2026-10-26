@@ -95,7 +95,7 @@ def test_project_reference_with_a_trim_is_trim_kind(tmp_path: Path) -> None:
     assert ref is not None
     assert (ref.stream_kind, ref.source_file, ref.frame_at) == ("trim", audit_trim, 7.0)
     assert ref.video_id == project.stage(1).primary().video_id  # type: ignore[union-attr]
-    assert ref.video_path == str(project.stage(1).primary().path)  # type: ignore[union-attr]
+    assert ref.video_path == project.stage(1).primary().path.as_posix()  # type: ignore[union-attr]
 
 
 def test_project_reference_without_a_trim_plays_the_raw_file(tmp_path: Path) -> None:

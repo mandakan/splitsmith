@@ -47,5 +47,5 @@ def absolute_path_videos(project: MatchProject) -> list[tuple[int, str]]:
     for stage in project.stages:
         for video in stage.videos:
             if video.path.is_absolute():
-                out.append((stage.stage_number, str(video.path)))
+                out.append((stage.stage_number, video.path.as_posix()))
     return out

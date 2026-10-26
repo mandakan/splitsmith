@@ -172,7 +172,7 @@ def test_promote_takes_the_registration_on_the_target_stage(tmp_path: Path) -> N
     project = MatchProject(name="Take", stages=stages)
     promoted = project.swap_primary(TAKE, root=tmp_path, stage_number=2, backup_audit=False)
     assert promoted.stage_number == 2
-    assert [(str(v.path), v.role) for v in project.stage(2).videos] == [
+    assert [(v.path.as_posix(), v.role) for v in project.stage(2).videos] == [
         ("raw/other.mp4", "secondary"),
         ("raw/take.mp4", "primary"),
     ]

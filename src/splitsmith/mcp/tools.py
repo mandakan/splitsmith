@@ -146,7 +146,7 @@ def _stage_summary(stage: StageEntry) -> dict[str, Any]:
 def _video_summary(video: StageVideo) -> dict[str, Any]:
     return {
         "video_id": video.video_id,
-        "path": str(video.path),
+        "path": video.path.as_posix(),
         "role": video.role,
         "processed": dict(video.processed),
         "beep_time": video.beep_time,

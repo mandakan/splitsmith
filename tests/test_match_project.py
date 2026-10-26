@@ -1192,7 +1192,7 @@ def test_init_placeholder_replaces_existing_placeholders_returning_videos(
     assert len(project.stages) == 5
     assert all(s.videos == [] for s in project.stages)
     assert len(project.unassigned_videos) == 1
-    assert str(project.unassigned_videos[0].path) == "raw/clip.mp4"
+    assert project.unassigned_videos[0].path.as_posix() == "raw/clip.mp4"
 
 
 def test_import_scoreboard_overlays_placeholders_preserving_videos(tmp_path: Path) -> None:
@@ -1232,7 +1232,7 @@ def test_import_scoreboard_overlays_placeholders_preserving_videos(tmp_path: Pat
     assert all(not s.placeholder for s in project.stages)
     assert project.stages[0].stage_name == "Real S1"
     assert len(project.stages[0].videos) == 1
-    assert str(project.stages[0].videos[0].path) == "raw/v1.mp4"
+    assert project.stages[0].videos[0].path.as_posix() == "raw/v1.mp4"
     assert project.stages[0].videos[0].role == "primary"
     assert len(project.stages[1].videos) == 1
 
@@ -1272,7 +1272,7 @@ def test_import_scoreboard_overlay_drops_extras_to_unassigned(tmp_path: Path) ->
     )
     assert len(project.stages) == 2
     assert len(project.unassigned_videos) == 1
-    assert str(project.unassigned_videos[0].path) == "raw/v3.mp4"
+    assert project.unassigned_videos[0].path.as_posix() == "raw/v3.mp4"
     assert project.unassigned_videos[0].role == "secondary"
 
 
@@ -2025,7 +2025,7 @@ def test_match_analysis_uses_canonical_heuristic(tmp_path: Path) -> None:
     assert len(analysis.stages) == 2
     assert analysis.stages[0].lower == sc1 - timedelta(minutes=15)
     assert analysis.stages[0].upper == sc1
-    by_path = {str(e.path): e for e in analysis.videos}
+    by_path = {e.path.as_posix(): e for e in analysis.videos}
     assert by_path["raw/a.mp4"].classification == "in_window"
     assert by_path["raw/a.mp4"].stage_numbers == [1]
     assert by_path["raw/b.mp4"].classification == "orphan"
@@ -2270,7 +2270,7 @@ def test_unassign_stage_videos_moves_videos_to_unassigned(tmp_path: Path) -> Non
 
     assert moved == 2
     assert stage.videos == []
-    assert {str(v.path) for v in project.unassigned_videos} == {"a.mp4", "b.mp4"}
+    assert {v.path.as_posix() for v in project.unassigned_videos} == {"a.mp4", "b.mp4"}
     assert all(v.role == "secondary" for v in project.unassigned_videos)
 
 
@@ -2282,7 +2282,7 @@ def test_unassign_stage_videos_leaves_other_stages_alone(tmp_path: Path) -> None
 
     project.unassign_stage_videos(2)
 
-    assert [str(v.path) for v in project.stages[0].videos] == ["keep.mp4"]
+    assert [v.path.as_posix() for v in project.stages[0].videos] == ["keep.mp4"]
     assert project.stages[0].videos[0].role == "primary"
 
 
