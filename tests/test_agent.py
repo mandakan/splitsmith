@@ -573,6 +573,47 @@ def _sigterm_ignored_outside_the_agent():
 
 
 @pytest.mark.usefixtures("_sigterm_ignored_outside_the_agent")
+def test_sigterm_stops_the_agent_on_a_loop_without_signal_handlers(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Windows' proactor loop raises NotImplementedError from
+    ``add_signal_handler``; the agent then takes SIGTERM through
+    ``signal.signal`` and still stops, and puts the old handler back."""
+    import signal
+
+    _isolate_env(monkeypatch)
+
+    async def never_drain(db: str, conc: int, **_kw: object) -> None:  # pragma: no cover
+        raise AssertionError("no wake was sent")
+
+    monkeypatch.setattr(agent, "_run_worker_once", never_drain)
+
+    def unsupported(self, sig, callback, *args):  # noqa: ANN001
+        raise NotImplementedError
+
+    probe = asyncio.new_event_loop()
+    monkeypatch.setattr(type(probe), "add_signal_handler", unsupported)
+    probe.close()
+    before = signal.getsignal(signal.SIGTERM)
+
+    async def scenario() -> None:
+        loop = asyncio.get_running_loop()
+        loop.call_later(0.2, signal.raise_signal, signal.SIGTERM)
+        await asyncio.wait_for(
+            agent.run_agent(
+                "http://srv",
+                registration_token="reg",
+                state_dir=tmp_path,
+                transport=_open_channel_transport(wake=False),
+            ),
+            timeout=5,
+        )
+
+    asyncio.run(scenario())  # returns rather than timing out
+    assert signal.getsignal(signal.SIGTERM) is before
+
+
+@pytest.mark.usefixtures("_sigterm_ignored_outside_the_agent")
 def test_run_agent_returns_on_sigterm_while_idle(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     import signal
 
@@ -585,7 +626,7 @@ def test_run_agent_returns_on_sigterm_while_idle(tmp_path: Path, monkeypatch: py
 
     async def scenario() -> None:
         loop = asyncio.get_running_loop()
-        loop.call_later(0.2, os.kill, os.getpid(), signal.SIGTERM)
+        loop.call_later(0.2, signal.raise_signal, signal.SIGTERM)
         await asyncio.wait_for(
             agent.run_agent(
                 "http://srv",
@@ -613,7 +654,7 @@ def test_sigterm_mid_drain_finishes_the_drain_then_returns(
     async def drain(db: str, conc: int, *, stop_event: asyncio.Event | None = None) -> None:
         assert stop_event is not None, "the agent must hand its stop to the drain"
         drains.append("started")
-        os.kill(os.getpid(), signal.SIGTERM)
+        signal.raise_signal(signal.SIGTERM)
         await asyncio.wait_for(stop_event.wait(), timeout=5)
         drains.append("finished")
 
@@ -647,7 +688,7 @@ def test_the_agent_names_its_jobs_worker_record(tmp_path: Path, monkeypatch: pyt
 
     async def drain(db: str, conc: int, *, stop_event: asyncio.Event | None = None) -> None:
         seen.append(observability.worker_name())
-        os.kill(os.getpid(), signal.SIGTERM)
+        signal.raise_signal(signal.SIGTERM)
         assert stop_event is not None
         await asyncio.wait_for(stop_event.wait(), timeout=5)
 

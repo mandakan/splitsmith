@@ -630,6 +630,22 @@ async def _drain_loop(
         logger.info("drain finished; waiting for next wake")
 
 
+def _on_sigterm(loop: asyncio.AbstractEventLoop, handler: Callable[[], None]) -> Callable[[], None]:
+    """Run ``handler`` on the loop when SIGTERM arrives; returns the undo.
+
+    The loop's own signal handler where it has one. Windows' proactor loop
+    raises ``NotImplementedError`` for it, so there ``signal.signal`` takes
+    the signal and hands it to the loop thread-safely, and the undo puts the
+    previous handler back.
+    """
+    try:
+        loop.add_signal_handler(signal.SIGTERM, handler)
+    except NotImplementedError:
+        previous = signal.signal(signal.SIGTERM, lambda *_: loop.call_soon_threadsafe(handler))
+        return lambda: signal.signal(signal.SIGTERM, previous)
+    return lambda: loop.remove_signal_handler(signal.SIGTERM)
+
+
 async def run_agent(
     server_url: str,
     *,
@@ -703,7 +719,7 @@ async def run_agent(
         await _gated_drain(db, conc, stop_event=stop_event, enabled=_enabled, run=_run_worker_once)
 
     loop = asyncio.get_running_loop()
-    loop.add_signal_handler(signal.SIGTERM, _request_stop)
+    restore_sigterm = _on_sigterm(loop, _request_stop)
 
     # The bundle says how this box is woken: a storage-bucket marker it polls
     # ("r2", for a scale-to-zero server) or, by default, the SSE channel.
@@ -748,7 +764,7 @@ async def run_agent(
             # reader would otherwise sit in its stream until the next frame.
             done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
         finally:
-            loop.remove_signal_handler(signal.SIGTERM)
+            restore_sigterm()
             stop_event.set()
             coordinator.wake_event.set()
             for task in tasks:
