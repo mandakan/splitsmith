@@ -26,7 +26,6 @@ shelling out.
 
 from __future__ import annotations
 
-import fcntl
 import json
 import os
 import platform
@@ -38,6 +37,7 @@ from pathlib import Path
 from typing import Literal
 
 from .config import Config, TrimResult, WebTrimConfig
+from .derived import locked
 from .media_check import valid_mp4, valid_mp4_cached
 from .runtime import ENV_CONFIG_FILE, ffmpeg_path
 
@@ -379,9 +379,8 @@ def write_web_rendition(
     good rendition is never replaced by a bad one."""
     ffmpeg_binary = ffmpeg_path(ffmpeg_binary)
     web = web_trim_path(trimmed)
-    lock_path = web.with_name(f"{web.stem}.lock")
-    with lock_path.open("a") as lock:
-        fcntl.flock(lock, fcntl.LOCK_EX)
+    # ``<stem>.lock`` beside the rendition, the lock a pull of it also takes.
+    with locked(web):
         if rendition_ok(trimmed):
             return web
         partial = unique_partial(web)
