@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import importlib.util
 import stat
+import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -18,7 +19,10 @@ def test_phone_token_persists_private_and_rotates(tmp_path: Path) -> None:
     first = rs.phone_token(p, rotate=False)
     assert len(first) >= 32
     assert rs.phone_token(p, rotate=False) == first
-    assert stat.S_IMODE(p.stat().st_mode) == 0o600
+    # POSIX mode bits; Windows has none (it keeps a file under the user's
+    # profile private through the profile's ACL), so it checks nothing here.
+    if sys.platform != "win32":
+        assert stat.S_IMODE(p.stat().st_mode) == 0o600
     assert rs.phone_token(p, rotate=True) != first
 
 

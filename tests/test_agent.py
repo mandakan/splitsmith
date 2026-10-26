@@ -12,6 +12,7 @@ from __future__ import annotations
 import asyncio
 import os
 import stat
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -82,7 +83,10 @@ def test_register_writes_agent_json_0600_and_roundtrips(
 
     path = tmp_path / "agent.json"
     assert path.exists()
-    assert stat.S_IMODE(path.stat().st_mode) == 0o600
+    # POSIX mode bits; Windows has none (it keeps a file under the user's
+    # profile private through the profile's ACL), so it checks nothing here.
+    if sys.platform != "win32":
+        assert stat.S_IMODE(path.stat().st_mode) == 0o600
 
     loaded = AgentState.load(tmp_path)
     assert loaded is not None

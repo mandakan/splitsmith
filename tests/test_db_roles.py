@@ -272,7 +272,10 @@ def test_rotate_writes_the_url_with_owner_only_permissions(
 
     written = make_url(out.read_text(encoding="utf-8"))
     assert written.username == AGENT_ROLE
-    assert out.stat().st_mode & 0o777 == 0o600
+    # POSIX mode bits; Windows has none (it keeps a file under the user's
+    # profile private through the profile's ACL), so it checks nothing here.
+    if sys.platform != "win32":
+        assert out.stat().st_mode & 0o777 == 0o600
     assert statements == [password_statement(AGENT_ROLE, written.password or "")]
     # The password never reaches stdout.
     assert (written.password or "") not in capsys.readouterr().out
@@ -322,4 +325,7 @@ def test_rotate_direct_out_shares_the_password_on_the_direct_host(
     assert pooled.host == "ep-a-1-pooler.example.neon.tech"
     assert direct.host == "ep-a-1.example.neon.tech"
     assert pooled.password == direct.password
-    assert (tmp_path / "d.url").stat().st_mode & 0o777 == 0o600
+    # POSIX mode bits; Windows has none (it keeps a file under the user's
+    # profile private through the profile's ACL), so it checks nothing here.
+    if sys.platform != "win32":
+        assert (tmp_path / "d.url").stat().st_mode & 0o777 == 0o600
