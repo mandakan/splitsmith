@@ -242,9 +242,9 @@ def test_run_eval_routes_the_fixture_camera_class(tmp_path: Path, monkeypatch: p
         return SimpleNamespace(candidates=[])
 
     monkeypatch.setattr(core, "detect_shots_ensemble", fake_detect)
-    runtime = SimpleNamespace(
-        calibration=SimpleNamespace(voter_a_floor=0.1, voter_b_threshold=0.1, voter_c_threshold=0.5)
-    )
+    from tests._ensemble_stubs import stub_calibration
+
+    runtime = SimpleNamespace(calibration=stub_calibration())
     core.run_eval(runtime, fixtures_root=fixtures, slugs=[slug])  # type: ignore[arg-type]
 
     assert captured["camera_class"] == "handheld"

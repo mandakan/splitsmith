@@ -10,7 +10,6 @@ from pathlib import Path
 
 import numpy as np
 
-import splitsmith
 from splitsmith.ensemble.calibration import EnsembleCalibration
 from splitsmith.ensemble.decoder import PriorTable, StageDecoder, decode_stage
 
@@ -137,16 +136,19 @@ def test_candidates_in_any_order_and_an_empty_stage() -> None:
 
 
 def test_the_calibration_carries_a_decoder_and_loads_without_one() -> None:
-    """The shipped calibration has no decoder and still loads; one with a
-    decoder block round-trips it."""
+    """A set without decoders loads and decodes with none; one with a
+    decoder per class round-trips it through the JSON."""
+    from tests._ensemble_stubs import stub_calibration
+
     model = _model()
-    shipped = Path(splitsmith.__file__).parent / "data" / "ensemble_calibration.json"
-    base = json.loads(shipped.read_text(encoding="utf-8"))
-    base.pop("decoder", None)
-    assert EnsembleCalibration.model_validate(base).decoder is None
-    cal = EnsembleCalibration.model_validate({**base, "decoder": model.model_dump()})
-    assert cal.decoder is not None
-    assert math.isclose(cal.decoder.split_prior(np.array([-0.5]))[0], 1.0)
+    plain = stub_calibration()
+    assert plain.model_set("clap").decoder_for("headcam", "headcam") is None
+    payload = plain.model_dump()
+    payload["model_sets"]["clap"]["decoders_by_camera_class"] = {"headcam": model.model_dump()}
+    cal = EnsembleCalibration.model_validate(json.loads(json.dumps(payload)))
+    decoder = cal.model_set("clap").decoder_for("headcam", "headcam")
+    assert decoder is not None
+    assert math.isclose(decoder.split_prior(np.array([-0.5]))[0], 1.0)
 
 
 def _fit_module():
@@ -254,6 +256,7 @@ def _stub_detection(monkeypatch, times, gunshot):
     from splitsmith.config import Shot
     from splitsmith.ensemble import api as ensemble_api
     from splitsmith.ensemble import features as ensemble_features
+    from tests._ensemble_stubs import with_set_update
     from tests.test_ensemble import CLAP_PROMPTS, _build_stub_runtime
 
     shots = [
@@ -282,7 +285,9 @@ def _stub_detection(monkeypatch, times, gunshot):
     runtime = _build_stub_runtime()
     # A decoder that reads only the gunshot probability (logit = 10 * (g - 0.5)).
     model = _model(coef=[0, 0, 10.0, 0, 0, 0], intercept=-5.0)
-    runtime.calibration = runtime.calibration.model_copy(update={"decoder": model})
+    runtime.calibration = with_set_update(
+        runtime.calibration, "clap", decoders_by_camera_class={"headcam": model, "handheld": model}
+    )
     return runtime
 
 
@@ -318,9 +323,10 @@ def test_the_runtime_decodes_by_default_and_can_be_turned_off(monkeypatch) -> No
 
 def test_a_calibration_without_a_decoder_keeps_the_consensus(monkeypatch) -> None:
     from splitsmith.ensemble.api import EnsembleConfig, detect_shots_ensemble
+    from tests._ensemble_stubs import with_set_update
 
     runtime = _stub_detection(monkeypatch, [2.0, 2.3], [0.9, 0.1])
-    runtime.calibration = runtime.calibration.model_copy(update={"decoder": None})
+    runtime.calibration = with_set_update(runtime.calibration, "clap", decoders_by_camera_class={})
     res = detect_shots_ensemble(
         np.zeros(48_000 * 10, dtype=np.float32),
         48_000,

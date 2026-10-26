@@ -1003,11 +1003,12 @@ def run_eval(
         if progress is not None:
             progress(i + 1, total, fix.slug)
 
+    default_thresholds = cal.thresholds_for(None, model_set="clap")
     universe = EvalUniverse(
         fixtures=fixtures,
-        voter_a_floor=cal.voter_a_floor,
-        voter_b_threshold=cal.voter_b_threshold,
-        voter_c_threshold=cal.voter_c_threshold,
+        voter_a_floor=default_thresholds.voter_a_floor,
+        voter_b_threshold=default_thresholds.voter_b_threshold,
+        voter_c_threshold=default_thresholds.voter_c_threshold,
         tolerance_ms=cfg.tolerance_ms,
     )
     summary = _summary(fixtures)

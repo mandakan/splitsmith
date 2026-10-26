@@ -187,10 +187,11 @@ if not models:
 
 for camera_class, model in sorted(models.items()):
     n = getattr(model, "n_features", None)
-    if n is not None and n != cal.voter_c_feature_dim:
+    want = cal.model_set(cal.default_model_set).voter_c_feature_dim
+    if n is not None and n != want:
         sys.exit(
             f"    FAIL: voter C ({camera_class}) takes {n} features; "
-            f"calibration says {cal.voter_c_feature_dim}"
+            f"calibration says {want}"
         )
 
 # The probe is optional -- artifacts built without Voter E name no file,

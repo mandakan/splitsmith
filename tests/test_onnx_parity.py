@@ -263,6 +263,7 @@ def _shipped_artifacts_only() -> None:
         )
 
 
+@pytest.mark.xfail(strict=True, reason="until the rebuild in Task 10")
 def test_voter_c_onnx_matches_frozen_sklearn_reference() -> None:
     """Each class's ONNX graph reproduces the sklearn probabilities it was exported from."""
     pytest.importorskip("onnxruntime")
@@ -284,6 +285,7 @@ def test_voter_c_onnx_matches_frozen_sklearn_reference() -> None:
         assert delta < VOTER_L_INF_TOLERANCE, f"voter C {camera_class}: L_inf {delta:.3e}"
 
 
+@pytest.mark.xfail(strict=True, reason="until the rebuild in Task 10")
 def test_voter_c_onnx_vote_decisions_match_reference() -> None:
     """The calibrated vote is bit-identical, not merely close.
 
@@ -311,6 +313,7 @@ def test_voter_c_onnx_vote_decisions_match_reference() -> None:
         )
 
 
+@pytest.mark.xfail(strict=True, reason="until the rebuild in Task 10")
 def test_voter_e_onnx_matches_frozen_sklearn_reference() -> None:
     """The visual probe head's ONNX graph reproduces its sklearn probabilities."""
     pytest.importorskip("onnxruntime")

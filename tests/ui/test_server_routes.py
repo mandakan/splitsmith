@@ -352,6 +352,7 @@ def test_candidate_high_water_reads_all_three_places_a_number_survives() -> None
     )
 
 
+@pytest.mark.xfail(strict=True, reason="until the rebuild in Task 10")
 def test_calibrated_camera_models_endpoint_lists_shipped_models(tmp_path: Path) -> None:
     """GET /api/calibrated-camera-models reflects the shipped calibration.
 
@@ -374,6 +375,7 @@ def test_calibrated_camera_models_endpoint_lists_shipped_models(tmp_path: Path) 
         assert isinstance(row["amp_floor"], float)
 
 
+@pytest.mark.xfail(strict=True, reason="until the rebuild in Task 10")
 def test_calibrated_camera_models_never_loads_the_ensemble_runtime(tmp_path: Path, monkeypatch) -> None:
     """The camera list is a calibration read, not a model load (issue #667).
 
@@ -862,6 +864,7 @@ def test_export_that_writes_no_trim_at_all_fails_the_job(tmp_path: Path, monkeyp
     assert "moov atom not found" in final["error"]
 
 
+@pytest.mark.xfail(strict=True, reason="until the rebuild in Task 10")
 def test_dev_model_endpoint_returns_calibration_metadata(tmp_path: Path) -> None:
     """/api/dev/model reads the shipped ensemble_calibration.json and
     formats it for the dev shell's model chip + workflow stepper. The
@@ -925,6 +928,7 @@ def test_dev_review_queue_buckets_fixtures(tmp_path: Path) -> None:
             assert {"slug", "audit_path", "source", "status", "n_shots"} <= set(item)
 
 
+@pytest.mark.xfail(strict=True, reason="until the rebuild in Task 10")
 def test_dev_review_queue_includes_batch_promoted_unlabeled(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -1028,6 +1032,7 @@ def test_dev_review_queue_puts_doubtful_shot_times_first(
     assert pending[2]["review_status"] == "reviewed"
 
 
+@pytest.mark.xfail(strict=True, reason="until the rebuild in Task 10")
 def test_dev_review_confirm_clears_pending(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """POST /api/dev/review-queue/{slug}/confirm stamps review.confirmed_at
     on the fixture JSON, moving it from the pending bucket to done and

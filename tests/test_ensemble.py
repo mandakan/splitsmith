@@ -19,7 +19,6 @@ from splitsmith.ensemble import (
     detect_shots_ensemble,
 )
 from splitsmith.ensemble.api import EnsembleRuntime
-from splitsmith.ensemble.calibration import EnsembleCalibration
 from splitsmith.ensemble.features import (
     CLAP_PROMPTS,
     CLAP_PROMPTS_SHOT,
@@ -38,6 +37,7 @@ from splitsmith.ensemble.voters import (
     vote_e,
     within_stage_amp_veto,
 )
+from tests._ensemble_stubs import stub_calibration, stub_thresholds
 
 
 def test_vote_a_floor_threshold() -> None:
@@ -209,21 +209,7 @@ def test_normalize_camera_model_key_returns_none_when_either_input_missing() -> 
 
 
 def test_amp_floor_for_prefers_per_model_over_default() -> None:
-    cal = EnsembleCalibration(
-        voter_a_floor=0.0,
-        voter_b_threshold=0.0,
-        voter_c_threshold=0.5,
-        voter_c_target_recall=0.95,
-        tolerance_ms=75.0,
-        clap_prompts_shot=list(CLAP_PROMPTS_SHOT),
-        clap_prompts=list(CLAP_PROMPTS),
-        calibration_fixtures=["stub"],
-        n_calibration_candidates=10,
-        n_calibration_positives=5,
-        voter_c_feature_dim=VOTER_C_FEATURE_DIM,
-        built_at="1970-01-01T00:00:00Z",
-        amp_floor_by_camera_model={"insta360 go 3s": 0.20, "meta vanguard": 0.15},
-    )
+    cal = stub_calibration(amp_floor_by_camera_model={"insta360 go 3s": 0.20, "meta vanguard": 0.15})
     # Known model -> per-model value.
     assert cal.amp_floor_for("Insta360", "GO 3S", default=0.30) == 0.20
     # Known model with different casing still matches the canonical key.
@@ -237,20 +223,7 @@ def test_amp_floor_for_prefers_per_model_over_default() -> None:
 def test_amp_floor_for_returns_default_when_per_model_table_absent() -> None:
     """Pre-#304 calibration artifacts have no per-model table; the lookup
     must still hand back the caller's default rather than crashing."""
-    cal = EnsembleCalibration(
-        voter_a_floor=0.0,
-        voter_b_threshold=0.0,
-        voter_c_threshold=0.5,
-        voter_c_target_recall=0.95,
-        tolerance_ms=75.0,
-        clap_prompts_shot=list(CLAP_PROMPTS_SHOT),
-        clap_prompts=list(CLAP_PROMPTS),
-        calibration_fixtures=["stub"],
-        n_calibration_candidates=10,
-        n_calibration_positives=5,
-        voter_c_feature_dim=VOTER_C_FEATURE_DIM,
-        built_at="1970-01-01T00:00:00Z",
-    )
+    cal = stub_calibration()
     assert cal.amp_floor_by_camera_model is None
     assert cal.amp_floor_for("Insta360", "GO 3S", default=0.15) == 0.15
     assert cal.amp_floor_for("Insta360", "GO 3S", default=None) is None
@@ -415,20 +388,7 @@ class _StubGBDT:
 
 
 def _build_stub_runtime() -> EnsembleRuntime:
-    cal = EnsembleCalibration(
-        voter_a_floor=0.05,
-        voter_b_threshold=0.0,
-        voter_c_threshold=0.5,
-        voter_c_target_recall=0.95,
-        tolerance_ms=75.0,
-        clap_prompts_shot=list(CLAP_PROMPTS_SHOT),
-        clap_prompts=list(CLAP_PROMPTS),
-        calibration_fixtures=["stub"],
-        n_calibration_candidates=10,
-        n_calibration_positives=5,
-        voter_c_feature_dim=VOTER_C_FEATURE_DIM,
-        built_at="1970-01-01T00:00:00Z",
-    )
+    cal = stub_calibration()
     return EnsembleRuntime(
         calibration=cal,
         voter_c_model={"headcam": _StubGBDT(), "handheld": _StubGBDT()},
@@ -489,7 +449,9 @@ def test_detect_shots_ensemble_apriori_boost_lifts_top_k(monkeypatch) -> None:
     keep the top-2 candidates by detector confidence."""
     runtime = _build_stub_runtime()
     # Push voter B threshold high so no candidate clears it.
-    runtime.calibration = runtime.calibration.model_copy(update={"voter_b_threshold": 99.0})
+    runtime.calibration = stub_calibration(
+        thresholds={cls: stub_thresholds(voter_b_threshold=99.0) for cls in ("headcam", "handheld")}
+    )
 
     confidences = [0.9, 0.4, 0.7, 0.3]
     fake_shots = [
@@ -802,19 +764,16 @@ def test_detect_shots_ensemble_voter_e_e_required_drops_low_score(monkeypatch, t
     # Two candidates above 0.5 (kept by Voter E), two below (vetoed).
     runtime.visual = _StubVisualRuntime([0.9, 0.1, 0.8, 0.05])  # type: ignore[assignment]
     # Calibration must carry a voter_e_threshold for the runtime to act.
-    cal = runtime.calibration.model_copy(
+    cal = stub_calibration(
+        thresholds={cls: stub_thresholds(voter_e_threshold=0.5) for cls in ("headcam", "handheld")}
+    ).model_copy(
         update={
-            "voter_e_threshold": 0.5,
             "voter_e_target_recall": 0.95,
             "voter_e_clip_model_id": "stub",
             "voter_e_frame_offsets": [0.0],
             "voter_e_probe_artifact": "stub.joblib",
         }
     )
-    # Mirror the threshold into the per-class block so thresholds_for() picks it up.
-    if cal.thresholds_by_camera_class:
-        for cls, t in cal.thresholds_by_camera_class.items():
-            cal.thresholds_by_camera_class[cls] = t.model_copy(update={"voter_e_threshold": 0.5})
     runtime.calibration = cal
 
     fake_shots = [
@@ -883,18 +842,16 @@ def test_detect_shots_ensemble_voter_e_audio_strong_skips_veto(monkeypatch, tmp_
     runtime = _build_stub_runtime()
     # All four candidates: Voter E says no (signal below threshold).
     runtime.visual = _StubVisualRuntime([0.05, 0.10, 0.15, 0.20])  # type: ignore[assignment]
-    cal = runtime.calibration.model_copy(
+    cal = stub_calibration(
+        thresholds={cls: stub_thresholds(voter_e_threshold=0.5) for cls in ("headcam", "handheld")}
+    ).model_copy(
         update={
-            "voter_e_threshold": 0.5,
             "voter_e_target_recall": 0.95,
             "voter_e_clip_model_id": "stub",
             "voter_e_frame_offsets": [0.0],
             "voter_e_probe_artifact": "stub.joblib",
         }
     )
-    if cal.thresholds_by_camera_class:
-        for cls, t in cal.thresholds_by_camera_class.items():
-            cal.thresholds_by_camera_class[cls] = t.model_copy(update={"voter_e_threshold": 0.5})
     runtime.calibration = cal
 
     fake_shots = [
@@ -1047,70 +1004,25 @@ def test_camera_class_from_mount_maps_known_mounts() -> None:
 
 def test_calibration_thresholds_for_class_returns_class_thresholds() -> None:
     """Per-class lookup hits the correct entry; unknown classes fall back."""
-    from splitsmith.ensemble.calibration import ClassThresholds
-
-    cal = EnsembleCalibration(
-        voter_a_floor=0.05,
-        voter_b_threshold=0.0,
-        voter_c_threshold=0.5,
-        voter_c_target_recall=0.95,
-        tolerance_ms=75.0,
-        clap_prompts_shot=list(CLAP_PROMPTS_SHOT),
-        clap_prompts=list(CLAP_PROMPTS),
-        calibration_fixtures=["a", "b"],
-        n_calibration_candidates=10,
-        n_calibration_positives=5,
-        voter_c_feature_dim=VOTER_C_FEATURE_DIM,
-        built_at="1970-01-01T00:00:00Z",
-        default_camera_class="headcam",
-        thresholds_by_camera_class={
-            "headcam": ClassThresholds(
-                voter_a_floor=0.05,
-                voter_b_threshold=0.0,
-                voter_c_threshold=0.5,
-                n_calibration_candidates=8,
-                n_calibration_positives=4,
-                calibration_fixtures=["a"],
-            ),
-            "handheld": ClassThresholds(
-                voter_a_floor=0.10,
-                voter_b_threshold=0.20,
-                voter_c_threshold=0.30,
-                n_calibration_candidates=2,
-                n_calibration_positives=1,
-                calibration_fixtures=["b"],
+    cal = stub_calibration(
+        thresholds={
+            "headcam": stub_thresholds(voter_c_threshold=0.5, calibration_fixtures=["a"]),
+            "handheld": stub_thresholds(
+                voter_a_floor=0.10, voter_b_threshold=0.20, voter_c_threshold=0.30, calibration_fixtures=["b"]
             ),
         },
+        default_camera_class="headcam",
     )
 
-    assert cal.thresholds_for("headcam").voter_c_threshold == 0.5
-    assert cal.thresholds_for("handheld").voter_c_threshold == 0.30
-    # Unknown class -> default.
-    assert cal.thresholds_for("future-class").voter_c_threshold == 0.5
-    # No class given -> default.
-    assert cal.thresholds_for(None).voter_c_threshold == 0.5
-
-
-def test_calibration_thresholds_for_legacy_artifact_synthesizes_single_class() -> None:
-    """Pre-issue-#137 artifacts (no per-class dict) still resolve to a single set."""
-    cal = EnsembleCalibration(
-        voter_a_floor=0.07,
-        voter_b_threshold=0.08,
-        voter_c_threshold=0.42,
-        voter_c_target_recall=0.95,
-        tolerance_ms=75.0,
-        clap_prompts_shot=list(CLAP_PROMPTS_SHOT),
-        clap_prompts=list(CLAP_PROMPTS),
-        calibration_fixtures=["legacy"],
-        n_calibration_candidates=1,
-        n_calibration_positives=1,
-        voter_c_feature_dim=VOTER_C_FEATURE_DIM,
-        built_at="1970-01-01T00:00:00Z",
-    )
-
-    th = cal.thresholds_for("anything-at-all")
-    assert th.voter_a_floor == 0.07
-    assert th.voter_c_threshold == 0.42
+    for name in ("base", "clap"):
+        assert cal.thresholds_for("headcam", model_set=name).voter_c_threshold == 0.5
+        assert cal.thresholds_for("handheld", model_set=name).voter_c_threshold == 0.30
+        # Unknown class -> default.
+        assert cal.thresholds_for("future-class", model_set=name).voter_c_threshold == 0.5
+        # No class given -> default.
+        assert cal.thresholds_for(None, model_set=name).voter_c_threshold == 0.5
+    assert cal.thresholds_for("handheld", model_set="clap").voter_b_threshold == 0.20
+    assert cal.thresholds_for("handheld", model_set="base").voter_b_threshold is None
 
 
 def test_detect_shots_ensemble_uses_per_class_thresholds(monkeypatch) -> None:
@@ -1123,31 +1035,14 @@ def test_detect_shots_ensemble_uses_per_class_thresholds(monkeypatch) -> None:
     """
     from splitsmith.ensemble import api as ensemble_api
     from splitsmith.ensemble import features as ensemble_features
-    from splitsmith.ensemble.calibration import ClassThresholds
 
     runtime = _build_stub_runtime()
-    runtime.calibration = runtime.calibration.model_copy(
-        update={
-            "default_camera_class": "headcam",
-            "thresholds_by_camera_class": {
-                "headcam": ClassThresholds(
-                    voter_a_floor=0.05,
-                    voter_b_threshold=0.0,
-                    voter_c_threshold=0.5,
-                    n_calibration_candidates=10,
-                    n_calibration_positives=5,
-                    calibration_fixtures=["stub"],
-                ),
-                "handheld": ClassThresholds(
-                    voter_a_floor=0.20,
-                    voter_b_threshold=0.0,
-                    voter_c_threshold=0.5,
-                    n_calibration_candidates=5,
-                    n_calibration_positives=2,
-                    calibration_fixtures=["stub-phone"],
-                ),
-            },
-        }
+    runtime.calibration = stub_calibration(
+        thresholds={
+            "headcam": stub_thresholds(voter_a_floor=0.05),
+            "handheld": stub_thresholds(voter_a_floor=0.20, calibration_fixtures=["stub-phone"]),
+        },
+        default_camera_class="headcam",
     )
 
     fake_shots = [

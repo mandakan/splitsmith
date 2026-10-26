@@ -107,7 +107,13 @@ class ClassThresholds(BaseModel):
     """
 
     voter_a_floor: float
-    voter_b_threshold: float
+    voter_b_threshold: float | None = Field(
+        default=None,
+        description=(
+            "CLAP differential threshold for voter B. ``None`` in a model set "
+            "that scores no CLAP columns (``base``): voter B does not vote there."
+        ),
+    )
     voter_c_threshold: float
     voter_e_threshold: float | None = Field(
         default=None,
@@ -124,6 +130,52 @@ class ClassThresholds(BaseModel):
     calibration_fixtures: list[str]
 
 
+class ModelSet(BaseModel):
+    """One model set's voter C graphs, thresholds and decoders, per camera class.
+
+    A set is a named subset of ``features.VOTER_C_COLUMN_NAMES``: ``base``
+    needs no model download, ``clap`` adds the CLAP columns. Both sets come
+    from one build over one fixture list (thin detection spec 2026-10-26).
+    """
+
+    columns: list[str] = Field(description="Voter C column names this set scores, in matrix order.")
+    voter_c_feature_dim: int = Field(description="Input width of this set's voter C graphs.")
+    voter_c_onnx_artifacts: dict[str, str] = Field(
+        description="Voter C ONNX graph filename per camera class.",
+    )
+    thresholds_by_camera_class: dict[str, ClassThresholds]
+    voter_c_metrics_by_camera_class: dict[str, dict[str, float]] = Field(
+        default_factory=dict,
+        description="Per-class held-out voter C metrics recorded at build time.",
+    )
+    decoders_by_camera_class: dict[str, StageDecoder] = Field(
+        default_factory=dict,
+        description="Whole-stage decoder per camera class, fitted on this set's held-out scores.",
+    )
+    requires_artifacts: list[str] = Field(
+        default_factory=list,
+        description="Model registry slugs this set needs at runtime; empty for ``base``.",
+    )
+
+    def thresholds_for(self, camera_class: str | None, default_camera_class: str) -> ClassThresholds:
+        """Thresholds for ``camera_class``; ``None`` and unknown classes take the default class."""
+        per_class = self.thresholds_by_camera_class
+        cls = camera_class or default_camera_class
+        if cls in per_class:
+            return per_class[cls]
+        if default_camera_class in per_class:
+            return per_class[default_camera_class]
+        return next(iter(per_class.values()))
+
+    def decoder_for(self, camera_class: str | None, default_camera_class: str) -> StageDecoder | None:
+        """The decoder for ``camera_class`` (same fallback as thresholds); ``None`` when the set has none."""
+        per_class = self.decoders_by_camera_class
+        cls = camera_class or default_camera_class
+        if cls in per_class:
+            return per_class[cls]
+        return per_class.get(default_camera_class)
+
+
 class EnsembleCalibration(BaseModel):
     """Per-voter thresholds + provenance.
 
@@ -132,35 +184,6 @@ class EnsembleCalibration(BaseModel):
     calibration script.
     """
 
-    voter_a_floor: float = Field(
-        description=(
-            "Minimum detector confidence below which voter A drops a "
-            "candidate. Auto-calibrated to the lowest positive-shot "
-            "confidence across the calibration set."
-        ),
-    )
-    voter_b_threshold: float = Field(
-        description=(
-            "CLAP (shot - not-shot) prompt-similarity differential "
-            "threshold. Calibrated to the minimum value across labelled "
-            "positives -- preserves recall by construction."
-        ),
-    )
-    voter_c_threshold: float = Field(
-        description=(
-            "GBDT probability threshold for voter C. Picked from "
-            "5-fold CV predictions on the calibration set to hit "
-            "``voter_c_target_recall``."
-        ),
-    )
-    voter_e_threshold: float | None = Field(
-        default=None,
-        description=(
-            "Default-class CLIP visual-probe threshold for Voter E "
-            "(issue #183). ``None`` on artifacts that pre-date Voter E or "
-            "where the default class had no shots-vs-cross_bay calibration."
-        ),
-    )
     voter_c_target_recall: float = Field(
         ge=0.0,
         le=1.0,
@@ -198,26 +221,6 @@ class EnsembleCalibration(BaseModel):
     )
     n_calibration_positives: int = Field(
         description="Number of labelled positives across the calibration set.",
-    )
-    voter_c_feature_dim: int = Field(
-        description=(
-            "Number of features the GBDT classifier expects: hand-crafted "
-            "features + per-prompt CLAP similarities + the CLAP "
-            "shot/not-shot differential."
-        ),
-    )
-    voter_c_onnx_artifacts: dict[str, str] | None = Field(
-        default=None,
-        description=(
-            "Issue #649: filename of the voter C ONNX graph for each "
-            'camera class, e.g. ``{"headcam": "voter_c_gbdt_headcam.onnx"}``. '
-            "The map is explicit rather than derived from the class name so "
-            "a new camera class needs no code change and a hand-assembled "
-            "``SPLITSMITH_ARTIFACTS_DIR`` set can name its files freely. "
-            "``None`` on artifacts built before the ONNX export -- those "
-            "shipped a scikit-learn pickle, which the loader no longer "
-            "reads, so it raises and asks for a rebuild."
-        ),
     )
     voter_e_clip_model_id: str | None = Field(
         default=None,
@@ -264,36 +267,15 @@ class EnsembleCalibration(BaseModel):
             "preserves byte-identical behaviour for existing projects."
         ),
     )
-    decoder: StageDecoder | None = Field(
-        default=None,
+    model_sets: dict[str, ModelSet] = Field(
         description=(
-            "Whole-stage decoder (``ensemble.decoder``), experimental: fitted "
-            "by the build on leave-one-match-out voter C scores. ``None`` on "
-            "artifacts built before it; the runtime uses it only when "
-            "``EnsembleConfig.stage_decoder`` (or SPLITSMITH_STAGE_DECODER=1) "
-            "asks for it."
+            "Every model set this build produced, by name (``base``, ``clap``). "
+            "Per-set numbers live only here."
         ),
     )
-    thresholds_by_camera_class: dict[str, ClassThresholds] | None = Field(
-        default=None,
-        description=(
-            "Per-camera-class threshold sets. ``None`` on legacy artifacts "
-            "(pre-issue #137); the loader synthesizes a single-class entry "
-            "from the top-level voter_*_threshold fields so old artifacts "
-            "still load. Default headcam thresholds are frozen across "
-            "rebuilds to protect the dominant class."
-        ),
-    )
-    voter_c_metrics_by_camera_class: dict[str, dict[str, float]] | None = Field(
-        default=None,
-        description=(
-            "Per-class GBDT cross-validation metrics recorded at build "
-            "time (precision/recall/F1 at the picked threshold, plus "
-            "tp/fp/fn counts). Written by build_ensemble_artifacts.py; "
-            "``None`` on legacy artifacts. Surfaced by /api/dev/model so "
-            "the Retrain and Validate pages can show what the build "
-            "measured without a separate eval run."
-        ),
+    default_model_set: str = Field(
+        default="base",
+        description="The set detection uses when neither the env nor a preference names one.",
     )
     camera_model_metadata: dict[str, dict[str, str]] | None = Field(
         default=None,
@@ -345,35 +327,17 @@ class EnsembleCalibration(BaseModel):
                 return self.amp_floor_by_camera_model[key]
         return default
 
-    def thresholds_for(self, camera_class: str | None) -> ClassThresholds:
-        """Return calibrated thresholds for ``camera_class``, falling back to the default class.
-
-        ``camera_class=None`` returns the default-class set. Unknown
-        classes (no calibration on file) also fall back -- with a future
-        warning hook so the server can surface the miss.
-        """
-        per_class = self.thresholds_by_camera_class
-        if per_class is None:
-            # Pre-issue-#137 artifact: synthesize a single-class set from
-            # the top-level fields. No need to cache; this branch is
-            # rare and the result is cheap.
-            return ClassThresholds(
-                voter_a_floor=self.voter_a_floor,
-                voter_b_threshold=self.voter_b_threshold,
-                voter_c_threshold=self.voter_c_threshold,
-                voter_e_threshold=self.voter_e_threshold,
-                n_calibration_candidates=self.n_calibration_candidates,
-                n_calibration_positives=self.n_calibration_positives,
-                calibration_fixtures=list(self.calibration_fixtures),
+    def model_set(self, name: str) -> ModelSet:
+        """The named model set; an unknown name raises naming the sets this calibration has."""
+        if name not in self.model_sets:
+            raise RuntimeError(
+                f"ensemble calibration has no model set {name!r}; it has {', '.join(sorted(self.model_sets))}"
             )
-        cls = camera_class or self.default_camera_class
-        if cls in per_class:
-            return per_class[cls]
-        if self.default_camera_class in per_class:
-            return per_class[self.default_camera_class]
-        # Last-resort: pick any class. Should never happen on a real
-        # artifact since the build script always emits the default class.
-        return next(iter(per_class.values()))
+        return self.model_sets[name]
+
+    def thresholds_for(self, camera_class: str | None, *, model_set: str) -> ClassThresholds:
+        """Calibrated thresholds for ``camera_class`` in ``model_set``, falling back to the default class."""
+        return self.model_set(model_set).thresholds_for(camera_class, self.default_camera_class)
 
 
 DEFAULT_VOTER_E_PROBE_FILENAME = "voter_e_visual_probe.onnx"
@@ -458,7 +422,14 @@ def load_calibration() -> EnsembleCalibration:
     """Read ``ensemble_calibration.json`` from the resolved artifacts dir."""
     path = runtime().artifact("ensemble_calibration.json")
     with path.open("r", encoding="utf-8") as fh:
-        return EnsembleCalibration.model_validate(json.load(fh))
+        payload = json.load(fh)
+    if "model_sets" not in payload:
+        raise RuntimeError(
+            f"{path} predates model sets (no `model_sets` block), so this splitsmith cannot "
+            "read it. Rebuild the artifacts with `uv run python scripts/build_ensemble_artifacts.py`, "
+            "or check out the commit they were built with."
+        )
+    return EnsembleCalibration.model_validate(payload)
 
 
 def load_voter_c_model(artifacts: Mapping[str, str] | None = None) -> dict[str, OnnxProbaModel]:
@@ -468,11 +439,14 @@ def load_voter_c_model(artifacts: Mapping[str, str] | None = None) -> dict[str, 
     model via ``models[camera_class]`` (with the calibration's
     ``default_camera_class`` as fallback for unknown classes).
 
-    ``artifacts`` is the calibration's ``voter_c_onnx_artifacts`` map;
-    pass it when the caller already holds a calibration so the JSON is
-    not read twice. ``None`` reads it here.
+    ``artifacts`` is a model set's ``voter_c_onnx_artifacts`` map; pass it
+    when the caller already holds a calibration so the JSON is not read
+    twice. ``None`` reads the default set's map here.
     """
-    names = artifacts if artifacts is not None else load_calibration().voter_c_onnx_artifacts
+    if artifacts is None:
+        cal = load_calibration()
+        artifacts = cal.model_set(cal.default_model_set).voter_c_onnx_artifacts
+    names = artifacts
     resolved = runtime()
     if not names:
         raise RuntimeError(

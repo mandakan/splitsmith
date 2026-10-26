@@ -118,6 +118,7 @@ class HeldoutSplit(BaseModel):
 
 
 class VoterCHead(BaseModel):
+    model_set: str
     camera_class: CameraClass
     n_fixtures: int
     n_candidates: int
@@ -189,6 +190,8 @@ class ModelVersion(BaseModel):
     date: str
     subject: str
     built_at: str | None
+    # The set the recall and precision figures are read from.
+    model_set: str
     n_fixtures: dict[str, int]
     recall: dict[str, float]
     precision: dict[str, float]
@@ -239,10 +242,50 @@ def _cv_metrics(block: Mapping[str, Any] | None) -> SplitMetrics | None:
     )
 
 
+LEGACY_MODEL_SET = "legacy"
+
+
+def model_set_names(cal: Mapping[str, Any]) -> list[str]:
+    """The calibration's model sets, the default set first. A flat
+    calibration from before model sets (git history) is one set, ``legacy``."""
+    sets = cal.get("model_sets")
+    if not isinstance(sets, Mapping):
+        return [LEGACY_MODEL_SET]
+    default = cal.get("default_model_set")
+    return sorted(sets, key=lambda n: (n != default, n))
+
+
+def model_set_block(cal: Mapping[str, Any], name: str) -> Mapping[str, Any]:
+    """The one place the lab reads a set's per-set fields (thresholds,
+    graphs, metrics, feature width). ``legacy`` is a flat calibration's
+    top level; an unknown name raises ``KeyError``."""
+    sets = cal.get("model_sets")
+    if not isinstance(sets, Mapping):
+        if name != LEGACY_MODEL_SET:
+            raise KeyError(name)
+        return cal
+    return sets[name]
+
+
+def _primary_set(cal: Mapping[str, Any]) -> str:
+    return model_set_names(cal)[0]
+
+
+def _heldout_block(heldout: Mapping[str, Any] | None, name: str) -> Mapping[str, Any]:
+    """A set's held-out report: under ``model_sets`` in a report written with
+    model sets, the top level in one written before them."""
+    report = heldout or {}
+    sets = report.get("model_sets")
+    if isinstance(sets, Mapping):
+        return sets.get(name) or {}
+    return report if name == LEGACY_MODEL_SET else {}
+
+
 def calibration_fixtures_by_class(cal: Mapping[str, Any]) -> dict[str, list[str]]:
-    """Each head's fixture list; a calibration from before the per-class
-    heads lists one corpus, reported under ``all``."""
-    by_class = cal.get("thresholds_by_camera_class") or {}
+    """Each head's fixture list (every set shares one, so the default set's);
+    a calibration from before the per-class heads lists one corpus, reported
+    under ``all``."""
+    by_class = model_set_block(cal, _primary_set(cal)).get("thresholds_by_camera_class") or {}
     out = {cls: list(block.get("calibration_fixtures") or []) for cls, block in by_class.items()}
     if not out and cal.get("calibration_fixtures"):
         out["all"] = list(cal["calibration_fixtures"])
@@ -252,10 +295,23 @@ def calibration_fixtures_by_class(cal: Mapping[str, Any]) -> dict[str, list[str]
 def _heads(
     cal: Mapping[str, Any], heldout: Mapping[str, Any] | None, artifact_sizes: Mapping[str, int]
 ) -> list[VoterCHead]:
-    by_class = cal.get("thresholds_by_camera_class") or {}
-    metrics = cal.get("voter_c_metrics_by_camera_class") or {}
-    onnx = cal.get("voter_c_onnx_artifacts") or {}
-    held = (heldout or {}).get("by_camera_class") or {}
+    heads: list[VoterCHead] = []
+    for set_name in model_set_names(cal):
+        heads += _set_heads(set_name, cal, heldout, artifact_sizes)
+    return heads
+
+
+def _set_heads(
+    set_name: str,
+    cal: Mapping[str, Any],
+    heldout: Mapping[str, Any] | None,
+    artifact_sizes: Mapping[str, int],
+) -> list[VoterCHead]:
+    block_set = model_set_block(cal, set_name)
+    by_class = block_set.get("thresholds_by_camera_class") or {}
+    metrics = block_set.get("voter_c_metrics_by_camera_class") or {}
+    onnx = block_set.get("voter_c_onnx_artifacts") or {}
+    held = _heldout_block(heldout, set_name).get("by_camera_class") or {}
     heads: list[VoterCHead] = []
     for cls in ("headcam", "handheld"):
         block = by_class.get(cls)
@@ -278,6 +334,7 @@ def _heads(
             )
         heads.append(
             VoterCHead(
+                model_set=set_name,
                 camera_class=cls,
                 n_fixtures=len(block.get("calibration_fixtures") or []),
                 n_candidates=int(block.get("n_calibration_candidates") or 0),
@@ -493,7 +550,7 @@ def build_model_map(
         built_at=calibration.get("built_at"),
         target_recall=calibration.get("voter_c_target_recall"),
         tolerance_ms=calibration.get("tolerance_ms"),
-        feature_dim=calibration.get("voter_c_feature_dim"),
+        feature_dim=model_set_block(calibration, _primary_set(calibration)).get("voter_c_feature_dim"),
         default_camera_class=calibration.get("default_camera_class"),
         heads=_heads(calibration, heldout, artifact_sizes),
         hyperparameters=dict(hyperparameters),
@@ -522,12 +579,14 @@ def version_from(
     """One shipped calibration, with the fixtures it added and dropped
     against the version before it (``previous``; ``None`` for the first)."""
     stems = {s for v in calibration_fixtures_by_class(cal).values() for s in v}
-    metrics = cal.get("voter_c_metrics_by_camera_class") or {}
+    set_name = _primary_set(cal)
+    metrics = model_set_block(cal, set_name).get("voter_c_metrics_by_camera_class") or {}
     return ModelVersion(
         sha=sha,
         date=date,
         subject=subject,
         built_at=cal.get("built_at"),
+        model_set=set_name,
         n_fixtures={k: len(v) for k, v in calibration_fixtures_by_class(cal).items()},
         recall={
             k: float(m["voter_c_recall_cv"])
@@ -695,7 +754,9 @@ def load_model_map(shipped_calibration: Path, model_id: str = SHIPPED_ID) -> Mod
     calibration = _read_json(calibration_path) or {}
     thresholds = {
         stem: float(block["voter_c_threshold"])
-        for block in (calibration.get("thresholds_by_camera_class") or {}).values()
+        for block in (
+            model_set_block(calibration, _primary_set(calibration)).get("thresholds_by_camera_class") or {}
+        ).values()
         if block.get("voter_c_threshold") is not None
         for stem in block.get("calibration_fixtures") or []
     }
@@ -712,7 +773,12 @@ def load_model_map(shipped_calibration: Path, model_id: str = SHIPPED_ID) -> Mod
     except OSError:
         script = ""
     sizes: dict[str, int] = {}
-    for name in (calibration.get("voter_c_onnx_artifacts") or {}).values():
+    graphs = {
+        g
+        for set_name in model_set_names(calibration)
+        for g in (model_set_block(calibration, set_name).get("voter_c_onnx_artifacts") or {}).values()
+    }
+    for name in sorted(graphs):
         try:
             sizes[name] = (calibration_path.parent / name).stat().st_size
         except OSError:

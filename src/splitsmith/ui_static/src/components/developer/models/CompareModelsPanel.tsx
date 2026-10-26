@@ -54,8 +54,10 @@ export function CompareModelsPanel({ a, b }: { a: ModelMap; b: ModelMap }) {
         </p>
 
         {heads.map((h) => (
-          <div key={h.cameraClass} className="flex flex-col gap-3">
-            <span className="text-md text-ink">{CLASSIFIER_LABEL[h.cameraClass]}</span>
+          <div key={`${h.modelSet}-${h.cameraClass}`} className="flex flex-col gap-3">
+            <span className="text-md text-ink">
+              {CLASSIFIER_LABEL[h.cameraClass]} <span className="text-muted">({h.modelSet} model)</span>
+            </span>
             <div className="grid gap-4 xl:grid-cols-2">
               <Table>
                 <thead>

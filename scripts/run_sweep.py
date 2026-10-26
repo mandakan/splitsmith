@@ -142,7 +142,7 @@ def _resolve_thresholds(
     cal: EnsembleCalibration,
 ) -> dict[str, float | None]:
     """Apply absolute/offset overrides on top of the calibrated baseline."""
-    base = cal.thresholds_for(camera_class)
+    base = cal.thresholds_for(camera_class, model_set="clap")
     out: dict[str, float | None] = {}
     for v in ("a_floor", "b_threshold", "c_threshold", "e_threshold"):
         baseline = getattr(base, f"voter_{v}")

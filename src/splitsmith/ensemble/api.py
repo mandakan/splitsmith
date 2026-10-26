@@ -33,6 +33,9 @@ from .tta import compute_tta_agreement
 #: Overrides ``EnsembleConfig.stage_decoder``: "0" keeps the consensus vote
 #: (the escape hatch), "1" forces the whole-stage decoder (A/B runs).
 ENV_STAGE_DECODER = "SPLITSMITH_STAGE_DECODER"
+# The set the runtime scores until it resolves one per call: ``clap`` is
+# today's columns minus PANN, so detection behaves as it did.
+_RUNTIME_MODEL_SET = "clap"
 
 
 class EnsembleConfig(BaseModel):
@@ -239,13 +242,14 @@ def load_ensemble_runtime(*, with_voter_e: bool = True) -> EnsembleRuntime:
     when the probe artifact is missing or the calibration predates it.
     """
     calibration = load_calibration()
-    voter_c_model = load_voter_c_model(calibration.voter_c_onnx_artifacts)
+    model_set = calibration.model_set(_RUNTIME_MODEL_SET)
+    voter_c_model = load_voter_c_model(model_set.voter_c_onnx_artifacts)
     for model in voter_c_model.values():
-        width = getattr(model, "n_features", feat.VOTER_C_FEATURE_DIM)
-        if width != feat.VOTER_C_FEATURE_DIM:
+        width = getattr(model, "n_features", model_set.voter_c_feature_dim)
+        if width != model_set.voter_c_feature_dim:
             raise RuntimeError(
                 f"{model.path} takes {width} features but this splitsmith builds "
-                f"{feat.VOTER_C_FEATURE_DIM}; the artifacts predate the current voter C "
+                f"{model_set.voter_c_feature_dim}; the artifacts predate the current voter C "
                 "layout. Rebuild them with scripts/build_ensemble_artifacts.py, or check "
                 "out the commit they were built with."
             )
@@ -326,7 +330,8 @@ def detect_shots_ensemble(
     """
     cfg = ensemble_config or EnsembleConfig()
     cal = runtime.calibration
-    thresholds = cal.thresholds_for(camera_class)
+    thresholds = cal.thresholds_for(camera_class, model_set=_RUNTIME_MODEL_SET)
+    decoder = cal.model_set(_RUNTIME_MODEL_SET).decoder_for(camera_class, cal.default_camera_class)
 
     # Voter A universe: maximum recall (raw detector, no confidence floor).
     # ``recall_fallback="cwt"`` matches the calibration script so the
@@ -428,13 +433,13 @@ def detect_shots_ensemble(
     decoder_probs: np.ndarray | None = None
     env_decoder = os.environ.get(ENV_STAGE_DECODER)
     decoder_on = {"0": False, "1": True}.get(env_decoder or "", cfg.stage_decoder)
-    if cal.decoder is not None and decoder_on:
+    if decoder is not None and decoder_on:
         decoder_probs = dec.shot_probabilities(
-            cal.decoder,
+            decoder,
             dec.decoder_features(score_c, clap_diff, gunshot_prob, confidences, peak_amps, vb),
         )
         keep_mask = dec.decode_stage(
-            cal.decoder,
+            decoder,
             shot_times,
             decoder_probs,
             beep_time=beep_time,

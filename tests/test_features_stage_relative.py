@@ -236,6 +236,9 @@ def test_old_width_artifact_fails_at_load(monkeypatch):
         n_features = 31
         path = Path("voter_c_gbdt_headcam.onnx")
 
+    from tests._ensemble_stubs import stub_calibration
+
+    monkeypatch.setattr(api, "load_calibration", stub_calibration)
     monkeypatch.setattr(api, "load_voter_c_model", lambda *_a, **_k: {"headcam": Narrow()})
     monkeypatch.setattr(api.feat, "load_clap_runtime", lambda: None)
     monkeypatch.setattr(api.feat, "load_pann_runtime", lambda: None)

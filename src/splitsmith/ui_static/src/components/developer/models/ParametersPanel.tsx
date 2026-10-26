@@ -28,8 +28,8 @@ export function ParametersPanel({ ensemble }: { ensemble: EnsembleModel }) {
             <tr>
               <Th>Voter C classifier</Th>
               {heads.map((h) => (
-                <Th key={h.camera_class} align="right">
-                  {h.camera_class}
+                <Th key={`${h.model_set}-${h.camera_class}`} align="right">
+                  {h.model_set} {h.camera_class}
                 </Th>
               ))}
             </tr>

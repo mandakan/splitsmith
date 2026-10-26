@@ -178,6 +178,7 @@ describe("versionSeries", () => {
       date: "2026-01-01",
       subject: "",
       built_at: null,
+      model_set: "base",
       n_fixtures: n,
       recall: {},
       precision: {},
@@ -203,8 +204,9 @@ describe("heldOutTone", () => {
 
 describe("comparing two models", () => {
   const m = (recall: number) => ({ precision: 0.9, recall, f1: 0, tp: 0, fp: 0, fn: 0 });
-  const head = (cls: "headcam" | "handheld", recall: number, byMatch: Record<string, number>) =>
+  const head = (cls: "headcam" | "handheld", recall: number, byMatch: Record<string, number>, set = "clap") =>
     ({
+      model_set: set,
       camera_class: cls,
       n_fixtures: 1,
       n_candidates: 10,
@@ -239,7 +241,10 @@ describe("comparing two models", () => {
 
   it("lines up splits and matches per head, a head only one model has included", () => {
     const heads = compareHeads(a, b);
-    expect(heads.map((h) => h.cameraClass)).toEqual(["headcam", "handheld"]);
+    expect(heads.map((h) => [h.modelSet, h.cameraClass])).toEqual([
+      ["clap", "headcam"],
+      ["clap", "handheld"],
+    ]);
     const lomo = heads[0].rows.find((r) => r.split === "lomo")!;
     expect([lomo.a?.recall, lomo.b?.recall]).toEqual([0.82, 0.9]);
     expect(heads[0].rows.find((r) => r.split === "grouped")).toEqual({ split: "grouped", a: null, b: null });
@@ -257,12 +262,29 @@ describe("comparing two models", () => {
   it("marks the parameters that differ", () => {
     const rows = paramRows(a, b);
     expect(rows.find((r) => r.label === "Target recall")?.differs).toBe(false);
-    expect(rows.find((r) => r.label === "headcam: voter C threshold")).toMatchObject({
+    expect(rows.find((r) => r.label === "clap headcam: voter C threshold")).toMatchObject({
       a: "0.8200",
       b: "0.9000",
       differs: true,
     });
-    expect(rows.find((r) => r.label === "handheld: fixtures")).toMatchObject({ a: "--", b: "1", differs: true });
+    expect(rows.find((r) => r.label === "clap handheld: fixtures")).toMatchObject({ a: "--", b: "1", differs: true });
+  });
+
+  it("pairs a build from before model sets with the clap set, and lists base on its own", () => {
+    const old = model([fx("both")], [head("headcam", 0.8, {}, "legacy")]);
+    const sets = model([fx("both")], [head("headcam", 0.9, {}, "base"), head("headcam", 0.85, {}, "clap")]);
+    const heads = compareHeads(old, sets);
+    expect(heads.map((h) => [h.modelSet, h.cameraClass])).toEqual([
+      ["base", "headcam"],
+      ["clap", "headcam"],
+    ]);
+    const lomo = (i: number) => heads[i].rows.find((r) => r.split === "lomo")!;
+    expect([lomo(0).a, lomo(0).b?.recall]).toEqual([null, 0.9]);
+    expect([lomo(1).a?.recall, lomo(1).b?.recall]).toEqual([0.8, 0.85]);
+    expect(paramRows(old, sets).find((r) => r.label === "clap headcam: voter C threshold")).toMatchObject({
+      a: "0.8000",
+      b: "0.8500",
+    });
   });
 });
 

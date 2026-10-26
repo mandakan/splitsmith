@@ -63,6 +63,8 @@ export interface HeldoutSplit {
 }
 
 export interface VoterCHead {
+  /** The model set this head belongs to (``base``, ``clap``; ``legacy`` for a build from before sets). */
+  model_set: string;
   camera_class: CameraClass;
   n_fixtures: number;
   n_candidates: number;
@@ -133,6 +135,8 @@ export interface ModelVersion {
   date: string;
   subject: string;
   built_at: string | null;
+  /** The set the recall and precision figures are read from. */
+  model_set: string;
   n_fixtures: Record<string, number>;
   recall: Record<string, number>;
   precision: Record<string, number>;
@@ -575,6 +579,7 @@ export function corpusMembership(a: ModelMap, b: ModelMap): Record<string, Membe
 }
 
 export interface HeadComparison {
+  modelSet: string;
   cameraClass: CameraClass;
   rows: { split: SplitName; a: SplitMetrics | null; b: SplitMetrics | null }[];
   matches: { match: string; a: SplitMetrics | null; b: SplitMetrics | null }[];
@@ -582,12 +587,26 @@ export interface HeadComparison {
   perMatch: { a: boolean; b: boolean };
 }
 
-/** Both models' figures per head, split by split and match by match. */
+/** A build from before model sets scored every column (plus PANN): its
+ * heads line up with the ``clap`` set's. */
+const comparableSet = (set: string) => (set === "legacy" ? "clap" : set);
+
+/** The model sets either model has, ``base`` first. */
+function comparedSets(a: ModelMap, b: ModelMap): string[] {
+  const sets = new Set([...a.ensemble.heads, ...b.ensemble.heads].map((h) => comparableSet(h.model_set)));
+  return [...sets].sort((x, y) => Number(x !== "base") - Number(y !== "base") || x.localeCompare(y));
+}
+
+const headOf = (m: ModelMap, set: string, cls: CameraClass) =>
+  m.ensemble.heads.find((h) => comparableSet(h.model_set) === set && h.camera_class === cls) ?? null;
+
+/** Both models' figures per head (set and class), split by split and match by match. */
 export function compareHeads(a: ModelMap, b: ModelMap): HeadComparison[] {
   const out: HeadComparison[] = [];
+  for (const set of comparedSets(a, b))
   for (const cls of ["headcam", "handheld"] as CameraClass[]) {
-    const ha = a.ensemble.heads.find((h) => h.camera_class === cls) ?? null;
-    const hb = b.ensemble.heads.find((h) => h.camera_class === cls) ?? null;
+    const ha = headOf(a, set, cls);
+    const hb = headOf(b, set, cls);
     if (!ha && !hb) continue;
     const at = (h: VoterCHead | null, s: SplitName) =>
       h?.heldout.find((x) => x.split === s)?.at_shipped_threshold ?? null;
@@ -595,6 +614,7 @@ export function compareHeads(a: ModelMap, b: ModelMap): HeadComparison[] {
     const mb = hb?.lomo_by_match ?? {};
     const matches = [...new Set([...Object.keys(ma), ...Object.keys(mb)])].sort();
     out.push({
+      modelSet: set,
       cameraClass: cls,
       rows: (["stratified", "grouped", "lomo"] as SplitName[]).map((s) => ({ split: s, a: at(ha, s), b: at(hb, s) })),
       matches: matches.map((m) => ({ match: m, a: ma[m] ?? null, b: mb[m] ?? null })),
@@ -619,16 +639,18 @@ export function paramRows(a: ModelMap, b: ModelMap): ParamRow[] {
     ["Match tolerance ms", fmt(a.ensemble.tolerance_ms, 0), fmt(b.ensemble.tolerance_ms, 0)],
     ["Voter C features", String(a.ensemble.feature_dim ?? "--"), String(b.ensemble.feature_dim ?? "--")],
   ];
+  for (const set of comparedSets(a, b))
   for (const cls of ["headcam", "handheld"] as CameraClass[]) {
-    const ha = a.ensemble.heads.find((h) => h.camera_class === cls);
-    const hb = b.ensemble.heads.find((h) => h.camera_class === cls);
+    const ha = headOf(a, set, cls);
+    const hb = headOf(b, set, cls);
+    const k = `${set} ${cls}`;
     rows.push(
-      [`${cls}: fixtures`, String(ha?.n_fixtures ?? "--"), String(hb?.n_fixtures ?? "--")],
-      [`${cls}: candidates`, String(ha?.n_candidates ?? "--"), String(hb?.n_candidates ?? "--")],
-      [`${cls}: shots`, String(ha?.n_positives ?? "--"), String(hb?.n_positives ?? "--")],
-      [`${cls}: voter A floor`, fmt(ha?.voter_a_floor), fmt(hb?.voter_a_floor)],
-      [`${cls}: voter B threshold`, fmt(ha?.voter_b_threshold), fmt(hb?.voter_b_threshold)],
-      [`${cls}: voter C threshold`, fmt(ha?.voter_c_threshold), fmt(hb?.voter_c_threshold)],
+      [`${k}: fixtures`, String(ha?.n_fixtures ?? "--"), String(hb?.n_fixtures ?? "--")],
+      [`${k}: candidates`, String(ha?.n_candidates ?? "--"), String(hb?.n_candidates ?? "--")],
+      [`${k}: shots`, String(ha?.n_positives ?? "--"), String(hb?.n_positives ?? "--")],
+      [`${k}: voter A floor`, fmt(ha?.voter_a_floor), fmt(hb?.voter_a_floor)],
+      [`${k}: voter B threshold`, fmt(ha?.voter_b_threshold), fmt(hb?.voter_b_threshold)],
+      [`${k}: voter C threshold`, fmt(ha?.voter_c_threshold), fmt(hb?.voter_c_threshold)],
     );
   }
   return rows.map(([label, va, vb]) => ({ label, a: va, b: vb, differs: va !== vb }));

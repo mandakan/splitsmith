@@ -11572,7 +11572,9 @@ def create_app(
                         "built_at": cal.built_at,
                         "fixture_count": len(cal.calibration_fixtures),
                         "target_recall": cal.voter_c_target_recall,
-                        "metrics_by_class": cal.voter_c_metrics_by_camera_class,
+                        "metrics_by_class": cal.model_set(
+                            cal.default_model_set
+                        ).voter_c_metrics_by_camera_class,
                     }
 
                 before = _cal_snapshot()
@@ -12209,7 +12211,7 @@ def create_app(
             f1=None,
             fixture_count=len(cal.calibration_fixtures),
             built_at=cal.built_at,
-            metrics_by_class=cal.voter_c_metrics_by_camera_class,
+            metrics_by_class=cal.model_set(cal.default_model_set).voter_c_metrics_by_camera_class,
             step_counts=DeveloperStepCounts(
                 corpus=len(fixtures),
                 review=review_count,
