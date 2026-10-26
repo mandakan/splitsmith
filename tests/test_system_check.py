@@ -14,9 +14,16 @@ from splitsmith import runtime as runtime_module
 from splitsmith import system_check
 
 
-def _make_fake_ffmpeg(path: Path) -> None:
+def _make_fake_ffmpeg(path: Path) -> Path:
+    """A stand-in binary that exits 0, and the path to run it by. Windows
+    cannot run a shell script, so there it is a ``.cmd`` beside ``path``."""
+    if sys.platform == "win32":
+        path = path.with_suffix(".cmd")
+        path.write_text("@exit /b 0\r\n", encoding="utf-8")
+        return path
     path.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
     path.chmod(0o755)
+    return path
 
 
 def _point_runtime_at(
@@ -42,8 +49,8 @@ def _reset_runtime() -> None:
 def test_present_binaries_yield_ok(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     ff = tmp_path / "ffmpeg"
     fp = tmp_path / "ffprobe"
-    _make_fake_ffmpeg(ff)
-    _make_fake_ffmpeg(fp)
+    ff = _make_fake_ffmpeg(ff)
+    fp = _make_fake_ffmpeg(fp)
     _point_runtime_at(monkeypatch, ffmpeg=str(ff), ffprobe=str(fp), config_dir=tmp_path / "cfg")
 
     outcome = system_check.check_ffmpeg()
@@ -69,8 +76,8 @@ def test_missing_binary_returns_install_hint(monkeypatch: pytest.MonkeyPatch, tm
 def test_positive_result_is_cached(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     ff = tmp_path / "ffmpeg"
     fp = tmp_path / "ffprobe"
-    _make_fake_ffmpeg(ff)
-    _make_fake_ffmpeg(fp)
+    ff = _make_fake_ffmpeg(ff)
+    fp = _make_fake_ffmpeg(fp)
     _point_runtime_at(monkeypatch, ffmpeg=str(ff), ffprobe=str(fp), config_dir=tmp_path / "cfg")
 
     first = system_check.check_ffmpeg()
@@ -87,8 +94,8 @@ def test_positive_result_is_cached(monkeypatch: pytest.MonkeyPatch, tmp_path: Pa
 def test_cached_positive_skips_subprocess(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     ff = tmp_path / "ffmpeg"
     fp = tmp_path / "ffprobe"
-    _make_fake_ffmpeg(ff)
-    _make_fake_ffmpeg(fp)
+    ff = _make_fake_ffmpeg(ff)
+    fp = _make_fake_ffmpeg(fp)
     _point_runtime_at(monkeypatch, ffmpeg=str(ff), ffprobe=str(fp), config_dir=tmp_path / "cfg")
     system_check.check_ffmpeg()
 
@@ -107,8 +114,8 @@ def test_cached_positive_skips_subprocess(monkeypatch: pytest.MonkeyPatch, tmp_p
 def test_stale_cache_re_verifies(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     ff = tmp_path / "ffmpeg"
     fp = tmp_path / "ffprobe"
-    _make_fake_ffmpeg(ff)
-    _make_fake_ffmpeg(fp)
+    ff = _make_fake_ffmpeg(ff)
+    fp = _make_fake_ffmpeg(fp)
     _point_runtime_at(monkeypatch, ffmpeg=str(ff), ffprobe=str(fp), config_dir=tmp_path / "cfg")
 
     # Write a stale positive cache entry from a day + change ago.
@@ -170,8 +177,8 @@ def test_install_hint_is_platform_aware(monkeypatch: pytest.MonkeyPatch) -> None
 def test_use_cache_false_forces_probe(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     ff = tmp_path / "ffmpeg"
     fp = tmp_path / "ffprobe"
-    _make_fake_ffmpeg(ff)
-    _make_fake_ffmpeg(fp)
+    ff = _make_fake_ffmpeg(ff)
+    fp = _make_fake_ffmpeg(fp)
     _point_runtime_at(monkeypatch, ffmpeg=str(ff), ffprobe=str(fp), config_dir=tmp_path / "cfg")
     system_check.check_ffmpeg()  # primes cache
 
