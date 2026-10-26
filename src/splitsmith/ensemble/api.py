@@ -219,11 +219,14 @@ class EnsembleRuntime:
     # field stays duck-typed on ``predict_proba`` so tests can inject a
     # stub without building an ONNX graph.
     voter_c_model: dict[str, Any]
-    clap: feat.ClapRuntime
+    # ``None`` under a model set that scores no CLAP columns (``base``).
+    clap: feat.ClapRuntime | None
     # Track the prompt list the calibration was built against so we can
     # warn if the on-package CLAP prompt bank ever drifts.
     expected_prompts: tuple[str, ...] = field(default_factory=tuple)
     visual: vis.VisualRuntime | None = None
+    # The model set this runtime scores with (``features.MODEL_SETS``).
+    model_set: str = "clap"
 
 
 def load_ensemble_runtime(*, with_voter_e: bool = True) -> EnsembleRuntime:

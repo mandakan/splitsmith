@@ -4,9 +4,13 @@ but not the shipped one."""
 from __future__ import annotations
 
 from collections.abc import Mapping
+from dataclasses import dataclass
 from typing import Any
 
+import numpy as np
+
 from splitsmith.ensemble import features as feat
+from splitsmith.ensemble.api import EnsembleRuntime
 from splitsmith.ensemble.calibration import ClassThresholds, EnsembleCalibration, ModelSet
 from splitsmith.ensemble.decoder import StageDecoder
 
@@ -81,3 +85,30 @@ def with_set_update(cal: EnsembleCalibration, name: str, **update: Any) -> Ensem
     sets = dict(cal.model_sets)
     sets[name] = sets[name].model_copy(update=update)
     return cal.model_copy(update={"model_sets": sets})
+
+
+@dataclass
+class StubClapRuntime:
+    """Stands in for ``ClapRuntime``; tests patch ``compute_clap_similarities``."""
+
+
+class StubGBDT:
+    """``predict_proba`` always returns 0.95 for class 1, 0.05 for class 0."""
+
+    def predict_proba(self, x: np.ndarray) -> np.ndarray:
+        out = np.zeros((x.shape[0], 2), dtype=np.float64)
+        out[:, 0] = 0.05
+        out[:, 1] = 0.95
+        return out
+
+
+def stub_runtime(model_set: str = "clap", **calibration_over: Any) -> EnsembleRuntime:
+    """A runtime over ``stub_calibration`` that scores ``model_set``: a CLAP
+    stand-in only for ``clap``, the always-0.95 GBDT for both classes."""
+    return EnsembleRuntime(
+        calibration=stub_calibration(**calibration_over),
+        voter_c_model={"headcam": StubGBDT(), "handheld": StubGBDT()},
+        clap=StubClapRuntime() if model_set == "clap" else None,  # type: ignore[arg-type]
+        expected_prompts=tuple(feat.CLAP_PROMPTS),
+        model_set=model_set,
+    )

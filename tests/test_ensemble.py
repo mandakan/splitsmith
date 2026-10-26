@@ -8,8 +8,6 @@ side-stepping the heavy model paths.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-
 import numpy as np
 import pytest
 
@@ -37,7 +35,7 @@ from splitsmith.ensemble.voters import (
     vote_e,
     within_stage_amp_veto,
 )
-from tests._ensemble_stubs import stub_calibration, stub_thresholds
+from tests._ensemble_stubs import stub_calibration, stub_runtime, stub_thresholds
 
 
 def test_vote_a_floor_threshold() -> None:
@@ -367,29 +365,8 @@ def test_voter_c_feature_matrix_empty_returns_zero_rows() -> None:
 # ---------------------------------------------------------------------------
 
 
-@dataclass
-class _StubClapRuntime:
-    """Mimics ``ClapRuntime`` for type-shape; never used by the stubs below."""
-
-
-class _StubGBDT:
-    """``predict_proba`` always returns 0.95 for class 1, 0.05 for class 0."""
-
-    def predict_proba(self, x: np.ndarray) -> np.ndarray:
-        out = np.zeros((x.shape[0], 2), dtype=np.float64)
-        out[:, 0] = 0.05
-        out[:, 1] = 0.95
-        return out
-
-
 def _build_stub_runtime() -> EnsembleRuntime:
-    cal = stub_calibration()
-    return EnsembleRuntime(
-        calibration=cal,
-        voter_c_model={"headcam": _StubGBDT(), "handheld": _StubGBDT()},
-        clap=_StubClapRuntime(),  # type: ignore[arg-type]
-        expected_prompts=tuple(CLAP_PROMPTS),
-    )
+    return stub_runtime("clap")
 
 
 def test_detect_shots_ensemble_full_universe_with_stubs(monkeypatch) -> None:

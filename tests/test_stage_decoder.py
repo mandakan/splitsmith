@@ -301,8 +301,8 @@ def _stub_detection(monkeypatch, times, confidence):
     from splitsmith.config import Shot
     from splitsmith.ensemble import api as ensemble_api
     from splitsmith.ensemble import features as ensemble_features
-    from tests._ensemble_stubs import with_set_update
-    from tests.test_ensemble import CLAP_PROMPTS, _build_stub_runtime
+    from splitsmith.ensemble.features import CLAP_PROMPTS
+    from tests._ensemble_stubs import stub_runtime, with_set_update
 
     shots = [
         Shot(
@@ -322,7 +322,7 @@ def _stub_detection(monkeypatch, times, confidence):
         "compute_clap_similarities",
         lambda audio, sr, t, runtime: np.full((len(t), len(CLAP_PROMPTS)), 0.5, dtype=np.float32),
     )
-    runtime = _build_stub_runtime()
+    runtime = stub_runtime("clap")
     # A decoder that reads only the detector confidence (logit = 10 * (c - 0.5)).
     model = _model(coef=[0, 0, 10.0, 0, 0], intercept=-5.0)
     runtime.calibration = with_set_update(
