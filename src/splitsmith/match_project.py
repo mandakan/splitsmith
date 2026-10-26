@@ -2297,7 +2297,7 @@ class MatchProject(BaseModel):
         for video in self.all_videos():
             if video.fingerprint is not None:
                 continue
-            candidate = video.path if video.path.is_absolute() else raw_link.resolve(root / video.path)
+            candidate = raw_link.resolve(video.path if video.path.is_absolute() else root / video.path)
             try:
                 if not candidate.exists():
                     continue
@@ -2342,7 +2342,9 @@ class MatchProject(BaseModel):
         if self._confined and (video_path.is_absolute() or ".." in video_path.parts):
             return root / UNREACHABLE_SOURCE_DIR / (video_path.name or "source")
         if video_path.is_absolute():
-            return video_path
+            # A raw_dir outside the project stores the entry's absolute
+            # path; on Windows that entry is a pointer file too.
+            return raw_link.resolve(video_path)
         local = root / video_path
         if not self._confined and not local.exists() and not local.is_symlink():
             # Referenced in place through a pointer file (Windows). Never on
@@ -2421,7 +2423,7 @@ class MatchProject(BaseModel):
         if self._confined and (video_path.is_absolute() or ".." in video_path.parts):
             return False
         if video_path.is_absolute():
-            return video_path.exists()
+            return raw_link.resolve(video_path).exists()
         local = root / video_path if self._confined else raw_link.resolve(root / video_path)
         if self._storage is None:
             return local.exists()

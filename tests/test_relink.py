@@ -8,6 +8,7 @@ from pathlib import Path
 
 import pytest
 
+from splitsmith import raw_link
 from splitsmith.match_project import MatchProject, StageEntry, StageVideo
 from splitsmith.relink import (
     apply_relink,
@@ -174,4 +175,4 @@ def test_apply_relink_creates_link_when_missing(tmp_path: Path) -> None:
     new_target.write_bytes(b"")
     [applied] = apply_relink([(raw / "a.mp4", new_target)])
     assert applied.previous_target is None
-    assert (raw / "a.mp4").is_symlink()
+    assert raw_link.is_link(raw / "a.mp4")

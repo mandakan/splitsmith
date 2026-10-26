@@ -48,12 +48,24 @@ def present(entry: Path) -> bool:
 def target(entry: Path) -> Path | None:
     """The source a link points at (absolute), or ``None`` for a copy or nothing."""
     if entry.is_symlink():
-        linked = entry.readlink()
+        linked = _plain(entry.readlink())
         return linked if linked.is_absolute() else entry.parent / linked
     pointer = pointer_path(entry)
     if pointer.is_file():
         return Path(pointer.read_text(encoding="utf-8").strip())
     return None
+
+
+def _plain(path: Path) -> Path:
+    """``readlink`` on Windows returns an extended-length path
+    (``\\\\?\\C:\\...``, ``\\\\?\\UNC\\server\\...``); the same file as
+    the plain path, but it never compares equal to one."""
+    text = str(path)
+    if text.startswith("\\\\?\\UNC\\"):
+        return Path("\\\\" + text[8:])
+    if text.startswith("\\\\?\\"):
+        return Path(text[4:])
+    return path
 
 
 def resolve(entry: Path) -> Path:

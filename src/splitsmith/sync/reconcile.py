@@ -196,7 +196,7 @@ def present_sources_for(match_root: Path, projects: Mapping[str, MatchProject]) 
             continue
         for stage in project.stages:
             for video in stage.videos:
-                path = video.path if video.path.is_absolute() else raw_link.resolve(root / video.path)
+                path = raw_link.resolve(video.path if video.path.is_absolute() else root / video.path)
                 try:
                     if path.exists():
                         present.add((slug, video.video_id))

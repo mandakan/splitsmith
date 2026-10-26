@@ -157,3 +157,16 @@ def test_a_confined_project_never_follows_a_pointer(tmp_path: Path) -> None:
 
     assert project.resolve_video_path(root, video.path) == root / "raw" / "VID.mp4"
     assert not project.source_present(root, video.path)
+
+
+def test_a_raw_dir_outside_the_project_follows_its_pointer(tmp_path: Path) -> None:
+    # The stored path is then the entry's absolute path.
+    project, root = _project(tmp_path)
+    project.raw_dir = str(tmp_path / "scratch-ssd" / "raw")
+    src = _clip(tmp_path, "cam")
+
+    video = project.register_video(src, root)
+
+    assert video.path.is_absolute()
+    assert project.resolve_video_path(root, video.path) == src
+    assert project.source_present(root, video.path)

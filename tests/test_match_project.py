@@ -22,6 +22,7 @@ from pathlib import Path
 
 import pytest
 
+from splitsmith import raw_link
 from splitsmith.match_project import (
     PROJECT_FILE,
     SCHEMA_VERSION,
@@ -1391,9 +1392,9 @@ def test_register_video_symlinks_into_raw(tmp_path: Path) -> None:
 
     assert video.path == Path("raw") / "VID_001.mp4"
     assert video.role == "secondary"
-    assert (root / "raw" / "VID_001.mp4").exists()
+    assert raw_link.resolve(root / "raw" / "VID_001.mp4").exists()
     # Symlink resolves back to the source.
-    assert (root / "raw" / "VID_001.mp4").resolve() == source
+    assert raw_link.target(root / "raw" / "VID_001.mp4") == source
     assert len(project.unassigned_videos) == 1
 
 
@@ -1762,8 +1763,8 @@ def test_register_video_uses_configured_raw_dir(tmp_path: Path) -> None:
 
     video = project.register_video(src, root)
     assert video.path.is_absolute()
-    assert (external_raw / "VID.mp4").exists()
-    assert (external_raw / "VID.mp4").resolve() == src
+    assert raw_link.resolve(external_raw / "VID.mp4").exists()
+    assert raw_link.target(external_raw / "VID.mp4") == src
 
 
 def test_atomic_write_uses_same_directory_for_tmp(tmp_path: Path) -> None:

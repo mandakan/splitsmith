@@ -228,7 +228,7 @@ def _current_audit_trim(
     )
     # The source as it sits on this disk, never mirrored down for this: a
     # relative path under the shooter root, or an absolute one (a drive).
-    source = video.path if video.path.is_absolute() else raw_link.resolve(root / video.path)
+    source = raw_link.resolve(video.path if video.path.is_absolute() else root / video.path)
     return trim if audit_trim_matches(trim, params, source=source) else None
 
 

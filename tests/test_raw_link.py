@@ -108,3 +108,16 @@ def test_windows_uses_pointers_and_posix_symlinks(monkeypatch: pytest.MonkeyPatc
     assert raw_link.use_pointers() is True
     monkeypatch.setattr(raw_link.sys, "platform", "darwin")
     assert raw_link.use_pointers() is False
+
+
+@pytest.mark.parametrize(
+    ("given", "plain"),
+    [
+        ("\\\\?\\C:\\Users\\me\\cam\\VID.mp4", "C:\\Users\\me\\cam\\VID.mp4"),
+        ("\\\\?\\UNC\\nas\\share\\VID.mp4", "\\\\nas\\share\\VID.mp4"),
+        ("/Volumes/cam/VID.mp4", "/Volumes/cam/VID.mp4"),
+    ],
+)
+def test_windows_extended_length_targets_read_as_plain_paths(given: str, plain: str) -> None:
+    # readlink on Windows returns \\?\C:\..., which never equals C:\...
+    assert str(raw_link._plain(Path(given))) == plain

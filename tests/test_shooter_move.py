@@ -35,7 +35,7 @@ from pathlib import Path
 
 import pytest
 
-from splitsmith import match_model
+from splitsmith import match_model, raw_link
 from splitsmith.match_project import MatchProject, RawVideo, StageEntry, StageVideo
 from splitsmith.ui.shooter_move import move_shooter
 
@@ -202,10 +202,10 @@ def test_symlink_relink(tmp_path: Path) -> None:
 
     dst_link = proj_b.raw_path(root_b) / "GH01.MP4"
     # Target has the symlink pointing at the same real file.
-    assert dst_link.is_symlink()
-    assert Path(dst_link.readlink()).resolve() == dummy.resolve()
+    assert raw_link.is_link(dst_link)
+    assert raw_link.target(dst_link).resolve() == dummy.resolve()  # type: ignore[union-attr]
     # Source symlink is gone.
-    assert not src_link.exists() and not src_link.is_symlink()
+    assert not raw_link.present(src_link)
 
     # Source stage no longer has the video.
     assert proj_a.stage(1).primary() is None
@@ -1002,8 +1002,8 @@ def test_a_take_moves_every_stage(tmp_path: Path) -> None:
     for n in (1, 2, 3):
         assert _read_audit(proj_b, root_b, n) == {"shots": [float(n)]}
         assert _read_audit(proj_a, root_a, n) is None
-    assert (proj_b.raw_path(root_b) / "TAKE.MP4").is_symlink()
-    assert not (proj_a.raw_path(root_a) / "TAKE.MP4").is_symlink()
+    assert raw_link.is_link(proj_b.raw_path(root_b) / "TAKE.MP4")
+    assert not raw_link.is_link(proj_a.raw_path(root_a) / "TAKE.MP4")
 
 
 def test_a_take_with_a_blocked_stage_moves_nothing(tmp_path: Path) -> None:
@@ -1025,7 +1025,7 @@ def test_a_take_with_a_blocked_stage_moves_nothing(tmp_path: Path) -> None:
     }
     for n in (1, 2, 3):
         assert _read_audit(proj_a, root_a, n) == {"shots": [float(n)]}
-    assert (proj_a.raw_path(root_a) / "TAKE.MP4").is_symlink()
+    assert raw_link.is_link(proj_a.raw_path(root_a) / "TAKE.MP4")
 
 
 def test_a_moved_take_keeps_its_declared_stage_order(tmp_path: Path) -> None:
