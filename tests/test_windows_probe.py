@@ -117,3 +117,16 @@ def test_summary_groups_import_failures_by_origin(probe, tmp_path):
 
     assert "10 imported, 2 failed" in text
     assert "| `splitsmith/trim.py:29` | ModuleNotFoundError: x | 2 |" in text
+
+
+def test_summary_names_shards_that_left_neither_a_report_nor_a_log(probe, tmp_path):
+    junit = tmp_path / "junit"
+    junit.mkdir()
+    _junit(junit / "shard-2.xml", '<testcase classname="tests.test_a" name="test_one"/>')
+    logs = tmp_path / "logs"
+    logs.mkdir()
+    (logs / "shard-2.log").write_text("1 passed\n", encoding="utf-8")
+
+    text = probe.summarize(junit_dir=junit, imports=None, logs_dir=logs, shards=3)
+
+    assert "Shards 1, 3 never reached pytest" in text

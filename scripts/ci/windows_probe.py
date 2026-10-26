@@ -180,7 +180,9 @@ def _missing_reports_section(junit_dir: Path | None, logs_dir: Path) -> list[str
     return out
 
 
-def summarize(*, junit_dir: Path | None, imports: Path | None, logs_dir: Path | None) -> str:
+def summarize(
+    *, junit_dir: Path | None, imports: Path | None, logs_dir: Path | None, shards: int | None = None
+) -> str:
     out = ["# Windows probe", "", "Not a gate: this run shows what breaks on Windows; nothing waits on it."]
     out.append("")
     if imports is not None and imports.exists():
@@ -189,6 +191,17 @@ def summarize(*, junit_dir: Path | None, imports: Path | None, logs_dir: Path | 
         out += _junit_section(junit_dir)
     if logs_dir is not None and logs_dir.exists():
         out += _missing_reports_section(junit_dir, logs_dir)
+    if shards:
+        seen = {
+            p.stem for d in (junit_dir, logs_dir) if d is not None and d.exists() for p in d.rglob("shard-*")
+        }
+        missing = [str(n) for n in range(1, shards + 1) if f"shard-{n}" not in seen]
+        if missing:
+            out += [
+                f"Shards {', '.join(missing)} never reached pytest: the job failed during setup."
+                " Its log on the run page says which step.",
+                "",
+            ]
     return "\n".join(out)
 
 
@@ -201,6 +214,7 @@ def main(argv: list[str] | None = None) -> int:
     summ.add_argument("--junit-dir", type=Path)
     summ.add_argument("--imports", type=Path)
     summ.add_argument("--logs-dir", type=Path)
+    summ.add_argument("--shards", type=int)
     args = parser.parse_args(argv)
     if args.command == "imports":
         result = sweep(ROOT / "src" / "splitsmith", "splitsmith")
@@ -210,7 +224,9 @@ def main(argv: list[str] | None = None) -> int:
         for f in result.failures:
             print(f"  {f.module}: {f.error} ({f.origin})")
         return 0
-    print(summarize(junit_dir=args.junit_dir, imports=args.imports, logs_dir=args.logs_dir))
+    print(
+        summarize(junit_dir=args.junit_dir, imports=args.imports, logs_dir=args.logs_dir, shards=args.shards)
+    )
     return 0
 
 
