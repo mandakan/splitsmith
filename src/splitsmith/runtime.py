@@ -419,10 +419,18 @@ def _probe_text(completed: subprocess.CompletedProcess) -> str:
 def quote_filter_value(value: str) -> str:
     """Quote one ``filter_complex`` option value the way ffmpeg's escaping rules want.
 
-    Inside ``'...'`` every character is literal, so quoting is all that is
-    needed for the ``:`` and ``,`` an absolute path can contain. A literal
-    ``'`` cannot appear inside the quotes at all -- the quote is closed,
-    the character escaped outside it, and the quote reopened.
+    ffmpeg reads the value twice. The graph parser takes one level of
+    quoting off the filter's arguments, then the filter's own option
+    parser reads them again, where ``\\``, ``'`` and ``:`` are special. So
+    those three are backslash-escaped for the second read, and the result
+    is single-quoted for the first: inside ``'...'`` every character is
+    literal, which carries the ``,``, ``[`` and ``]`` of the graph and the
+    second read's escapes through. A ``'`` cannot appear inside the quotes
+    at all -- the quote is closed, the character escaped outside it, and
+    the quote reopened. One level only split a Windows path at its drive
+    colon and ate its backslashes (no clock, no LUT there), and failed any
+    path with a ``:`` or ``'``. A value with none of the three is quoted
+    exactly as before, so ordinary argv and render-cache keys are unchanged.
 
     Shared, not copied: this probe's drawtext exercise and
     ``compare.mp4_grid``'s own ``drawtext``/``text=`` filters both need
@@ -431,7 +439,15 @@ def quote_filter_value(value: str) -> str:
     the other way around), so there is no cycle to avoid by duplicating
     it -- ``mp4_grid`` imports this function instead.
     """
-    return "'" + value.replace("'", r"'\''") + "'"
+    return "'" + escape_filter_value(value).replace("'", r"'\''") + "'"
+
+
+def escape_filter_value(value: str) -> str:
+    """The second-read half of :func:`quote_filter_value`: ``\\``, ``'`` and
+    ``:`` backslash-escaped. ``segment_cache`` writes a work dir spelled
+    this way as ``<work>`` too, or a quoted path inside the work dir would
+    key every render apart."""
+    return re.sub(r"([\\':])", r"\\\1", value)
 
 
 def _probe_version(binary: str, runner: Runner) -> str | None:
