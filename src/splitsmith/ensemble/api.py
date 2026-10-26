@@ -8,6 +8,7 @@ the per-candidate universe voter A produces.
 
 from __future__ import annotations
 
+import logging
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -17,6 +18,7 @@ import numpy as np
 from pydantic import BaseModel, Field
 
 from ..config import ShotDetectConfig
+from ..models.errors import ModelError
 from ..shot_detect import detect_shots
 from . import decoder as dec
 from . import features as feat
@@ -29,6 +31,8 @@ from .calibration import (
     load_voter_e_probe,
 )
 from .tta import compute_tta_agreement
+
+logger = logging.getLogger(__name__)
 
 #: Overrides ``EnsembleConfig.stage_decoder``: "0" keeps the consensus vote
 #: (the escape hatch), "1" forces the whole-stage decoder (A/B runs).
@@ -251,7 +255,29 @@ def load_ensemble_runtime(*, model_set: str | None = None, with_voter_e: bool = 
     eagerly. Default ``True``; falls back to a runtime without Voter E
     when the probe artifact is missing or the calibration predates it.
     """
-    name = resolve_model_set(model_set)
+    return _load_runtime(resolve_model_set(model_set), with_voter_e=with_voter_e)
+
+
+def _load_runtime(name: str, *, with_voter_e: bool) -> EnsembleRuntime:
+    """The runtime for set ``name`` exactly (no env resolution, so the
+    fallback below cannot resolve back to ``clap``).
+
+    Under ``clap``, a CLAP artifact that is missing, unreachable or fails
+    verification (``ModelError``) or a file that cannot be read
+    (``OSError``) loads ``base`` instead, with a warning; detection never
+    blocks on a download, and the result's ``model_set`` says which set ran.
+    Any other error propagates."""
+    clap: feat.ClapRuntime | None = None
+    if name == "clap":
+        try:
+            clap = feat.load_clap_runtime()
+        except (ModelError, OSError) as exc:
+            logger.warning(
+                "the clap model set needs %s and could not load them (%s); detecting with base",
+                ", ".join((feat.CLAP_AUDIO_ARTIFACT_SLUG, feat.CLAP_TEXT_ARTIFACT_SLUG)),
+                exc,
+            )
+            return _load_runtime("base", with_voter_e=with_voter_e)
     calibration = load_calibration()
     model_set_block = calibration.model_set(name)
     voter_c_model = load_voter_c_model(model_set_block.voter_c_onnx_artifacts)
@@ -270,8 +296,6 @@ def load_ensemble_runtime(*, model_set: str | None = None, with_voter_e: bool = 
             "CLAP_PROMPTS. Rebuild artifacts via "
             "scripts/build_ensemble_artifacts.py."
         )
-    clap = feat.load_clap_runtime() if name == "clap" else None
-
     visual: vis.VisualRuntime | None = None
     if with_voter_e and calibration.voter_e_probe_artifact:
         probe = load_voter_e_probe(calibration.voter_e_probe_artifact)

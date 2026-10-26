@@ -1108,3 +1108,25 @@ def test_trim_audit_clip_missing_source_raises(tmp_path: Path) -> None:
     project.save(root)
     with pytest.raises(FileNotFoundError, match="source video missing"):
         detect_tools.trim_audit_clip(str(root), stage_number=1)
+
+
+def test_the_mcp_runtime_follows_the_machine_preference_and_caches_per_set(monkeypatch) -> None:
+    """The MCP tool mirrors the HTTP job: the local preference picks the set,
+    and a clap request that fell back to base is retried."""
+    from splitsmith import user_config
+    from splitsmith.mcp import detect_tools
+    from tests._ensemble_stubs import stub_runtime
+
+    monkeypatch.delenv("SPLITSMITH_MODEL_SET", raising=False)
+    prefs = user_config.load_global_prefs()
+    user_config.save_global_prefs(prefs.model_copy(update={"detection_model_set": "clap"}))
+    asked: list[str | None] = []
+    monkeypatch.setattr(
+        detect_tools.ensemble_module,
+        "load_ensemble_runtime",
+        lambda **kw: asked.append(kw["model_set"]) or stub_runtime("base"),
+    )
+    monkeypatch.setattr(detect_tools, "_ENSEMBLE_RUNTIMES", {})
+    assert detect_tools._get_ensemble_runtime().model_set == "base"
+    detect_tools._get_ensemble_runtime()
+    assert asked == ["clap", "clap"]

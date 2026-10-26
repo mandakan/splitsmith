@@ -1147,3 +1147,54 @@ def test_the_runtime_checks_each_graph_against_its_own_set_s_width(monkeypatch) 
     monkeypatch.setattr(api, "load_voter_c_model", lambda artifacts: {"headcam": Wide()})
     with pytest.raises(RuntimeError, match="voter_c_gbdt_base_headcam.onnx"):
         api.load_ensemble_runtime(model_set="base", with_voter_e=False)
+
+
+def test_clap_requested_without_artifacts_runs_base_and_says_so(monkeypatch, caplog) -> None:
+    from splitsmith.ensemble import api
+    from splitsmith.models.errors import ModelError
+
+    def _missing():
+        raise ModelError("clap_audio_encoder: not cached and no network")
+
+    monkeypatch.setattr(feat, "load_clap_runtime", _missing)
+    monkeypatch.setattr(api, "load_calibration", stub_calibration)
+    loaded: list[list[str]] = []
+
+    def _graphs(artifacts):
+        loaded.append(sorted(artifacts.values()))
+        return {cls: StubGBDT() for cls in artifacts}
+
+    monkeypatch.setattr(api, "load_voter_c_model", _graphs)
+    monkeypatch.setenv("SPLITSMITH_MODEL_SET", "clap")
+    with caplog.at_level("WARNING"):
+        runtime = api.load_ensemble_runtime(model_set="clap", with_voter_e=False)
+    assert runtime.model_set == "base"
+    assert runtime.clap is None
+    assert "clap_audio_encoder" in caplog.text
+    # The base runtime scores the base set's graphs, not clap's.
+    assert loaded[-1] == ["voter_c_gbdt_base_handheld.onnx", "voter_c_gbdt_base_headcam.onnx"]
+
+
+def test_a_missing_clap_file_on_disk_also_falls_back(monkeypatch) -> None:
+    from splitsmith.ensemble import api
+
+    def _gone():
+        raise FileNotFoundError("clap_audio.onnx")
+
+    monkeypatch.setattr(feat, "load_clap_runtime", _gone)
+    monkeypatch.setattr(api, "load_calibration", stub_calibration)
+    monkeypatch.setattr(api, "load_voter_c_model", lambda artifacts: {cls: StubGBDT() for cls in artifacts})
+    assert api.load_ensemble_runtime(model_set="clap", with_voter_e=False).model_set == "base"
+
+
+def test_other_errors_while_loading_clap_propagate(monkeypatch) -> None:
+    from splitsmith.ensemble import api
+
+    def _drift():
+        raise RuntimeError("prompt bank drift")
+
+    monkeypatch.setattr(feat, "load_clap_runtime", _drift)
+    monkeypatch.setattr(api, "load_calibration", stub_calibration)
+    monkeypatch.setattr(api, "load_voter_c_model", lambda artifacts: {cls: StubGBDT() for cls in artifacts})
+    with pytest.raises(RuntimeError, match="prompt bank"):
+        api.load_ensemble_runtime(model_set="clap", with_voter_e=False)
