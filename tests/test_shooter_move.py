@@ -211,7 +211,7 @@ def test_symlink_relink(tmp_path: Path) -> None:
     assert proj_a.stage(1).primary() is None
     # Target stage has it as primary.
     assert proj_b.stage(1).primary() is not None
-    assert str(proj_b.stage(1).primary().path) == "raw/GH01.MP4"
+    assert proj_b.stage(1).primary().path.as_posix() == "raw/GH01.MP4"
 
 
 # ---------------------------------------------------------------------------
@@ -449,7 +449,7 @@ def test_occupied_stage_block(tmp_path: Path) -> None:
 
     # Source unchanged: video still there, audit still there.
     assert proj_a.stage(3).primary() is not None
-    assert str(proj_a.stage(3).primary().path) == "raw/GH03A.MP4"
+    assert proj_a.stage(3).primary().path.as_posix() == "raw/GH03A.MP4"
     assert _read_audit(proj_a, root_a, 3) == {"shots": [1.0]}
 
     # Source raw link still present.
