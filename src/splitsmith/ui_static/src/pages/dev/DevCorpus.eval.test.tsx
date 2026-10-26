@@ -121,6 +121,7 @@ function runCovering(slugs: string[]): LabEvalRun {
     },
     universe: {
       fixtures: slugs.map(fixtureOf),
+      model_set: "clap",
       voter_a_floor: 0.1,
       voter_b_threshold: 0.02,
       voter_c_threshold: 0.5,

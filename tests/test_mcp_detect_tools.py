@@ -49,7 +49,13 @@ def _fake_ensemble_result(times: list[float], consensus: int = 3, expected_round
         )
         for i, t in enumerate(times)
     ]
-    return EnsembleResult(candidates=cands, consensus=consensus, expected_rounds=expected_rounds)
+    return EnsembleResult(
+        model_set="base",
+        calibration_built_at="x",
+        candidates=cands,
+        consensus=consensus,
+        expected_rounds=expected_rounds,
+    )
 
 
 class _FakeAudit:

@@ -2694,8 +2694,11 @@ export interface LabRunSummary {
 
 export interface LabEvalUniverse {
   fixtures: LabEvalFixture[];
+  /** The model set the universe was scored with. */
+  model_set: string;
   voter_a_floor: number;
-  voter_b_threshold: number;
+  /** ``null`` under the base model set, where voter B does not vote. */
+  voter_b_threshold: number | null;
   voter_c_threshold: number;
   tolerance_ms: number;
 }

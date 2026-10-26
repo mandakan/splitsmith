@@ -7001,7 +7001,7 @@ def build_worker_state(*, process_name: str = "splitsmith-worker") -> AppState:
     otherwise.
     """
     state = AppState()
-    state.compute = LocalComputeBackend(runtime_loader=lambda: _get_ensemble_runtime())
+    state.compute = LocalComputeBackend(runtime_loader=lambda _model_set: _get_ensemble_runtime())
     _apply_hosted_mode_wiring(state, worker=True, process_name=process_name)
     register_job_bodies(state)
     return state
@@ -9293,7 +9293,7 @@ def create_app(
     # in tests takes effect even though the backend was constructed
     # before the patch ran. When the hosted backend lands this swap
     # point is where the picker would inject a ``RemoteComputeBackend``.
-    state.compute = LocalComputeBackend(runtime_loader=lambda: _get_ensemble_runtime())
+    state.compute = LocalComputeBackend(runtime_loader=lambda _model_set: _get_ensemble_runtime())
     # Hosted-mode swap: when ``SPLITSMITH_MODE=hosted``, replace the
     # local-mode auth + per-user stores + job backend with their
     # Postgres-backed equivalents. Must happen before the recent-

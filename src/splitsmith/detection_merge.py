@@ -245,6 +245,10 @@ def merge_detection_into(
         "_note": CANDIDATES_NOTE,
         "consensus": result.consensus,
         "expected_rounds": result.expected_rounds,
+        # Which model set scored this run, and which build: a doc written
+        # before model sets has neither and reads as unknown.
+        "_model_set": result.model_set,
+        "_calibration_built_at": result.calibration_built_at,
         "candidates": numbered,
     }
     reset_deletions: list[dict[str, Any]] = []
@@ -305,6 +309,8 @@ def merge_detection_into(
                 "consensus": result.consensus,
                 "expected_rounds": result.expected_rounds,
                 "seeded_shots": seeded_shots,
+                "model_set": result.model_set,
+                "calibration_built_at": result.calibration_built_at,
                 **(run_payload or {}),
             },
         }

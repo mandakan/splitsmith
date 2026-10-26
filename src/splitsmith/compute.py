@@ -26,7 +26,13 @@ from typing import Protocol
 import numpy as np
 
 from . import ensemble as ensemble_pkg
-from .ensemble.api import EnsembleConfig, EnsembleResult, EnsembleRuntime, load_ensemble_runtime
+from .ensemble.api import (
+    EnsembleConfig,
+    EnsembleResult,
+    EnsembleRuntime,
+    load_ensemble_runtime,
+    resolve_model_set,
+)
 
 
 class ComputeBackend(Protocol):
@@ -46,8 +52,12 @@ class ComputeBackend(Protocol):
         camera_model: str | None = None,
         video_path: Path | None = None,
         source_beep_time: float | None = None,
+        model_set: str | None = None,
     ) -> EnsembleResult:
-        """Run the shot-detection ensemble for a single stage."""
+        """Run the shot-detection ensemble for a single stage.
+
+        ``model_set`` is the caller's preference (``resolve_model_set``);
+        the result's ``model_set`` names the set that actually ran."""
 
 
 class LocalComputeBackend:
@@ -55,9 +65,14 @@ class LocalComputeBackend:
 
     ``runtime_loader`` is injected so the server can hand us its
     existing module-level lazy-loader (which test code already
-    monkeypatches). When called outside the server -- e.g. from a
-    standalone script -- the default ``load_ensemble_runtime`` is
-    used, which actually downloads / instantiates the heavy models.
+    monkeypatches); it takes the requested model set. When called
+    outside the server -- e.g. from a standalone script -- the default
+    ``load_ensemble_runtime`` is used, which actually downloads /
+    instantiates the heavy models.
+
+    Runtimes are cached by the set the loader *returned*: a ``clap``
+    request that came back ``base`` (artifacts missing) is cached as
+    ``base``, so the next ``clap`` request tries again.
     """
 
     name = "local"
@@ -65,18 +80,23 @@ class LocalComputeBackend:
     def __init__(
         self,
         *,
-        runtime_loader: Callable[[], EnsembleRuntime] | None = None,
+        runtime_loader: Callable[[str | None], EnsembleRuntime] | None = None,
     ) -> None:
-        self._runtime_loader = runtime_loader or load_ensemble_runtime
-        self._runtime: EnsembleRuntime | None = None
+        self._runtime_loader = runtime_loader or (lambda s: load_ensemble_runtime(model_set=s))
+        self._runtimes: dict[str, EnsembleRuntime] = {}
         self._lock = threading.Lock()
 
-    def _ensure_runtime(self) -> EnsembleRuntime:
-        if self._runtime is None:
+    def _ensure_runtime(self, model_set: str | None = None) -> EnsembleRuntime:
+        wanted = resolve_model_set(model_set)
+        runtime = self._runtimes.get(wanted)
+        if runtime is None:
             with self._lock:
-                if self._runtime is None:
-                    self._runtime = self._runtime_loader()
-        return self._runtime
+                runtime = self._runtimes.get(wanted)
+                if runtime is None:
+                    runtime = self._runtime_loader(model_set)
+                    # A test double may carry no set; key it by the request.
+                    self._runtimes[getattr(runtime, "model_set", wanted)] = runtime
+        return runtime
 
     def detect_stage(
         self,
@@ -92,8 +112,9 @@ class LocalComputeBackend:
         camera_model: str | None = None,
         video_path: Path | None = None,
         source_beep_time: float | None = None,
+        model_set: str | None = None,
     ) -> EnsembleResult:
-        runtime = self._ensure_runtime()
+        runtime = self._ensure_runtime(model_set)
         # Call through the package binding so tests that monkeypatch
         # ``splitsmith.ensemble.detect_shots_ensemble`` still intercept
         # us. ``ensemble.api.detect_shots_ensemble`` is the same

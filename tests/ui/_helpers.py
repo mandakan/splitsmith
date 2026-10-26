@@ -350,7 +350,13 @@ def _fake_ensemble_result(candidates: list[dict], consensus: int = 3):
         )
         for i, c in enumerate(candidates)
     ]
-    return EnsembleResult(candidates=cands, consensus=consensus, expected_rounds=None)
+    return EnsembleResult(
+        model_set="base",
+        calibration_built_at="x",
+        candidates=cands,
+        consensus=consensus,
+        expected_rounds=None,
+    )
 
 
 def _seed_second_video(tmp_path: Path, project_root: Path) -> str:

@@ -16,6 +16,7 @@ from splitsmith.ensemble import (
     EnsembleConfig,
     detect_shots_ensemble,
 )
+from splitsmith.ensemble import features as feat
 from splitsmith.ensemble.api import EnsembleRuntime
 from splitsmith.ensemble.features import (
     CLAP_PROMPTS,
@@ -35,7 +36,7 @@ from splitsmith.ensemble.voters import (
     vote_e,
     within_stage_amp_veto,
 )
-from tests._ensemble_stubs import stub_calibration, stub_runtime, stub_thresholds
+from tests._ensemble_stubs import StubGBDT, stub_calibration, stub_runtime, stub_thresholds
 
 
 def test_vote_a_floor_threshold() -> None:
@@ -1010,3 +1011,139 @@ def test_detect_shots_ensemble_uses_per_class_thresholds(monkeypatch) -> None:
         camera_class="handheld",
     )
     assert result_hand.candidates[0].vote_a == 0
+
+
+# ---------------------------------------------------------------------------
+# Model sets (thin detection spec 2026-10-26)
+# ---------------------------------------------------------------------------
+
+
+def _shots(n: int = 4) -> list[Shot]:
+    return [
+        Shot(
+            shot_number=i + 1,
+            time_absolute=5.0 + i * 0.3,
+            time_from_beep=i * 0.3,
+            split=0.3 if i > 0 else 5.0,
+            peak_amplitude=0.4,
+            confidence=0.6,
+            notes="",
+        )
+        for i in range(n)
+    ]
+
+
+def _detect(monkeypatch, runtime, *, camera_class: str = "headcam", clap_calls: list | None = None):
+    from splitsmith.ensemble import api as ensemble_api
+    from splitsmith.ensemble import features as ensemble_features
+
+    def _sims(audio, sr, times, rt):
+        if clap_calls is not None:
+            clap_calls.append(rt)
+        return np.full((len(times), len(CLAP_PROMPTS)), 0.5, dtype=np.float32)
+
+    monkeypatch.setattr(ensemble_api, "detect_shots", lambda *a, **kw: _shots())
+    monkeypatch.setattr(ensemble_features, "compute_clap_similarities", _sims)
+    audio = np.zeros(48_000 * 20, dtype=np.float32)
+    return detect_shots_ensemble(
+        audio, 48_000, beep_time=5.0, stage_time=10.0, runtime=runtime, camera_class=camera_class
+    )
+
+
+class _Width(StubGBDT):
+    def __init__(self, seen: list[int]) -> None:
+        self.seen = seen
+
+    def predict_proba(self, x: np.ndarray) -> np.ndarray:
+        self.seen.append(x.shape[1])
+        return super().predict_proba(x)
+
+
+def test_resolve_model_set_prefers_env_then_preference_then_base(monkeypatch) -> None:
+    from splitsmith.ensemble.api import resolve_model_set
+
+    monkeypatch.delenv("SPLITSMITH_MODEL_SET", raising=False)
+    assert resolve_model_set() == "base"
+    assert resolve_model_set("clap") == "clap"
+    monkeypatch.setenv("SPLITSMITH_MODEL_SET", "base")
+    assert resolve_model_set("clap") == "base"
+    monkeypatch.setenv("SPLITSMITH_MODEL_SET", "pann")
+    with pytest.raises(ValueError, match="base, clap"):
+        resolve_model_set()
+    monkeypatch.delenv("SPLITSMITH_MODEL_SET")
+    with pytest.raises(ValueError, match="base, clap"):
+        resolve_model_set("pann")
+
+
+def test_base_runtime_never_computes_clap(monkeypatch) -> None:
+    calls: list = []
+    runtime = stub_runtime("base")
+    result = _detect(monkeypatch, runtime, camera_class="handheld", clap_calls=calls)
+    assert calls == []
+    assert result.model_set == "base"
+    assert result.calibration_built_at == runtime.calibration.built_at
+    assert all(c.vote_b == 0 and c.clap_diff == 0.0 for c in result.candidates)
+    # A and C agree on every stub candidate: 2 of the 2 voters base has.
+    assert all(c.kept for c in result.candidates)
+
+
+def test_clap_runtime_scores_the_full_column_set(monkeypatch) -> None:
+    seen: list[int] = []
+    runtime = stub_runtime("clap")
+    runtime.voter_c_model = {"headcam": _Width(seen), "handheld": _Width(seen)}
+    result = _detect(monkeypatch, runtime)
+    assert seen == [feat.VOTER_C_FEATURE_DIM]
+    assert result.model_set == "clap"
+
+
+def test_base_runtime_scores_only_the_base_columns(monkeypatch) -> None:
+    seen: list[int] = []
+    runtime = stub_runtime("base")
+    runtime.voter_c_model = {"headcam": _Width(seen), "handheld": _Width(seen)}
+    _detect(monkeypatch, runtime)
+    assert seen == [len(feat.model_set_columns("base"))]
+
+
+def test_base_runtime_decodes_with_the_base_set_s_decoder(monkeypatch) -> None:
+    from tests._ensemble_stubs import with_set_update
+    from tests.test_stage_decoder import _model
+
+    runtime = stub_runtime("base")
+    # The base set's decoder reads three features and keeps nothing (bias -50);
+    # the clap set's has none. Decoding with base's proves the lookup is per set.
+    base_decoder = _model(
+        features=["score_c", "confidence", "log_peak_amplitude"], coef=[0, 0, 0], bias=-50.0
+    )
+    runtime.calibration = with_set_update(
+        runtime.calibration, "base", decoders_by_camera_class={"headcam": base_decoder}
+    )
+    monkeypatch.delenv("SPLITSMITH_STAGE_DECODER", raising=False)
+    result = _detect(monkeypatch, runtime)
+    assert all(c.decoder_prob is not None for c in result.candidates)
+    assert not any(c.kept for c in result.candidates)
+
+
+def test_base_runtime_constructs_no_clap_session(monkeypatch) -> None:
+    from splitsmith.ensemble import api
+
+    def _no_clap():
+        raise AssertionError("CLAP loaded under base")
+
+    monkeypatch.setattr(feat, "load_clap_runtime", _no_clap)
+    monkeypatch.setattr(api, "load_calibration", stub_calibration)
+    monkeypatch.setattr(api, "load_voter_c_model", lambda artifacts: {cls: StubGBDT() for cls in artifacts})
+    rt = api.load_ensemble_runtime(model_set="base", with_voter_e=False)
+    assert rt.model_set == "base" and rt.clap is None
+
+
+def test_the_runtime_checks_each_graph_against_its_own_set_s_width(monkeypatch) -> None:
+    from splitsmith.ensemble import api
+
+    class Wide(StubGBDT):
+        n_features = feat.VOTER_C_FEATURE_DIM
+        path = "voter_c_gbdt_base_headcam.onnx"
+
+    monkeypatch.setattr(api, "load_calibration", stub_calibration)
+    monkeypatch.setattr(api, "load_voter_c_model", lambda artifacts: {"headcam": Wide()})
+    with pytest.raises(RuntimeError, match="voter_c_gbdt_base_headcam.onnx"):
+        api.load_ensemble_runtime(model_set="base", with_voter_e=False)

@@ -33,9 +33,19 @@ from .tta import compute_tta_agreement
 #: Overrides ``EnsembleConfig.stage_decoder``: "0" keeps the consensus vote
 #: (the escape hatch), "1" forces the whole-stage decoder (A/B runs).
 ENV_STAGE_DECODER = "SPLITSMITH_STAGE_DECODER"
-# The set the runtime scores until it resolves one per call: ``clap`` is
-# every voter C column, as detection scored before model sets.
-_RUNTIME_MODEL_SET = "clap"
+#: Names the model set to detect with (``features.MODEL_SETS``); wins over
+#: any preference. Hosted images set it to ``clap``.
+ENV_MODEL_SET = "SPLITSMITH_MODEL_SET"
+
+
+def resolve_model_set(preference: str | None = None) -> str:
+    """The model set to detect with: ``SPLITSMITH_MODEL_SET``, then
+    ``preference`` (the local setting), then ``features.DEFAULT_MODEL_SET``.
+    A name outside ``features.MODEL_SETS`` raises ``ValueError``."""
+    name = os.environ.get(ENV_MODEL_SET) or preference or feat.DEFAULT_MODEL_SET
+    if name not in feat.MODEL_SETS:
+        raise ValueError(f"unknown model set {name!r}; expected one of {', '.join(feat.MODEL_SETS)}")
+    return name
 
 
 class EnsembleConfig(BaseModel):
@@ -208,6 +218,8 @@ class EnsembleResult(BaseModel):
     candidates: list[EnsembleCandidate]
     consensus: int
     expected_rounds: int | None = None
+    model_set: str = Field(description="The model set that scored this run (``base`` / ``clap``).")
+    calibration_built_at: str = Field(description="``built_at`` of the calibration that scored it.")
 
 
 @dataclass
@@ -229,22 +241,26 @@ class EnsembleRuntime:
     model_set: str = "clap"
 
 
-def load_ensemble_runtime(*, with_voter_e: bool = True) -> EnsembleRuntime:
-    """Materialise calibration + heavy models. Slow first-call (model downloads).
+def load_ensemble_runtime(*, model_set: str | None = None, with_voter_e: bool = True) -> EnsembleRuntime:
+    """Materialise calibration + models for one model set (see
+    :func:`resolve_model_set`; ``model_set`` is the caller's preference).
+    Only ``clap`` constructs the CLAP session; ``base`` touches no model
+    registry.
 
     ``with_voter_e`` controls whether the CLIP visual model is loaded
     eagerly. Default ``True``; falls back to a runtime without Voter E
     when the probe artifact is missing or the calibration predates it.
     """
+    name = resolve_model_set(model_set)
     calibration = load_calibration()
-    model_set = calibration.model_set(_RUNTIME_MODEL_SET)
-    voter_c_model = load_voter_c_model(model_set.voter_c_onnx_artifacts)
+    model_set_block = calibration.model_set(name)
+    voter_c_model = load_voter_c_model(model_set_block.voter_c_onnx_artifacts)
     for model in voter_c_model.values():
-        width = getattr(model, "n_features", model_set.voter_c_feature_dim)
-        if width != model_set.voter_c_feature_dim:
+        width = getattr(model, "n_features", model_set_block.voter_c_feature_dim)
+        if width != model_set_block.voter_c_feature_dim:
             raise RuntimeError(
-                f"{model.path} takes {width} features but this splitsmith builds "
-                f"{model_set.voter_c_feature_dim}; the artifacts predate the current voter C "
+                f"{model.path} takes {width} features but the {name} model set builds "
+                f"{model_set_block.voter_c_feature_dim}; the artifacts predate the current voter C "
                 "layout. Rebuild them with scripts/build_ensemble_artifacts.py, or check "
                 "out the commit they were built with."
             )
@@ -254,7 +270,7 @@ def load_ensemble_runtime(*, with_voter_e: bool = True) -> EnsembleRuntime:
             "CLAP_PROMPTS. Rebuild artifacts via "
             "scripts/build_ensemble_artifacts.py."
         )
-    clap = feat.load_clap_runtime()
+    clap = feat.load_clap_runtime() if name == "clap" else None
 
     visual: vis.VisualRuntime | None = None
     if with_voter_e and calibration.voter_e_probe_artifact:
@@ -271,6 +287,7 @@ def load_ensemble_runtime(*, with_voter_e: bool = True) -> EnsembleRuntime:
         clap=clap,
         expected_prompts=tuple(calibration.clap_prompts),
         visual=visual,
+        model_set=name,
     )
 
 
@@ -323,8 +340,10 @@ def detect_shots_ensemble(
     """
     cfg = ensemble_config or EnsembleConfig()
     cal = runtime.calibration
-    thresholds = cal.thresholds_for(camera_class, model_set=_RUNTIME_MODEL_SET)
-    decoder = cal.model_set(_RUNTIME_MODEL_SET).decoder_for(camera_class, cal.default_camera_class)
+    set_block = cal.model_set(runtime.model_set)
+    thresholds = set_block.thresholds_for(camera_class, cal.default_camera_class)
+    decoder = set_block.decoder_for(camera_class, cal.default_camera_class)
+    stamp = {"model_set": runtime.model_set, "calibration_built_at": cal.built_at}
 
     # Voter A universe: maximum recall (raw detector, no confidence floor).
     # ``recall_fallback="cwt"`` matches the calibration script so the
@@ -334,7 +353,9 @@ def detect_shots_ensemble(
     shots = detect_shots(audio, sample_rate, beep_time, stage_time, detector_cfg)
     n = len(shots)
     if n == 0:
-        return EnsembleResult(candidates=[], consensus=cfg.consensus, expected_rounds=expected_rounds)
+        return EnsembleResult(
+            candidates=[], consensus=cfg.consensus, expected_rounds=expected_rounds, **stamp
+        )
 
     # Features are measured at each candidate's scoring time, where the models
     # were trained; candidates are reported at their shot time (the rise foot).
@@ -349,14 +370,25 @@ def detect_shots_ensemble(
     hand = feat.compute_hand_features(
         audio, sample_rate, times, beep_time, confidences, peak_amps, tta_agreement
     )
-    clap_sims = feat.compute_clap_similarities(audio, sample_rate, times, runtime.clap)
-    clap_diff = feat.clap_diff_from_similarities(clap_sims)
-    voter_c_x = feat.voter_c_feature_matrix(hand, clap_sims, clap_diff, camera_classes=camera_class)
+    if runtime.clap is not None:
+        clap_sims = feat.compute_clap_similarities(audio, sample_rate, times, runtime.clap)
+        clap_diff = feat.clap_diff_from_similarities(clap_sims)
+    else:
+        # ``base``: no CLAP columns are scored, so none are computed.
+        clap_sims = np.zeros((n, len(feat.CLAP_PROMPTS)), dtype=np.float32)
+        clap_diff = np.zeros(n, dtype=np.float32)
+    voter_c_x = feat.select_columns(
+        feat.voter_c_feature_matrix(hand, clap_sims, clap_diff, camera_classes=camera_class),
+        set_block.columns,
+    )
     cls_key = camera_class if camera_class in runtime.voter_c_model else cal.default_camera_class
     score_c = runtime.voter_c_model[cls_key].predict_proba(voter_c_x)[:, 1].astype(np.float64)
 
     va = voters.vote_a(confidences, thresholds.voter_a_floor)
-    vb = voters.vote_b(clap_diff, thresholds.voter_b_threshold)
+    if runtime.clap is not None and thresholds.voter_b_threshold is not None:
+        vb = voters.vote_b(clap_diff, thresholds.voter_b_threshold)
+    else:
+        vb = np.zeros(n, dtype=np.int64)
     if expected_rounds is not None and expected_rounds > 0:
         vc = voters.vote_c_adaptive(score_c, expected_rounds)
     else:
@@ -478,4 +510,5 @@ def detect_shots_ensemble(
         candidates=candidates,
         consensus=cfg.consensus,
         expected_rounds=expected_rounds,
+        **stamp,
     )

@@ -96,15 +96,17 @@ export function TuningPanel({
                 max={0.5}
                 step={0.001}
               />
-              <ThresholdRow
-                label="Voter B threshold"
-                calibrated={cal.voter_b_threshold}
-                value={config.voter_b_threshold_override}
-                onChange={(v) => onChange({ voter_b_threshold_override: v })}
-                min={-0.05}
-                max={0.2}
-                step={0.001}
-              />
+              {cal.voter_b_threshold !== null && (
+                <ThresholdRow
+                  label="Voter B threshold"
+                  calibrated={cal.voter_b_threshold}
+                  value={config.voter_b_threshold_override}
+                  onChange={(v) => onChange({ voter_b_threshold_override: v })}
+                  min={-0.05}
+                  max={0.2}
+                  step={0.001}
+                />
+              )}
               <ThresholdRow
                 label="Voter C threshold"
                 calibrated={cal.voter_c_threshold}

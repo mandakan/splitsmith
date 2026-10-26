@@ -23,7 +23,9 @@ def _run(times: list[float]) -> SimpleNamespace:
         )
         for i, t in enumerate(times, start=1)
     ]
-    return SimpleNamespace(candidates=cands, consensus=2, expected_rounds=None)
+    return SimpleNamespace(
+        candidates=cands, consensus=2, expected_rounds=None, model_set="base", calibration_built_at="x"
+    )
 
 
 BASE = {"stage_number": 1, "beep_time": 5.0, "clip_video_id": "head", "shots": []}

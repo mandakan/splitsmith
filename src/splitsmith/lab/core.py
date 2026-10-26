@@ -481,8 +481,12 @@ class EvalUniverse(BaseModel):
     """Cached, model-output-bound layer (heavy to compute)."""
 
     fixtures: list[EvalFixture]
+    # The model set the universe was scored with; a universe cached before
+    # model sets scored every column, which the ``clap`` set does.
+    model_set: str = "clap"
     voter_a_floor: float
-    voter_b_threshold: float
+    # ``None`` under ``base`` (no CLAP, so voter B does not vote).
+    voter_b_threshold: float | None
     voter_c_threshold: float
     tolerance_ms: float
 
@@ -1003,9 +1007,10 @@ def run_eval(
         if progress is not None:
             progress(i + 1, total, fix.slug)
 
-    default_thresholds = cal.thresholds_for(None, model_set="clap")
+    default_thresholds = cal.thresholds_for(None, model_set=runtime.model_set)
     universe = EvalUniverse(
         fixtures=fixtures,
+        model_set=runtime.model_set,
         voter_a_floor=default_thresholds.voter_a_floor,
         voter_b_threshold=default_thresholds.voter_b_threshold,
         voter_c_threshold=default_thresholds.voter_c_threshold,
@@ -1095,7 +1100,11 @@ def rescore_universe(universe: EvalUniverse, config: EvalConfig) -> EvalRun:
         score_c = np.array([c.score_c for c in fix.candidates], dtype=np.float64)
 
         vote_a = (confs >= a_floor).astype(np.int64)
-        vote_b = (clap_diff >= b_thr).astype(np.int64)
+        vote_b = (
+            (clap_diff >= b_thr).astype(np.int64)
+            if b_thr is not None
+            else np.zeros_like(confs, dtype=np.int64)
+        )
 
         expected = fix.expected_rounds if config.use_expected_rounds else None
         if expected and expected > 0:
