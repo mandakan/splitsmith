@@ -120,4 +120,4 @@ def test_windows_uses_pointers_and_posix_symlinks(monkeypatch: pytest.MonkeyPatc
 )
 def test_windows_extended_length_targets_read_as_plain_paths(given: str, plain: str) -> None:
     # readlink on Windows returns \\?\C:\..., which never equals C:\...
-    assert str(raw_link._plain(Path(given))) == plain
+    assert str(raw_link._plain(Path(given))) == str(Path(plain))

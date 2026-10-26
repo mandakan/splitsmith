@@ -147,7 +147,7 @@ def test_apply_relink_rewrites_symlink_and_records_previous_target(tmp_path: Pat
     assert applied.previous_target == tmp_path / "originals" / "a.mp4"
     assert applied.new_target == new_target.resolve()
     # And the link now resolves to the new target.
-    assert (raw / "a.mp4").resolve() == new_target.resolve()
+    assert raw_link.target(raw / "a.mp4").resolve() == new_target.resolve()  # type: ignore[union-attr]
 
 
 def test_apply_relink_refuses_to_overwrite_regular_file(tmp_path: Path) -> None:
