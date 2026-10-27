@@ -89,7 +89,9 @@ def test_a_failed_streamed_read_detects_again_from_a_download(
     assert seen == [SIGNED, str((root / video.path).resolve())]
     assert SOURCE_KEY in storage.fetched
     wav = audio_helpers.video_audio_path(root, 1, video, project=project)
-    assert not list(wav.parent.glob("*partial*"))
+    # This WAV's own partials only: the trim the detection chains may still
+    # be cutting the audit WAV beside it.
+    assert not list(wav.parent.glob(f"{wav.stem}.*.partial{wav.suffix}"))
     assert MatchProject.load(root).stage(1).primary().beep_time == 0.5  # type: ignore[union-attr]
 
 
