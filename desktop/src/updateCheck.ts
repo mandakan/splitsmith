@@ -9,7 +9,7 @@ export const FEED_TIMEOUT_MS = 5_000;
 
 /** Shipped macOS apps ask with no parameter; that URL never changes. */
 export function feedUrl(platform: NodeJS.Platform): string {
-  return platform === "linux" ? `${UPDATE_FEED_URL}?platform=linux` : UPDATE_FEED_URL;
+  return platform === "linux" || platform === "win32" ? `${UPDATE_FEED_URL}?platform=${platform}` : UPDATE_FEED_URL;
 }
 
 export interface UpdateFeed {

@@ -23,6 +23,7 @@ const SHUTDOWN_GRACE_MS = 10_000;
 const KILL_GRACE_MS = 5_000;
 const TAIL_LINES = 50;
 const UPDATE_CHECK_DELAY_MS = 5_000;
+const APP_USER_MODEL_ID = "app.splitsmith.desktop";
 const LOADING_PAGE = path.join(__dirname, "..", "src", "loading.html");
 
 /** ``Contents/Resources`` of the bundle; ``pnpm start`` points it at desktop/build/resources. */
@@ -132,7 +133,7 @@ async function refuseUnsandboxed(): Promise<void> {
   }
 }
 
-/** The window icon on Linux; macOS takes it from the bundle. */
+/** The window icon on Linux; macOS takes it from the bundle, Windows from the exe. */
 function windowIcon(): string | undefined {
   if (process.platform !== "linux") return undefined;
   const icon = path.join(resourcesPath(), "icon.png");
@@ -194,6 +195,9 @@ if (!app.requestSingleInstanceLock()) {
       void refuseUnsandboxed();
       return;
     }
+    // Taskbar grouping, pinning and notifications key on this; it must
+    // match electron-builder.yml's appId, which the installer's shortcut carries.
+    if (process.platform === "win32") app.setAppUserModelId(APP_USER_MODEL_ID);
     buildMenu();
     createWindow();
     startSidecar().catch((err: Error) => showFailure([String(err.message)]));

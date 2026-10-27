@@ -5,8 +5,29 @@
 import path from "node:path";
 
 export const READY_PREFIX = "SPLITSMITH_READY ";
-export const PYTHON_RELATIVE = path.join("python", "bin", "python3.12");
-export const CLI_RELATIVE = path.join("python", "bin", "splitsmith");
+
+/**
+ * ``path`` for the platform being described, not the host: the helpers take
+ * ``platform`` as an argument, and the tests ask for win32 paths on a Mac.
+ */
+function pathFor(platform: NodeJS.Platform): path.PlatformPath {
+  return platform === "win32" ? path.win32 : path.posix;
+}
+
+/**
+ * The bundled interpreter, relative to the resources dir. python-build-standalone
+ * puts ``python.exe`` at the root on Windows and ``bin/python3.12`` elsewhere.
+ */
+export function pythonRelative(platform: NodeJS.Platform): string {
+  return platform === "win32" ? path.win32.join("python", "python.exe") : path.posix.join("python", "bin", "python3.12");
+}
+
+/** The runtime's ``splitsmith`` console script (``Scripts\splitsmith.exe`` on Windows). */
+export function cliRelative(platform: NodeJS.Platform): string {
+  return platform === "win32"
+    ? path.win32.join("python", "Scripts", "splitsmith.exe")
+    : path.posix.join("python", "bin", "splitsmith");
+}
 
 /** The JSON the sidecar prints after ``SPLITSMITH_READY`` (ui/embedded.py ServerHandle). */
 export interface ReadyPayload {
@@ -51,16 +72,20 @@ export interface SidecarOptions {
   platform: NodeJS.Platform;
 }
 
-/** An XDG base dir only when it is absolute, as the spec requires (and user_config.py does). */
-function xdgBase(env: NodeJS.ProcessEnv, name: string, fallback: string): string {
+/**
+ * An env var naming a base dir, used only when it is absolute (XDG requires
+ * it, user_config.py honours it the same way); otherwise ``fallback``.
+ */
+function absoluteEnv(env: NodeJS.ProcessEnv, name: string, fallback: string, p: path.PlatformPath): string {
   const v = env[name];
-  return v && path.isAbsolute(v) ? v : fallback;
+  return v && p.isAbsolute(v) ? v : fallback;
 }
 
 /**
  * Where the sidecar logs and where numba caches. macOS keeps the paths
- * it shipped with; Linux follows XDG, next to the engine's own cache dir
- * (runtime._platform_cache_dir). Data (SPLITSMITH_HOME) is never set:
+ * it shipped with; Linux follows XDG and Windows uses %LOCALAPPDATA%, both
+ * next to the engine's own cache dir (runtime._platform_cache_dir). Data
+ * (SPLITSMITH_HOME) is never set:
  * the engine picks the same place the CLI does.
  */
 export function platformDirs(
@@ -68,14 +93,19 @@ export function platformDirs(
   home: string,
   env: NodeJS.ProcessEnv,
 ): { logDir: string; numbaCacheDir: string } {
+  const p = pathFor(platform);
+  if (platform === "win32") {
+    const local = absoluteEnv(env, "LOCALAPPDATA", p.join(home, "AppData", "Local"), p);
+    return { logDir: p.join(local, "splitsmith", "logs"), numbaCacheDir: p.join(local, "splitsmith", "numba") };
+  }
   if (platform === "linux") {
-    const state = xdgBase(env, "XDG_STATE_HOME", path.join(home, ".local", "state"));
-    const cache = xdgBase(env, "XDG_CACHE_HOME", path.join(home, ".cache"));
-    return { logDir: path.join(state, "splitsmith", "logs"), numbaCacheDir: path.join(cache, "splitsmith", "numba") };
+    const state = absoluteEnv(env, "XDG_STATE_HOME", p.join(home, ".local", "state"), p);
+    const cache = absoluteEnv(env, "XDG_CACHE_HOME", p.join(home, ".cache"), p);
+    return { logDir: p.join(state, "splitsmith", "logs"), numbaCacheDir: p.join(cache, "splitsmith", "numba") };
   }
   return {
-    logDir: path.join(home, "Library", "Logs", "Splitsmith"),
-    numbaCacheDir: path.join(home, "Library", "Caches", "Splitsmith", "numba"),
+    logDir: p.join(home, "Library", "Logs", "Splitsmith"),
+    numbaCacheDir: p.join(home, "Library", "Caches", "Splitsmith", "numba"),
   };
 }
 
@@ -94,24 +124,29 @@ export interface SidecarSpec {
  * vars are then set explicitly (see splitsmith.runtime for the list).
  */
 export function sidecarSpec({ resourcesPath, port, home, env, platform }: SidecarOptions): SidecarSpec {
+  const p = pathFor(platform);
+  const exe = platform === "win32" ? ".exe" : "";
   const { logDir, numbaCacheDir } = platformDirs(platform, home, env);
   const clean: Record<string, string> = {};
   for (const [k, v] of Object.entries(env)) {
     if (v === undefined) continue;
-    if (k.startsWith("PYTHON") || k.startsWith("SPLITSMITH_")) continue;
+    // Windows env names are case-insensitive: ``PythonPath`` is PYTHONPATH there.
+    const name = platform === "win32" ? k.toUpperCase() : k;
+    if (name.startsWith("PYTHON") || name.startsWith("SPLITSMITH_")) continue;
     clean[k] = v;
   }
   return {
-    command: path.join(resourcesPath, PYTHON_RELATIVE),
+    command: p.join(resourcesPath, pythonRelative(platform)),
     args: ["-m", "splitsmith.ui.embedded", "--log-dir", logDir],
     env: {
       ...clean,
       SPLITSMITH_HOST: "127.0.0.1",
       SPLITSMITH_PORT: String(port),
-      SPLITSMITH_FFMPEG: path.join(resourcesPath, "bin", "ffmpeg"),
-      SPLITSMITH_FFPROBE: path.join(resourcesPath, "bin", "ffprobe"),
-      // The bundle is read-only (signed on macOS, squashfs in an AppImage);
-      // numba's default cache is next to the module and would fail to write.
+      SPLITSMITH_FFMPEG: p.join(resourcesPath, "bin", `ffmpeg${exe}`),
+      SPLITSMITH_FFPROBE: p.join(resourcesPath, "bin", `ffprobe${exe}`),
+      // The bundle is read-only (signed on macOS, squashfs in an AppImage)
+      // and an installer owns it on Windows; numba's default cache is next
+      // to the module and would fail to write or be left behind on uninstall.
       NUMBA_CACHE_DIR: numbaCacheDir,
       PYTHONDONTWRITEBYTECODE: "1",
       PYTHONNOUSERSITE: "1",

@@ -24,8 +24,8 @@ describe("menuTemplate", () => {
       "windowMenu",
     ]);
   });
-  it("on Linux has no app menu, no CLI installer, and Help carries About and updates", () => {
-    expect(shape(menuTemplate("linux", h, "Splitsmith") as Item[])).toEqual([
+  it.each(["linux", "win32"] as const)("on %s has no app menu, no CLI installer, and Help carries About and updates", (platform) => {
+    expect(shape(menuTemplate(platform, h, "Splitsmith") as Item[])).toEqual([
       { File: ["Open log folder", "separator", "quit"] },
       "editMenu",
       { View: ["reload", "resetZoom", "zoomIn", "zoomOut", "separator", "togglefullscreen", "toggleDevTools"] },
