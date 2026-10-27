@@ -1,14 +1,12 @@
-"""Per-candidate feature extractors for the 4-voter ensemble.
+"""Per-candidate feature extractors for the ensemble.
 
-Three families of features:
+Two families of features:
 
 * **Hand-crafted** -- pure ``numpy`` derivatives of the audio (RMS,
   attack, reverb-tail, multi-resolution envelope ratios). Cheap;
   computed on every call.
 * **CLAP** -- per-prompt cosine similarity in CLAP's shared
   audio-text embedding space. Loaded once via ``load_clap_runtime``.
-* **PANN** -- AudioSet ``Gunshot, gunfire`` class probability. Loaded
-  once via ``load_pann_runtime``.
 
 The CLAP prompt bank lives here (not in calibration.py) because the
 trained GBDT classifier in voter C was fit on similarities to *these*
@@ -19,7 +17,7 @@ prompt strings were used so loading checks the bank still matches.
 from __future__ import annotations
 
 import os
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -57,9 +55,6 @@ CLAP_SR = 48000  # CLAP-HTSAT native rate
 CLAP_MODEL_ID = "laion/clap-htsat-unfused"
 CLAP_WINDOW_S = 1.0  # 1 s window centred on each candidate
 
-PANN_SR = 32000  # PANN CNN14 native rate
-PANN_WINDOW_S = 1.0
-PANN_GUNSHOT_CLASS_INDEX = 427  # AudioSet ontology
 
 _HAND_FEATURE_NAMES: tuple[str, ...] = (
     "peak_amp",
@@ -162,20 +157,6 @@ class ClapRuntime:
     backend: Backend
     model: Any = None
     processor: Any = None
-
-
-@dataclass
-class PannRuntime:
-    """PANN gunshot-class inference state, backend-agnostic.
-
-    ``predict_gunshot_prob`` takes an ``(N, T_samples)`` float32 batch
-    at ``PANN_SR`` and returns an ``(N,)`` numpy vector of the AudioSet
-    ``Gunshot, gunfire`` class probability per row.
-    """
-
-    predict_gunshot_prob: Callable[[np.ndarray], np.ndarray]
-    backend: Backend
-    tagger: Any = None
 
 
 def _slice_window(audio: np.ndarray, sr: int, t: float, win_s: float) -> np.ndarray:
@@ -380,7 +361,6 @@ REL_FEATURE_NAMES: tuple[str, ...] = tuple(
     for s in (
         *_REL_LOG_SOURCES,
         *_REL_LIN_HAND_SOURCES,
-        "gunshot_prob",
         "clap_diff",
         *_REL_LIN_TIMBRE_SOURCES,
         *(f"clap_sim_{i:02d}" for i in range(len(CLAP_PROMPTS))),
@@ -388,11 +368,42 @@ REL_FEATURE_NAMES: tuple[str, ...] = tuple(
 )
 REL_FEATURE_DIM: int = len(REL_FEATURE_NAMES)
 
-# +1 for clap_diff, +1 for gunshot_prob (folded in from voter D), and the
-# stage-relative block (spec 2026-10-09) appended after the camera one-hot.
-VOTER_C_FEATURE_DIM: int = (
-    HAND_FEATURE_DIM + len(CLAP_PROMPTS) + 1 + 1 + CAMERA_CLASS_FEATURE_DIM + REL_FEATURE_DIM
+# Every voter C column by name, in matrix order: hand | CLAP per-prompt
+# similarities | clap_diff | camera one-hot | the stage-relative block
+# (spec 2026-10-09). A model set is a subset of these names, and both the
+# runtime and the build pick a set's columns through ``select_columns``, so
+# the two cannot disagree on order (thin detection spec 2026-10-26).
+VOTER_C_COLUMN_NAMES: tuple[str, ...] = (
+    *_HAND_FEATURE_NAMES,
+    *(f"clap_sim_{i:02d}" for i in range(len(CLAP_PROMPTS))),
+    "clap_diff",
+    *(f"cam_{c}" for c in CAMERA_CLASS_FEATURE_NAMES),
+    *REL_FEATURE_NAMES,
 )
+VOTER_C_FEATURE_DIM: int = len(VOTER_C_COLUMN_NAMES)
+_VOTER_C_COLUMN_INDEX: dict[str, int] = {name: i for i, name in enumerate(VOTER_C_COLUMN_NAMES)}
+
+# ``base`` needs no model download; ``clap`` adds the CLAP columns and needs
+# the CLAP audio encoder and text embeddings.
+MODEL_SETS: tuple[str, ...] = ("base", "clap")
+DEFAULT_MODEL_SET: str = "base"
+
+
+def model_set_columns(name: str) -> tuple[str, ...]:
+    """The voter C column names model set ``name`` scores, in matrix order."""
+    if name == "clap":
+        return VOTER_C_COLUMN_NAMES
+    if name == "base":
+        return tuple(n for n in VOTER_C_COLUMN_NAMES if "clap" not in n)
+    raise ValueError(f"unknown model set {name!r}; expected one of {', '.join(MODEL_SETS)}")
+
+
+def select_columns(x: np.ndarray, columns: Sequence[str]) -> np.ndarray:
+    """The ``(N, len(columns))`` slice of a full voter C matrix, by column name."""
+    idx = [_VOTER_C_COLUMN_INDEX[c] for c in columns]
+    return x[:, idx]
+
+
 _REF_FALLBACK_FRACTION: float = 0.3
 _REF_FALLBACK_MIN: int = 3
 _HAND_INDEX: dict[str, int] = {name: i for i, name in enumerate(_HAND_FEATURE_NAMES)}
@@ -418,7 +429,6 @@ def stage_relative_features(
     hand: np.ndarray,
     clap_sims: np.ndarray,
     clap_diff: np.ndarray,
-    gunshot_prob: np.ndarray,
 ) -> np.ndarray:
     """Per-candidate ``(N, REL_FEATURE_DIM)`` block relative to the stage's likely shots.
 
@@ -433,7 +443,7 @@ def stage_relative_features(
     ref = reference_indices(hand[:, _HAND_INDEX["confidence"]])
     sources: list[np.ndarray] = [np.log(np.maximum(hand[:, _HAND_INDEX[s]], 1e-9)) for s in _REL_LOG_SOURCES]
     sources += [hand[:, _HAND_INDEX[s]] for s in _REL_LIN_HAND_SOURCES]
-    sources += [np.asarray(gunshot_prob, dtype=np.float64), np.asarray(clap_diff, dtype=np.float64)]
+    sources += [np.asarray(clap_diff, dtype=np.float64)]
     sources += [hand[:, _HAND_INDEX[s]] for s in _REL_LIN_TIMBRE_SOURCES]
     sources += [np.asarray(clap_sims[:, i], dtype=np.float64) for i in range(clap_sims.shape[1])]
     for j, col in enumerate(sources):
@@ -493,7 +503,7 @@ ENV_CLAP_TEXT_OVERRIDE = "SPLITSMITH_CLAP_TEXT"
 def _resolve_onnx_clap_paths() -> tuple[Path, Path]:
     """Locate the CLAP audio encoder ONNX + pre-baked text embeddings.
 
-    Order matches PANN's :func:`_resolve_onnx_pann_path`:
+    Order:
 
     1. ``SPLITSMITH_ONNX_CLAP`` / ``SPLITSMITH_CLAP_TEXT`` env vars --
        dev / test override (paths produced by ``export_clap_onnx.py``).
@@ -526,6 +536,28 @@ def _resolve_onnx_clap_paths() -> tuple[Path, Path]:
         registry.resolve(CLAP_AUDIO_ARTIFACT_SLUG),
         registry.resolve(CLAP_TEXT_ARTIFACT_SLUG),
     )
+
+
+def clap_artifacts_present() -> bool:
+    """Can CLAP load without downloading anything?
+
+    The torch backend (a dev install) loads from the Hugging Face cache and
+    counts as present; so do the ``SPLITSMITH_ONNX_CLAP`` /
+    ``SPLITSMITH_CLAP_TEXT`` overrides. On the ONNX backend both CLAP
+    artifacts must be cached and verified in the model registry; a
+    calibration without a ``model_artifacts`` block has none. Never
+    downloads (``ModelRegistry.status``)."""
+    if select_backend() is Backend.TORCH:
+        return True
+    if os.environ.get(ENV_ONNX_CLAP_OVERRIDE) and os.environ.get(ENV_CLAP_TEXT_OVERRIDE):
+        return True
+    from ..models import registry as registry_mod
+
+    registry = registry_mod.get_default_registry()
+    if registry is None:
+        return False
+    states = {s.slug: s.state for s in registry.status()}
+    return all(states.get(slug) == "present" for slug in (CLAP_AUDIO_ARTIFACT_SLUG, CLAP_TEXT_ARTIFACT_SLUG))
 
 
 def _build_clap_runtime_onnx() -> ClapRuntime:
@@ -628,136 +660,17 @@ def clap_diff_from_similarities(sims: np.ndarray) -> np.ndarray:
     return (shot_mean - not_mean).astype(np.float32)
 
 
-def _build_pann_runtime_torch() -> PannRuntime:
-    """Construct a torch-backed :class:`PannRuntime`. Dev / contributor path."""
-    from panns_inference import AudioTagging
-
-    tagger = AudioTagging(checkpoint_path=None, device="cpu")
-
-    def predict_gunshot_prob(batch: np.ndarray) -> np.ndarray:
-        clipwise, _embedding = tagger.inference(batch)
-        return np.asarray(clipwise, dtype=np.float32)[:, PANN_GUNSHOT_CLASS_INDEX].astype(np.float32)
-
-    return PannRuntime(
-        predict_gunshot_prob=predict_gunshot_prob,
-        backend=Backend.TORCH,
-        tagger=tagger,
-    )
-
-
-PANN_ARTIFACT_SLUG = "pann_cnn14"
-ENV_ONNX_PANN_OVERRIDE = "SPLITSMITH_ONNX_PANN"
-
-
-def _resolve_onnx_pann_path() -> Path:
-    """Locate the PANN ONNX artifact.
-
-    Order:
-    1. ``SPLITSMITH_ONNX_PANN`` env var -- dev / test override pointing
-       at a freshly exported file under ``build/onnx-spike/``.
-    2. The slim model registry -- ``ensemble_calibration.json`` must have
-       a ``model_artifacts.pann_cnn14`` block; the registry downloads
-       from R2 and SHA256-verifies. Raises clear errors if the block
-       isn't there yet (still in slim v1 rollout).
-    """
-    override = os.environ.get(ENV_ONNX_PANN_OVERRIDE)
-    if override:
-        path = Path(override)
-        if not path.is_file():
-            raise FileNotFoundError(f"{ENV_ONNX_PANN_OVERRIDE} points at {path}, which does not exist")
-        return path
-
-    from ..models import get_default_registry
-
-    registry = get_default_registry()
-    if registry is None:
-        raise RuntimeError(
-            "ONNX PANN backend selected but ensemble_calibration.json has no "
-            "model_artifacts block. Run `uv run python "
-            "scripts/export_pann_onnx.py` and paste the printed snippet into "
-            "src/splitsmith/data/ensemble_calibration.json, or point "
-            f"{ENV_ONNX_PANN_OVERRIDE} at a local export."
-        )
-    return registry.resolve(PANN_ARTIFACT_SLUG)
-
-
-def _build_pann_runtime_onnx() -> PannRuntime:
-    """Construct an onnxruntime-backed :class:`PannRuntime`.
-
-    Loads the consolidated single-file artifact produced by
-    ``scripts/export_pann_onnx.py``. Inference contract matches the
-    torch branch: ``(N, T)`` float32 audio at ``PANN_SR`` -> ``(N,)``
-    gunshot probability in numpy.
-    """
-    from .onnx_session import build_onnx_session
-
-    onnx_path = _resolve_onnx_pann_path()
-    session = build_onnx_session(onnx_path)
-    input_name = session.get_inputs()[0].name
-
-    def predict_gunshot_prob(batch: np.ndarray) -> np.ndarray:
-        audio = np.ascontiguousarray(batch.astype(np.float32, copy=False))
-        clipwise = session.run(None, {input_name: audio})[0]
-        return clipwise[:, PANN_GUNSHOT_CLASS_INDEX].astype(np.float32)
-
-    return PannRuntime(
-        predict_gunshot_prob=predict_gunshot_prob,
-        backend=Backend.ONNX,
-        tagger=None,
-    )
-
-
-def load_pann_runtime() -> PannRuntime:
-    """Load PANN through the selected backend.
-
-    First call on the torch path downloads ~80 MB to ``~/panns_data/``.
-    On the ONNX path, the consolidated ``pann_cnn14.onnx`` is resolved
-    via :func:`_resolve_onnx_pann_path` (env override or slim model
-    registry). Reuse the returned runtime across detections.
-    """
-    backend = select_backend()
-    if backend is Backend.TORCH:
-        return _build_pann_runtime_torch()
-    if backend is Backend.ONNX:
-        return _build_pann_runtime_onnx()
-    raise SplitsmithBackendError(f"Unknown backend {backend!r}")
-
-
-def compute_pann_gunshot_probs(
-    audio: np.ndarray,
-    sample_rate: int,
-    candidate_times: np.ndarray,
-    runtime: PannRuntime,
-) -> np.ndarray:
-    """Per-candidate ``Gunshot, gunfire`` class probability, shape ``(N,)``.
-
-    Inference goes through ``runtime.predict_gunshot_prob`` so this
-    function is backend-agnostic and free of ``import torch``.
-    """
-    if not len(candidate_times):
-        return np.zeros(0, dtype=np.float32)
-    if sample_rate != PANN_SR:
-        pann_audio = librosa.resample(audio.astype(np.float32), orig_sr=sample_rate, target_sr=PANN_SR)
-    else:
-        pann_audio = audio.astype(np.float32)
-    batch = np.stack(
-        [_slice_window(pann_audio, PANN_SR, float(t), PANN_WINDOW_S) for t in candidate_times],
-        axis=0,
-    )
-    return runtime.predict_gunshot_prob(batch)
-
-
 def voter_c_feature_matrix(
     hand_features: np.ndarray,
     clap_sims: np.ndarray,
     clap_diff: np.ndarray,
-    gunshot_prob: np.ndarray,
     camera_classes: list[str] | np.ndarray | str | None = None,
 ) -> np.ndarray:
     """Stack the GBDT input vector for the candidates of ONE stage.
 
-    Columns in order: ``hand | clap_sims | clap_diff | gunshot_prob |
-    camera_class_onehot | stage_relative``. The stage-relative block
+    Columns in order: ``hand | clap_sims | clap_diff |
+    camera_class_onehot | stage_relative`` (``VOTER_C_COLUMN_NAMES``); a
+    model set scores a subset of them through ``select_columns``. The stage-relative block
     compares each candidate with the stage's likely shots (see
     ``reference_indices``), so every row must come from the same
     detector universe.
@@ -765,13 +678,6 @@ def voter_c_feature_matrix(
     Column order matches the calibration script. Drift here -- adding
     features, reordering CLAP prompts, reordering camera classes -- silently
     desyncs voter C, so any change requires rebuilding the shipped GBDT.
-
-    ``gunshot_prob`` is the PANN ``Gunshot, gunfire`` class probability
-    (formerly voter D's signal). Folded into voter C as a feature so the
-    GBDT can learn its interaction with the other columns rather than
-    casting an independent vote -- on the 30-fixture corpus voter D's
-    threshold was a dead axis under ``c_required=True`` (see
-    ``docs/ensemble_dashboard/findings/2026-05-11_voter_abd_have_no_leverage.md``).
 
     ``camera_classes`` (issue #139) is a per-row class label (or a single
     string broadcast to every row). ``None`` and unknown classes fall back
@@ -786,13 +692,12 @@ def voter_c_feature_matrix(
     else:
         classes_input = camera_classes
     cam_block = camera_class_one_hot(classes_input, n_rows)
-    rel = stage_relative_features(hand_features, clap_sims, clap_diff, gunshot_prob)
+    rel = stage_relative_features(hand_features, clap_sims, clap_diff)
     x = np.concatenate(
         [
             hand_features,
             clap_sims.astype(np.float64),
             clap_diff.astype(np.float64)[:, None],
-            gunshot_prob.astype(np.float64)[:, None],
             cam_block,
             rel,
         ],

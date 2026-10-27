@@ -35,13 +35,12 @@ dependencies = [
     # Auto-loads <project>/.env / .env.local so SPLITSMITH_SSI_TOKEN works
     # without the user having to ``export`` it before launching the UI.
     "python-dotenv>=1.0.0",
-    # Ensemble shot-detection runtime. Every shipped model now loads
-    # through onnxruntime: voters B (CLAP) and D (PANN, folded into C
-    # as a feature column) since #377, and voters C (GBDT) and E
-    # (linear probe head) since #649. Heavy torch / transformers /
-    # panns-inference moved to [dev] -- they power the export scripts
-    # and the optional Voter E CLIP backbone, not the shipped audit
-    # hot path.
+    # Ensemble shot-detection runtime. Every shipped model loads through
+    # onnxruntime: voter B (CLAP, in the opt-in clap model set) since
+    # #377, and voters C (GBDT) and E (linear probe head) since #649.
+    # Heavy torch / transformers live in [dev] -- they power the export
+    # scripts and the optional Voter E CLIP backbone, not the shipped
+    # audit hot path.
     # scikit-learn and joblib are contributor-side only, in the [dev]
     # group: training in scripts/build_ensemble_artifacts.py and the
     # ONNX export scripts. Nothing under src/ imports either. That is
@@ -53,7 +52,6 @@ dependencies = [
     # transitively, so the install does not shrink; what went away is
     # our version constraint on it.
     "onnxruntime>=1.20.0",
-    "huggingface_hub>=0.26.0",
     # PIL/Pillow was a transitive of torch + transformers before the
     # slim migration. The overlay renderer + Voter E frame loader
     # import it directly, so we pin it as a first-class runtime dep
@@ -255,7 +253,6 @@ dev = [
     # reference. End users on the slim wheel never see these.
     "torch>=2.11.0",
     "transformers>=5.10.0",
-    "panns-inference>=0.1.1",
 ]
 
 [tool.ruff]

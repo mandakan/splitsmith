@@ -109,11 +109,11 @@ uv pip install --python "$SMOKE_VENV/bin/python" "$WHEEL" --quiet --reinstall
 
 # --- sentinel: no torch trio ----------------------------------------
 
-echo "==> sentinel: torch / transformers / panns_inference must NOT be installed"
+echo "==> sentinel: torch / transformers must NOT be installed"
 "$SMOKE_VENV/bin/python" - <<'PY'
 import sys
 
-forbidden = ("torch", "transformers", "panns_inference")
+forbidden = ("torch", "transformers")
 for name in forbidden:
     try:
         __import__(name)
@@ -123,7 +123,7 @@ for name in forbidden:
         f"slim wheel pulled in {name} -- the [dev] group leaked into the runtime install"
     )
 
-required = ("onnxruntime", "librosa", "huggingface_hub", "numpy", "PIL")
+required = ("onnxruntime", "librosa", "numpy", "PIL")
 for name in required:
     __import__(name)
 
@@ -187,10 +187,11 @@ if not models:
 
 for camera_class, model in sorted(models.items()):
     n = getattr(model, "n_features", None)
-    if n is not None and n != cal.voter_c_feature_dim:
+    want = cal.model_set(cal.default_model_set).voter_c_feature_dim
+    if n is not None and n != want:
         sys.exit(
             f"    FAIL: voter C ({camera_class}) takes {n} features; "
-            f"calibration says {cal.voter_c_feature_dim}"
+            f"calibration says {want}"
         )
 
 # The probe is optional -- artifacts built without Voter E name no file,

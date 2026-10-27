@@ -7,13 +7,13 @@ incompatibility reached a release: CI installed the wheel with a fresh
 resolve, but the only detection it ran exercised the envelope detector
 (voter A), which never touches them. The pickles are gone, so what is
 left to check is that the graphs instantiate under the resolved
-onnxruntime and that their declared feature width still matches the
-calibration the rest of the pipeline is built from.
+onnxruntime and that each model set's graphs take that set's declared
+feature width.
 
 Cheap on purpose -- it needs neither ``fetch-models`` nor ffmpeg.
 ``Runtime.artifacts_dir`` defaults to the packaged ``splitsmith/data/``,
-so these files come out of the wheel itself; the 440 MiB R2 download is
-for the CLAP / PANN ONNX models, which this does not touch. That is what
+so these files come out of the wheel itself; the R2 download is
+for the CLAP ONNX models, which this does not touch. That is what
 lets it run on every PR rather than only behind the opt-in smoke job.
 
 Run with the interpreter whose resolve you want to test:
@@ -55,7 +55,7 @@ def check_session(path: Path, label: str, *, expect_features: int | None) -> str
         return f"{label} artifact input {inputs[0].name!r} has shape {shape}; expected 2-D"
     if expect_features is not None and shape[1] != expect_features:
         return (
-            f"{label} artifact takes {shape[1]} features; calibration's "
+            f"{label} artifact takes {shape[1]} features; its model set's "
             f"voter_c_feature_dim is {expect_features}"
         )
     return None
@@ -79,29 +79,33 @@ def main() -> int:
         print(f"calibration did not parse: {type(exc).__name__}: {exc}", file=sys.stderr)
         return 1
 
-    voter_c_artifacts = calibration.get("voter_c_onnx_artifacts")
-    if not voter_c_artifacts:
+    model_sets = calibration.get("model_sets")
+    if not isinstance(model_sets, dict) or not model_sets:
         print(
-            "calibration names no voter_c_onnx_artifacts -- rebuild the "
-            "artifact set with scripts/build_ensemble_artifacts.py",
+            "calibration has no model_sets -- rebuild the artifact set with "
+            "scripts/build_ensemble_artifacts.py",
             file=sys.stderr,
         )
         return 1
 
-    feature_dim = calibration.get("voter_c_feature_dim")
-    if not isinstance(feature_dim, int):
-        print(f"calibration has no usable voter_c_feature_dim: {feature_dim!r}", file=sys.stderr)
-        return 1
-
-    for camera_class, filename in sorted(voter_c_artifacts.items()):
-        err = check_session(
-            artifacts_dir / filename,
-            f"voter C ({camera_class})",
-            expect_features=feature_dim,
-        )
-        if err is not None:
-            print(err, file=sys.stderr)
+    for set_name, block in sorted(model_sets.items()):
+        voter_c_artifacts = block.get("voter_c_onnx_artifacts")
+        if not voter_c_artifacts:
+            print(f"model set {set_name} names no voter_c_onnx_artifacts", file=sys.stderr)
             return 1
+        feature_dim = block.get("voter_c_feature_dim")
+        if not isinstance(feature_dim, int):
+            print(f"model set {set_name} has no usable voter_c_feature_dim: {feature_dim!r}", file=sys.stderr)
+            return 1
+        for camera_class, filename in sorted(voter_c_artifacts.items()):
+            err = check_session(
+                artifacts_dir / filename,
+                f"voter C ({set_name} model set, {camera_class})",
+                expect_features=feature_dim,
+            )
+            if err is not None:
+                print(err, file=sys.stderr)
+                return 1
 
     # The probe is genuinely optional -- artifacts built without Voter E
     # name no file, and the ensemble falls back to the 4-voter path.

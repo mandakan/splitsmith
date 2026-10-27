@@ -43,7 +43,7 @@ vars (issue #370):
 Each candidate must be executable; non-executable entries fall through.
 
 The first call has a side effect: it ``setdefault``-s ``HF_HOME`` and
-``TORCH_HOME`` into the resolved cache dir so CLAP / PANN downloads
+``TORCH_HOME`` into the resolved cache dir so CLAP downloads
 land somewhere a packaged app can clean up, instead of the user's
 home dir.
 """
@@ -275,7 +275,7 @@ def resolve_runtime(
     _validate_binary(ffp, "ffprobe")
 
     # Point HuggingFace / Torch caches into our cleanable cache dir so
-    # CLAP/PANN downloads don't pollute ``~``. ``setdefault`` so users
+    # CLAP downloads don't pollute ``~``. ``setdefault`` so users
     # who already point these elsewhere stay in control.
     os.environ.setdefault("HF_HOME", str(cache / "hf"))
     os.environ.setdefault("TORCH_HOME", str(cache / "torch"))

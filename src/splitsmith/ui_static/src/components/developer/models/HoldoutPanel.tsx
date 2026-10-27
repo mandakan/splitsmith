@@ -66,7 +66,7 @@ export function HoldoutPanel({
                 At the shipped threshold, one bar per split, top to bottom: by candidate, by stage, leave match out.
               </p>
               {ensemble.heads.map((h) => (
-                <HeadBars key={h.camera_class} head={h} active={split} />
+                <HeadBars key={`${h.model_set}-${h.camera_class}`} head={h} active={split} />
               ))}
             </>
           )}
@@ -138,7 +138,9 @@ function HeadBars({ head, active }: { head: VoterCHead; active: SplitName }) {
     <div className="flex flex-col gap-2">
       <div className="flex flex-wrap items-baseline gap-2">
         <i aria-hidden className="size-2 rounded-full" style={{ background: HEAD_COLOR[head.camera_class] }} />
-        <span className="text-md text-ink">{CLASSIFIER_LABEL[head.camera_class]}</span>
+        <span className="text-md text-ink">
+          {CLASSIFIER_LABEL[head.camera_class]} <span className="text-muted">({head.model_set} model)</span>
+        </span>
         <span className="text-sm text-muted">
           {head.n_fixtures} fixtures, {head.heldout_stages ?? "?"} stages, {head.heldout_matches.length} matches
         </span>

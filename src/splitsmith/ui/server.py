@@ -1534,12 +1534,13 @@ def tenant_looks_provider(tenant: TenantContext) -> looks_module.UserLooksProvid
     return provide
 
 
-# Module-level cache for the 4-voter ensemble runtime (issue #31). Heavy
-# (CLAP ~600 MB, PANN ~80 MB), so it is loaded on the first shot-detect
-# call and reused for subsequent calls. The threading lock guards against
-# two shot-detect jobs colliding on first init when the model weights
-# haven't downloaded yet.
-_ENSEMBLE_RUNTIME: ensemble_module.EnsembleRuntime | None = None
+# Module-level cache of ensemble runtimes (issue #31), one per model set,
+# keyed by the set the loader *returned*: a ``clap`` request that fell back
+# to ``base`` (artifacts missing) is cached as ``base``, so the next ``clap``
+# request tries again. Loaded on the first shot-detect call and reused; the
+# lock keeps two shot-detect jobs from colliding on first init while the
+# model weights download.
+_ENSEMBLE_RUNTIMES: dict[str, ensemble_module.EnsembleRuntime] = {}
 _ENSEMBLE_RUNTIME_LOCK = threading.Lock()
 
 
@@ -1583,46 +1584,63 @@ def _trim_wav_to_clip(src_wav: Path, dst_wav: Path, start_s: float, end_s: float
         ) from exc
 
 
-def _get_ensemble_runtime() -> ensemble_module.EnsembleRuntime:
-    """Lazy-load + cache the ensemble runtime; thread-safe.
+def _requested_model_set(model_set: str | None = None) -> str:
+    """The model set a detection asks for: ``model_set`` when given, else
+    ``SPLITSMITH_MODEL_SET``, then (locally) the machine's preference, then
+    ``base``. Hosted has no machine preference; its images set the env."""
+    if model_set is not None:
+        return ensemble_module.api.resolve_model_set(model_set)
+    preference = None if _hosted_mode_active() else user_config.load_global_prefs().detection_model_set
+    return ensemble_module.api.resolve_model_set(preference)
+
+
+def _get_ensemble_runtime(model_set: str | None = None) -> ensemble_module.EnsembleRuntime:
+    """Lazy-load + cache the ensemble runtime for a model set; thread-safe.
+
+    ``model_set`` defaults to :func:`_requested_model_set`. The runtime that
+    comes back may score another set (a ``clap`` request without its
+    artifacts runs ``base``); its ``model_set`` says which.
 
     Test code monkeypatches this function (and
     ``ensemble_module.detect_shots_ensemble``) to avoid pulling the heavy
     model weights into the test process.
 
     Voter E (issue #183) adds a CLIP image-encoder load on top of the
-    existing CLAP/PANN/GBDT models. Skip it unless the operator has
+    existing CLAP/GBDT models. Skip it unless the operator has
     opted in via ``SPLITSMITH_ENABLE_VOTER_E=1`` so the default install
     doesn't pay ~600 MB of memory and the first-call download.
     """
-    global _ENSEMBLE_RUNTIME
-    if _ENSEMBLE_RUNTIME is None:
+    wanted = _requested_model_set(model_set)
+    runtime = _ENSEMBLE_RUNTIMES.get(wanted)
+    if runtime is None:
         with _ENSEMBLE_RUNTIME_LOCK:
-            if _ENSEMBLE_RUNTIME is None:
+            runtime = _ENSEMBLE_RUNTIMES.get(wanted)
+            if runtime is None:
                 with_voter_e = os.environ.get("SPLITSMITH_ENABLE_VOTER_E") == "1"
-                _ENSEMBLE_RUNTIME = ensemble_module.load_ensemble_runtime(with_voter_e=with_voter_e)
-    return _ENSEMBLE_RUNTIME
+                runtime = ensemble_module.load_ensemble_runtime(model_set=wanted, with_voter_e=with_voter_e)
+                _ENSEMBLE_RUNTIMES[runtime.model_set] = runtime
+    return runtime
 
 
-def _ensemble_runtime_is_warm() -> bool:
-    """``True`` when the ensemble singleton is already loaded in this process.
+def _ensemble_runtime_is_warm(model_set: str | None = None) -> bool:
+    """``True`` when the runtime for the requested set is already loaded.
 
-    Cheap, lock-free read of the module global. Used by ``_run_shot_detect``
+    Cheap, lock-free read of the module cache. Used by ``_run_shot_detect``
     to decide whether the upcoming model resolution pays a cold load (timed
     as the ``cold_model_load`` phase) or hits the warm cache. The worker's
-    boot-time warmup populates the singleton so the steady-state path reports
-    warm.
+    boot-time warmup populates it so the steady-state path reports warm. A
+    ``clap`` request that fell back to ``base`` reads cold: it tries again.
     """
-    return _ENSEMBLE_RUNTIME is not None
+    return _requested_model_set(model_set) in _ENSEMBLE_RUNTIMES
 
 
 def warm_ensemble_runtime() -> None:
-    """Force the ensemble singleton to load now (worker-boot warmup).
+    """Load the requested set's runtime now (worker-boot warmup).
 
     Thin public wrapper over :func:`_get_ensemble_runtime` so the worker
-    entrypoint (``splitsmith.queue.run_worker``) can populate
-    ``_ENSEMBLE_RUNTIME`` before the first ``shot_detect`` job runs, keeping
-    the underscore-private loader internal. Returns nothing -- callers warm
+    entrypoint (``splitsmith.queue.run_worker``) can populate the cache
+    before the first ``shot_detect`` job runs, keeping the
+    underscore-private loader internal. Returns nothing -- callers warm
     the cache for its side effect, not its value. The model load happens on
     a worker thread (``asyncio.to_thread``) so it never blocks the event
     loop; a failure here is non-fatal and is re-attempted (and timed as the
@@ -2942,8 +2960,22 @@ def _run_model_download_job(handle: JobHandle) -> None:
     )
 
 
+def _required_model_artifacts() -> tuple[str, list[str]]:
+    """The requested model set and the registry slugs it needs to run
+    (``ModelSet.requires_artifacts``): none for ``base``. A calibration that
+    cannot be read needs nothing here; detection reports that itself."""
+    model_set = _requested_model_set()
+    try:
+        required = list(ensemble_module.load_calibration().model_set(model_set).requires_artifacts)
+    except Exception:  # noqa: BLE001 -- never break boot or a status poll on this
+        logger.exception("could not read the calibration's model sets")
+        required = []
+    return model_set, required
+
+
 async def _maybe_submit_model_download(state: AppState) -> None:
-    """Kick off the slim-artifact prefetch on startup when anything is missing.
+    """Kick off the slim-artifact prefetch on startup when anything the
+    requested model set needs is missing (nothing for ``base``, the default).
 
     No-op when the registry is unavailable (older calibrations without
     a ``model_artifacts`` block, or the torch dev install), when every
@@ -2951,7 +2983,7 @@ async def _maybe_submit_model_download(state: AppState) -> None:
     still active (idempotent across reloads of an embedded host).
     ``SPLITSMITH_NO_MODEL_PREFETCH=1`` skips it entirely: the subprocess
     tests of the embedded entrypoint boot against an empty config dir
-    and must not each start a 430 MB download that the drain then has
+    and must not each start a 120 MB download that the drain then has
     to cancel (that is what made the SIGTERM test time out on CI).
     """
     if os.environ.get("SPLITSMITH_NO_MODEL_PREFETCH", "").lower() in {"1", "true", "yes", "on"}:
@@ -2963,7 +2995,8 @@ async def _maybe_submit_model_download(state: AppState) -> None:
         return
     if registry is None:
         return
-    missing = [s for s in registry.status() if s.state != "present"]
+    _model_set, required = _required_model_artifacts()
+    missing = [s for s in registry.status() if s.slug in required and s.state != "present"]
     if not missing:
         return
     if await state.jobs.find_active(kind="model_download") is not None:
@@ -3549,7 +3582,7 @@ def register_job_bodies(state: AppState) -> None:
                 # Shot detection is primary-only AND gated on ``beep_reviewed``
                 # (#71): the flag is True because the user confirmed it or the
                 # auto-trust gate cleared (#219 layer 3b). Saves the CLAP /
-                # GBDT / PANN ensemble work when the beep is wrong. Layered
+                # GBDT ensemble work when the beep is wrong. Layered
                 # automation gate (#215): users can disable the auto-trigger
                 # globally or per project. Worker callbacks run with no event
                 # loop; ``run_sync`` bridges to the async JobBackend.
@@ -3809,7 +3842,7 @@ def register_job_bodies(state: AppState) -> None:
             is None
         ):
             # Same gate as the detect-then-trim path (#71): don't burn
-            # CLAP / GBDT / PANN cycles on a beep the user hasn't
+            # CLAP / GBDT cycles on a beep the user hasn't
             # confirmed. Manual entries pre-set ``beep_reviewed`` to True
             # so this still runs; the auto-detect / select-candidate path
             # leaves it False until the user's explicit "Mark reviewed"
@@ -3932,7 +3965,7 @@ def register_job_bodies(state: AppState) -> None:
 
         ``_candidates_pending_audit.candidates`` carries every candidate
         annotated with per-voter signals (vote_a/b/c/d, ensemble_score,
-        score_c, clap_diff, gunshot_prob) so the audit UI can render the
+        score_c, clap_diff) so the audit UI can render the
         decision trail. ``shots[]`` is seeded from the consensus subset
         unless it is already populated -- the user retains authority. If
         ``reset`` is True, ``shots[]`` is wiped first so the user can
@@ -4082,13 +4115,23 @@ def register_job_bodies(state: AppState) -> None:
         # detect in this process, reports warm and skips it). Forcing the
         # resolution here so ``detect_stage`` below then hits the warm cache
         # means the heavy weight load never hides inside ``ensemble_infer``.
-        cold = not _ensemble_runtime_is_warm()
+        # The set is read once per job, so a preference flipped mid-job
+        # takes effect on the next detection, never halfway through this one.
+        requested = _requested_model_set()
+        cold = not _ensemble_runtime_is_warm(requested)
         handle.timer.set_meta(cold_model_load=cold, expected_rounds=expected_rounds)
         if cold:
+            handle.update(progress=0.35, message=f"Loading the {requested} detection model...")
             with handle.timer.phase("cold_model_load"):
-                _get_ensemble_runtime()
+                runtime = _get_ensemble_runtime(requested)
+        else:
+            runtime = _get_ensemble_runtime(requested)
+        # The set that actually loaded: a clap request whose files are not
+        # downloaded yet runs base. The backend is asked for that set, so it
+        # never retries clap a second time inside ``ensemble_infer``.
+        model_set = getattr(runtime, "model_set", requested)
 
-        handle.update(progress=0.4, message="Detecting shots (4-voter ensemble)...")
+        handle.update(progress=0.4, message=f"Detecting shots ({model_set} model)...")
         with handle.timer.phase("ensemble_infer"):
             result = state.compute.detect_stage(
                 audio=audio_array,
@@ -4102,6 +4145,7 @@ def register_job_bodies(state: AppState) -> None:
                 camera_model=prim.camera_model,
                 video_path=source if enable_e else None,
                 source_beep_time=prim.beep_time if enable_e else None,
+                model_set=model_set,
             )
 
         candidates: list[dict[str, Any]] = []
@@ -6993,7 +7037,7 @@ def build_worker_state(*, process_name: str = "splitsmith-worker") -> AppState:
 
     The headless counterpart to ``create_app``'s state wiring: no FastAPI
     app and no routes -- just the compute backend (local ensemble, loaded
-    once per process via the ``_ENSEMBLE_RUNTIME`` singleton), the
+    once per model set per process via the ``_ENSEMBLE_RUNTIMES`` cache), the
     hosted-mode Postgres/S3 wiring (execute-only job backend, no boot
     sweep), and the shared job-body registry the Procrastinate
     ``run_compute_job`` task dispatches against. Requires hosted-mode env
@@ -7001,7 +7045,7 @@ def build_worker_state(*, process_name: str = "splitsmith-worker") -> AppState:
     otherwise.
     """
     state = AppState()
-    state.compute = LocalComputeBackend(runtime_loader=lambda: _get_ensemble_runtime())
+    state.compute = LocalComputeBackend(runtime_loader=lambda model_set: _get_ensemble_runtime(model_set))
     _apply_hosted_mode_wiring(state, worker=True, process_name=process_name)
     register_job_bodies(state)
     return state
@@ -9293,7 +9337,7 @@ def create_app(
     # in tests takes effect even though the backend was constructed
     # before the patch ran. When the hosted backend lands this swap
     # point is where the picker would inject a ``RemoteComputeBackend``.
-    state.compute = LocalComputeBackend(runtime_loader=lambda: _get_ensemble_runtime())
+    state.compute = LocalComputeBackend(runtime_loader=lambda model_set: _get_ensemble_runtime(model_set))
     # Hosted-mode swap: when ``SPLITSMITH_MODE=hosted``, replace the
     # local-mode auth + per-user stores + job backend with their
     # Postgres-backed equivalents. Must happen before the recent-
@@ -10239,11 +10283,16 @@ def create_app(
                 "active_job": None,
             }
         statuses = registry.status()
-        missing = [s.slug for s in statuses if s.state == "missing"]
-        mismatched = [s.slug for s in statuses if s.state == "mismatched"]
+        # Only what the requested model set needs counts as missing, so
+        # under base (no download) the SPA draws no download overlay.
+        model_set, required = _required_model_artifacts()
+        missing = [s.slug for s in statuses if s.state == "missing" and s.slug in required]
+        mismatched = [s.slug for s in statuses if s.state == "mismatched" and s.slug in required]
         active_job = await state.jobs.find_active(kind="model_download")
         return {
             "available": True,
+            "model_set": model_set,
+            "required": required,
             "cache_root": str(registry.root),
             "artifacts": [
                 {
@@ -10526,7 +10575,7 @@ def create_app(
         Reads the calibration JSON directly rather than going through
         ``_get_ensemble_runtime`` (issue #667): this is a metadata read,
         and building the full runtime would make a dropdown fetch pay
-        for the CLAP/PANN/voter-C session loads it never touches -- and
+        for the CLAP/voter-C session loads it never touches -- and
         would turn a missing model artifact into a 500 on a camera list
         that does not depend on any model.
         """
@@ -11110,7 +11159,7 @@ def create_app(
     # Lab: fixture management + ensemble eval + tuning
     # ----------------------------------------------------------------------
     #
-    # End-user-visible only via the /lab route in the SPA. Heavy CLAP/PANN
+    # End-user-visible only via the /lab route in the SPA. Heavy CLAP
     # runtime is loaded once on first /api/lab/eval call and cached on the
     # FastAPI app instance so subsequent eval / rescore calls amortise it.
     # The whole block is gated on ``lab_enabled`` so end-user installs
@@ -11572,7 +11621,9 @@ def create_app(
                         "built_at": cal.built_at,
                         "fixture_count": len(cal.calibration_fixtures),
                         "target_recall": cal.voter_c_target_recall,
-                        "metrics_by_class": cal.voter_c_metrics_by_camera_class,
+                        "metrics_by_class": cal.model_set(
+                            cal.default_model_set
+                        ).voter_c_metrics_by_camera_class,
                     }
 
                 before = _cal_snapshot()
@@ -12209,7 +12260,7 @@ def create_app(
             f1=None,
             fixture_count=len(cal.calibration_fixtures),
             built_at=cal.built_at,
-            metrics_by_class=cal.voter_c_metrics_by_camera_class,
+            metrics_by_class=cal.model_set(cal.default_model_set).voter_c_metrics_by_camera_class,
             step_counts=DeveloperStepCounts(
                 corpus=len(fixtures),
                 review=review_count,

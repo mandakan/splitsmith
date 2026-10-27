@@ -38,6 +38,10 @@ paths:
   - "tests/test_fixtures_registry.py"
   - "tests/test_lab_*.py"
   - "tests/test_onnx_parity.py"
+  - "tests/test_model_set_columns.py"
+  - "tests/test_calibration_model_sets.py"
+  - "tests/test_pann_is_gone.py"
+  - "tests/_ensemble_stubs.py"
   - "tests/test_runtime.py"
   - "docs/cameras.md"
 ---
@@ -54,7 +58,7 @@ it, dated, whenever a measurement shows something new about a camera.
 - `Shot.feature_time` is the detector's own leading-edge walk, where candidates
   are found and scored. It is never serialized.
 - **Every model input reads `Shot.scoring_time`** (the ensemble, TTA, the build,
-  the CLAP/PANN caches, the sweeps). Computing features from `time_absolute`
+  the CLAP caches, the sweeps). Computing features from `time_absolute`
   shifted them between two camera firmwares and made held-out footage
   undetectable.
 
@@ -64,41 +68,69 @@ it, dated, whenever a measurement shows something new about a camera.
   `min_confidence` floor (the lowest positive-shot confidence across the
   calibration set). **It is the candidate generator: every other voter sees only
   candidates A emits.**
-- **Voter B**: threshold on the CLAP shot-vs-not-shot prompt similarity
-  differential, calibrated against labelled fixtures.
-- **Voter C**: a `GradientBoostingClassifier` over hand-crafted features + CLAP
-  per-prompt similarities + PANN gunshot probability, calibrated to a target
-  recall on the same set. Trained with sklearn in the build script but **shipped as one ONNX
-  graph per camera class and run through `onnxruntime`: nothing under `src/`
-  imports sklearn or unpickles an estimator.** Switches to per-stage adaptive
-  top-(K+slack) when the audit JSON has `stage_rounds.expected`. PANN is a
-  feature column on C (it used to be a separate voter D) so the GBDT learns its
-  interaction with the other inputs.
+- **Two model sets** (`features.MODEL_SETS`, spec 2026-10-26): `base` needs no
+  download (hand-crafted features, the camera one-hot and the stage-relative
+  block without its CLAP columns); `clap` adds the CLAP per-prompt
+  similarities, `clap_diff` and their relative columns, and needs the 120 MB
+  CLAP artifacts. **Columns are picked by name** (`model_set_columns`,
+  `select_columns`) in the runtime and the build alike, so the two cannot
+  disagree on order. Both sets come from one build over one fixture list; the
+  build refuses otherwise (`_assert_sets_agree`).
+- **Which set runs**: `SPLITSMITH_MODEL_SET`, then the machine's
+  `GlobalPrefs.detection_model_set` (local only), then `base`
+  (`api.resolve_model_set`). Hosted images set the env to `clap`. **A `clap`
+  request whose CLAP artifacts are missing, unreachable or unreadable
+  (`ModelError`, `OSError`) detects with `base`**; any other error propagates.
+  Only `clap` constructs a CLAP session. Every result, the audit doc's
+  `_candidates_pending_audit` (`_model_set`, `_calibration_built_at`) and the
+  `shot_detect_run` event record the set that actually ran; a doc from before
+  sets has neither and reads as unknown. The server, the compute backend and
+  the MCP tool cache one runtime per set *returned*, so a fallen-back `clap`
+  request is retried.
+- **Voter B** (`clap` only): threshold on the CLAP shot-vs-not-shot prompt
+  similarity differential, calibrated against labelled fixtures. Under `base`
+  its threshold is `None` and it never votes.
+- **Voter C**: a `GradientBoostingClassifier` per camera class per set over that
+  set's columns, calibrated to a target recall on the same set. Trained with
+  sklearn in the build script but **shipped as one ONNX graph per set and class
+  (`voter_c_gbdt_<set>_<class>.onnx`) and run through `onnxruntime`: nothing
+  under `src/` imports sklearn or unpickles an estimator.** The runtime refuses a
+  graph whose width differs from its set's `voter_c_feature_dim`. Switches to
+  per-stage adaptive top-(K+slack) when the audit JSON has
+  `stage_rounds.expected`. **PANN is retired**: no runtime, build, cache or
+  manifest entry reads it (`tests/test_pann_is_gone.py`); old audit docs and
+  lab records that carry `gunshot_prob` still load.
 - **Consensus**: a candidate is kept when `vote_total + apriori_boost >=
-  consensus` (default 2-of-3); the apriori boost biases toward expected-count
-  regions when prior info is known.
-- **Whole-stage decoder** (`ensemble/decoder.py`, on by default): replaces the
-  consensus and the headcam amplitude veto when the calibration has a `decoder`
-  block. One logistic recalibration over the voters' signals gives each
-  candidate P(shot), and a dynamic program keeps the best-scoring *set* for the
-  stage under a split prior (the corpus's splits) and an end prior (last shot at
-  beep + stage time; off when the clip ends early). It needs only the beep and
-  the stage time; the round count is not used (its weight tunes to 0). Fitted by
-  the build on leave-one-match-out voter C scores
-  (`scripts/fit_stage_decoder.py`); `--decoder-only` fits it for an existing
-  calibration and writes only that block (which is how the shipped calibration
-  got its decoder). `SPLITSMITH_STAGE_DECODER=0` keeps the
-  consensus, `=1` forces the decoder.
+  consensus` (default 2-of-3; under `base`, A and C must both vote); the
+  apriori boost biases toward expected-count regions when prior info is known.
+- **Whole-stage decoder** (`ensemble/decoder.py`, on by default): **one per
+  camera class per set** (`ModelSet.decoders_by_camera_class`). One logistic
+  recalibration over the voters' signals gives each candidate P(shot), and a
+  dynamic program keeps the best-scoring *set* for the stage under a split prior
+  (the corpus's splits) and an end prior (last shot at beep + stage time; off
+  when the clip ends early). The recalibration reads **its own `features`
+  list** (`decoder_features`; `base` decodes on `score_c`, `confidence`,
+  `log_peak_amplitude`, `clap` adds `clap_diff` and `vote_b`), so a
+  calibration always decodes with the columns it was fitted on. It needs only
+  the beep and the stage time; the round count is not used (its weight tunes to
+  0). Fitted by the build on leave-one-match-out voter C scores
+  (`scripts/fit_stage_decoder.py`); `--decoder-only` refits every set's
+  decoders for an existing calibration and writes only those blocks.
+  `SPLITSMITH_STAGE_DECODER=0` keeps the consensus, `=1` forces the decoder.
 
 Wired into the UI's `/api/stages/{n}/shot-detect`; the FastAPI server lazy-loads
-CLAP / PANN / GBDT on the first detection.
+the requested set's models on the first detection.
 
 ## Calibration artifacts
 
-- Ship under `src/splitsmith/data/`: `ensemble_calibration.json` plus the voter
-  C / voter E ONNX graphs it names, built by
-  `scripts/build_ensemble_artifacts.py`. Re-run it after adding audited
-  fixtures.
+- Ship under `src/splitsmith/data/`: `ensemble_calibration.json` (per-set
+  numbers only under `model_sets`; `load_calibration` refuses a calibration
+  without them and names the rebuild) plus the voter C / voter E ONNX graphs it
+  names, built by `scripts/build_ensemble_artifacts.py`. Re-run it after adding
+  audited fixtures. The lab reads a calibration through
+  `lab.model_map.model_set_block`; a flat one from git history reads as one set,
+  `legacy`. The ONNX parity references are per set
+  (`tests/data/voter_c_parity_reference_<set>.npz`).
 - `SPLITSMITH_ARTIFACTS_DIR=/path` points the engine at another artifact set
   for A/B comparisons without rebuilding the shipped one (`splitsmith.runtime`
   lists the env vars).
@@ -113,7 +145,7 @@ CLAP / PANN / GBDT on the first detection.
   `scripts/feature_caches.py`): every fixture's WAV against the lock (missing
   ones fetched; one the lock lacks, one R2 cannot serve, or a local one that
   differs from the lock, i.e. an unpushed re-cut, stops the build), and its
-  CLAP / PANN caches against that WAV by the stamped `wav_sha256` (an unstamped
+  CLAP cache against that WAV by the stamped `wav_sha256` (an unstamped
   cache is checked once against fresh candidate times, then stamped). A stale
   or missing cache stops the build unless `--extract`. Don't go back to a
   row-count check: it let a re-cut clip's old features through.

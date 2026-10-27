@@ -625,8 +625,8 @@ async def run_worker(
     wired here.
 
     A persistent worker is the whole point of the fleet: it loads the
-    ensemble models once (the process-wide ``_ENSEMBLE_RUNTIME``
-    singleton, on the first detection) and drains many jobs. Building
+    ensemble models once (the process-wide ``_ENSEMBLE_RUNTIMES`` cache,
+    on the first detection) and drains many jobs. Building
     the worker ``state`` wires the per-user ``PostgresJobBackend``
     (execute-only, no boot sweep) + storage + the shared job bodies.
 

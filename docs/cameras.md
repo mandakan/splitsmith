@@ -58,6 +58,12 @@ reliable key for older fixtures.
   on headcam fixtures needing review that was 450 shots. Recognise it on a 1 ms zoom: two humps,
   the first narrow, less than 10 ms apart.
 
+- **Most of the headcam misses are GO 3S (2026-10-26).** Built on all nine headcam matches
+  and held out by match (the thin detection spike), the GO 3S misses 11 shots per 100; its false
+  positives stay at 3 to 5 per 100, as on the Vanguard. The misses concentrate in Satra and HFO
+  Masters. The Satra labels have not yet been checked on a spectrogram, so part of it may be
+  label error rather than detector error.
+
 Implication: absolute spectral features drift within a stage on this camera. Features relative to
 the stage's own earlier shots should hold up better; evaluate recall by shot index in string, not
 only overall.
@@ -91,7 +97,12 @@ only overall.
 ## DJI Osmo Action 4 (head)
 
 - Audio is too noisy to audit shots on (the user's call, Höstfinalen XI, Martin's stages 2 to 8
-  were audited on a handheld angle instead). No fixtures yet.
+  were audited on a handheld angle instead).
+- **False positives (2026-10-26).** The 8 fixtures snapped onto it from the handheld (one
+  shooter, Höstfinalen XI) make 24 false positives per 100 shots, held out by match, against 3 to
+  5 for the GO 3S and the Vanguard. Most are not echoes: the median false positive sits 0.7 s from
+  the nearest true shot. One shooter and one match, so this may be the venue as much as the
+  camera.
 - 2688x1512 at 59.94 fps.
 
 ## iPhone 17 Pro / Pro Max (hand)

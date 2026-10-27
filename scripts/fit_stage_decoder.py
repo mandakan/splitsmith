@@ -20,12 +20,18 @@ cannot drift apart. Single camera: every term reads one fixture.
 from __future__ import annotations
 
 import math
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 
 import numpy as np
 from sklearn.linear_model import LogisticRegression
 
-from splitsmith.ensemble.decoder import FEATURES, PriorTable, StageDecoder, decode_stage, decoder_features
+from splitsmith.ensemble.decoder import (  # noqa: F401  decoder_features is re-exported for callers
+    PriorTable,
+    StageDecoder,
+    decode_stage,
+    decoder_features,
+    feature_matrix,
+)
 
 SPLIT_GRID = (-1.2, 1.2, 0.01)  # log10 seconds
 END_GRID = (-1.0, 0.3, 0.002)  # seconds from the timer stop
@@ -88,19 +94,22 @@ def fit_count_prior(stages: list[dict]) -> PriorTable | None:
     )
 
 
-def _x(rows: list[dict]) -> np.ndarray:
-    return decoder_features(
-        np.array([r["score_c"] for r in rows]),
-        np.array([r["clap_diff"] for r in rows]),
-        np.array([r["gunshot_prob"] for r in rows]),
-        np.array([r["confidence"] for r in rows]),
-        np.array([r["peak_amp"] for r in rows]),
-        np.array([r["vote_b"] for r in rows]),
+def _x(rows: list[dict], features: Sequence[str]) -> np.ndarray:
+    """The recalibration matrix over ``rows`` (``peak_amp`` is the row key
+    for the runtime's ``peak_amplitude``); a feature a row lacks raises."""
+    signals: dict[str, np.ndarray] = {}
+    for name in features:
+        if name == "log_peak_amplitude":
+            signals["peak_amplitude"] = np.array([r["peak_amp"] for r in rows])
+        else:
+            signals[name] = np.array([r[name] for r in rows])
+    return feature_matrix(features, signals)
+
+
+def _logistic(rows: list[dict], features: Sequence[str]) -> LogisticRegression:
+    return LogisticRegression(max_iter=3000, C=1.0).fit(
+        _x(rows, features), np.array([r["label"] for r in rows])
     )
-
-
-def _logistic(rows: list[dict]) -> LogisticRegression:
-    return LogisticRegression(max_iter=3000, C=1.0).fit(_x(rows), np.array([r["label"] for r in rows]))
 
 
 def match_count(kept: list[float], truth: list[float], tol_s: float) -> tuple[int, int, int]:
@@ -122,13 +131,15 @@ def fit_stage_decoder(
     rows: list[dict],
     stages: dict[str, dict],
     *,
+    features: Sequence[str],
     tolerance_ms: float,
     fast_floor_s: float | None = None,
     log: Callable[[str], None] = print,
 ) -> StageDecoder | None:
     """``rows``: one per candidate with ``fixture``, ``match``, ``t_shot``,
-    ``label``, ``score_c`` (out of fold by match) and the other
-    :data:`FEATURES` inputs. ``stages``: fixture -> ``truth``, ``beep``,
+    ``label``, ``score_c`` (out of fold by match) and the other inputs
+    ``features`` names (``peak_amp`` for ``log_peak_amplitude``); the
+    decoder is fitted on, and decodes with, exactly ``features``. ``stages``: fixture -> ``truth``, ``beep``,
     ``stage_time``, ``duration`` and ``expected`` (the round count or
     ``None``). ``None`` with fewer than two matches."""
     matches = sorted({r["match"] for r in rows})
@@ -144,13 +155,14 @@ def fit_stage_decoder(
     for m in matches:
         train = [r for r in rows if r["match"] != m]
         idx = [i for i, r in enumerate(rows) if r["match"] == m]
-        oof[idx] = _logistic(train).predict_proba(_x([rows[i] for i in idx]))[:, 1]
+        oof[idx] = _logistic(train, features).predict_proba(_x([rows[i] for i in idx], features))[:, 1]
     by_fixture: dict[str, list[int]] = {}
     for i, r in enumerate(rows):
         by_fixture.setdefault(r["fixture"], []).append(i)
 
     model = StageDecoder(
-        coef=[0.0] * len(FEATURES),
+        features=list(features),
+        coef=[0.0] * len(features),
         intercept=0.0,
         bias=0.0,
         w_split=0.0,
@@ -218,7 +230,7 @@ def fit_stage_decoder(
     )
 
     # 4. The shipped recalibration, on every row.
-    final = _logistic(rows)
+    final = _logistic(rows, features)
     return model.model_copy(
         update={
             "coef": [round(float(c), 6) for c in final.coef_[0]],

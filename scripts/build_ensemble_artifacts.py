@@ -23,10 +23,9 @@ hand-feature / CLAP-prompt set. The fixture-builder script
 review-time variants under ``build/ensemble-review/``; this script is
 the production-time equivalent that ships its outputs in the wheel.
 
-CLAP and PANN feature caches under ``tests/fixtures/.cache/`` are
-expected to exist; build them first via
-``scripts/extract_clap_features.py`` and
-``scripts/extract_audio_embeddings.py``.
+CLAP feature caches under ``tests/fixtures/.cache/`` are expected to
+exist; build them first via ``scripts/extract_clap_features.py`` (or
+pass ``--extract``).
 
 Run:
     uv run python scripts/build_ensemble_artifacts.py
@@ -41,7 +40,8 @@ import functools
 import json
 import sys
 from collections import Counter
-from collections.abc import Callable
+from collections.abc import Callable, Iterable, Sequence
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -61,6 +61,7 @@ from splitsmith.ensemble.calibration import (
     camera_class_from_mount,
     normalize_camera_model_key,
 )
+from splitsmith.ensemble.decoder import DECODER_FEATURES_BY_SET, StageDecoder
 from splitsmith.ensemble.fixtures import (
     WRONG_CLIP_FIXTURES,
     fixture_stems,
@@ -96,6 +97,9 @@ DATA_DIR = Path("src/splitsmith/data")
 #: out-of-fold probabilities ``build_sweep_signals.py`` joins onto the
 #: sweep. Build output, not a shipped artifact.
 HELDOUT_DIR = Path("build/ensemble_heldout")
+# The model_artifacts entries a rebuild carries forward: what the clap
+# model set downloads at runtime.
+CARRIED_ARTIFACT_SLUGS: tuple[str, ...] = (feat.CLAP_AUDIO_ARTIFACT_SLUG, feat.CLAP_TEXT_ARTIFACT_SLUG)
 
 
 class BuildError(RuntimeError):
@@ -115,9 +119,12 @@ TESTS_DATA_DIR = TESTS_DIR / "data"
 # the tests so ``tests/test_onnx_parity.py`` needs neither scikit-learn
 # nor the retired pickles. Voter E rows are subsampled with a fixed seed
 # to keep the 512-wide embedding matrix near 2 MB on disk.
-VOTER_C_PARITY_REFERENCE_PATH = TESTS_DATA_DIR / "voter_c_parity_reference.npz"
 VOTER_E_PARITY_REFERENCE_PATH = TESTS_DATA_DIR / "voter_e_parity_reference.npz"
 VOTER_E_PARITY_MAX_ROWS: int = 1024
+# The voter C references ship in git and every build rewrites them; a
+# fixed-seed sample of the universe keeps them near the size they had
+# before the corpus grew, with plenty of rows to exercise each tree.
+VOTER_C_PARITY_MAX_ROWS: int = 6000
 PARITY_SUBSAMPLE_SEED: int = 649
 
 # Cap mined negatives per fixture relative to that fixture's positive count,
@@ -152,7 +159,7 @@ def _build_universe(
     *,
     log: Callable[[str], None] = print,
 ):
-    """Per-fixture: detect at max recall, label, slot CLAP+PANN signals.
+    """Per-fixture: detect at max recall, label, slot the CLAP signals.
 
     Each universe row carries a ``camera_class`` tag derived from the
     fixture's ``camera.mount`` so the calibrator can stratify per-voter
@@ -166,16 +173,11 @@ def _build_universe(
         truth_path = FIXTURES_DIR / f"{fix}.json"
         wav_path = FIXTURES_DIR / f"{fix}.wav"
         clap_path = CACHE_DIR / f"{fix}_clap.npz"
-        pann_path = CACHE_DIR / f"{fix}_pann.npz"
         if not truth_path.exists() or not wav_path.exists():
             log(f"  skip {fix}: missing fixture files")
             continue
-        if not clap_path.exists() or not pann_path.exists():
-            log(
-                f"  skip {fix}: CLAP/PANN cache missing -- run "
-                "extract_clap_features.py + extract_audio_embeddings.py "
-                "for this stem to include it."
-            )
+        if not clap_path.exists():
+            log(f"  skip {fix}: CLAP cache missing -- run extract_clap_features.py for it to include it.")
             continue
 
         truth = json.loads(truth_path.read_text(encoding="utf-8"))
@@ -205,11 +207,6 @@ def _build_universe(
             )
         sims = clap["text_sims"]
         clap_diff = feat.clap_diff_from_similarities(sims)
-
-        pann = np.load(pann_path)
-        if pann["gunshot_prob"].shape[0] != len(shots):
-            raise BuildError(f"{fix}: PANN cache stale; re-run extract_audio_embeddings.py --force")
-        gunshot_prob = pann["gunshot_prob"]
 
         times = np.array(cand_t, dtype=np.float64)
         confidences = np.array([s.confidence for s in shots], dtype=np.float64)
@@ -244,7 +241,6 @@ def _build_universe(
                     "confidence": float(shot.confidence),
                     "peak_amp": float(shot.peak_amplitude),
                     "clap_diff": float(clap_diff[i]),
-                    "gunshot_prob": float(gunshot_prob[i]),
                     "hand_feats": hand[i].tolist(),
                     "clap_sims": [float(x) for x in sims[i]],
                 }
@@ -395,7 +391,6 @@ def _x_from(universe: list[dict]) -> np.ndarray:
             np.array([r["hand_feats"] for r in rows], dtype=np.float64),
             np.array([r["clap_sims"] for r in rows], dtype=np.float64),
             np.array([r["clap_diff"] for r in rows], dtype=np.float64),
-            np.array([r["gunshot_prob"] for r in rows], dtype=np.float64),
             [r.get("camera_class", DEFAULT_CAMERA_CLASS) for r in rows],
         )
     return out
@@ -441,8 +436,7 @@ def _load_mined_negatives(
         sidecar_path = FULL_DIR / f"{fix}_full.json"
         wav_path = FULL_DIR / f"{fix}_full.wav"
         clap_path = CACHE_DIR / f"{fix}_clap_full.npz"
-        pann_path = CACHE_DIR / f"{fix}_pann_full.npz"
-        if not all(p.exists() for p in (sidecar_path, wav_path, clap_path, pann_path)):
+        if not all(p.exists() for p in (sidecar_path, wav_path, clap_path)):
             skipped.append(fix)
             continue
 
@@ -463,14 +457,7 @@ def _load_mined_negatives(
         )
 
         clap = np.load(clap_path, allow_pickle=True)
-        pann = np.load(pann_path)
         clap_times = clap["times"].astype(np.float64)
-        if clap_times.shape != pann["gunshot_prob"].shape:
-            raise BuildError(
-                f"{fix}: full CLAP and PANN caches disagree on candidate count "
-                f"({clap_times.shape[0]} vs {pann['gunshot_prob'].shape[0]}); "
-                "rebuild both with --full --force."
-            )
         prompts_in_cache = [str(p) for p in clap["prompts"].tolist()]
         if tuple(prompts_in_cache) != feat.CLAP_PROMPTS:
             raise BuildError(
@@ -479,7 +466,6 @@ def _load_mined_negatives(
             )
         sims = clap["text_sims"]
         clap_diffs = feat.clap_diff_from_similarities(sims)
-        gunshot_probs = pann["gunshot_prob"]
 
         # Map mined times -> full-cache row indices. Same WAV + same config in
         # mine_negatives and the --full extractors, so an exact (or sub-ms)
@@ -523,7 +509,6 @@ def _load_mined_negatives(
                     "label": 0,
                     "confidence": float(cand_conf[k]),
                     "clap_diff": float(clap_diffs[ci]),
-                    "gunshot_prob": float(gunshot_probs[ci]),
                     "hand_feats": hand[k].tolist(),
                     "clap_sims": [float(x) for x in sims[ci]],
                     "region_tag": str(region_tags[kept_mined_idx[k]]),
@@ -683,15 +668,17 @@ def _heldout_class_report(
 
 
 def _heldout_rows(
-    rows: list[dict], cv_probs: np.ndarray, heldout: dict[str, np.ndarray | None]
+    rows: list[dict], cv_probs: np.ndarray, heldout: dict[str, np.ndarray | None], model_set: str
 ) -> list[dict]:
-    """Per-candidate out-of-fold probabilities, keyed like the sweep's rows.
-    Mined negatives carry no ``candidate_idx`` and are not in the sweep."""
+    """Per-candidate out-of-fold probabilities, keyed like the sweep's rows
+    and tagged with the model set that scored them. Mined negatives carry
+    no ``candidate_idx`` and are not in the sweep."""
     out: list[dict] = []
     for i, r in enumerate(rows):
         if "candidate_idx" not in r:
             continue
         row = {
+            "model_set": model_set,
             "fixture": r["fixture"],
             "candidate_idx": int(r["candidate_idx"]),
             "t_absolute": float(r["t_absolute"]),
@@ -705,43 +692,11 @@ def _heldout_rows(
     return out
 
 
-def _fit_decoder(
-    universe: list[dict],
-    heldout_rows: list[dict],
-    thresholds_by_class: dict[str, dict],
-    tolerance_ms: float,
-    fast_floor_s: float | None,
-    log: Callable[[str], None],
-):
-    """The whole-stage decoder (``ensemble.decoder``), fitted on every
-    candidate whose voter C score is out of fold by match. ``None`` when a
-    class had a single match (no leave-one-match-out scores)."""
-    by_key = {(r["fixture"], r["candidate_idx"]): r for r in universe}
-    rows: list[dict] = []
-    for h in heldout_rows:
-        if not np.isfinite(h.get("score_c_lomo", float("nan"))):
-            continue
-        u = by_key[(h["fixture"], h["candidate_idx"])]
-        b_thr = thresholds_by_class[u["camera_class"]]["voter_b_threshold"]
-        rows.append(
-            {
-                "fixture": u["fixture"],
-                "match": _event_groups(u["fixture"])[0],
-                "t_shot": u["t_shot"],
-                "label": int(u["label"]),
-                "score_c": float(h["score_c_lomo"]),
-                "clap_diff": u["clap_diff"],
-                "gunshot_prob": u["gunshot_prob"],
-                "confidence": u["confidence"],
-                "peak_amp": u["peak_amp"],
-                "vote_b": int(u["clap_diff"] >= b_thr),
-            }
-        )
-    if not rows:
-        log("  decoder: no out-of-fold voter C scores; skipped")
-        return None
+def _decoder_stages(fixtures: Iterable[str], universe: list[dict]) -> dict[str, dict]:
+    """What the decoder's fit scores each stage against: truth, beep, stage
+    time, clip length and the round count, per fixture."""
     stages: dict[str, dict] = {}
-    for fix in {r["fixture"] for r in rows}:
+    for fix in fixtures:
         u = next(r for r in universe if r["fixture"] == fix)
         truth = json.loads((FIXTURES_DIR / f"{fix}.json").read_text(encoding="utf-8"))
         stages[fix] = {
@@ -751,43 +706,162 @@ def _fit_decoder(
             "duration": u["clip_duration"],
             "expected": u["expected_rounds"],
         }
+    return stages
+
+
+def _fit_decoder(
+    universe: list[dict],
+    heldout_rows: list[dict],
+    thresholds_by_class: dict[str, dict],
+    tolerance_ms: float,
+    fast_floor_s: float | None,
+    log: Callable[[str], None],
+    *,
+    features: Sequence[str],
+    camera_class: str,
+):
+    """The whole-stage decoder (``ensemble.decoder``) for one camera class
+    of one model set, fitted on that class's candidates whose voter C score
+    is out of fold by match, over ``features``. ``clap_diff`` and voter B's
+    vote are read only when ``features`` names them (``clap``). ``None``
+    when the class had a single match (no leave-one-match-out scores)."""
+    by_key = {(r["fixture"], r["candidate_idx"]): r for r in universe}
+    b_thr = thresholds_by_class[camera_class].get("voter_b_threshold")
+    rows: list[dict] = []
+    for h in heldout_rows:
+        if not np.isfinite(h.get("score_c_lomo", float("nan"))):
+            continue
+        u = by_key[(h["fixture"], h["candidate_idx"])]
+        if u.get("camera_class", DEFAULT_CAMERA_CLASS) != camera_class:
+            continue
+        row = {
+            "fixture": u["fixture"],
+            "match": _event_groups(u["fixture"])[0],
+            "t_shot": u["t_shot"],
+            "label": int(u["label"]),
+            "score_c": float(h["score_c_lomo"]),
+            "confidence": u["confidence"],
+            "peak_amp": u["peak_amp"],
+        }
+        if "clap_diff" in features:
+            row["clap_diff"] = u["clap_diff"]
+        if "vote_b" in features:
+            row["vote_b"] = int(u["clap_diff"] >= b_thr)
+        rows.append(row)
+    if not rows:
+        log(f"  decoder {camera_class}: no out-of-fold voter C scores; skipped")
+        return None
+    stages = _decoder_stages(sorted({r["fixture"] for r in rows}), universe)
     # A fixture with candidates scored in only some folds is decoded on those.
     return fit_stage_decoder.fit_stage_decoder(
-        rows, stages, tolerance_ms=tolerance_ms, fast_floor_s=fast_floor_s, log=log
+        rows,
+        stages,
+        features=features,
+        tolerance_ms=tolerance_ms,
+        fast_floor_s=fast_floor_s,
+        log=log,
     )
+
+
+def _fit_decoders_by_class(
+    name: str,
+    universe: list[dict],
+    heldout_rows: list[dict],
+    thresholds_by_class: dict[str, dict],
+    tolerance_ms: float,
+    fast_floor_s: float | None,
+    log: Callable[[str], None],
+) -> dict[str, StageDecoder]:
+    """One decoder per camera class for model set ``name``, each fitted on
+    that class's rows over ``DECODER_FEATURES_BY_SET[name]``. A class that
+    cannot be fitted (one match) has no decoder and keeps the consensus."""
+    out: dict[str, StageDecoder] = {}
+    for cls in sorted(thresholds_by_class):
+        log(f"  decoder {name}/{cls}:")
+        decoder = _fit_decoder(
+            universe,
+            heldout_rows,
+            thresholds_by_class,
+            tolerance_ms,
+            fast_floor_s,
+            log,
+            features=DECODER_FEATURES_BY_SET[name],
+            camera_class=cls,
+        )
+        if decoder is not None:
+            out[cls] = decoder
+    return out
+
+
+def _assert_sets_agree(blocks: dict[str, dict]) -> None:
+    """Every model set must come from the same fixtures, class by class:
+    numbers from two corpora are not comparable."""
+    names = sorted(blocks)
+    first = blocks[names[0]]["thresholds_by_camera_class"]
+    for name in names[1:]:
+        other = blocks[name]["thresholds_by_camera_class"]
+        if set(other) != set(first):
+            raise BuildError(
+                f"model sets {names[0]} and {name} cover different camera classes "
+                f"({sorted(first)} vs {sorted(other)}), so their fixture lists differ"
+            )
+        for cls in first:
+            if first[cls]["calibration_fixtures"] != other[cls]["calibration_fixtures"]:
+                raise BuildError(
+                    f"model sets {names[0]} and {name} were calibrated on different {cls} fixture lists"
+                )
+
+
+def _check_graph_width(name: str, camera_class: str, model: Any, block: dict) -> None:
+    """A set's graph must take exactly the set's columns."""
+    width = int(model.n_features_in_)
+    if width != int(block["voter_c_feature_dim"]):
+        raise BuildError(
+            f"the {name} model set's {camera_class} voter C takes {width} features, "
+            f"but the set has {block['voter_c_feature_dim']} columns"
+        )
 
 
 def _write_decoder_only(
     cal_path: Path,
+    builds: dict[str, ModelSetBuild],
     universe: list[dict],
-    heldout_rows: list[dict],
     tolerance_ms: float,
     fast_floor_s: float | None,
     log: Callable[[str], None],
 ) -> dict:
-    """Fit the whole-stage decoder for an existing calibration and write
-    only its ``decoder`` block; the models, thresholds and every other field
-    stay as they are. Voter B's vote, one of the recalibration's inputs, is
+    """Fit every set's per-class decoders for an existing calibration and
+    write only those blocks; the models, thresholds and every other field
+    stay as they are. Voter B's vote, an input of the ``clap`` decoders, is
     taken at that calibration's own thresholds, as the runtime computes it."""
     if not cal_path.exists():
-        raise BuildError(f"{cal_path}: no calibration to add a decoder to")
+        raise BuildError(f"{cal_path}: no calibration to add decoders to")
     cal = json.loads(cal_path.read_text(encoding="utf-8"))
-    shipped = cal.get("thresholds_by_camera_class") or {}
-    thresholds = {
-        cls: {"voter_b_threshold": shipped.get(cls, {}).get("voter_b_threshold", cal["voter_b_threshold"])}
-        for cls in {u["camera_class"] for u in universe}
-    }
-    decoder = _fit_decoder(universe, heldout_rows, thresholds, tolerance_ms, fast_floor_s, log)
-    if decoder is None:
-        raise BuildError("the decoder could not be fitted (needs at least two matches)")
-    cal["decoder"] = decoder.model_dump()
+    if "model_sets" not in cal:
+        raise BuildError(f"{cal_path} predates model sets; rebuild it in full")
+    for name, built in sorted(builds.items()):
+        block = cal["model_sets"].get(name)
+        if block is None:
+            raise BuildError(f"{cal_path} has no {name} model set to add decoders to")
+        decoders = _fit_decoders_by_class(
+            name,
+            universe,
+            built.heldout_rows,
+            block["thresholds_by_camera_class"],
+            tolerance_ms,
+            fast_floor_s,
+            log,
+        )
+        if not decoders:
+            raise BuildError(f"no {name} decoder could be fitted (needs at least two matches)")
+        block["decoders_by_camera_class"] = {cls: d.model_dump() for cls, d in decoders.items()}
     cal_path.write_text(json.dumps(cal, indent=2) + "\n", encoding="utf-8")
-    log(f"Wrote the decoder into {cal_path} (nothing else changed)")
+    log(f"Wrote every set's decoders into {cal_path} (nothing else changed)")
     return cal
 
 
 def _write_heldout(
-    report: dict[str, dict],
+    reports: dict[str, dict[str, dict]],
     rows: list[dict],
     *,
     target_recall: float,
@@ -795,7 +869,9 @@ def _write_heldout(
     log: Callable[[str], None],
     out: Path = HELDOUT_DIR,
 ) -> None:
-    """Write ``out/report.json`` and ``voter_c_oof.parquet``."""
+    """Write ``out/report.json`` (``model_sets.<name>.by_camera_class``) and
+    ``voter_c_oof.parquet`` (one row per candidate per set, ``model_set``
+    names which)."""
     import pyarrow as pa
     import pyarrow.parquet as pq
 
@@ -811,7 +887,7 @@ def _write_heldout(
                     "grouped": "StratifiedGroupKFold(5), groups = match + stage",
                     "lomo": "LeaveOneGroupOut, groups = match",
                 },
-                "by_camera_class": report,
+                "model_sets": {name: {"by_camera_class": r} for name, r in reports.items()},
             },
             indent=2,
         )
@@ -819,20 +895,23 @@ def _write_heldout(
         encoding="utf-8",
     )
     pq.write_table(pa.Table.from_pylist(rows), out / "voter_c_oof.parquet")
-    for cls, r in report.items():
-        parts = []
-        for name in ("stratified", "grouped", "lomo"):
-            block = r.get(name)
-            if block is None:
-                parts.append(f"{name}=n/a")
-                continue
-            m = block["at_shipped_threshold"]
-            parts.append(f"{name} P/R/F1={m['precision']:.3f}/{m['recall']:.3f}/{m['f1']:.3f}")
-        log(f"  held-out {cls}: " + "  ".join(parts))
+    for set_name, report in reports.items():
+        for cls, r in report.items():
+            parts = []
+            for name in ("stratified", "grouped", "lomo"):
+                block = r.get(name)
+                if block is None:
+                    parts.append(f"{name}=n/a")
+                    continue
+                m = block["at_shipped_threshold"]
+                parts.append(f"{name} P/R/F1={m['precision']:.3f}/{m['recall']:.3f}/{m['f1']:.3f}")
+            log(f"  held-out {set_name}/{cls}: " + "  ".join(parts))
     log(f"  held-out report + OOF probabilities -> {out}/")
 
 
-def _train_voter_c_for_class(rows: list[dict], target_recall: float):
+def _train_voter_c_for_class(
+    rows: list[dict], target_recall: float, columns: Sequence[str] = feat.VOTER_C_COLUMN_NAMES
+):
     """Fit one GBDT per camera class; return ``(model, threshold, cv_probs, y, heldout)``.
 
     Trained on rows from a single camera class only -- decouples each
@@ -848,9 +927,10 @@ def _train_voter_c_for_class(rows: list[dict], target_recall: float):
     ``lomo`` (leave one match out), each an array of out-of-fold
     probabilities aligned with ``rows`` or ``None``. The shipped model
     and threshold are unchanged by them; whether the threshold should
-    move to a grouped split is a separate, measured decision.
+    move to a grouped split is a separate, measured decision. ``columns``
+    is the model set's column list (``features.model_set_columns``).
     """
-    X = _x_from(rows)
+    X = feat.select_columns(_x_from(rows), columns)
     y = np.array([c["label"] for c in rows], dtype=np.int64)
     if y.sum() < 5:
         raise BuildError(
@@ -879,6 +959,94 @@ def _train_voter_c_for_class(rows: list[dict], target_recall: float):
     clf = _new_voter_c_gbdt()
     clf.fit(X, y)
     return clf, threshold, cv_probs, y, heldout
+
+
+@dataclass
+class ModelSetBuild:
+    """One model set's fitted voter C per class and its calibration block
+    (``ModelSet`` JSON; ``voter_c_onnx_artifacts`` and the decoders are
+    filled in by the caller)."""
+
+    models: dict[str, GradientBoostingClassifier]
+    block: dict
+    heldout_report: dict[str, dict]
+    heldout_rows: list[dict]
+
+
+def _train_model_set(
+    name: str,
+    by_class: dict[str, list[dict]],
+    *,
+    target_recall: float,
+    log: Callable[[str], None],
+    by_class_train: dict[str, list[dict]] | None = None,
+) -> ModelSetBuild:
+    """Fit model set ``name``: one voter C per camera class over the set's
+    columns, its thresholds (no voter B under ``base``), held-out metrics.
+    ``by_class_train`` adds mined negatives to voter C's training rows; the
+    thresholds and fixture lists always come from ``by_class``."""
+    columns = list(feat.model_set_columns(name))
+    models: dict[str, GradientBoostingClassifier] = {}
+    thresholds_by_class: dict[str, dict] = {}
+    metrics_by_class: dict[str, dict] = {}
+    heldout_report: dict[str, dict] = {}
+    heldout_rows: list[dict] = []
+    for cls in sorted(by_class):
+        rows = by_class[cls]
+        rows_pos = [r for r in rows if r["label"] == 1]
+        if not rows_pos:
+            log(f"  {name}/{cls}: 0 positives -- skipping (no per-class thresholds emitted)")
+            continue
+        cls_a = _voter_a_floor(rows)
+        cls_b = _voter_b_threshold(rows) if name == "clap" else None
+        train_rows = (by_class_train or {}).get(cls, rows)
+        model, cls_c, cv_probs, cv_labels, heldout = _train_voter_c_for_class(
+            train_rows, target_recall=target_recall, columns=columns
+        )
+        models[cls] = model
+        heldout_report[cls] = _heldout_class_report(
+            train_rows, cv_probs, cv_labels, heldout, cls_c, target_recall
+        )
+        heldout_rows.extend(_heldout_rows(train_rows, cv_probs, heldout, name))
+        thresholds_by_class[cls] = {
+            "voter_a_floor": cls_a,
+            "voter_b_threshold": cls_b,
+            "voter_c_threshold": cls_c,
+            "n_calibration_candidates": len(rows),
+            "n_calibration_positives": len(rows_pos),
+            "calibration_fixtures": sorted({r["fixture"] for r in rows}),
+        }
+        # Per-class precision/recall at the picked C threshold, from this
+        # class's own CV predictions (held-out within-class).
+        kept = cv_probs >= cls_c
+        tp = int((kept & (cv_labels == 1)).sum())
+        fp = int((kept & (cv_labels == 0)).sum())
+        fn = int((~kept & (cv_labels == 1)).sum())
+        precision = tp / (tp + fp) if (tp + fp) else 0.0
+        recall = tp / (tp + fn) if (tp + fn) else 0.0
+        f1 = 2 * precision * recall / (precision + recall) if (precision + recall) else 0.0
+        metrics_by_class[cls] = {
+            "voter_c_precision_cv": round(precision, 4),
+            "voter_c_recall_cv": round(recall, 4),
+            "voter_c_f1_cv": round(f1, 4),
+            "voter_c_tp": tp,
+            "voter_c_fp": fp,
+            "voter_c_fn": fn,
+        }
+        b_text = f"{cls_b:.4f}" if cls_b is not None else "--"
+        log(
+            f"  {name}/{cls}: A={cls_a:.4f}  B={b_text}  C={cls_c:.4f}  "
+            f"(n={len(rows)} cands / {len(rows_pos)} pos)  "
+            f"voter-C CV P/R/F1={precision:.3f}/{recall:.3f}/{f1:.3f}"
+        )
+    block = {
+        "columns": columns,
+        "voter_c_feature_dim": len(columns),
+        "thresholds_by_camera_class": thresholds_by_class,
+        "voter_c_metrics_by_camera_class": metrics_by_class,
+        "requires_artifacts": list(CARRIED_ARTIFACT_SLUGS) if name == "clap" else [],
+    }
+    return ModelSetBuild(models=models, block=block, heldout_report=heldout_report, heldout_rows=heldout_rows)
 
 
 DEFAULT_VOTER_E_TARGET_RECALL: float = 0.95
@@ -1127,7 +1295,22 @@ def _export_onnx_proba(clf: Any, n_features: int, path: Path) -> None:
     path.write_bytes(onx.SerializeToString())
 
 
+def parity_rows(n_rows: int, max_rows: int) -> np.ndarray:
+    """The sorted row indices a parity reference keeps: all of them up to
+    ``max_rows``, else a fixed-seed sample, so a rebuild of the same
+    universe writes the same rows."""
+    if n_rows <= max_rows:
+        return np.arange(n_rows)
+    rng = np.random.default_rng(PARITY_SUBSAMPLE_SEED)
+    return np.sort(rng.choice(n_rows, size=max_rows, replace=False))
+
+
+def voter_c_parity_reference_path(model_set: str) -> Path:
+    return TESTS_DATA_DIR / f"voter_c_parity_reference_{model_set}.npz"
+
+
 def _write_voter_c_parity_reference(
+    model_set: str,
     models: dict[str, Any],
     thresholds_by_class: dict[str, dict],
     X: np.ndarray,
@@ -1136,7 +1319,8 @@ def _write_voter_c_parity_reference(
 ) -> None:
     """Freeze the sklearn voter C probabilities the ONNX graphs must match.
 
-    ``X`` is the real calibration feature matrix -- every class model is
+    ``X`` is the real calibration feature matrix (a fixed-seed sample of at
+    most ``VOTER_C_PARITY_MAX_ROWS`` rows of it) -- every class model is
     scored over the whole matrix, not just its own class's rows, so the
     parity test exercises more of each tree ensemble. Stored as float32
     because that is what the runtime feeds the ONNX session; the frozen
@@ -1147,18 +1331,16 @@ def _write_voter_c_parity_reference(
         log(f"  skipped voter C parity reference ({TESTS_DIR}/ not present)")
         return
     TESTS_DATA_DIR.mkdir(parents=True, exist_ok=True)
-    X32 = np.ascontiguousarray(X, dtype=np.float32)
+    X32 = np.ascontiguousarray(X[parity_rows(X.shape[0], VOTER_C_PARITY_MAX_ROWS)], dtype=np.float32)
     arrays: dict[str, np.ndarray] = {"X": X32}
     for cls, model in sorted(models.items()):
         arrays[f"proba_{cls}"] = np.asarray(
             model.predict_proba(X32.astype(np.float64))[:, 1], dtype=np.float64
         )
         arrays[f"threshold_{cls}"] = np.float64(thresholds_by_class[cls]["voter_c_threshold"])
-    np.savez_compressed(VOTER_C_PARITY_REFERENCE_PATH, **arrays)
-    log(
-        f"Wrote {VOTER_C_PARITY_REFERENCE_PATH} "
-        f"(X {X32.shape} float32, classes: {', '.join(sorted(models))})"
-    )
+    path = voter_c_parity_reference_path(model_set)
+    np.savez_compressed(path, **arrays)
+    log(f"Wrote {path} " f"(X {X32.shape} float32, classes: {', '.join(sorted(models))})")
 
 
 def _write_voter_e_parity_reference(
@@ -1197,18 +1379,22 @@ def _write_voter_e_parity_reference(
 def _carry_model_artifacts(cal_path: Path) -> dict | None:
     """Return the previous calibration's ``model_artifacts`` block, if any.
 
-    That block (slim-install download URLs + sha256 for the CLAP/PANN
-    ONNX exports) is curated by the export/upload scripts, not by this
-    build -- a calibration rebuild does not retrain those models, so
-    dropping the block breaks ``fetch-models`` on slim wheels (caught by
-    CI's slim-wheel smoke test on the 2026-08-17 retrain).
+    That block (slim-install download URLs + sha256 for the CLAP ONNX
+    exports) is curated by the export/upload scripts, not by this build --
+    a calibration rebuild does not retrain those models, so dropping the
+    block breaks ``fetch-models`` on slim wheels (caught by CI's
+    slim-wheel smoke test on the 2026-08-17 retrain). Only the artifacts a
+    model set downloads are carried; anything else (a retired model's
+    export) is dropped.
     """
     try:
         prev = json.loads(cal_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return None
     block = prev.get("model_artifacts")
-    return block if isinstance(block, dict) else None
+    if not isinstance(block, dict):
+        return None
+    return {slug: entry for slug, entry in block.items() if slug in CARRIED_ARTIFACT_SLUGS}
 
 
 def _event_match(stem: str) -> str | None:
@@ -1340,10 +1526,9 @@ def build_artifacts(
     if not universe:
         raise BuildError(
             "candidate universe is empty -- every fixture was skipped (see the "
-            "per-fixture log lines). Most common cause: missing CLAP/PANN "
+            "per-fixture log lines). Most common cause: missing CLAP "
             "feature caches under tests/fixtures/.cache -- run "
-            "`uv run python scripts/extract_clap_features.py` and "
-            "`uv run python scripts/extract_audio_embeddings.py`, then retrain."
+            "`uv run python scripts/extract_clap_features.py` (or pass --extract), then retrain."
         )
     n_total = len(universe)
     n_pos = sum(c["label"] for c in universe)
@@ -1381,91 +1566,43 @@ def build_artifacts(
         )
     by_class_train = _split_by_camera_class(voter_c_universe)
 
-    # Per-class GBDTs (issue #297): one model per camera class. Decouples
-    # each class's decision boundary so adding fixtures to one class can't
-    # drag the other class's precision down via shared trees + sample
-    # weighting (the old joint-GBDT failure mode that prompted the split).
-    voter_c_models: dict[str, Any] = {}
-    thresholds_by_class: dict[str, dict] = {}
-    metrics_by_class: dict[str, dict] = {}
-    heldout_report: dict[str, dict] = {}
-    heldout_rows: list[dict] = []
-    for cls in sorted(by_class):
-        rows = by_class[cls]
-        rows_pos = [r for r in rows if r["label"] == 1]
-        if not rows_pos:
-            log(f"  {cls}: 0 positives -- skipping (no per-class thresholds emitted)")
-            continue
-
-        cls_a = _voter_a_floor(rows)
-        cls_b = _voter_b_threshold(rows)
-
-        train_rows = by_class_train.get(cls, rows)
-        cls_model, cls_c, cls_cv_probs, cls_cv_labels, cls_heldout = _train_voter_c_for_class(
-            train_rows, target_recall=target_recall
+    # Per-class GBDTs (issue #297), one set of them per model set (thin
+    # detection spec 2026-10-26): both sets come from this one universe, so
+    # they share every fixture list, and each class gets its own decoder.
+    builds = {
+        name: _train_model_set(
+            name, by_class, target_recall=target_recall, log=log, by_class_train=by_class_train
         )
-        voter_c_models[cls] = cls_model
-        heldout_report[cls] = _heldout_class_report(
-            train_rows, cls_cv_probs, cls_cv_labels, cls_heldout, cls_c, target_recall
-        )
-        heldout_rows.extend(_heldout_rows(train_rows, cls_cv_probs, cls_heldout))
-
-        thresholds_by_class[cls] = {
-            "voter_a_floor": cls_a,
-            "voter_b_threshold": cls_b,
-            "voter_c_threshold": cls_c,
-            "n_calibration_candidates": len(rows),
-            "n_calibration_positives": len(rows_pos),
-            "calibration_fixtures": sorted({r["fixture"] for r in rows}),
-        }
-
-        # Per-class precision/recall at the picked C threshold, from this
-        # class's own CV predictions (held-out within-class).
-        kept = cls_cv_probs >= cls_c
-        tp = int(((kept) & (cls_cv_labels == 1)).sum())
-        fp = int(((kept) & (cls_cv_labels == 0)).sum())
-        fn = int(((~kept) & (cls_cv_labels == 1)).sum())
-        precision = tp / (tp + fp) if (tp + fp) else 0.0
-        recall = tp / (tp + fn) if (tp + fn) else 0.0
-        f1 = 2 * precision * recall / (precision + recall) if (precision + recall) else 0.0
-        metrics_by_class[cls] = {
-            "voter_c_precision_cv": round(precision, 4),
-            "voter_c_recall_cv": round(recall, 4),
-            "voter_c_f1_cv": round(f1, 4),
-            "voter_c_tp": tp,
-            "voter_c_fp": fp,
-            "voter_c_fn": fn,
-        }
-
-        log(
-            f"  {cls}: A={cls_a:.4f}  B={cls_b:.4f}  C={cls_c:.4f}  "
-            f"(n={len(rows)} cands / {len(rows_pos)} pos)  "
-            f"voter-C CV P/R/F1={precision:.3f}/{recall:.3f}/{f1:.3f}"
-        )
-
-    if not thresholds_by_class:
+        for name in feat.MODEL_SETS
+    }
+    blocks = {name: built.block for name, built in builds.items()}
+    if not blocks[feat.DEFAULT_MODEL_SET]["thresholds_by_camera_class"]:
         raise BuildError("no camera class produced calibrated thresholds; need >= 1 positive")
+    _assert_sets_agree(blocks)
     data_dir = out_dir if out_dir is not None else DATA_DIR
     if decoder_only:
         return _write_decoder_only(
-            data_dir / "ensemble_calibration.json",
-            universe,
-            heldout_rows,
-            tolerance_ms,
-            decoder_fast_floor_s,
-            log,
+            data_dir / "ensemble_calibration.json", builds, universe, tolerance_ms, decoder_fast_floor_s, log
         )
     _write_heldout(
-        heldout_report,
-        heldout_rows,
+        {name: built.heldout_report for name, built in builds.items()},
+        [row for built in builds.values() for row in built.heldout_rows],
         target_recall=target_recall,
         tolerance_ms=tolerance_ms,
         log=log,
         out=out_dir / "heldout" if out_dir is not None else HELDOUT_DIR,
     )
-    decoder = _fit_decoder(
-        universe, heldout_rows, thresholds_by_class, tolerance_ms, decoder_fast_floor_s, log
-    )
+    for name, built in builds.items():
+        decoders = _fit_decoders_by_class(
+            name,
+            universe,
+            built.heldout_rows,
+            built.block["thresholds_by_camera_class"],
+            tolerance_ms,
+            decoder_fast_floor_s,
+            log,
+        )
+        built.block["decoders_by_camera_class"] = {cls: d.model_dump() for cls, d in decoders.items()}
 
     # Voter E (issue #183): train CLIP visual probe head on the head-mounted
     # corpus and merge per-class thresholds back in. Fully optional -- if
@@ -1492,28 +1629,22 @@ def build_artifacts(
             "n_visual_skipped_missing_video": len(missing_video),
             "missing_video_fixtures": sorted(missing_video),
         }
-        if voter_e_probe is not None and DEFAULT_CAMERA_CLASS in thresholds_by_class:
-            thresholds_by_class[DEFAULT_CAMERA_CLASS]["voter_e_threshold"] = voter_e_threshold
+        if voter_e_probe is not None:
+            # Voter E is not keyed by set: the same threshold in every set.
+            for block in blocks.values():
+                if DEFAULT_CAMERA_CLASS in block["thresholds_by_camera_class"]:
+                    block["thresholds_by_camera_class"][DEFAULT_CAMERA_CLASS][
+                        "voter_e_threshold"
+                    ] = voter_e_threshold
 
     # Per-camera-model within-stage amplitude floor (#304).
     log("Per-model within-stage amplitude floor:")
     amp_floor_by_model = _amp_floors_by_camera_model(universe, log=log)
     camera_model_meta = _camera_model_metadata(universe)
 
-    # Default-class top-level fields. Existing code paths that haven't
-    # migrated to ``thresholds_for(camera_class)`` keep reading the
-    # default class -- byte-identical to today for headcam projects.
+    default_classes = blocks[feat.DEFAULT_MODEL_SET]["thresholds_by_camera_class"]
     default_cls = (
-        DEFAULT_CAMERA_CLASS
-        if DEFAULT_CAMERA_CLASS in thresholds_by_class
-        else next(iter(sorted(thresholds_by_class)))
-    )
-    default_thresholds = thresholds_by_class[default_cls]
-    log(
-        f"Default class for legacy callers: {default_cls!r} "
-        f"(A={default_thresholds['voter_a_floor']:.4f} "
-        f"B={default_thresholds['voter_b_threshold']:.4f} "
-        f"C={default_thresholds['voter_c_threshold']:.4f})"
+        DEFAULT_CAMERA_CLASS if DEFAULT_CAMERA_CLASS in default_classes else sorted(default_classes)[0]
     )
 
     data_dir.mkdir(parents=True, exist_ok=True)
@@ -1524,21 +1655,19 @@ def build_artifacts(
     # to whichever scikit-learn version the installing user resolved.
     # Exported before the calibration JSON is written so a failed export
     # never leaves a JSON pointing at artifacts that don't exist.
-    voter_c_onnx_artifacts: dict[str, str] = {}
-    for cls, cls_model in sorted(voter_c_models.items()):
-        onnx_path = data_dir / f"voter_c_gbdt_{cls}.onnx"
-        _export_onnx_proba(cls_model, int(cls_model.n_features_in_), onnx_path)
-        voter_c_onnx_artifacts[cls] = onnx_path.name
-        log(f"Wrote {onnx_path}")
+    for name, built in builds.items():
+        built.block["voter_c_onnx_artifacts"] = {}
+        for cls, cls_model in sorted(built.models.items()):
+            _check_graph_width(name, cls, cls_model, built.block)
+            onnx_path = data_dir / f"voter_c_gbdt_{name}_{cls}.onnx"
+            _export_onnx_proba(cls_model, int(cls_model.n_features_in_), onnx_path)
+            built.block["voter_c_onnx_artifacts"][cls] = onnx_path.name
+            log(f"Wrote {onnx_path}")
     if voter_e_probe is not None:
         _export_onnx_proba(voter_e_probe, int(voter_e_probe.n_features_in_), voter_e_path)
         log(f"Wrote {voter_e_path}")
 
     cal = {
-        "voter_a_floor": default_thresholds["voter_a_floor"],
-        "voter_b_threshold": default_thresholds["voter_b_threshold"],
-        "voter_c_threshold": default_thresholds["voter_c_threshold"],
-        "voter_e_threshold": default_thresholds.get("voter_e_threshold"),
         "voter_c_target_recall": target_recall,
         "voter_e_target_recall": voter_e_target_recall if voter_e_probe is not None else None,
         "tolerance_ms": tolerance_ms,
@@ -1547,23 +1676,20 @@ def build_artifacts(
         "calibration_fixtures": [f for f in fixtures if any(c["fixture"] == f for c in universe)],
         "n_calibration_candidates": n_total,
         "n_calibration_positives": int(n_pos),
-        "voter_c_feature_dim": feat.VOTER_C_FEATURE_DIM,
-        "voter_c_onnx_artifacts": voter_c_onnx_artifacts,
         "voter_e_clip_model_id": vis.CLIP_VISUAL_MODEL_ID if voter_e_probe is not None else None,
         "voter_e_frame_offsets": (list(vis.DEFAULT_FRAME_OFFSETS) if voter_e_probe is not None else None),
         "voter_e_probe_artifact": (DEFAULT_VOTER_E_PROBE_FILENAME if voter_e_probe is not None else None),
         "voter_e_audio_strong_min_votes_recommended": 3 if voter_e_probe is not None else None,
         "built_at": dt.datetime.now(dt.UTC).isoformat(),
         "default_camera_class": default_cls,
-        "thresholds_by_camera_class": thresholds_by_class,
+        "default_model_set": feat.DEFAULT_MODEL_SET,
+        "model_sets": blocks,
         "amp_floor_by_camera_model": amp_floor_by_model or None,
         "camera_model_metadata": camera_model_meta or None,
-        "voter_c_metrics_by_camera_class": metrics_by_class,
         "voter_e_provenance": voter_e_provenance,
-        "decoder": decoder.model_dump() if decoder is not None else None,
         **mining_provenance,
     }
-    # A bundle shares the shipped CLAP / PANN exports, so it carries the
+    # A bundle shares the shipped CLAP exports, so it carries the
     # shipped block (its own folder has no previous calibration).
     carried = _carry_model_artifacts(cal_path if out_dir is None else DATA_DIR / "ensemble_calibration.json")
     if carried is not None:
@@ -1600,7 +1726,15 @@ def build_artifacts(
 
     # Frozen sklearn probabilities for tests/test_onnx_parity.py. Skipped
     # in a wheel context (the dev retrain endpoint), where tests/ is absent.
-    _write_voter_c_parity_reference(voter_c_models, thresholds_by_class, _x_from(voter_c_universe), log=log)
+    full_x = _x_from(voter_c_universe)
+    for name, built in builds.items():
+        _write_voter_c_parity_reference(
+            name,
+            built.models,
+            built.block["thresholds_by_camera_class"],
+            feat.select_columns(full_x, built.block["columns"]),
+            log=log,
+        )
     if voter_e_probe is not None and voter_e_matrix is not None and voter_e_threshold is not None:
         _write_voter_e_parity_reference(voter_e_probe, voter_e_matrix, voter_e_threshold, log=log)
     return cal
@@ -1704,7 +1838,7 @@ def main() -> None:
     p.add_argument(
         "--extract",
         action="store_true",
-        help="Re-extract CLAP / PANN caches that are missing or were made from other audio.",
+        help="Re-extract CLAP caches that are missing or were made from other audio.",
     )
     args = p.parse_args()
     if any(v is not None for v in (args.name, args.version, args.description)) and args.out is None:

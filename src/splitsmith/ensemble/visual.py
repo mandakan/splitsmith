@@ -1,6 +1,6 @@
 """Voter E -- per-candidate CLIP visual probe (issue #183).
 
-Mirrors the Voter D / PANN structure: a runtime that lazy-loads model
+Mirrors the CLAP structure: a runtime that lazy-loads model
 weights, a feature-computation function that takes
 ``(video_path, candidate_times)`` and returns CLIP image embeddings, and
 a scoring function that runs the trained linear probe head to produce

@@ -167,7 +167,7 @@ def test_shot_detection_reads_the_published_wav_without_the_source(
         seen.append(len(kwargs["audio"]))  # type: ignore[arg-type]
         raise _StopError("stop before the ensemble")
 
-    monkeypatch.setattr(server_mod, "_ensemble_runtime_is_warm", lambda: True)
+    monkeypatch.setattr(server_mod, "_ensemble_runtime_is_warm", lambda *_a, **_k: True)
     monkeypatch.setattr(state.compute, "detect_stage", detect_stage)
 
     job = client.post("/api/shooters/me/stages/1/shot-detect").json()
@@ -190,7 +190,7 @@ def test_shot_detection_cuts_from_the_source_when_nothing_is_stored(
         seen.append(len(kwargs["audio"]))  # type: ignore[arg-type]
         raise _StopError("stop before the ensemble")
 
-    monkeypatch.setattr(server_mod, "_ensemble_runtime_is_warm", lambda: True)
+    monkeypatch.setattr(server_mod, "_ensemble_runtime_is_warm", lambda *_a, **_k: True)
     monkeypatch.setattr(state.compute, "detect_stage", detect_stage)
 
     job = client.post("/api/shooters/me/stages/1/shot-detect").json()
@@ -275,7 +275,7 @@ def test_shot_detection_on_a_memory_backed_worker_drops_the_trim_it_cut(
         seen.append(len(kwargs["audio"]))  # type: ignore[arg-type]
         raise _StopError("stop before the ensemble")
 
-    monkeypatch.setattr(server_mod, "_ensemble_runtime_is_warm", lambda: True)
+    monkeypatch.setattr(server_mod, "_ensemble_runtime_is_warm", lambda *_a, **_k: True)
     monkeypatch.setattr(state.compute, "detect_stage", detect_stage)
 
     job = client.post("/api/shooters/me/stages/1/shot-detect").json()

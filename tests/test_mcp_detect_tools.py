@@ -24,7 +24,7 @@ from splitsmith.mcp import detect_tools
 
 def _fake_ensemble_result(times: list[float], consensus: int = 3, expected_rounds=None):
     """Build a small ``EnsembleResult`` for tests so we don't pull
-    CLAP / GBDT / PANN weights into CI.
+    CLAP / GBDT weights into CI.
 
     Mirrors the helper in ``test_ui_server.py``; duplicated here so
     these tests stay self-contained."""
@@ -45,12 +45,17 @@ def _fake_ensemble_result(times: list[float], consensus: int = 3, expected_round
             ensemble_score=3.0,
             score_c=0.9,
             clap_diff=0.5,
-            gunshot_prob=0.7,
             kept=True,
         )
         for i, t in enumerate(times)
     ]
-    return EnsembleResult(candidates=cands, consensus=consensus, expected_rounds=expected_rounds)
+    return EnsembleResult(
+        model_set="base",
+        calibration_built_at="x",
+        candidates=cands,
+        consensus=consensus,
+        expected_rounds=expected_rounds,
+    )
 
 
 class _FakeAudit:
@@ -1103,3 +1108,25 @@ def test_trim_audit_clip_missing_source_raises(tmp_path: Path) -> None:
     project.save(root)
     with pytest.raises(FileNotFoundError, match="source video missing"):
         detect_tools.trim_audit_clip(str(root), stage_number=1)
+
+
+def test_the_mcp_runtime_follows_the_machine_preference_and_caches_per_set(monkeypatch) -> None:
+    """The MCP tool mirrors the HTTP job: the local preference picks the set,
+    and a clap request that fell back to base is retried."""
+    from splitsmith import user_config
+    from splitsmith.mcp import detect_tools
+    from tests._ensemble_stubs import stub_runtime
+
+    monkeypatch.delenv("SPLITSMITH_MODEL_SET", raising=False)
+    prefs = user_config.load_global_prefs()
+    user_config.save_global_prefs(prefs.model_copy(update={"detection_model_set": "clap"}))
+    asked: list[str | None] = []
+    monkeypatch.setattr(
+        detect_tools.ensemble_module,
+        "load_ensemble_runtime",
+        lambda **kw: asked.append(kw["model_set"]) or stub_runtime("base"),
+    )
+    monkeypatch.setattr(detect_tools, "_ENSEMBLE_RUNTIMES", {})
+    assert detect_tools._get_ensemble_runtime().model_set == "base"
+    detect_tools._get_ensemble_runtime()
+    assert asked == ["clap", "clap"]

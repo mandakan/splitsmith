@@ -164,7 +164,7 @@ def candidate_high_water(doc: Any) -> int:
 #: The ``_note`` a detection run writes on its ``_candidates_pending_audit``
 #: block.
 CANDIDATES_NOTE = (
-    "3-voter ensemble (PANN gunshot folded into voter C). "
+    "3-voter ensemble (A envelope, B CLAP when the clap model set is active, C GBDT). "
     "vote_a/b/c=1 means the voter kept the candidate; "
     "ensemble_score = vote_total + apriori_boost. shots[] is "
     "seeded from candidates with ensemble_score >= consensus. "
@@ -190,7 +190,6 @@ def candidate_dict(cand: Any) -> dict[str, Any]:
         "ensemble_score": cand.ensemble_score,
         "score_c": cand.score_c,
         "clap_diff": cand.clap_diff,
-        "gunshot_prob": cand.gunshot_prob,
         "voter_e_signal": cand.voter_e_signal,
     }
 
@@ -246,6 +245,10 @@ def merge_detection_into(
         "_note": CANDIDATES_NOTE,
         "consensus": result.consensus,
         "expected_rounds": result.expected_rounds,
+        # Which model set scored this run, and which build: a doc written
+        # before model sets has neither and reads as unknown.
+        "_model_set": result.model_set,
+        "_calibration_built_at": result.calibration_built_at,
         "candidates": numbered,
     }
     reset_deletions: list[dict[str, Any]] = []
@@ -306,6 +309,8 @@ def merge_detection_into(
                 "consensus": result.consensus,
                 "expected_rounds": result.expected_rounds,
                 "seeded_shots": seeded_shots,
+                "model_set": result.model_set,
+                "calibration_built_at": result.calibration_built_at,
                 **(run_payload or {}),
             },
         }

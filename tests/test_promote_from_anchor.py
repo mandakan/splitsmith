@@ -187,11 +187,10 @@ def _make_minimal_ensemble_result():
             ensemble_score=3.0,
             score_c=0.9,
             clap_diff=0.5,
-            gunshot_prob=0.8,
             kept=True,
         )
     ]
-    return EnsembleResult(candidates=cands, consensus=2)
+    return EnsembleResult(model_set="base", calibration_built_at="x", candidates=cands, consensus=2)
 
 
 def test_build_fixture_includes_camera_anchor_history() -> None:

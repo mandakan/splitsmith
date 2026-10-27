@@ -1,7 +1,7 @@
-"""Compare CLAP / PANN ONNX outputs against their torch references.
+"""Compare the CLAP ONNX output against its torch reference.
 
-Reads the artifacts written by ``export_clap_onnx.py`` and
-``export_pann_onnx.py`` from ``build/onnx-spike/`` and checks that
+Reads the artifacts written by ``export_clap_onnx.py`` from
+``build/onnx-spike/`` and checks that
 ``onnxruntime`` produces outputs matching the torch reference within
 tolerance. Tolerance defaults are deliberately tight (1e-4 absolute,
 1e-3 relative); loosen with ``--atol`` / ``--rtol`` if the platform
@@ -60,22 +60,6 @@ def main() -> None:
         all_ok &= _check("clap_audio", ref, got, args.atol, args.rtol)
     else:
         print(f"CLAP: skip (missing {clap_onnx}; run export_clap_onnx.py first)")
-
-    pann_onnx = args.out_dir / "pann_cnn14.onnx"
-    if pann_onnx.exists():
-        print(f"\nPANN: {pann_onnx}")
-        sample = np.load(args.out_dir / "pann_sample_audio.npy")[None, :]
-        ref = np.load(args.out_dir / "pann_torch_reference.npy")
-        sess = ort.InferenceSession(str(pann_onnx), providers=["CPUExecutionProvider"])
-        (got,) = sess.run(None, {"audio": sample})
-        all_ok &= _check("pann_clipwise", ref, got, args.atol, args.rtol)
-
-        gunshot_idx = 427
-        ref_g = ref[:, gunshot_idx]
-        got_g = got[:, gunshot_idx]
-        all_ok &= _check("pann_gunshot_class", ref_g, got_g, args.atol, args.rtol)
-    else:
-        print(f"\nPANN: skip (missing {pann_onnx}; run export_pann_onnx.py first)")
 
     print()
     if all_ok:

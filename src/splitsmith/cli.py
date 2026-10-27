@@ -422,7 +422,7 @@ def ui(
         help=(
             "Expose the developer Lab surfaces (/dev/*: corpus, review "
             "queue, validate, retrain). Hidden by default since it's a "
-            "developer tool that loads heavy CLAP/PANN models on first use."
+            "developer tool that loads heavy CLAP models on first use."
         ),
     ),
     lab_token: str | None = typer.Option(

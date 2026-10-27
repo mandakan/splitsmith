@@ -221,9 +221,9 @@ uv run pytest -q -n0 tests/test_beep_detect.py   # serial, for debugging
 
 ## Runtime backends (slim ONNX vs dev torch)
 
-The shipped runtime uses [ONNX Runtime](https://onnxruntime.ai/) for Voter B (CLAP) and Voter D (PANN gunshot probability, folded into Voter C). The slim install carries no torch, no transformers, no panns_inference. Artifacts (~440 MB) auto-download from `models.splitsmith.app` into `~/.splitsmith/models/` as a background job the moment `splitsmith ui` boots; `splitsmith fetch-models` is still around for scripted prefetch (CI, metered connections).
+The shipped runtime uses [ONNX Runtime](https://onnxruntime.ai/) for the GBDT voter and, in the `clap` model set, for Voter B (CLAP). The slim install carries no torch and no transformers. The default `base` model set needs no download; when the `clap` set is chosen (`SPLITSMITH_MODEL_SET=clap`), the CLAP artifacts (~120 MB) download from `models.splitsmith.app` into `~/.splitsmith/models/` as a background job when `splitsmith ui` boots, and detection runs `base` until they are there; `splitsmith fetch-models` is still around for scripted prefetch (CI, metered connections).
 
-The dev backend (torch + transformers + panns_inference) lives in the `[dev]` group and is required for: re-running `scripts/build_ensemble_artifacts.py`, the ONNX export scripts (`scripts/export_pann_onnx.py`, `scripts/export_clap_onnx.py`), and enabling Voter E (CLIP visual probe -- off by default; turn on with `SPLITSMITH_ENABLE_VOTER_E=1` after `uv sync --all-groups`).
+The dev backend (torch + transformers) lives in the `[dev]` group and is required for: re-running `scripts/build_ensemble_artifacts.py`, the ONNX export script (`scripts/export_clap_onnx.py`), and enabling Voter E (CLIP visual probe -- off by default; turn on with `SPLITSMITH_ENABLE_VOTER_E=1` after `uv sync --all-groups`).
 
 `select_backend()` resolves to torch when both backends are importable (dev path with HF caches), and to onnxruntime by elimination otherwise (slim install). Override per-process with `SPLITSMITH_BACKEND=torch|onnx`. See [`docs/local-slim/`](docs/local-slim/) for the full design.
 

@@ -85,7 +85,7 @@ def test_reference_is_stable_under_ties():
 def _rel(hand, n_clap=10):
     n = hand.shape[0]
     sims = np.zeros((n, n_clap))
-    return feat.stage_relative_features(hand, sims, np.zeros(n), np.zeros(n))
+    return feat.stage_relative_features(hand, sims, np.zeros(n))
 
 
 def test_tiny_stages_do_not_raise():
@@ -172,7 +172,6 @@ def _rows(fixture: str, n: int, seed: int, expected: int | None):
             "hand_feats": hand[i].tolist(),
             "clap_sims": sims[i].tolist(),
             "clap_diff": float(sims[i, 0]),
-            "gunshot_prob": float(abs(sims[i, 1])),
         }
         for i in range(n)
     ]
@@ -183,8 +182,8 @@ def test_matrix_has_the_relative_block_and_no_nan():
     hand = np.array([r["hand_feats"] for r in rows])
     hand[0, 17] = np.nan
     sims = np.array([r["clap_sims"] for r in rows])
-    x = feat.voter_c_feature_matrix(hand, sims, sims[:, 0], np.abs(sims[:, 1]), "headcam")
-    assert x.shape == (6, feat.VOTER_C_FEATURE_DIM) and feat.VOTER_C_FEATURE_DIM == 57
+    x = feat.voter_c_feature_matrix(hand, sims, sims[:, 0], "headcam")
+    assert x.shape == (6, feat.VOTER_C_FEATURE_DIM) and feat.VOTER_C_FEATURE_DIM == 55
     assert not np.isnan(x).any()
 
 
@@ -201,7 +200,6 @@ def test_trainer_and_runtime_build_identical_matrices():
                 np.array([r["hand_feats"] for r in rs]),
                 sims,
                 np.array([r["clap_diff"] for r in rs]),
-                np.array([r["gunshot_prob"] for r in rs]),
                 "headcam",
             )
         )
@@ -237,8 +235,10 @@ def test_old_width_artifact_fails_at_load(monkeypatch):
         n_features = 31
         path = Path("voter_c_gbdt_headcam.onnx")
 
+    from tests._ensemble_stubs import stub_calibration
+
+    monkeypatch.setattr(api, "load_calibration", stub_calibration)
     monkeypatch.setattr(api, "load_voter_c_model", lambda *_a, **_k: {"headcam": Narrow()})
     monkeypatch.setattr(api.feat, "load_clap_runtime", lambda: None)
-    monkeypatch.setattr(api.feat, "load_pann_runtime", lambda: None)
-    with pytest.raises(RuntimeError, match=r"voter_c_gbdt_headcam\.onnx.*31.*57"):
-        api.load_ensemble_runtime(with_voter_e=False)
+    with pytest.raises(RuntimeError, match=r"voter_c_gbdt_headcam\.onnx.*31.*55"):
+        api.load_ensemble_runtime(model_set="clap", with_voter_e=False)

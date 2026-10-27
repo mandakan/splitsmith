@@ -37,7 +37,8 @@ def _fx(stem: str, *, mount: str = "head", match: str = "alpha-2026", stage: int
     )
 
 
-CAL = {
+# A flat calibration as git history holds it: built before model sets.
+LEGACY_CAL = {
     "built_at": "2026-10-09T20:14:31+00:00",
     "voter_c_target_recall": 0.95,
     "tolerance_ms": 75.0,
@@ -66,10 +67,12 @@ CAL = {
         }
     },
     "voter_c_onnx_artifacts": {"headcam": "voter_c_gbdt_headcam.onnx"},
-    "model_artifacts": {"pann_cnn14": {"filename": "pann.onnx", "sha256": "ab", "size_bytes": 3}},
+    "model_artifacts": {
+        "clap_audio_encoder": {"filename": "clap_audio.onnx", "sha256": "ab", "size_bytes": 3}
+    },
 }
 
-HELDOUT = {
+LEGACY_HELDOUT = {
     "built_at": "2026-10-10T08:15:48+00:00",
     "splits": {"lomo": "LeaveOneGroupOut, groups = match"},
     "by_camera_class": {
@@ -94,6 +97,43 @@ HELDOUT = {
 }
 
 
+def _set_block(*, with_clap: bool) -> dict:
+    by_class = json.loads(json.dumps(LEGACY_CAL["thresholds_by_camera_class"]))
+    if not with_clap:
+        for block in by_class.values():
+            block.pop("voter_b_threshold", None)
+    name = "clap" if with_clap else "base"
+    return {
+        "columns": [],
+        "voter_c_feature_dim": 55 if with_clap else 31,
+        "voter_c_onnx_artifacts": {"headcam": f"voter_c_gbdt_{name}_headcam.onnx"},
+        "thresholds_by_camera_class": by_class,
+        "voter_c_metrics_by_camera_class": LEGACY_CAL["voter_c_metrics_by_camera_class"],
+        "requires_artifacts": ["clap_audio_encoder", "clap_text_embeddings"] if with_clap else [],
+    }
+
+
+CAL = {
+    **{
+        k: v
+        for k, v in LEGACY_CAL.items()
+        if k
+        not in ("thresholds_by_camera_class", "voter_c_metrics_by_camera_class", "voter_c_onnx_artifacts")
+    },
+    "default_model_set": "base",
+    "model_sets": {"base": _set_block(with_clap=False), "clap": _set_block(with_clap=True)},
+}
+
+HELDOUT = {
+    "built_at": LEGACY_HELDOUT["built_at"],
+    "splits": LEGACY_HELDOUT["splits"],
+    "model_sets": {
+        "base": {"by_camera_class": LEGACY_HELDOUT["by_camera_class"]},
+        "clap": {"by_camera_class": {}},
+    },
+}
+
+
 def _build(fixtures, **over):
     kwargs = {
         "fixtures": fixtures,
@@ -104,7 +144,7 @@ def _build(fixtures, **over):
         "ranker_manifest": None,
         "ranker_version": "beep-ranker-lr-4a15dc5d",
         "hyperparameters": {"max_depth": 3},
-        "artifact_sizes": {"voter_c_gbdt_headcam.onnx": 1234},
+        "artifact_sizes": {"voter_c_gbdt_base_headcam.onnx": 1234},
         "history": [],
     }
     kwargs.update(over)
@@ -144,7 +184,7 @@ def test_fold_keys_follow_the_event_id_like_the_build() -> None:
 
 def test_heads_carry_thresholds_cv_and_held_out_metrics() -> None:
     m = _build([])
-    head = {h.camera_class: h for h in m.ensemble.heads}
+    head = {h.camera_class: h for h in m.ensemble.heads if h.model_set == "base"}
     assert head["headcam"].voter_c_threshold == 0.2
     assert head["headcam"].cv is not None and head["headcam"].cv.tp == 38
     assert head["headcam"].onnx_bytes == 1234
@@ -153,7 +193,44 @@ def test_heads_carry_thresholds_cv_and_held_out_metrics() -> None:
     assert head["headcam"].heldout_matches == ["alpha-2026"]
     # No held-out block and no metrics for the class: still listed, empty.
     assert head["handheld"].heldout == [] and head["handheld"].cv is None
-    assert m.ensemble.artifacts[0].filename == "pann.onnx"
+    assert m.ensemble.artifacts[0].filename == "clap_audio.onnx"
+
+
+def test_every_head_names_its_set_and_the_default_set_comes_first() -> None:
+    m = _build([])
+    assert [(h.model_set, h.camera_class) for h in m.ensemble.heads] == [
+        ("base", "headcam"),
+        ("base", "handheld"),
+        ("clap", "headcam"),
+        ("clap", "handheld"),
+    ]
+    by = {(h.model_set, h.camera_class): h for h in m.ensemble.heads}
+    assert by[("base", "headcam")].voter_b_threshold is None
+    assert by[("clap", "headcam")].voter_b_threshold == 0.036
+    assert by[("clap", "headcam")].onnx == "voter_c_gbdt_clap_headcam.onnx"
+    assert by[("clap", "headcam")].heldout == []
+    assert m.ensemble.feature_dim == 31
+
+
+def test_a_flat_calibration_from_history_reads_as_one_legacy_set() -> None:
+    assert model_map.model_set_names(LEGACY_CAL) == ["legacy"]
+    assert model_map.model_set_block(LEGACY_CAL, "legacy") is LEGACY_CAL
+    assert model_map.model_set_names(CAL) == ["base", "clap"]
+    with pytest.raises(KeyError):
+        model_map.model_set_block(CAL, "legacy")
+    m = _build(
+        [],
+        calibration=LEGACY_CAL,
+        heldout=LEGACY_HELDOUT,
+        artifact_sizes={"voter_c_gbdt_headcam.onnx": 1234},
+    )
+    head = {h.camera_class: h for h in m.ensemble.heads}
+    assert {h.model_set for h in m.ensemble.heads} == {"legacy"}
+    assert head["headcam"].voter_c_threshold == 0.2
+    assert head["headcam"].onnx_bytes == 1234
+    assert head["headcam"].heldout[0].at_shipped_threshold.recall == 0.9
+    v = version_from("cccc", "2026-07-01", "old", LEGACY_CAL, None)
+    assert v.model_set == "legacy" and v.recall == {"headcam": 0.95}
 
 
 def test_a_build_without_the_heldout_report_still_maps() -> None:
@@ -210,6 +287,7 @@ def test_version_lists_what_it_added_and_dropped() -> None:
     assert second.added == ["stage-shots-alpha-2026-stage1-sabc-iphone"]
     assert second.removed == ["x"]
     assert second.recall == {"headcam": 0.95}
+    assert second.model_set == "base"
 
 
 def test_fixture_heldout_counts_each_fixture_at_its_heads_threshold() -> None:

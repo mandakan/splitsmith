@@ -88,7 +88,8 @@ FULL_DIR = FIXTURES_DIR / "full"
 
 
 def _resolve_audio_paths(name: str, *, full: bool) -> tuple[Path, Path, float, float]:
-    """Mirror of extract_audio_embeddings._resolve_audio_paths."""
+    """WAV path, cache path and the window to read: the fixture clip, or its
+    full-source sidecar with ``full``."""
     if full:
         wav_path = FULL_DIR / f"{name}_full.wav"
         cache_path = CACHE_DIR / f"{name}_clap_full.npz"

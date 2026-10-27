@@ -23,7 +23,7 @@ def test_local_backend_lazy_loads_runtime_only_once(monkeypatch) -> None:
     load_calls = 0
     load_lock = threading.Lock()
 
-    def _loader():
+    def _loader(model_set=None):
         nonlocal load_calls
         with load_lock:
             load_calls += 1
@@ -33,7 +33,13 @@ def test_local_backend_lazy_loads_runtime_only_once(monkeypatch) -> None:
 
     def _fake_detect(audio, sr, beep, stage_time, runtime, **kwargs):
         captured.append({"beep": beep, "stage_time": stage_time, **kwargs})
-        return EnsembleResult(candidates=[], consensus=2, expected_rounds=kwargs.get("expected_rounds"))
+        return EnsembleResult(
+            model_set="base",
+            calibration_built_at="x",
+            candidates=[],
+            consensus=2,
+            expected_rounds=kwargs.get("expected_rounds"),
+        )
 
     import splitsmith.ensemble as ensemble_pkg
 
@@ -54,13 +60,15 @@ def test_local_backend_calls_through_package_binding_so_patches_work(monkeypatch
     ``ensemble.api`` module attribute, this monkeypatch would not
     intercept. The package-binding indirection in the backend is
     what makes the existing test suite's pattern work."""
-    sentinel = EnsembleResult(candidates=[], consensus=99, expected_rounds=42)
+    sentinel = EnsembleResult(
+        model_set="base", calibration_built_at="x", candidates=[], consensus=99, expected_rounds=42
+    )
 
     import splitsmith.ensemble as ensemble_pkg
 
     monkeypatch.setattr(ensemble_pkg, "detect_shots_ensemble", lambda *a, **kw: sentinel)
 
-    backend = LocalComputeBackend(runtime_loader=lambda: _FakeRuntime())
+    backend = LocalComputeBackend(runtime_loader=lambda model_set: _FakeRuntime())
     result = backend.detect_stage(
         audio=np.zeros(1, dtype=np.float32),
         sample_rate=48000,
@@ -83,14 +91,14 @@ def test_local_backend_forwards_keyword_arguments(monkeypatch) -> None:
 
     def _fake_detect(audio, sr, beep, stage_time, runtime, **kwargs):
         seen.update(kwargs)
-        return EnsembleResult(candidates=[], consensus=2)
+        return EnsembleResult(model_set="base", calibration_built_at="x", candidates=[], consensus=2)
 
     import splitsmith.ensemble as ensemble_pkg
 
     monkeypatch.setattr(ensemble_pkg, "detect_shots_ensemble", _fake_detect)
 
     cfg = EnsembleConfig()
-    backend = LocalComputeBackend(runtime_loader=lambda: _FakeRuntime())
+    backend = LocalComputeBackend(runtime_loader=lambda model_set: _FakeRuntime())
     backend.detect_stage(
         audio=np.zeros(1, dtype=np.float32),
         sample_rate=48000,
@@ -130,7 +138,7 @@ def test_state_compute_is_swappable_by_tests() -> None:
     app = create_app()
     state = app.state.splitsmith_state
 
-    sentinel_result = EnsembleResult(candidates=[], consensus=7)
+    sentinel_result = EnsembleResult(model_set="base", calibration_built_at="x", candidates=[], consensus=7)
 
     class _RecordingBackend:
         name = "recording"

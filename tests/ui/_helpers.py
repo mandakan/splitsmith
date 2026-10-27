@@ -346,12 +346,17 @@ def _fake_ensemble_result(candidates: list[dict], consensus: int = 3):
             ensemble_score=c.get("ensemble_score", 3.0),
             score_c=c.get("score_c", 0.9),
             clap_diff=c.get("clap_diff", 0.5),
-            gunshot_prob=c.get("gunshot_prob", 0.7),
             kept=c.get("kept", True),
         )
         for i, c in enumerate(candidates)
     ]
-    return EnsembleResult(candidates=cands, consensus=consensus, expected_rounds=None)
+    return EnsembleResult(
+        model_set="base",
+        calibration_built_at="x",
+        candidates=cands,
+        consensus=consensus,
+        expected_rounds=None,
+    )
 
 
 def _seed_second_video(tmp_path: Path, project_root: Path) -> str:

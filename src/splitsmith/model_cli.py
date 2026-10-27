@@ -32,9 +32,9 @@ err_console = Console(stderr=True)
 def _no_artifacts_block() -> None:
     err_console.print(
         "[yellow]No model_artifacts block in ensemble_calibration.json.[/]\n"
-        "This wheel ships without slim ONNX artifacts -- "
-        "either install dev extras (uv sync --all-groups) and run the\n"
-        "torch backend, or wait for a wheel that includes the ONNX block."
+        "Shot detection's default (base) model set needs no download. The clap set\n"
+        "needs the CLAP ONNX artifacts this wheel does not name; install dev extras\n"
+        "(uv sync --all-groups) to run CLAP on the torch backend instead."
     )
 
 

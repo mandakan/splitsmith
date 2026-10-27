@@ -400,7 +400,8 @@ class EvalCandidate(BaseModel):
     peak_amplitude: float
     score_c: float
     clap_diff: float
-    gunshot_prob: float
+    # Eval records cached before PANN was retired carry it; nothing writes it now.
+    gunshot_prob: float | None = None
     vote_a: int
     vote_b: int
     vote_c: int
@@ -461,7 +462,7 @@ class EvalFixture(BaseModel):
 
     The ``candidates`` list is the per-candidate cache used by
     ``rescore_universe`` -- so a Lab session loads the universe once,
-    then sweeps consensus / apriori sliders without touching CLAP/PANN.
+    then sweeps consensus / apriori sliders without touching CLAP.
     """
 
     slug: str
@@ -480,8 +481,12 @@ class EvalUniverse(BaseModel):
     """Cached, model-output-bound layer (heavy to compute)."""
 
     fixtures: list[EvalFixture]
+    # The model set the universe was scored with; a universe cached before
+    # model sets scored every column, which the ``clap`` set does.
+    model_set: str = "clap"
     voter_a_floor: float
-    voter_b_threshold: float
+    # ``None`` under ``base`` (no CLAP, so voter B does not vote).
+    voter_b_threshold: float | None
     voter_c_threshold: float
     tolerance_ms: float
 
@@ -970,7 +975,6 @@ def run_eval(
                 peak_amplitude=c.peak_amplitude,
                 score_c=c.score_c,
                 clap_diff=c.clap_diff,
-                gunshot_prob=c.gunshot_prob,
                 vote_a=c.vote_a,
                 vote_b=c.vote_b,
                 vote_c=c.vote_c,
@@ -1003,11 +1007,13 @@ def run_eval(
         if progress is not None:
             progress(i + 1, total, fix.slug)
 
+    default_thresholds = cal.thresholds_for(None, model_set=runtime.model_set)
     universe = EvalUniverse(
         fixtures=fixtures,
-        voter_a_floor=cal.voter_a_floor,
-        voter_b_threshold=cal.voter_b_threshold,
-        voter_c_threshold=cal.voter_c_threshold,
+        model_set=runtime.model_set,
+        voter_a_floor=default_thresholds.voter_a_floor,
+        voter_b_threshold=default_thresholds.voter_b_threshold,
+        voter_c_threshold=default_thresholds.voter_c_threshold,
         tolerance_ms=cfg.tolerance_ms,
     )
     summary = _summary(fixtures)
@@ -1094,7 +1100,11 @@ def rescore_universe(universe: EvalUniverse, config: EvalConfig) -> EvalRun:
         score_c = np.array([c.score_c for c in fix.candidates], dtype=np.float64)
 
         vote_a = (confs >= a_floor).astype(np.int64)
-        vote_b = (clap_diff >= b_thr).astype(np.int64)
+        vote_b = (
+            (clap_diff >= b_thr).astype(np.int64)
+            if b_thr is not None
+            else np.zeros_like(confs, dtype=np.int64)
+        )
 
         expected = fix.expected_rounds if config.use_expected_rounds else None
         if expected and expected > 0:

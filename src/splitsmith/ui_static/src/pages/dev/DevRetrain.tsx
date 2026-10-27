@@ -41,7 +41,7 @@ const STAGES: PipelineStage[] = [
   { num: "01", name: "Load fixtures", desc: "Walk audit dir, pair JSON+WAV" },
   { num: "02", name: "Voter A floor", desc: "Auto-calibrate envelope onset threshold" },
   { num: "03", name: "CLAP scoring", desc: "Run prompt-similarity differential" },
-  { num: "04", name: "Feature build", desc: "Stack hand-crafted + CLAP + PANN" },
+  { num: "04", name: "Feature build", desc: "Stack hand-crafted + CLAP" },
   { num: "05", name: "GBDT 5-fold CV", desc: "Train + pick voter C threshold" },
   { num: "06", name: "Write artifact", desc: "Save calibration JSON + ONNX graphs" },
 ];
@@ -580,7 +580,7 @@ const VOTERS = [
     accent: "live",
     name: "GBDT classifier",
     sub: "feature interaction",
-    feat: "31 features (envelope + CLAP + PANN)",
+    feat: "Envelope features, plus CLAP in the clap set",
   },
 ] as const;
 

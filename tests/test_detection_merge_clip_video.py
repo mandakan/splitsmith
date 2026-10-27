@@ -8,7 +8,7 @@ from splitsmith.detection_merge import merge_detection_into
 
 _FIELDS = (
     "peak_amplitude confidence vote_a vote_b vote_c vote_e vote_total apriori_boost ensemble_score "
-    "score_c clap_diff gunshot_prob voter_e_signal"
+    "score_c clap_diff voter_e_signal"
 ).split()
 
 
@@ -23,7 +23,9 @@ def _run(times: list[float]) -> SimpleNamespace:
         )
         for i, t in enumerate(times, start=1)
     ]
-    return SimpleNamespace(candidates=cands, consensus=2, expected_rounds=None)
+    return SimpleNamespace(
+        candidates=cands, consensus=2, expected_rounds=None, model_set="base", calibration_built_at="x"
+    )
 
 
 BASE = {"stage_number": 1, "beep_time": 5.0, "clip_video_id": "head", "shots": []}

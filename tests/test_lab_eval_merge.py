@@ -32,7 +32,6 @@ def _candidate(number: int, t: float, *, truth: int = 1, kept: bool = True) -> l
         peak_amplitude=0.5,
         score_c=0.9,
         clap_diff=0.5,
-        gunshot_prob=0.9,
         vote_a=1,
         vote_b=1,
         vote_c=1,
@@ -118,7 +117,7 @@ def _fake_run_eval(
     config: lab_core.EvalConfig | None = None,
     progress: Any = None,
 ) -> lab_core.EvalRun:
-    """Stand-in for ``lab.run_eval`` -- no CLAP/PANN, deterministic per call.
+    """Stand-in for ``lab.run_eval`` -- no CLAP, deterministic per call.
 
     Mirrors what the real thing would produce for each of the three
     calls this test drives: a full run (fixture-a, fixture-b), a

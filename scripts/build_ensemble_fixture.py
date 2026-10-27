@@ -10,7 +10,7 @@ Voters
 ------
 A. Baseline detector + min_confidence=0.03  (calibrated, 100 % recall)
 B. CLAP zero-shot, threshold = min(clap_diff over positives)  (100 % recall)
-C. GBDT classifier (PANN gunshot_prob folded in as a feature),
+C. GBDT classifier over hand-crafted and CLAP features,
    threshold for --gbdt-target-recall (default 95 %)
 
 Both written variants share the same ``_candidates_pending_audit`` (the full
@@ -211,14 +211,6 @@ def _compute_universe(fixtures: list[str], tolerance_ms: float, voter_a_floor: f
         not_mean = sims[:, not_idx].mean(axis=1)
         diff = shot_mean - not_mean
 
-        pann_path = CACHE_DIR / f"{fix}_pann.npz"
-        if not pann_path.exists():
-            raise SystemExit(f"{fix}: PANN cache missing; run scripts/extract_audio_embeddings.py first.")
-        pann = np.load(pann_path)
-        if pann["gunshot_prob"].shape[0] != len(all_shots):
-            raise SystemExit(f"{fix}: PANN cache stale; re-run extract_audio_embeddings.py --force")
-        gunshot_prob = pann["gunshot_prob"]
-
         per_fixture[fix] = {
             "truth": truth,
             "shots": all_shots,
@@ -243,7 +235,6 @@ def _compute_universe(fixtures: list[str], tolerance_ms: float, voter_a_floor: f
                     "label": labels[i],
                     "vote_a": int(round(shot.scoring_time, 6) in safe_times),
                     "clap_diff": float(diff[i]),
-                    "gunshot_prob": float(gunshot_prob[i]),
                     "hand_feats": feats,
                     "clap_sims": list(sims[i]),
                     "peak_amplitude": float(shot.peak_amplitude),
@@ -261,7 +252,7 @@ def _vote_b_threshold(calib_universe) -> float:
 
 def _x_from(cands) -> np.ndarray:
     return np.array(
-        [c["hand_feats"] + c["clap_sims"] + [c["clap_diff"], c["gunshot_prob"]] for c in cands],
+        [c["hand_feats"] + c["clap_sims"] + [c["clap_diff"]] for c in cands],
         dtype=np.float64,
     )
 
@@ -529,7 +520,7 @@ def main() -> None:
                 truth,
                 ensemble_shots,
                 all_candidates,
-                label=f"ensemble {args.consensus}-of-3 consensus (A=baseline+0.03, B=CLAP, C=GBDT+PANN)",
+                label=f"ensemble {args.consensus}-of-3 consensus (A=baseline+0.03, B=CLAP, C=GBDT)",
             ),
         )
 

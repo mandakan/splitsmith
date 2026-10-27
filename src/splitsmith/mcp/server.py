@@ -194,7 +194,7 @@ def create_server(name: str = "splitsmith") -> FastMCP:
     # Detection tools (layer 3c). Synchronous -- the call returns when
     # the detector finishes. Beep detection takes ~5 s on a 100 s
     # primary clip; the agent waits inline. Shot detection (heavier;
-    # CLAP / GBDT / PANN) lands in a future layer.
+    # CLAP / GBDT) lands in a future layer.
     # ----------------------------------------------------------------
 
     @mcp.tool()
@@ -235,7 +235,7 @@ def create_server(name: str = "splitsmith") -> FastMCP:
         """Run the 3-voter shot-detection ensemble on a stage.
 
         Mirror of ``POST /api/stages/{n}/shot-detect``. Loads the
-        audit clip's audio, runs CLAP + GBDT + PANN consensus, and
+        audit clip's audio, runs the ensemble (GBDT, plus CLAP under the clap model set), and
         writes the candidate universe + seeded ``shots[]`` into
         ``<project>/audit/stage<N>.json``.
 
@@ -243,7 +243,7 @@ def create_server(name: str = "splitsmith") -> FastMCP:
         ``beep_time``, stage has ``time_seconds > 0``.
 
         First call in this server lifetime loads the ensemble
-        runtime (~5 s for CLAP + GBDT + PANN, plus first-call
+        runtime (~5 s for CLAP + GBDT, plus first-call
         download if not yet cached locally). Subsequent calls
         reuse the cached weights. A typical 60 s stage finishes in
         20-40 s on CPU. Voter E (CLIP, ~600 MB) requires

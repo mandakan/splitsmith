@@ -1,14 +1,12 @@
 """Unit tests for the 4-voter ensemble logic.
 
 The voters are pure functions over per-candidate signals -- testable
-without loading CLAP/PANN/GBDT. The end-to-end ``detect_shots_ensemble``
+without loading CLAP/GBDT. The end-to-end ``detect_shots_ensemble``
 test uses a stubbed ``EnsembleRuntime`` to exercise the wiring while
 side-stepping the heavy model paths.
 """
 
 from __future__ import annotations
-
-from dataclasses import dataclass
 
 import numpy as np
 import pytest
@@ -18,8 +16,8 @@ from splitsmith.ensemble import (
     EnsembleConfig,
     detect_shots_ensemble,
 )
+from splitsmith.ensemble import features as feat
 from splitsmith.ensemble.api import EnsembleRuntime
-from splitsmith.ensemble.calibration import EnsembleCalibration
 from splitsmith.ensemble.features import (
     CLAP_PROMPTS,
     CLAP_PROMPTS_SHOT,
@@ -38,6 +36,7 @@ from splitsmith.ensemble.voters import (
     vote_e,
     within_stage_amp_veto,
 )
+from tests._ensemble_stubs import StubGBDT, stub_calibration, stub_runtime, stub_thresholds
 
 
 def test_vote_a_floor_threshold() -> None:
@@ -209,21 +208,7 @@ def test_normalize_camera_model_key_returns_none_when_either_input_missing() -> 
 
 
 def test_amp_floor_for_prefers_per_model_over_default() -> None:
-    cal = EnsembleCalibration(
-        voter_a_floor=0.0,
-        voter_b_threshold=0.0,
-        voter_c_threshold=0.5,
-        voter_c_target_recall=0.95,
-        tolerance_ms=75.0,
-        clap_prompts_shot=list(CLAP_PROMPTS_SHOT),
-        clap_prompts=list(CLAP_PROMPTS),
-        calibration_fixtures=["stub"],
-        n_calibration_candidates=10,
-        n_calibration_positives=5,
-        voter_c_feature_dim=VOTER_C_FEATURE_DIM,
-        built_at="1970-01-01T00:00:00Z",
-        amp_floor_by_camera_model={"insta360 go 3s": 0.20, "meta vanguard": 0.15},
-    )
+    cal = stub_calibration(amp_floor_by_camera_model={"insta360 go 3s": 0.20, "meta vanguard": 0.15})
     # Known model -> per-model value.
     assert cal.amp_floor_for("Insta360", "GO 3S", default=0.30) == 0.20
     # Known model with different casing still matches the canonical key.
@@ -237,20 +222,7 @@ def test_amp_floor_for_prefers_per_model_over_default() -> None:
 def test_amp_floor_for_returns_default_when_per_model_table_absent() -> None:
     """Pre-#304 calibration artifacts have no per-model table; the lookup
     must still hand back the caller's default rather than crashing."""
-    cal = EnsembleCalibration(
-        voter_a_floor=0.0,
-        voter_b_threshold=0.0,
-        voter_c_threshold=0.5,
-        voter_c_target_recall=0.95,
-        tolerance_ms=75.0,
-        clap_prompts_shot=list(CLAP_PROMPTS_SHOT),
-        clap_prompts=list(CLAP_PROMPTS),
-        calibration_fixtures=["stub"],
-        n_calibration_candidates=10,
-        n_calibration_positives=5,
-        voter_c_feature_dim=VOTER_C_FEATURE_DIM,
-        built_at="1970-01-01T00:00:00Z",
-    )
+    cal = stub_calibration()
     assert cal.amp_floor_by_camera_model is None
     assert cal.amp_floor_for("Insta360", "GO 3S", default=0.15) == 0.15
     assert cal.amp_floor_for("Insta360", "GO 3S", default=None) is None
@@ -377,8 +349,7 @@ def test_voter_c_feature_matrix_dimensions() -> None:
     hand = np.zeros((n, HAND_FEATURE_DIM))
     sims = np.zeros((n, len(CLAP_PROMPTS)))
     diff = np.zeros(n)
-    gunshot = np.zeros(n)
-    x = voter_c_feature_matrix(hand, sims, diff, gunshot)
+    x = voter_c_feature_matrix(hand, sims, diff)
     assert x.shape == (n, VOTER_C_FEATURE_DIM)
 
 
@@ -386,8 +357,7 @@ def test_voter_c_feature_matrix_empty_returns_zero_rows() -> None:
     hand = np.zeros((0, HAND_FEATURE_DIM))
     sims = np.zeros((0, len(CLAP_PROMPTS)))
     diff = np.zeros(0)
-    gunshot = np.zeros(0)
-    x = voter_c_feature_matrix(hand, sims, diff, gunshot)
+    x = voter_c_feature_matrix(hand, sims, diff)
     assert x.shape == (0, VOTER_C_FEATURE_DIM)
 
 
@@ -396,48 +366,8 @@ def test_voter_c_feature_matrix_empty_returns_zero_rows() -> None:
 # ---------------------------------------------------------------------------
 
 
-@dataclass
-class _StubClapRuntime:
-    """Mimics ``ClapRuntime`` for type-shape; never used by the stubs below."""
-
-
-@dataclass
-class _StubPannRuntime:
-    """Mimics ``PannRuntime`` for type-shape; never used by the stubs below."""
-
-
-class _StubGBDT:
-    """``predict_proba`` always returns 0.95 for class 1, 0.05 for class 0."""
-
-    def predict_proba(self, x: np.ndarray) -> np.ndarray:
-        out = np.zeros((x.shape[0], 2), dtype=np.float64)
-        out[:, 0] = 0.05
-        out[:, 1] = 0.95
-        return out
-
-
 def _build_stub_runtime() -> EnsembleRuntime:
-    cal = EnsembleCalibration(
-        voter_a_floor=0.05,
-        voter_b_threshold=0.0,
-        voter_c_threshold=0.5,
-        voter_c_target_recall=0.95,
-        tolerance_ms=75.0,
-        clap_prompts_shot=list(CLAP_PROMPTS_SHOT),
-        clap_prompts=list(CLAP_PROMPTS),
-        calibration_fixtures=["stub"],
-        n_calibration_candidates=10,
-        n_calibration_positives=5,
-        voter_c_feature_dim=VOTER_C_FEATURE_DIM,
-        built_at="1970-01-01T00:00:00Z",
-    )
-    return EnsembleRuntime(
-        calibration=cal,
-        voter_c_model={"headcam": _StubGBDT(), "handheld": _StubGBDT()},
-        clap=_StubClapRuntime(),  # type: ignore[arg-type]
-        pann=_StubPannRuntime(),  # type: ignore[arg-type]
-        expected_prompts=tuple(CLAP_PROMPTS),
-    )
+    return stub_runtime("clap")
 
 
 def test_detect_shots_ensemble_full_universe_with_stubs(monkeypatch) -> None:
@@ -465,11 +395,6 @@ def test_detect_shots_ensemble_full_universe_with_stubs(monkeypatch) -> None:
         "compute_clap_similarities",
         lambda audio, sr, times, runtime: np.full((len(times), len(CLAP_PROMPTS)), 0.5, dtype=np.float32),
     )
-    monkeypatch.setattr(
-        ensemble_features,
-        "compute_pann_gunshot_probs",
-        lambda audio, sr, times, runtime: np.full(len(times), 0.9, dtype=np.float32),
-    )
 
     audio = np.zeros(48_000 * 20, dtype=np.float32)
     result = detect_shots_ensemble(
@@ -491,7 +416,9 @@ def test_detect_shots_ensemble_apriori_boost_lifts_top_k(monkeypatch) -> None:
     keep the top-2 candidates by detector confidence."""
     runtime = _build_stub_runtime()
     # Push voter B threshold high so no candidate clears it.
-    runtime.calibration = runtime.calibration.model_copy(update={"voter_b_threshold": 99.0})
+    runtime.calibration = stub_calibration(
+        thresholds={cls: stub_thresholds(voter_b_threshold=99.0) for cls in ("headcam", "handheld")}
+    )
 
     confidences = [0.9, 0.4, 0.7, 0.3]
     fake_shots = [
@@ -524,11 +451,6 @@ def test_detect_shots_ensemble_apriori_boost_lifts_top_k(monkeypatch) -> None:
         ensemble_features,
         "compute_clap_similarities",
         lambda audio, sr, times, runtime: np.zeros((len(times), len(CLAP_PROMPTS)), dtype=np.float32),
-    )
-    monkeypatch.setattr(
-        ensemble_features,
-        "compute_pann_gunshot_probs",
-        lambda audio, sr, times, runtime: np.zeros(len(times), dtype=np.float32),
     )
 
     audio = np.zeros(48_000 * 20, dtype=np.float32)
@@ -580,11 +502,6 @@ def test_detect_shots_ensemble_within_stage_amp_floor_drops_quiet_headcam(
         "compute_clap_similarities",
         lambda audio, sr, times, runtime: np.full((len(times), len(CLAP_PROMPTS)), 0.5, dtype=np.float32),
     )
-    monkeypatch.setattr(
-        ensemble_features,
-        "compute_pann_gunshot_probs",
-        lambda audio, sr, times, runtime: np.full(len(times), 0.9, dtype=np.float32),
-    )
 
     audio = np.zeros(48_000 * 20, dtype=np.float32)
     result = detect_shots_ensemble(
@@ -630,11 +547,6 @@ def test_detect_shots_ensemble_within_stage_amp_floor_skipped_on_handheld(
         ensemble_features,
         "compute_clap_similarities",
         lambda audio, sr, times, runtime: np.full((len(times), len(CLAP_PROMPTS)), 0.5, dtype=np.float32),
-    )
-    monkeypatch.setattr(
-        ensemble_features,
-        "compute_pann_gunshot_probs",
-        lambda audio, sr, times, runtime: np.full(len(times), 0.9, dtype=np.float32),
     )
 
     audio = np.zeros(48_000 * 20, dtype=np.float32)
@@ -690,11 +602,6 @@ def test_detect_shots_ensemble_within_stage_amp_floor_uses_per_model_override(
         ensemble_features,
         "compute_clap_similarities",
         lambda audio, sr, times, runtime: np.full((len(times), len(CLAP_PROMPTS)), 0.5, dtype=np.float32),
-    )
-    monkeypatch.setattr(
-        ensemble_features,
-        "compute_pann_gunshot_probs",
-        lambda audio, sr, times, runtime: np.full(len(times), 0.9, dtype=np.float32),
     )
 
     audio = np.zeros(48_000 * 20, dtype=np.float32)
@@ -770,11 +677,6 @@ def test_detect_shots_ensemble_skips_voter_e_when_disabled(monkeypatch) -> None:
         "compute_clap_similarities",
         lambda audio, sr, times, runtime: np.full((len(times), len(CLAP_PROMPTS)), 0.5, dtype=np.float32),
     )
-    monkeypatch.setattr(
-        ensemble_features,
-        "compute_pann_gunshot_probs",
-        lambda audio, sr, times, runtime: np.full(len(times), 0.9, dtype=np.float32),
-    )
 
     audio = np.zeros(48_000 * 20, dtype=np.float32)
     result = detect_shots_ensemble(
@@ -804,19 +706,16 @@ def test_detect_shots_ensemble_voter_e_e_required_drops_low_score(monkeypatch, t
     # Two candidates above 0.5 (kept by Voter E), two below (vetoed).
     runtime.visual = _StubVisualRuntime([0.9, 0.1, 0.8, 0.05])  # type: ignore[assignment]
     # Calibration must carry a voter_e_threshold for the runtime to act.
-    cal = runtime.calibration.model_copy(
+    cal = stub_calibration(
+        thresholds={cls: stub_thresholds(voter_e_threshold=0.5) for cls in ("headcam", "handheld")}
+    ).model_copy(
         update={
-            "voter_e_threshold": 0.5,
             "voter_e_target_recall": 0.95,
             "voter_e_clip_model_id": "stub",
             "voter_e_frame_offsets": [0.0],
             "voter_e_probe_artifact": "stub.joblib",
         }
     )
-    # Mirror the threshold into the per-class block so thresholds_for() picks it up.
-    if cal.thresholds_by_camera_class:
-        for cls, t in cal.thresholds_by_camera_class.items():
-            cal.thresholds_by_camera_class[cls] = t.model_copy(update={"voter_e_threshold": 0.5})
     runtime.calibration = cal
 
     fake_shots = [
@@ -836,11 +735,6 @@ def test_detect_shots_ensemble_voter_e_e_required_drops_low_score(monkeypatch, t
         ensemble_features,
         "compute_clap_similarities",
         lambda audio, sr, times, runtime: np.full((len(times), len(CLAP_PROMPTS)), 0.5, dtype=np.float32),
-    )
-    monkeypatch.setattr(
-        ensemble_features,
-        "compute_pann_gunshot_probs",
-        lambda audio, sr, times, runtime: np.full(len(times), 0.9, dtype=np.float32),
     )
     # Bypass real frame extraction + CLIP forward pass.
     monkeypatch.setattr(
@@ -885,18 +779,16 @@ def test_detect_shots_ensemble_voter_e_audio_strong_skips_veto(monkeypatch, tmp_
     runtime = _build_stub_runtime()
     # All four candidates: Voter E says no (signal below threshold).
     runtime.visual = _StubVisualRuntime([0.05, 0.10, 0.15, 0.20])  # type: ignore[assignment]
-    cal = runtime.calibration.model_copy(
+    cal = stub_calibration(
+        thresholds={cls: stub_thresholds(voter_e_threshold=0.5) for cls in ("headcam", "handheld")}
+    ).model_copy(
         update={
-            "voter_e_threshold": 0.5,
             "voter_e_target_recall": 0.95,
             "voter_e_clip_model_id": "stub",
             "voter_e_frame_offsets": [0.0],
             "voter_e_probe_artifact": "stub.joblib",
         }
     )
-    if cal.thresholds_by_camera_class:
-        for cls, t in cal.thresholds_by_camera_class.items():
-            cal.thresholds_by_camera_class[cls] = t.model_copy(update={"voter_e_threshold": 0.5})
     runtime.calibration = cal
 
     fake_shots = [
@@ -916,11 +808,6 @@ def test_detect_shots_ensemble_voter_e_audio_strong_skips_veto(monkeypatch, tmp_
         ensemble_features,
         "compute_clap_similarities",
         lambda audio, sr, times, runtime: np.full((len(times), len(CLAP_PROMPTS)), 0.5, dtype=np.float32),
-    )
-    monkeypatch.setattr(
-        ensemble_features,
-        "compute_pann_gunshot_probs",
-        lambda audio, sr, times, runtime: np.full(len(times), 0.9, dtype=np.float32),
     )
     monkeypatch.setattr(
         ensemble_visual,
@@ -994,28 +881,25 @@ def test_voter_c_feature_matrix_appends_camera_class_one_hot() -> None:
     hand = np.zeros((n, HAND_FEATURE_DIM), dtype=np.float64)
     sims = np.zeros((n, len(CLAP_PROMPTS)), dtype=np.float32)
     diffs = np.zeros(n, dtype=np.float32)
-    gunshot = np.zeros(n, dtype=np.float32)
-    # The one-hot sits after hand | clap_sims | clap_diff | gunshot_prob; the
+    # The one-hot sits after hand | clap_sims | clap_diff; the
     # stage-relative block (spec 2026-10-09) follows it.
-    cam0 = HAND_FEATURE_DIM + len(CLAP_PROMPTS) + 2
+    cam0 = HAND_FEATURE_DIM + len(CLAP_PROMPTS) + 1
 
     # Default (no camera_class) -> all rows tagged headcam (column 0).
-    x_default = voter_c_feature_matrix(hand, sims, diffs, gunshot)
+    x_default = voter_c_feature_matrix(hand, sims, diffs)
     assert x_default.shape == (n, VOTER_C_FEATURE_DIM)
     cam_block = x_default[:, cam0 : cam0 + CAMERA_CLASS_FEATURE_DIM]
     assert np.array_equal(cam_block[:, 0], np.ones(n))
     assert cam_block[:, 1].sum() == 0
 
     # Single string -> broadcast to every row.
-    x_phone = voter_c_feature_matrix(hand, sims, diffs, gunshot, camera_classes="handheld")
+    x_phone = voter_c_feature_matrix(hand, sims, diffs, camera_classes="handheld")
     cam_block = x_phone[:, cam0 : cam0 + CAMERA_CLASS_FEATURE_DIM]
     assert np.array_equal(cam_block[:, 1], np.ones(n))
     assert cam_block[:, 0].sum() == 0
 
     # Per-row mix.
-    x_mix = voter_c_feature_matrix(
-        hand, sims, diffs, gunshot, camera_classes=["headcam", "handheld", "future-class"]
-    )
+    x_mix = voter_c_feature_matrix(hand, sims, diffs, camera_classes=["headcam", "handheld", "future-class"])
     cam_block = x_mix[:, cam0 : cam0 + CAMERA_CLASS_FEATURE_DIM]
     # Unknown class falls back to headcam (column 0).
     assert cam_block[0, 0] == 1.0 and cam_block[0, 1] == 0.0
@@ -1052,70 +936,25 @@ def test_camera_class_from_mount_maps_known_mounts() -> None:
 
 def test_calibration_thresholds_for_class_returns_class_thresholds() -> None:
     """Per-class lookup hits the correct entry; unknown classes fall back."""
-    from splitsmith.ensemble.calibration import ClassThresholds
-
-    cal = EnsembleCalibration(
-        voter_a_floor=0.05,
-        voter_b_threshold=0.0,
-        voter_c_threshold=0.5,
-        voter_c_target_recall=0.95,
-        tolerance_ms=75.0,
-        clap_prompts_shot=list(CLAP_PROMPTS_SHOT),
-        clap_prompts=list(CLAP_PROMPTS),
-        calibration_fixtures=["a", "b"],
-        n_calibration_candidates=10,
-        n_calibration_positives=5,
-        voter_c_feature_dim=VOTER_C_FEATURE_DIM,
-        built_at="1970-01-01T00:00:00Z",
-        default_camera_class="headcam",
-        thresholds_by_camera_class={
-            "headcam": ClassThresholds(
-                voter_a_floor=0.05,
-                voter_b_threshold=0.0,
-                voter_c_threshold=0.5,
-                n_calibration_candidates=8,
-                n_calibration_positives=4,
-                calibration_fixtures=["a"],
-            ),
-            "handheld": ClassThresholds(
-                voter_a_floor=0.10,
-                voter_b_threshold=0.20,
-                voter_c_threshold=0.30,
-                n_calibration_candidates=2,
-                n_calibration_positives=1,
-                calibration_fixtures=["b"],
+    cal = stub_calibration(
+        thresholds={
+            "headcam": stub_thresholds(voter_c_threshold=0.5, calibration_fixtures=["a"]),
+            "handheld": stub_thresholds(
+                voter_a_floor=0.10, voter_b_threshold=0.20, voter_c_threshold=0.30, calibration_fixtures=["b"]
             ),
         },
+        default_camera_class="headcam",
     )
 
-    assert cal.thresholds_for("headcam").voter_c_threshold == 0.5
-    assert cal.thresholds_for("handheld").voter_c_threshold == 0.30
-    # Unknown class -> default.
-    assert cal.thresholds_for("future-class").voter_c_threshold == 0.5
-    # No class given -> default.
-    assert cal.thresholds_for(None).voter_c_threshold == 0.5
-
-
-def test_calibration_thresholds_for_legacy_artifact_synthesizes_single_class() -> None:
-    """Pre-issue-#137 artifacts (no per-class dict) still resolve to a single set."""
-    cal = EnsembleCalibration(
-        voter_a_floor=0.07,
-        voter_b_threshold=0.08,
-        voter_c_threshold=0.42,
-        voter_c_target_recall=0.95,
-        tolerance_ms=75.0,
-        clap_prompts_shot=list(CLAP_PROMPTS_SHOT),
-        clap_prompts=list(CLAP_PROMPTS),
-        calibration_fixtures=["legacy"],
-        n_calibration_candidates=1,
-        n_calibration_positives=1,
-        voter_c_feature_dim=VOTER_C_FEATURE_DIM,
-        built_at="1970-01-01T00:00:00Z",
-    )
-
-    th = cal.thresholds_for("anything-at-all")
-    assert th.voter_a_floor == 0.07
-    assert th.voter_c_threshold == 0.42
+    for name in ("base", "clap"):
+        assert cal.thresholds_for("headcam", model_set=name).voter_c_threshold == 0.5
+        assert cal.thresholds_for("handheld", model_set=name).voter_c_threshold == 0.30
+        # Unknown class -> default.
+        assert cal.thresholds_for("future-class", model_set=name).voter_c_threshold == 0.5
+        # No class given -> default.
+        assert cal.thresholds_for(None, model_set=name).voter_c_threshold == 0.5
+    assert cal.thresholds_for("handheld", model_set="clap").voter_b_threshold == 0.20
+    assert cal.thresholds_for("handheld", model_set="base").voter_b_threshold is None
 
 
 def test_detect_shots_ensemble_uses_per_class_thresholds(monkeypatch) -> None:
@@ -1128,31 +967,14 @@ def test_detect_shots_ensemble_uses_per_class_thresholds(monkeypatch) -> None:
     """
     from splitsmith.ensemble import api as ensemble_api
     from splitsmith.ensemble import features as ensemble_features
-    from splitsmith.ensemble.calibration import ClassThresholds
 
     runtime = _build_stub_runtime()
-    runtime.calibration = runtime.calibration.model_copy(
-        update={
-            "default_camera_class": "headcam",
-            "thresholds_by_camera_class": {
-                "headcam": ClassThresholds(
-                    voter_a_floor=0.05,
-                    voter_b_threshold=0.0,
-                    voter_c_threshold=0.5,
-                    n_calibration_candidates=10,
-                    n_calibration_positives=5,
-                    calibration_fixtures=["stub"],
-                ),
-                "handheld": ClassThresholds(
-                    voter_a_floor=0.20,
-                    voter_b_threshold=0.0,
-                    voter_c_threshold=0.5,
-                    n_calibration_candidates=5,
-                    n_calibration_positives=2,
-                    calibration_fixtures=["stub-phone"],
-                ),
-            },
-        }
+    runtime.calibration = stub_calibration(
+        thresholds={
+            "headcam": stub_thresholds(voter_a_floor=0.05),
+            "handheld": stub_thresholds(voter_a_floor=0.20, calibration_fixtures=["stub-phone"]),
+        },
+        default_camera_class="headcam",
     )
 
     fake_shots = [
@@ -1172,11 +994,6 @@ def test_detect_shots_ensemble_uses_per_class_thresholds(monkeypatch) -> None:
         "compute_clap_similarities",
         lambda audio, sr, times, runtime: np.full((len(times), len(CLAP_PROMPTS)), 0.5, dtype=np.float32),
     )
-    monkeypatch.setattr(
-        ensemble_features,
-        "compute_pann_gunshot_probs",
-        lambda audio, sr, times, runtime: np.full(len(times), 0.9, dtype=np.float32),
-    )
 
     audio = np.zeros(48_000 * 20, dtype=np.float32)
 
@@ -1194,3 +1011,211 @@ def test_detect_shots_ensemble_uses_per_class_thresholds(monkeypatch) -> None:
         camera_class="handheld",
     )
     assert result_hand.candidates[0].vote_a == 0
+
+
+# ---------------------------------------------------------------------------
+# Model sets (thin detection spec 2026-10-26)
+# ---------------------------------------------------------------------------
+
+
+def _shots(n: int = 4) -> list[Shot]:
+    return [
+        Shot(
+            shot_number=i + 1,
+            time_absolute=5.0 + i * 0.3,
+            time_from_beep=i * 0.3,
+            split=0.3 if i > 0 else 5.0,
+            peak_amplitude=0.4,
+            confidence=0.6,
+            notes="",
+        )
+        for i in range(n)
+    ]
+
+
+def _detect(monkeypatch, runtime, *, camera_class: str = "headcam", clap_calls: list | None = None):
+    from splitsmith.ensemble import api as ensemble_api
+    from splitsmith.ensemble import features as ensemble_features
+
+    def _sims(audio, sr, times, rt):
+        if clap_calls is not None:
+            clap_calls.append(rt)
+        return np.full((len(times), len(CLAP_PROMPTS)), 0.5, dtype=np.float32)
+
+    monkeypatch.setattr(ensemble_api, "detect_shots", lambda *a, **kw: _shots())
+    monkeypatch.setattr(ensemble_features, "compute_clap_similarities", _sims)
+    audio = np.zeros(48_000 * 20, dtype=np.float32)
+    return detect_shots_ensemble(
+        audio, 48_000, beep_time=5.0, stage_time=10.0, runtime=runtime, camera_class=camera_class
+    )
+
+
+class _Width(StubGBDT):
+    def __init__(self, seen: list[int]) -> None:
+        self.seen = seen
+
+    def predict_proba(self, x: np.ndarray) -> np.ndarray:
+        self.seen.append(x.shape[1])
+        return super().predict_proba(x)
+
+
+def test_resolve_model_set_prefers_env_then_preference_then_base(monkeypatch) -> None:
+    from splitsmith.ensemble.api import resolve_model_set
+
+    monkeypatch.delenv("SPLITSMITH_MODEL_SET", raising=False)
+    assert resolve_model_set() == "base"
+    assert resolve_model_set("clap") == "clap"
+    monkeypatch.setenv("SPLITSMITH_MODEL_SET", "base")
+    assert resolve_model_set("clap") == "base"
+    monkeypatch.setenv("SPLITSMITH_MODEL_SET", "pann")
+    with pytest.raises(ValueError, match="base, clap"):
+        resolve_model_set()
+    monkeypatch.delenv("SPLITSMITH_MODEL_SET")
+    with pytest.raises(ValueError, match="base, clap"):
+        resolve_model_set("pann")
+
+
+def test_base_runtime_never_computes_clap(monkeypatch) -> None:
+    calls: list = []
+    runtime = stub_runtime("base")
+    result = _detect(monkeypatch, runtime, camera_class="handheld", clap_calls=calls)
+    assert calls == []
+    assert result.model_set == "base"
+    assert result.calibration_built_at == runtime.calibration.built_at
+    assert all(c.vote_b == 0 and c.clap_diff == 0.0 for c in result.candidates)
+    # A and C agree on every stub candidate: 2 of the 2 voters base has.
+    assert all(c.kept for c in result.candidates)
+
+
+def test_clap_runtime_scores_the_full_column_set(monkeypatch) -> None:
+    seen: list[int] = []
+    runtime = stub_runtime("clap")
+    runtime.voter_c_model = {"headcam": _Width(seen), "handheld": _Width(seen)}
+    result = _detect(monkeypatch, runtime)
+    assert seen == [feat.VOTER_C_FEATURE_DIM]
+    assert result.model_set == "clap"
+
+
+def test_base_runtime_scores_only_the_base_columns(monkeypatch) -> None:
+    seen: list[int] = []
+    runtime = stub_runtime("base")
+    runtime.voter_c_model = {"headcam": _Width(seen), "handheld": _Width(seen)}
+    _detect(monkeypatch, runtime)
+    assert seen == [len(feat.model_set_columns("base"))]
+
+
+def test_base_runtime_decodes_with_the_base_set_s_decoder(monkeypatch) -> None:
+    from tests._ensemble_stubs import with_set_update
+    from tests.test_stage_decoder import _model
+
+    runtime = stub_runtime("base")
+    # The base set's decoder reads three features and keeps nothing (bias -50);
+    # the clap set's has none. Decoding with base's proves the lookup is per set.
+    base_decoder = _model(
+        features=["score_c", "confidence", "log_peak_amplitude"], coef=[0, 0, 0], bias=-50.0
+    )
+    runtime.calibration = with_set_update(
+        runtime.calibration, "base", decoders_by_camera_class={"headcam": base_decoder}
+    )
+    monkeypatch.delenv("SPLITSMITH_STAGE_DECODER", raising=False)
+    result = _detect(monkeypatch, runtime)
+    assert all(c.decoder_prob is not None for c in result.candidates)
+    assert not any(c.kept for c in result.candidates)
+
+
+def test_base_runtime_constructs_no_clap_session(monkeypatch) -> None:
+    from splitsmith.ensemble import api
+
+    def _no_clap():
+        raise AssertionError("CLAP loaded under base")
+
+    monkeypatch.setattr(feat, "load_clap_runtime", _no_clap)
+    monkeypatch.setattr(api, "load_calibration", stub_calibration)
+    monkeypatch.setattr(api, "load_voter_c_model", lambda artifacts: {cls: StubGBDT() for cls in artifacts})
+    rt = api.load_ensemble_runtime(model_set="base", with_voter_e=False)
+    assert rt.model_set == "base" and rt.clap is None
+
+
+def test_the_runtime_checks_each_graph_against_its_own_set_s_width(monkeypatch) -> None:
+    from splitsmith.ensemble import api
+
+    class Wide(StubGBDT):
+        n_features = feat.VOTER_C_FEATURE_DIM
+        path = "voter_c_gbdt_base_headcam.onnx"
+
+    monkeypatch.setattr(api, "load_calibration", stub_calibration)
+    monkeypatch.setattr(api, "load_voter_c_model", lambda artifacts: {"headcam": Wide()})
+    with pytest.raises(RuntimeError, match="voter_c_gbdt_base_headcam.onnx"):
+        api.load_ensemble_runtime(model_set="base", with_voter_e=False)
+
+
+def test_clap_requested_without_artifacts_runs_base_and_says_so(monkeypatch, caplog) -> None:
+    from splitsmith.ensemble import api
+    from splitsmith.models.errors import ModelError
+
+    def _missing():
+        raise ModelError("clap_audio_encoder: not cached and no network")
+
+    monkeypatch.setattr(feat, "clap_artifacts_present", lambda: True)
+    monkeypatch.setattr(feat, "load_clap_runtime", _missing)
+    monkeypatch.setattr(api, "load_calibration", stub_calibration)
+    loaded: list[list[str]] = []
+
+    def _graphs(artifacts):
+        loaded.append(sorted(artifacts.values()))
+        return {cls: StubGBDT() for cls in artifacts}
+
+    monkeypatch.setattr(api, "load_voter_c_model", _graphs)
+    monkeypatch.setenv("SPLITSMITH_MODEL_SET", "clap")
+    with caplog.at_level("WARNING"):
+        runtime = api.load_ensemble_runtime(model_set="clap", with_voter_e=False)
+    assert runtime.model_set == "base"
+    assert runtime.clap is None
+    assert "clap_audio_encoder" in caplog.text
+    # The base runtime scores the base set's graphs, not clap's.
+    assert loaded[-1] == ["voter_c_gbdt_base_handheld.onnx", "voter_c_gbdt_base_headcam.onnx"]
+
+
+def test_a_missing_clap_file_on_disk_also_falls_back(monkeypatch) -> None:
+    from splitsmith.ensemble import api
+
+    def _gone():
+        raise FileNotFoundError("clap_audio.onnx")
+
+    monkeypatch.setattr(feat, "clap_artifacts_present", lambda: True)
+    monkeypatch.setattr(feat, "load_clap_runtime", _gone)
+    monkeypatch.setattr(api, "load_calibration", stub_calibration)
+    monkeypatch.setattr(api, "load_voter_c_model", lambda artifacts: {cls: StubGBDT() for cls in artifacts})
+    assert api.load_ensemble_runtime(model_set="clap", with_voter_e=False).model_set == "base"
+
+
+def test_other_errors_while_loading_clap_propagate(monkeypatch) -> None:
+    from splitsmith.ensemble import api
+
+    def _drift():
+        raise RuntimeError("prompt bank drift")
+
+    monkeypatch.setattr(feat, "clap_artifacts_present", lambda: True)
+    monkeypatch.setattr(feat, "load_clap_runtime", _drift)
+    monkeypatch.setattr(api, "load_calibration", stub_calibration)
+    monkeypatch.setattr(api, "load_voter_c_model", lambda artifacts: {cls: StubGBDT() for cls in artifacts})
+    with pytest.raises(RuntimeError, match="prompt bank"):
+        api.load_ensemble_runtime(model_set="clap", with_voter_e=False)
+
+
+def test_clap_before_its_artifacts_are_downloaded_runs_base_without_fetching(monkeypatch, caplog) -> None:
+    """Detection never blocks on a download: with the CLAP files not yet
+    cached it detects with base and does not try to load CLAP at all."""
+    from splitsmith.ensemble import api
+
+    def _would_download():
+        raise AssertionError("loading CLAP here would download it inline")
+
+    monkeypatch.setattr(feat, "clap_artifacts_present", lambda: False)
+    monkeypatch.setattr(feat, "load_clap_runtime", _would_download)
+    monkeypatch.setattr(api, "load_calibration", stub_calibration)
+    monkeypatch.setattr(api, "load_voter_c_model", lambda artifacts: {cls: StubGBDT() for cls in artifacts})
+    with caplog.at_level("WARNING"):
+        runtime = api.load_ensemble_runtime(model_set="clap", with_voter_e=False)
+    assert runtime.model_set == "base"
+    assert "clap_audio_encoder" in caplog.text

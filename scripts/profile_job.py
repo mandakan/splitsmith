@@ -123,7 +123,7 @@ def main() -> None:
     t_audio = time.perf_counter() - t0
 
     # Voter E (visual) is torch-only; the shipped slim ONNX path is voters
-    # A/B/C (CLAP + PANN + GBDT), which is what build_onnx_session accelerates.
+    # A/B/C (CLAP + GBDT), which is what build_onnx_session accelerates.
     t0 = time.perf_counter()
     runtime = load_ensemble_runtime(with_voter_e=False)
     t_load = time.perf_counter() - t0

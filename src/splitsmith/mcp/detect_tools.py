@@ -36,7 +36,7 @@ from typing import Any
 
 from .. import automation as automation_module
 from .. import ensemble as ensemble_module
-from .. import fs_atomic
+from .. import fs_atomic, user_config
 from ..audit_clock import CLIP_VIDEO_FIELD
 from ..beep import detect as beep_detect
 from ..detection_merge import merge_detection_into
@@ -47,12 +47,12 @@ from .write_tools import _resolve_stage_video
 
 logger = logging.getLogger(__name__)
 
-# Lazy module-level cache for the ensemble runtime (CLAP / GBDT / PANN
-# weights, optionally CLIP for voter E). Loading takes ~5 s; subsequent
-# calls in the same process are free. Mirrors the HTTP server's
-# ``_get_ensemble_runtime`` so MCP clients pay the cost once per server
-# lifetime.
-_ENSEMBLE_RUNTIME: ensemble_module.EnsembleRuntime | None = None
+# Lazy module-level cache of ensemble runtimes, one per model set (GBDT
+# and, under the clap model set, CLAP weights; optionally CLIP for voter
+# E). Loading takes ~5 s; subsequent calls in the same process are free.
+# Mirrors the HTTP server's ``_get_ensemble_runtime``: keyed by the set
+# the loader returned, so a clap request that fell back to base retries.
+_ENSEMBLE_RUNTIMES: dict[str, ensemble_module.EnsembleRuntime] = {}
 _ENSEMBLE_RUNTIME_LOCK = threading.Lock()
 
 # Guards this process's audit read-merge-write in ``detect_shots_for_stage``
@@ -65,19 +65,24 @@ _AUDIT_LOCK = threading.RLock()
 
 
 def _get_ensemble_runtime() -> ensemble_module.EnsembleRuntime:
-    """Load + cache the ensemble runtime; thread-safe.
+    """Load + cache the runtime for the requested model set; thread-safe.
 
-    Test code monkeypatches this function (and
-    ``ensemble.detect_shots_ensemble``) to avoid pulling the heavy
-    model weights into the test process.
+    The set is ``SPLITSMITH_MODEL_SET``, then this machine's preference
+    (``GlobalPrefs.detection_model_set``), then ``base``, as for the HTTP
+    job. Test code monkeypatches this function (and
+    ``ensemble.detect_shots_ensemble``) to avoid pulling the heavy model
+    weights into the test process.
     """
-    global _ENSEMBLE_RUNTIME
-    if _ENSEMBLE_RUNTIME is None:
+    wanted = ensemble_module.api.resolve_model_set(user_config.load_global_prefs().detection_model_set)
+    runtime = _ENSEMBLE_RUNTIMES.get(wanted)
+    if runtime is None:
         with _ENSEMBLE_RUNTIME_LOCK:
-            if _ENSEMBLE_RUNTIME is None:
+            runtime = _ENSEMBLE_RUNTIMES.get(wanted)
+            if runtime is None:
                 with_voter_e = os.environ.get("SPLITSMITH_ENABLE_VOTER_E") == "1"
-                _ENSEMBLE_RUNTIME = ensemble_module.load_ensemble_runtime(with_voter_e=with_voter_e)
-    return _ENSEMBLE_RUNTIME
+                runtime = ensemble_module.load_ensemble_runtime(model_set=wanted, with_voter_e=with_voter_e)
+                _ENSEMBLE_RUNTIMES[runtime.model_set] = runtime
+    return runtime
 
 
 def detect_beep_for_video(
@@ -216,7 +221,7 @@ def detect_shots_for_stage(
 
     Mirror of ``POST /api/stages/{n}/shot-detect``: loads the audit
     audio (preferring the trim cache, falling back to the full
-    primary WAV), runs CLAP + GBDT + PANN consensus, and writes the
+    primary WAV), runs the ensemble (GBDT, plus CLAP under the clap model set), and writes the
     candidate universe + seeded ``shots[]`` into
     ``<project>/audit/stage<N>.json``. The file is the source of
     truth for the audit UI; the SPA + MCP both read / write it.
@@ -235,7 +240,7 @@ def detect_shots_for_stage(
     list).
 
     First call in a process loads the ensemble runtime (~5 s for
-    CLAP + GBDT + PANN weights, plus first-call download if not yet
+    the GBDT and, under the clap model set, CLAP weights, plus a first-call download if not yet
     cached). Subsequent calls reuse it. Voter E (CLIP image
     encoder, ~600 MB) requires ``SPLITSMITH_ENABLE_VOTER_E=1`` --
     matches the HTTP server.

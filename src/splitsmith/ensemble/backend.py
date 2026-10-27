@@ -1,7 +1,7 @@
 """Runtime backend selection for ensemble inference (issue #377).
 
 Production hides the choice of ONNX vs torch behind typed runtime
-dataclasses (``ClapRuntime`` / ``PannRuntime`` / ``VisualRuntime`` in
+dataclasses (``ClapRuntime`` / ``VisualRuntime`` in
 sibling modules). Every voter calls into a numpy-in / numpy-out
 callable on the runtime; they never see a torch tensor or an
 ``InferenceSession``. This module is the one place that decides which
@@ -15,12 +15,11 @@ Resolution order:
 1. ``override`` argument to :func:`select_backend` -- callers can pin
    per-process (CLI ``--backend``).
 2. ``SPLITSMITH_BACKEND`` env var (``onnx`` / ``torch``).
-3. ``torch`` if importable -- preferred while only PANN has an ONNX
-   branch. CLAP and the visual probe still need torch, and the doc
-   05 invariant "one backend per process" means we can't mix mid-run.
-   When the remaining ONNX branches land, this preference flips to
-   "onnxruntime first" so slim wheel users (no torch installed) keep
-   working unchanged.
+3. ``torch`` if importable -- preferred because the visual probe
+   (Voter E) has no ONNX branch yet, and the doc 05 invariant "one
+   backend per process" means we can't mix mid-run. When it lands, this
+   preference flips to "onnxruntime first" so slim wheel users (no torch
+   installed) keep working unchanged.
 4. ``onnxruntime`` if importable -- the slim wheel's only backend.
 5. Raise :class:`SplitsmithBackendError` with install hints for both.
 """
@@ -74,9 +73,9 @@ def select_backend(override: Backend | str | None = None) -> Backend:
             ) from exc
 
     # During slim migration: torch wins when both are installed because
-    # only PANN has an ONNX branch (issue #377). When CLAP + visual ONNX
-    # land, swap these two checks so onnxruntime wins -- the slim wheel
-    # path (no torch installed) keeps working unchanged either way.
+    # the visual probe has no ONNX branch (issue #377). When it lands,
+    # swap these two checks so onnxruntime wins -- the slim wheel path
+    # (no torch installed) keeps working unchanged either way.
     if _is_importable("torch"):
         return Backend.TORCH
     if _is_importable("onnxruntime"):

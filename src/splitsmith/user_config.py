@@ -166,6 +166,10 @@ class GlobalPrefs(BaseModel):
     # The What's new entry ids this install has seen (``splitsmith.whats_new``);
     # ``None`` until the first visit after the feature shipped.
     whats_new_seen: list[str] | None = None
+    # The shot-detection model set this machine asks for
+    # (``ensemble.features.MODEL_SETS``): ``base`` needs no download,
+    # ``clap`` adds the 120 MB CLAP model. ``SPLITSMITH_MODEL_SET`` wins.
+    detection_model_set: str = "base"
 
 
 # ---------------------------------------------------------------------------

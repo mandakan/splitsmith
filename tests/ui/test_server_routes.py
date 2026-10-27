@@ -387,7 +387,7 @@ def test_calibrated_camera_models_never_loads_the_ensemble_runtime(tmp_path: Pat
 
     client, _ = _seed_project_with_primary(tmp_path)
 
-    def _boom() -> None:
+    def _boom(*_a, **_k) -> None:
         raise RuntimeError("ensemble runtime must not be built for a metadata read")
 
     monkeypatch.setattr(server_module, "_get_ensemble_runtime", _boom)

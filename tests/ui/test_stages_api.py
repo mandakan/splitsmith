@@ -1272,7 +1272,7 @@ def test_retry_endpoint_reenqueues_failed_job_via_bare_path(tmp_path: Path, monk
 def test_shot_detect_endpoint_writes_candidates(tmp_path: Path, monkeypatch) -> None:
     """The shot-detect job runs the 3-voter ensemble on the audit clip and
     merges per-voter signals into <project>/audit/stage<N>.json. Heavy
-    models (CLAP, PANN, GBDT) are stubbed via the ensemble module entry
+    models (CLAP, GBDT) are stubbed via the ensemble module entry
     points so the test runs offline."""
     import json as _json
 
@@ -1310,8 +1310,8 @@ def test_shot_detect_endpoint_writes_candidates(tmp_path: Path, monkeypatch) -> 
 
     # Stub the audit-audio resolver so the test doesn't depend on ffmpeg.
     monkeypatch.setattr(audio_helpers, "ensure_audit_audio", lambda *a, **kw: FakeAudit())
-    # Skip CLAP/PANN/GBDT loading; the stub below ignores the runtime arg.
-    monkeypatch.setattr(server_module, "_get_ensemble_runtime", lambda: None)
+    # Skip CLAP/GBDT loading; the stub below ignores the runtime arg.
+    monkeypatch.setattr(server_module, "_get_ensemble_runtime", lambda *_a, **_k: None)
     fake_result = _fake_ensemble_result(
         [
             {"time": 5.5, "confidence": 0.8, "ensemble_score": 3.0, "kept": True},
@@ -1397,7 +1397,7 @@ def test_shot_detect_reset_records_a_delete_for_every_shot_it_wipes(tmp_path: Pa
         trimmed = True
 
     monkeypatch.setattr(audio_helpers, "ensure_audit_audio", lambda *a, **kw: FakeAudit())
-    monkeypatch.setattr(server_module, "_get_ensemble_runtime", lambda: None)
+    monkeypatch.setattr(server_module, "_get_ensemble_runtime", lambda *_a, **_k: None)
     fake_result = _fake_ensemble_result(
         [{"time": 5.5, "confidence": 0.8, "ensemble_score": 3.0, "kept": True}],
         consensus=2,
@@ -1475,7 +1475,7 @@ def test_shot_detect_reset_drops_auto_regions_and_keeps_manual_ones(tmp_path: Pa
         trimmed = True
 
     monkeypatch.setattr(audio_helpers, "ensure_audit_audio", lambda *a, **kw: FakeAudit())
-    monkeypatch.setattr(server_module, "_get_ensemble_runtime", lambda: None)
+    monkeypatch.setattr(server_module, "_get_ensemble_runtime", lambda *_a, **_k: None)
     fake_result = _fake_ensemble_result(
         [{"time": 5.5, "confidence": 0.8, "ensemble_score": 3.0, "kept": True}],
         consensus=2,
@@ -1557,7 +1557,7 @@ def test_shot_detect_without_reset_records_no_deletes(tmp_path: Path, monkeypatc
         trimmed = True
 
     monkeypatch.setattr(audio_helpers, "ensure_audit_audio", lambda *a, **kw: FakeAudit())
-    monkeypatch.setattr(server_module, "_get_ensemble_runtime", lambda: None)
+    monkeypatch.setattr(server_module, "_get_ensemble_runtime", lambda *_a, **_k: None)
     fake_result = _fake_ensemble_result(
         [{"time": 5.5, "confidence": 0.8, "ensemble_score": 3.0, "kept": True}],
         consensus=2,
@@ -1626,7 +1626,7 @@ def test_a_second_detection_run_never_reuses_a_candidate_number(tmp_path: Path, 
         trimmed = True
 
     monkeypatch.setattr(audio_helpers, "ensure_audit_audio", lambda *a, **kw: FakeAudit())
-    monkeypatch.setattr(server_module, "_get_ensemble_runtime", lambda: None)
+    monkeypatch.setattr(server_module, "_get_ensemble_runtime", lambda *_a, **_k: None)
     fake_result = _fake_ensemble_result(
         [
             {"time": 5.5, "confidence": 0.8, "ensemble_score": 3.0, "kept": True},
@@ -1717,7 +1717,7 @@ def test_shot_detect_clears_beep_confirm_stub_marker(tmp_path: Path, monkeypatch
         trimmed = True
 
     monkeypatch.setattr(audio_helpers, "ensure_audit_audio", lambda *a, **kw: FakeAudit())
-    monkeypatch.setattr(server_module, "_get_ensemble_runtime", lambda: None)
+    monkeypatch.setattr(server_module, "_get_ensemble_runtime", lambda *_a, **_k: None)
     fake_result = _fake_ensemble_result(
         [{"time": 5.5, "confidence": 0.8, "ensemble_score": 3.0, "kept": True}],
         consensus=2,
@@ -1784,8 +1784,8 @@ def test_shot_detect_job_records_phase_timings(tmp_path: Path, monkeypatch) -> N
     monkeypatch.setattr(audio_helpers, "ensure_video_audit_trim", lambda *a, **kw: None)
     # Warm runtime: the singleton resolver returns a value, and the warm
     # probe reports True -> the body skips the cold_model_load phase.
-    monkeypatch.setattr(server_module, "_get_ensemble_runtime", lambda: object())
-    monkeypatch.setattr(server_module, "_ensemble_runtime_is_warm", lambda: True)
+    monkeypatch.setattr(server_module, "_get_ensemble_runtime", lambda *_a, **_k: object())
+    monkeypatch.setattr(server_module, "_ensemble_runtime_is_warm", lambda *_a, **_k: True)
     monkeypatch.setattr(
         ensemble_module,
         "detect_shots_ensemble",
@@ -1863,11 +1863,11 @@ def test_shot_detect_job_times_cold_model_load_when_runtime_cold(tmp_path: Path,
 
     monkeypatch.setattr(audio_helpers, "ensure_audit_audio", lambda *a, **kw: FakeAudit())
     monkeypatch.setattr(audio_helpers, "ensure_video_audit_trim", lambda *a, **kw: None)
-    monkeypatch.setattr(server_module, "_ensemble_runtime_is_warm", lambda: False)
+    monkeypatch.setattr(server_module, "_ensemble_runtime_is_warm", lambda *_a, **_k: False)
     monkeypatch.setattr(
         server_module,
         "_get_ensemble_runtime",
-        lambda: cold_loads.append(1) or object(),
+        lambda *_a, **_k: cold_loads.append(1) or object(),
     )
     monkeypatch.setattr(
         ensemble_module,
@@ -1934,7 +1934,7 @@ def test_shot_detect_endpoint_ensures_trim_before_detection(tmp_path: Path, monk
 
     monkeypatch.setattr(audio_helpers, "ensure_audit_audio", lambda *a, **kw: FakeAudit())
     monkeypatch.setattr(audio_helpers, "ensure_video_audit_trim", fake_trim)
-    monkeypatch.setattr(server_module, "_get_ensemble_runtime", lambda: None)
+    monkeypatch.setattr(server_module, "_get_ensemble_runtime", lambda *_a, **_k: None)
     monkeypatch.setattr(
         ensemble_module,
         "detect_shots_ensemble",
@@ -1998,7 +1998,7 @@ def test_shot_detect_endpoint_passes_camera_class_from_primary_mount(tmp_path: P
 
     monkeypatch.setattr(audio_helpers, "ensure_audit_audio", lambda *a, **kw: FakeAudit())
     monkeypatch.setattr(audio_helpers, "ensure_video_audit_trim", lambda *a, **kw: None)
-    monkeypatch.setattr(server_module, "_get_ensemble_runtime", lambda: None)
+    monkeypatch.setattr(server_module, "_get_ensemble_runtime", lambda *_a, **_k: None)
 
     captured: dict = {}
 
@@ -2050,7 +2050,7 @@ def test_shot_detect_endpoint_passes_default_class_when_mount_missing(tmp_path: 
 
     monkeypatch.setattr(audio_helpers, "ensure_audit_audio", lambda *a, **kw: FakeAudit())
     monkeypatch.setattr(audio_helpers, "ensure_video_audit_trim", lambda *a, **kw: None)
-    monkeypatch.setattr(server_module, "_get_ensemble_runtime", lambda: None)
+    monkeypatch.setattr(server_module, "_get_ensemble_runtime", lambda *_a, **_k: None)
 
     captured: dict = {}
 
@@ -2130,7 +2130,7 @@ def test_shot_detect_all_endpoint_submits_per_eligible_stage(tmp_path: Path, mon
 
     monkeypatch.setattr(audio_helpers, "ensure_audit_audio", lambda root, n, *a, **kw: FakeAudit(n))
     monkeypatch.setattr(audio_helpers, "ensure_video_audit_trim", lambda *a, **kw: None)
-    monkeypatch.setattr(server_module, "_get_ensemble_runtime", lambda: None)
+    monkeypatch.setattr(server_module, "_get_ensemble_runtime", lambda *_a, **_k: None)
     monkeypatch.setattr(
         ensemble_module,
         "detect_shots_ensemble",
@@ -2193,7 +2193,7 @@ def test_shot_detect_endpoint_writes_stage_rounds_into_audit_json(tmp_path: Path
 
     monkeypatch.setattr(audio_helpers, "ensure_audit_audio", lambda *a, **kw: FakeAudit())
     monkeypatch.setattr(audio_helpers, "ensure_video_audit_trim", lambda *a, **kw: None)
-    monkeypatch.setattr(server_module, "_get_ensemble_runtime", lambda: None)
+    monkeypatch.setattr(server_module, "_get_ensemble_runtime", lambda *_a, **_k: None)
 
     captured: dict = {}
 
@@ -2802,7 +2802,7 @@ def test_shot_detect_endpoint_dedupes_active_jobs(tmp_path: Path, monkeypatch) -
 
     monkeypatch.setattr(audio_helpers, "ensure_audit_audio", lambda *a, **kw: FakeAudit())
     monkeypatch.setattr(audio_helpers, "ensure_video_audit_trim", lambda *a, **kw: None)
-    monkeypatch.setattr(server_module, "_get_ensemble_runtime", lambda: None)
+    monkeypatch.setattr(server_module, "_get_ensemble_runtime", lambda *_a, **_k: None)
 
     proceed = threading.Event()
     invocations = []
@@ -3931,7 +3931,7 @@ def test_beep_review_resets_on_redetect(tmp_path: Path, monkeypatch) -> None:
 
 def test_shot_detect_gated_on_beep_review(tmp_path: Path, monkeypatch) -> None:
     """Auto-detected beeps don't trigger the shot-detect ensemble until
-    the user reviews the beep (#71). Wasting CLAP / GBDT / PANN cycles
+    the user reviews the beep (#71). Wasting CLAP / GBDT cycles
     on an unconfirmed beep is the failure mode this gate prevents."""
     client, _ = _seed_project_with_primary(tmp_path)
     _stub_detect(monkeypatch, beep_time=12.453)
@@ -3958,7 +3958,7 @@ def test_marking_reviewed_kicks_off_shot_detect(tmp_path: Path, monkeypatch) -> 
         "ensure_video_audit_trim",
         lambda *a, **kw: Path("dummy.mp4"),
     )
-    monkeypatch.setattr(server_mod, "_get_ensemble_runtime", lambda: object())
+    monkeypatch.setattr(server_mod, "_get_ensemble_runtime", lambda *_a, **_k: object())
 
     client, _ = _seed_project_with_primary(tmp_path)
     _stub_detect(monkeypatch, beep_time=12.453)
@@ -4008,7 +4008,7 @@ def test_trim_chains_shot_detect_when_reviewed_lands_mid_trim(tmp_path: Path, mo
     project.save(shooter_root)
     project.resolve_video_path(shooter_root, primary.path).resolve().write_bytes(b"S")
 
-    monkeypatch.setattr(server_mod, "_get_ensemble_runtime", lambda: object())
+    monkeypatch.setattr(server_mod, "_get_ensemble_runtime", lambda *_a, **_k: object())
 
     def fake_trim(root, *a, **kw):  # type: ignore[no-untyped-def]
         # Simulate the user clicking "Mark reviewed" while ffmpeg runs:
@@ -4325,3 +4325,119 @@ def test_audit_is_served_and_saved_on_the_clips_clock(tmp_path: Path, monkeypatc
     assert on_disk["beep_time"] == 5.0
     assert on_disk["shots"][0]["time"] == 6.756
     assert on_disk["shots"][0]["ms_after_beep"] == 1756
+
+
+def _prefer_model_set(name: str) -> None:
+    from splitsmith import user_config
+
+    prefs = user_config.load_global_prefs()
+    user_config.save_global_prefs(prefs.model_copy(update={"detection_model_set": name}))
+
+
+def test_the_runtime_getter_uses_the_preference_and_caches_by_the_set_it_got(monkeypatch) -> None:
+    """A clap preference whose artifacts are missing gets a base runtime; it
+    is cached as base, so the next call asks for clap again."""
+    from splitsmith.ui import server as server_module
+    from tests._ensemble_stubs import stub_runtime
+
+    monkeypatch.delenv("SPLITSMITH_MODEL_SET", raising=False)
+    _prefer_model_set("clap")
+    asked: list[str | None] = []
+
+    def _load(**kw):
+        asked.append(kw["model_set"])
+        return stub_runtime("base")
+
+    monkeypatch.setattr(server_module.ensemble_module, "load_ensemble_runtime", _load)
+    monkeypatch.setattr(server_module, "_ENSEMBLE_RUNTIMES", {})
+    rt1 = server_module._get_ensemble_runtime()
+    rt2 = server_module._get_ensemble_runtime()
+    assert asked == ["clap", "clap"]
+    assert rt1.model_set == rt2.model_set == "base"
+    assert list(server_module._ENSEMBLE_RUNTIMES) == ["base"]
+    assert not server_module._ensemble_runtime_is_warm()
+    _prefer_model_set("base")
+    assert server_module._ensemble_runtime_is_warm()
+    assert server_module._get_ensemble_runtime() is rt2
+    assert asked == ["clap", "clap"]
+
+
+def test_the_env_wins_over_the_preference(monkeypatch) -> None:
+    from splitsmith.ui import server as server_module
+    from tests._ensemble_stubs import stub_runtime
+
+    _prefer_model_set("clap")
+    monkeypatch.setenv("SPLITSMITH_MODEL_SET", "base")
+    asked: list[str | None] = []
+    monkeypatch.setattr(
+        server_module.ensemble_module,
+        "load_ensemble_runtime",
+        lambda **kw: asked.append(kw["model_set"]) or stub_runtime("base"),
+    )
+    monkeypatch.setattr(server_module, "_ENSEMBLE_RUNTIMES", {})
+    server_module._get_ensemble_runtime()
+    assert asked == ["base"]
+
+
+def test_shot_detect_detects_with_the_preferred_set_and_records_the_one_it_got(
+    tmp_path: Path, monkeypatch
+) -> None:
+    import json as _json
+
+    import soundfile as sf
+
+    from splitsmith import ensemble as ensemble_module
+    from splitsmith.ui import audio as audio_helpers
+    from splitsmith.ui import server as server_module
+    from tests._ensemble_stubs import stub_runtime
+
+    monkeypatch.delenv("SPLITSMITH_MODEL_SET", raising=False)
+    client, _ = _seed_project_with_primary(tmp_path)
+    _shooter_root = tmp_path / "match" / "shooters" / "me"
+    project = MatchProject.load(_shooter_root)
+    primary = project.stages[0].primary()
+    assert primary is not None
+    primary.beep_time = 5.0
+    project.stages[0].time_seconds = 10.0
+    project.save(_shooter_root)
+    project.resolve_video_path(_shooter_root, primary.path).resolve().write_bytes(b"S")
+    wav = _shooter_root / "audio" / "stage1_audit.wav"
+    wav.parent.mkdir(parents=True, exist_ok=True)
+    sf.write(wav, np.zeros(48_000, dtype="float32"), 48_000)
+    (_shooter_root / "trimmed").mkdir(parents=True, exist_ok=True)
+    (_shooter_root / "trimmed" / "stage1_trimmed.mp4").write_bytes(b"\x00")
+
+    class FakeAudit:
+        audio_path = wav
+        beep_in_clip = 5.0
+        trimmed = True
+
+    monkeypatch.setattr(audio_helpers, "ensure_audit_audio", lambda *a, **kw: FakeAudit())
+    _prefer_model_set("clap")
+    asked: list[str | None] = []
+    monkeypatch.setattr(
+        server_module.ensemble_module,
+        "load_ensemble_runtime",
+        lambda **kw: asked.append(kw["model_set"]) or stub_runtime("base"),
+    )
+    monkeypatch.setattr(server_module, "_ENSEMBLE_RUNTIMES", {})
+    scored_with: list[str] = []
+
+    def _detect(audio, sr, beep, stage, runtime, **kw):
+        scored_with.append(runtime.model_set)
+        result = _fake_ensemble_result(
+            [{"time": 5.5, "confidence": 0.8, "ensemble_score": 3.0, "kept": True}]
+        )
+        return result.model_copy(update={"model_set": runtime.model_set})
+
+    monkeypatch.setattr(ensemble_module, "detect_shots_ensemble", _detect)
+
+    resp = client.post("/api/shooters/me/stages/1/shot-detect")
+    final = _wait_for_job(client, resp.json()["id"])
+    assert final["status"] == "succeeded", final
+    # One load per detection: the job's cold phase asks for clap once and
+    # hands the set it got to the compute backend, which must not ask again.
+    assert asked == ["clap"]
+    assert scored_with == ["base"]
+    saved = _json.loads((_shooter_root / "audit" / "stage1.json").read_text(encoding="utf-8"))
+    assert saved["_candidates_pending_audit"]["_model_set"] == "base"

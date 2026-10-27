@@ -7,7 +7,7 @@ pre-loaded ``EnsembleRuntime`` so callers can amortise model loads.
 
 The eval flow is deliberately split into two steps:
 
-* ``run_eval`` walks every fixture, runs detector + CLAP + PANN + GBDT,
+* ``run_eval`` walks every fixture, runs detector + CLAP + GBDT,
   builds the per-candidate ``EvalUniverse``, and scores it under the
   current ``EnsembleConfig``. Slow (model-bound) on first call.
 * ``rescore_universe`` takes a cached ``EvalUniverse`` + a new config

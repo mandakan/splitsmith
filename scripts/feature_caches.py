@@ -1,6 +1,6 @@
-"""Are a fixture's CLAP / PANN feature caches made from the WAV it has now?
+"""Is a fixture's CLAP feature cache made from the WAV it has now?
 
-``tests/fixtures/.cache/<stem>_{clap,pann}.npz`` hold one row per detected
+``tests/fixtures/.cache/<stem>_clap.npz`` holds one row per detected
 candidate. A re-audit can re-cut a fixture's clip on a new clock; the old
 cache then still has as many rows as the new clip has candidates more often
 than not, so a row-count check (all the build had) passes it with features
@@ -11,7 +11,7 @@ R2), and a mismatch is stale.
 A cache written before the stamp existed is checked once against fresh
 candidate times: equal times mean the same audio, and the cache is stamped
 in place; anything else is stale. :func:`ensure_features` re-extracts what is
-stale or missing when asked (CLAP and PANN load once), and otherwise says
+stale or missing when asked (CLAP loads once), and otherwise says
 which fixtures need it.
 """
 
@@ -29,7 +29,7 @@ from splitsmith.shot_detect import detect_shots
 
 FIXTURES_DIR = Path(__file__).resolve().parent.parent / "tests" / "fixtures"
 CACHE_DIR = FIXTURES_DIR / ".cache"
-KINDS = ("clap", "pann")
+KINDS = ("clap",)
 # Candidate times are deterministic for the same samples; anything beyond
 # float noise means different audio.
 _TIME_TOL_S = 1e-6
@@ -70,8 +70,8 @@ def times_match(cached: np.ndarray, fresh: np.ndarray) -> bool:
 
 
 def cache_state(stem: str, wav_sha256: str, *, fresh_times: Callable[[], np.ndarray]) -> str:
-    """``ok``, ``stale`` or ``missing`` for the pair of caches. An unstamped
-    pair is checked against ``fresh_times()`` and stamped when it matches."""
+    """``ok``, ``stale`` or ``missing`` for the fixture's caches. An unstamped
+    cache is checked against ``fresh_times()`` and stamped when it matches."""
     paths = [cache_path(stem, k) for k in KINDS]
     if not all(p.exists() for p in paths):
         return "missing"
@@ -91,20 +91,16 @@ def cache_state(stem: str, wav_sha256: str, *, fresh_times: Callable[[], np.ndar
 
 
 def _extract(stems: list[str], digests: dict[str, str], log: Callable[[str], None]) -> None:
-    import extract_audio_embeddings as pann_x
     import extract_clap_features as clap_x
-    from panns_inference import AudioTagging
     from transformers import ClapModel, ClapProcessor
 
-    log(f"  loading CLAP ({clap_x.CLAP_MODEL_ID}) and PANN CNN14 for {len(stems)} fixture(s)...")
+    log(f"  loading CLAP ({clap_x.CLAP_MODEL_ID}) for {len(stems)} fixture(s)...")
     model = ClapModel.from_pretrained(clap_x.CLAP_MODEL_ID)
     processor = ClapProcessor.from_pretrained(clap_x.CLAP_MODEL_ID)
     model.eval()
-    tagger = AudioTagging(checkpoint_path=None, device="cpu")
     for i, stem in enumerate(stems, 1):
         log(f"  [{i}/{len(stems)}] extracting {stem}")
         clap_x.extract_for_fixture(stem, force=True, model=model, processor=processor)
-        pann_x.extract_for_fixture(stem, force=True, audio_tagger=tagger)
         for kind in KINDS:
             p = cache_path(stem, kind)
             if p.exists():

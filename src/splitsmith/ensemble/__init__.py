@@ -18,7 +18,7 @@ expected-shot count when the audit JSON carries ``stage_rounds.expected``.
 
 Public API: ``detect_shots_ensemble`` returns the consensus shots and the
 full voter-A universe with per-voter signals attached. Heavy models
-(CLAP, PANN, the GBDT classifier) are loaded once via
+(CLAP when the model set uses it, the GBDT classifier) are loaded once via
 ``load_ensemble_runtime`` and reused across calls.
 
 Calibration thresholds and the trained GBDT are shipped in the package's
