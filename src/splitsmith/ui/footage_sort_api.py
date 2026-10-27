@@ -671,11 +671,11 @@ def keep_this_shooters(
     kept: dict[int, StageAutoMatch] = {}
     for stage_number, s in suggestions.items():
         if s.primary is None:
-            secondaries = [p for p in s.secondaries if str(p) in ours]
+            secondaries = [p for p in s.secondaries if p.as_posix() in ours]
             if secondaries:
                 kept[stage_number] = StageAutoMatch(primary=None, secondaries=secondaries)
             continue
-        run = [p for p in [s.primary, *s.secondaries] if str(p) in ours]
+        run = [p for p in [s.primary, *s.secondaries] if p.as_posix() in ours]
         if run:
             kept[stage_number] = StageAutoMatch(primary=run[0], secondaries=run[1:])
     return kept
