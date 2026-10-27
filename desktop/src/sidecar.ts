@@ -22,10 +22,13 @@ export function pythonRelative(platform: NodeJS.Platform): string {
   return platform === "win32" ? path.win32.join("python", "python.exe") : path.posix.join("python", "bin", "python3.12");
 }
 
-/** The runtime's ``splitsmith`` console script (``Scripts\splitsmith.exe`` on Windows). */
+/**
+ * The runtime's ``splitsmith`` console script. On Windows it is the .cmd shim
+ * build-runtime.sh writes (uv's .exe launcher names the build dir).
+ */
 export function cliRelative(platform: NodeJS.Platform): string {
   return platform === "win32"
-    ? path.win32.join("python", "Scripts", "splitsmith.exe")
+    ? path.win32.join("python", "Scripts", "splitsmith.cmd")
     : path.posix.join("python", "bin", "splitsmith");
 }
 

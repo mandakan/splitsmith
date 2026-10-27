@@ -49,6 +49,12 @@ An Electron shell, not a second frontend: `desktop/src/main.ts` spawns
   CI's checkout is not, so only shipped DMGs broke (0.87.2's CLI pointed at
   the deleted worktree), and `smoke.sh` passed because the worktree still
   existed. The build fails if any `bin/` file still names the build dir.
+  Windows has no shebang to rewrite: uv's `Scripts\*.exe` launchers hold the
+  interpreter's absolute path, so `scripts/windows_console_shims.py` replaces
+  ours with `<name>.cmd` + `<name>-script.py` (finding `..\python.exe` from
+  `%~dp0`) and deletes everything else in `Scripts\` (numba also drops a
+  plain script there with a shebang); the same stale-path check runs, in
+  both the POSIX and the `C:\` spelling.
 - The bundle is sealed: `PYTHONDONTWRITEBYTECODE`, precompiled bytecode,
   `NUMBA_CACHE_DIR` under `~/Library/Caches`. Data stays in `~/.splitsmith`,
   shared with the CLI on purpose.
@@ -147,7 +153,12 @@ There is no Windows build yet (#1765). The shell already knows win32:
 numba under `%LOCALAPPDATA%\splitsmith` (the engine's cache dir), the menu
 takes the Linux shape (no CLI installer), `main.ts` sets the AppUserModelID
 to `electron-builder.yml`'s `appId`, and the feed answers `?platform=win32`.
-The runtime, ffmpeg, the installer, signing and CI are still to do.
+`build-runtime.sh --target windows-x86_64` builds the runtime under Git Bash
+(`lib/target.sh` maps MINGW/MSYS to it), and `desktop-windows.yml` (PRs,
+through `desktop.yml`) runs the slim import check and `smoke.sh` against the
+bare runtime dir with Chocolatey's ffmpeg as a stand-in. `smoke.sh` hands the
+engine `cygpath -w` paths, as the shell would. Our own ffmpeg, the installer,
+signing and the release job are still to do.
 `windows-probe.yml` runs the suite on
 `windows-latest` (Python 3.12, as the bundle ships) on every push to main and
 reports what breaks in the run summary; it is not a gate, and test failures

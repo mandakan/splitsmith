@@ -2,7 +2,8 @@ name: desktop
 
 # The desktop bundles on PRs: the unsigned macOS DMG, opened, installed and
 # launched (desktop-macos.yml), and the Linux AppImage + deb
-# (desktop-linux.yml). Neither uploads to a release; signing and
+# (desktop-linux.yml), and the Windows runtime, smoked without an installer
+# yet (desktop-windows.yml). None uploads to a release; signing and
 # notarization stay local (spec 2026-09-20).
 on:
   pull_request:
@@ -13,6 +14,7 @@ on:
       - ".github/workflows/desktop.yml"
       - ".github/workflows/desktop-macos.yml"
       - ".github/workflows/desktop-linux.yml"
+      - ".github/workflows/desktop-windows.yml"
       - "scripts/ci/fetch_pypi_wheel.py"
   push:
     tags: ["v*"]
@@ -31,3 +33,6 @@ jobs:
     uses: ./.github/workflows/desktop-linux.yml
     permissions:
       contents: write
+
+  windows:
+    uses: ./.github/workflows/desktop-windows.yml
