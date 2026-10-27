@@ -151,6 +151,10 @@ Detection models (~440 MB total) are auto-fetched from `models.splitsmith.app` i
 
 A signed DMG of the same engine, no `uv` or Homebrew ffmpeg needed. Download `Splitsmith-<version>-arm64.dmg` from the GitHub release, drag it to Applications, open it. The app shares `~/.splitsmith` with a CLI install, so a match audited in one is there in the other; Splitsmith > Install command line tool puts `splitsmith` on your PATH from the app's own runtime. The first detection downloads the models (about 430 MB); the first overlay render offers to download Chromium (about 260 MB). The app is built by `desktop/build.sh`; the design is `docs/superpowers/specs/2026-09-20-electron-desktop-packaging-design.md`.
 
+### Option 1c: Windows app (x64)
+
+The same engine for 64-bit Windows 10 and 11, with its own Python and ffmpeg. Download `Splitsmith-Setup-<version>-x64.exe` from the GitHub release and run it: it installs for your user only, with no admin prompt, and adds Start menu and desktop shortcuts. `Splitsmith-<version>-win-x64.zip` is the same app unzipped, for machines where installing is not allowed. The installer is not code-signed yet, so SmartScreen stops it the first time: choose More info, then Run anyway. Data lives in `%USERPROFILE%\.splitsmith`, shared with a CLI install, and uninstalling leaves it in place.
+
 ### Option 2: Docker image (server, worker, or self-hosted agent)
 
 The container image is published to GitHub Container Registry. One image runs every role: the entrypoint is the `splitsmith` CLI, so the subcommand you pass picks the role.
