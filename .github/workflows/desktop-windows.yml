@@ -3,9 +3,8 @@ name: desktop-windows
 # The Windows runtime (#1765): python-build-standalone plus the wheel, built
 # under Git Bash by the same build-runtime.sh as macOS and Linux, then the
 # slim import check and smoke.sh against it. There is no installer yet, so
-# smoke.sh runs the bare runtime dir, and ffmpeg is Chocolatey's build as a
-# stand-in until our own Windows build is pinned in fetch-ffmpeg.sh. Called
-# by desktop.yml on PRs; never uploads.
+# smoke.sh runs the bare runtime dir with our pinned ffmpeg (fetch-ffmpeg.sh)
+# copied into it. Called by desktop.yml on PRs; never uploads.
 on:
   workflow_call:
   workflow_dispatch:
@@ -49,13 +48,18 @@ jobs:
       - name: Slim import surface
         run: desktop/build/runtime/python/python.exe scripts/ci/assert_slim_import_surface.py
 
-      - name: ffmpeg stand-in
+      - name: ffmpeg
+        # build-ffmpeg.sh cross-compiles and cannot run the .exe, so this is
+        # where the build's encoder and filter checks really run.
         run: |
-          choco install ffmpeg -y --no-progress >/dev/null
-          src="$(dirname "$(find /c/ProgramData/chocolatey/lib/ffmpeg -name ffmpeg.exe | head -1)")"
+          desktop/fetch-ffmpeg.sh --target windows-x86_64
           mkdir -p desktop/build/runtime/bin
-          cp "$src/ffmpeg.exe" "$src/ffprobe.exe" desktop/build/runtime/bin/
-          desktop/build/runtime/bin/ffmpeg.exe -version | head -1
+          cp desktop/build/bin/ffmpeg.exe desktop/build/bin/ffprobe.exe desktop/build/runtime/bin/
+          ff=desktop/build/runtime/bin/ffmpeg.exe
+          encoders="$("$ff" -hide_banner -encoders)"; filters="$("$ff" -hide_banner -filters)"
+          grep -q libx264 <<<"$encoders" || { echo "no libx264 encoder" >&2; exit 1; }
+          grep -q drawtext <<<"$filters" || { echo "no drawtext filter" >&2; exit 1; }
+          desktop/build/runtime/bin/ffprobe.exe -version | head -1
 
       - name: Smoke
         run: desktop/smoke.sh desktop/build/runtime

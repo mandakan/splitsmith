@@ -156,9 +156,12 @@ to `electron-builder.yml`'s `appId`, and the feed answers `?platform=win32`.
 `build-runtime.sh --target windows-x86_64` builds the runtime under Git Bash
 (`lib/target.sh` maps MINGW/MSYS to it), and `desktop-windows.yml` (PRs,
 through `desktop.yml`) runs the slim import check and `smoke.sh` against the
-bare runtime dir with Chocolatey's ffmpeg as a stand-in. `smoke.sh` hands the
-engine `cygpath -w` paths, as the shell would. Our own ffmpeg, the installer,
-signing and the release job are still to do.
+bare runtime dir with our own ffmpeg. `smoke.sh` hands the engine `cygpath -w`
+paths, as the shell would. That ffmpeg is cross-compiled with mingw-w64
+(`build-ffmpeg-windows.sh`, Docker on any host arch; zlib from its pin, no bz2
+or iconv, w32threads) and the build cannot run the `.exe`, so the encoder and
+filter checks run in `desktop-windows.yml`. The installer, signing and the
+release job are still to do.
 `windows-probe.yml` runs the suite on
 `windows-latest` (Python 3.12, as the bundle ships) on every push to main and
 reports what breaks in the run summary; it is not a gate, and test failures
