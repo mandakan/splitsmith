@@ -36,3 +36,5 @@ jobs:
 
   windows:
     uses: ./.github/workflows/desktop-windows.yml
+    permissions:
+      contents: write

@@ -3,12 +3,24 @@ name: desktop-windows
 # The Windows NSIS installer and zip (#1765), built under Git Bash by the same
 # build.sh as macOS and Linux, with our pinned ffmpeg (fetch-ffmpeg.sh). Then
 # the slim import check and smoke.sh against the unpacked app, and a silent
-# per-user install and uninstall with smoke.sh against the installed copy.
-# Unsigned until code signing lands. Called by desktop.yml on PRs; never
-# uploads to a release.
+# per-user install, smoke.sh and launch-check.sh against the installed copy,
+# and an uninstall. Called by desktop.yml on PRs (checkout-built wheel,
+# artifacts only) and by release-please.yml after PyPI has the version (the
+# PyPI wheel). Unsigned until code signing lands, so a release only gets the
+# installer and zip attached when the repo variable WINDOWS_RELEASE_ATTACH is
+# "true": an attached .exe is what makes the update feed offer Windows.
 on:
   workflow_call:
+    inputs:
+      release_tag:
+        type: string
+        default: ""
   workflow_dispatch:
+    inputs:
+      release_tag:
+        description: "vX.Y.Z to build (and attach, if WINDOWS_RELEASE_ATTACH is true); empty for a checkout build"
+        required: false
+        default: ""
 
 permissions:
   contents: read
@@ -22,11 +34,15 @@ jobs:
     name: windows x64 installer + zip + smoke
     runs-on: windows-latest
     timeout-minutes: 75
+    permissions:
+      contents: write
     env:
       UV_PYTHON: "3.12"
       CSC_IDENTITY_AUTO_DISCOVERY: "false"
     steps:
       - uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.release_tag || github.ref }}
       - uses: astral-sh/setup-uv@v4
         with:
           enable-cache: true
@@ -39,8 +55,17 @@ jobs:
           path: ~/.splitsmith/models
           key: models-${{ hashFiles('src/splitsmith/data/ensemble_calibration.json') }}
 
+      - name: Published wheel
+        if: inputs.release_tag != ''
+        run: |
+          wheel="$(uv run --no-project python scripts/ci/fetch_pypi_wheel.py "${{ inputs.release_tag }}" build/wheel)"
+          echo "WHEEL=$PWD/$wheel" >> "$GITHUB_ENV"
+
       - name: Build
-        run: desktop/build.sh --windows
+        env:
+          # A tagged build must carry the baked YouTube OAuth client (the PyPI wheel has it).
+          SPLITSMITH_REQUIRE_YOUTUBE_CLIENT: ${{ inputs.release_tag != '' && '1' || '0' }}
+        run: desktop/build.sh --windows ${WHEEL:+--wheel "$WHEEL"}
 
       - name: Slim import surface
         run: desktop/dist/win-unpacked/resources/python/python.exe scripts/ci/assert_slim_import_surface.py
@@ -58,7 +83,7 @@ jobs:
       - name: Smoke (unpacked)
         run: desktop/smoke.sh desktop/dist/win-unpacked
 
-      - name: Install, smoke, uninstall
+      - name: Install, smoke, launch, uninstall
         # Start-Process -Wait: the NSIS installer returns before it is done
         # when started from bash. Git Bash would turn a bare /S into a path.
         run: |
@@ -70,6 +95,7 @@ jobs:
           echo "installed at $app"
           ls "$app"/*.exe
           desktop/smoke.sh "$app"
+          desktop/launch-check.sh "$app"
           uninst="$(cygpath -w "$(ls "$app"/Uninstall*.exe)")"
           powershell -NoProfile -Command "Start-Process -FilePath '$uninst' -ArgumentList '/S' -Wait"
           # The uninstaller copies itself to %TEMP% and finishes from there.
@@ -87,3 +113,12 @@ jobs:
             desktop/dist/*.zip
             desktop/dist/SHA256SUMS
           retention-days: 14
+
+      - name: Attach to the release
+        if: inputs.release_tag != '' && vars.WINDOWS_RELEASE_ATTACH == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          cd desktop/dist && mv SHA256SUMS SHA256SUMS-windows
+          gh release upload "${{ inputs.release_tag }}" *.exe *.zip SHA256SUMS-windows --clobber
