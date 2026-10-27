@@ -687,6 +687,11 @@ async def run_agent(
 
     apply_credentials(state)
     _prepare_cache_env(state_dir)
+    # Detection never downloads a model, so fetch what the model set needs
+    # before the first drain (a no-op when the image baked them).
+    from . import ensemble as ensemble_module
+
+    await asyncio.to_thread(ensemble_module.ensure_model_set_artifacts)
     # Names the jobs this agent runs in their timings' ``worker`` record.
     from .observability import set_worker_name
 

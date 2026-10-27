@@ -85,19 +85,24 @@ flight and exits, so the timeout only needs to cover your longest job; the
 Docker default of 10 s would kill that job mid-run. The compose files set the
 same thing as `stop_grace_period`.
 
-The second volume holds the detection models. The image ships without them -- they
-are ~450 MB, and the first detection downloads them from `models.splitsmith.app`
-into that directory, hash-verified. With the volume, that happens once and survives
-container recreates; without it, every recreated container downloads them again.
-To pre-warm rather than pay it on the first job:
+The second volume holds the detection model (CLAP, about 120 MB). The image ships
+with it, and Docker copies it into the volume the first time the volume is created.
+Detection never downloads a model: the agent checks the volume when it starts and
+fetches anything missing from `models.splitsmith.app`, hash-verified, before it takes
+a job. A volume created by an older image may hold only part of it; the agent fills
+in the rest at its next start. Without outbound internet and with an incomplete
+volume, the agent still starts and detects without the audio model, and logs a
+warning saying so.
+
+To fill the volume without starting the agent:
 
 ```bash
 docker run --rm -v splitsmith-models:/home/splitsmith/.splitsmith/models \
   <IMAGE> fetch-models
 ```
 
-A box with no outbound internet needs an image built with the models baked in:
-`docker build --build-arg BAKE_MODELS=1 .`
+`docker build --build-arg BAKE_MODELS=0 .` builds a smaller image without the
+model; the agent then downloads it at its first start.
 
 The container runs as a non-root user. `/data` is pre-created with that user's
 ownership, so a named volume (as above) is writable out of the box. If you bind-mount

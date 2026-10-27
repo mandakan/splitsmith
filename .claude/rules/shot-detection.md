@@ -87,6 +87,13 @@ it, dated, whenever a measurement shows something new about a camera.
   sets has neither and reads as unknown. The server, the compute backend and
   the MCP tool cache one runtime per set *returned*, so a fallen-back `clap`
   request is retried.
+- **Detection never downloads a model**, so whatever runs it must have the
+  artifacts first: local mode prefetches at boot and on the Overview switch;
+  hosted images bake them (`BAKE_MODELS=1`, and the build fails when the set's
+  artifacts are missing); `splitsmith worker` and `splitsmith agent` call
+  `ensemble.ensure_model_set_artifacts` before their first job
+  (`tests/test_ensure_model_set_artifacts.py`). Without those a hosted `clap`
+  worker would quietly detect with `base` for good.
 - **Voter B** (`clap` only): threshold on the CLAP shot-vs-not-shot prompt
   similarity differential, calibrated against labelled fixtures. Under `base`
   its threshold is `None` and it never votes.

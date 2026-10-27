@@ -32,6 +32,7 @@ from .api import (
     EnsembleResult,
     EnsembleRuntime,
     detect_shots_ensemble,
+    ensure_model_set_artifacts,
     load_ensemble_runtime,
 )
 from .calibration import (
@@ -60,6 +61,7 @@ __all__ = [
     "VisualRuntime",
     "camera_class_from_mount",
     "detect_shots_ensemble",
+    "ensure_model_set_artifacts",
     "load_calibration",
     "load_ensemble_runtime",
     "load_voter_c_model",

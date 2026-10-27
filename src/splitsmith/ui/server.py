@@ -9505,11 +9505,13 @@ def create_app(
     # with the Procrastinate worker bootstrap.
     register_job_bodies(state)
     # The slim-ONNX prefetch is a local-mode convenience: it submits a
-    # ``model_download`` job when artifacts are missing. Hosted mode bakes
-    # the slim models into the image (nothing to fetch) and has no boot
-    # tenant to own the job -- model prefetch is a process concern, not a
-    # per-user one -- so skip it there entirely rather than route an
-    # ownerless job through the per-tenant ``state.jobs`` property.
+    # ``model_download`` job when artifacts are missing. Hosted images bake
+    # the models in (``BAKE_MODELS``), the workers that run detection fetch
+    # anything missing at startup (``ensemble.ensure_model_set_artifacts``),
+    # and there is no boot tenant to own the job -- model prefetch is a
+    # process concern, not a per-user one -- so skip it there entirely rather
+    # than route an ownerless job through the per-tenant ``state.jobs``
+    # property.
     if not _hosted_mode_active():
         # Re-enqueue whatever a dead process left in the crash-recovery
         # journal (issue #665). Must follow ``register_job_bodies`` so

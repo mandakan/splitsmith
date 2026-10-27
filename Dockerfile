@@ -43,14 +43,11 @@
 #   procrastinate). The dev group (torch / transformers / panns / mypy /
 #   ruff / moto) stays out.
 # - ffmpeg + ffprobe for trim / probe.
-# - NO model artifacts by default. CLAP + PANN are ~450 MB -- a fifth of
-#   the image -- and the first detection fetches them from
-#   models.splitsmith.app into ``<SPLITSMITH_CONFIG_DIR>/models``. Build
-#   with ``--build-arg BAKE_MODELS=1`` to bake them in instead, which is
-#   what an offline or network-restricted deployment wants. This reverses
-#   doc 04's "never download at runtime": the download path exists, is
-#   hash-verified, and fails as a structured 503 (doc 03), so paying it
-#   once per cache beat carrying it in every pull.
+# - The CLAP model artifacts (~120 MB), baked in by default. Hosted detects
+#   with the ``clap`` model set, and detection never downloads a model: a
+#   container without them detects with ``base``. ``--build-arg
+#   BAKE_MODELS=0`` leaves them out; ``splitsmith worker`` and ``splitsmith
+#   agent`` then fetch them from models.splitsmith.app at startup.
 
 ARG PYTHON_IMAGE=python:3.11-slim-bookworm
 ARG NODE_IMAGE=node:22-bookworm-slim
@@ -184,24 +181,24 @@ RUN find /app/.venv -type d -name '__pycache__' -prune -exec rm -rf {} + ; \
     rm -rf "${SP}/sklearn/datasets/data" "${SP}/sklearn/datasets/descr" \
            "${SP}/sklearn/datasets/images"
 
-# The slim ONNX model artifacts, staged in a dir the runtime stage copies.
+# The model artifacts, staged in a dir the runtime stage copies.
 # ``SPLITSMITH_CONFIG_DIR`` drives the cache location (<config_dir>/models).
 #
-# Default OFF: the artifacts are ~450 MB against a ~2 GB image, and the
-# runtime already knows how to fetch and hash-verify them on first detection.
-# ``--build-arg BAKE_MODELS=1`` puts them back, which is what an offline or
-# air-gapped build wants -- and what a deployment wants if it cannot keep
-# <config_dir>/models on a volume, since without one the fetch repeats on
-# every container recreate rather than once.
-ENV SPLITSMITH_CONFIG_DIR=/opt/splitsmith
 # Hosted detects with the clap model set (spec 2026-10-26): every image,
 # Cloud Run, the Railway fallback or a self-hosted worker, carries it.
+# Detection never downloads a model and hosted mode has no boot prefetch,
+# so the CLAP artifacts (~120 MB) are baked in by default, and the build
+# fails when the set's artifacts did not land. ``--build-arg BAKE_MODELS=0``
+# leaves them out for a smaller image: ``splitsmith worker`` and
+# ``splitsmith agent`` fetch them at startup, once per cache.
+ENV SPLITSMITH_CONFIG_DIR=/opt/splitsmith
 ENV SPLITSMITH_MODEL_SET=clap
-ARG BAKE_MODELS=0
+ARG BAKE_MODELS=1
 RUN if [ "$BAKE_MODELS" = "1" ]; then \
-        /app/.venv/bin/splitsmith fetch-models; \
+        /app/.venv/bin/splitsmith fetch-models \
+        && /app/.venv/bin/python -c "import sys; from splitsmith.ensemble import api, features; sys.exit(api.resolve_model_set() == 'clap' and not features.clap_artifacts_present())"; \
     else \
-        echo "BAKE_MODELS=0 -- skipping model bake; runtime will download on first detection"; \
+        echo "BAKE_MODELS=0 -- skipping model bake; the worker fetches them at startup"; \
         mkdir -p /opt/splitsmith/models; \
     fi
 

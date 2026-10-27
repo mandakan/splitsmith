@@ -725,6 +725,11 @@ def worker(
         console.print(
             f"[green]splitsmith worker[/]: draining all queues (concurrency={concurrency})   (Ctrl+C to stop)"
         )
+    # Detection never downloads a model, so the worker fetches what its model
+    # set needs before it takes a job (a no-op when the image baked them).
+    from . import ensemble as _ensemble
+
+    _ensemble.ensure_model_set_artifacts()
     try:
         _asyncio.run(_run_worker(db_url, concurrency=concurrency, wait=not one_shot, deadline=deadline))
     except KeyboardInterrupt:
