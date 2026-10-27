@@ -223,7 +223,9 @@ PR touches only the manifest, ``CHANGELOG.md``, ``pyproject.toml``,
 ``src/splitsmith/__init__.py`` and ``uv.lock``. The ``Release`` workflow
 then tags, publishes to PyPI, pushes both GHCR images, deploys
 production on Cloud Run (after the image publish), and builds and attaches the Linux AppImage and .deb
-(``desktop-linux``, after ``publish-pypi``). The DMG is a separate local
+(``desktop-linux``, after ``publish-pypi``), and builds the Windows
+installer the same way (``desktop-windows``; attached only while the repo
+variable ``WINDOWS_RELEASE_ATTACH`` is ``true``). The DMG is a separate local
 step, ``desktop/release.sh`` (signing never leaves the Mac; notarization
 can take close to an hour); CI checks it unsigned before and as downloaded
 after (``desktop.md``). The update feed announces per platform: macOS

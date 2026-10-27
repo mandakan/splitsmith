@@ -88,6 +88,18 @@ jobs:
     permissions:
       contents: read
 
+  desktop-windows:
+    # The Windows installer and zip from the same PyPI wheel, installed,
+    # smoked and launched. Attached only while the repo variable
+    # WINDOWS_RELEASE_ATTACH is "true" (unsigned until code signing lands).
+    needs: [release-please, publish-pypi]
+    if: needs.release-please.outputs.release_created == 'true'
+    uses: ./.github/workflows/desktop-windows.yml
+    with:
+      release_tag: ${{ needs.release-please.outputs.tag_name }}
+    permissions:
+      contents: write
+
   deploy-prod:
     # And the production Cloud Run deploy. Chained rather than left to the
     # `release: published` event (GITHUB_TOKEN release does not trigger it).
