@@ -17,7 +17,7 @@ from typing import Any
 
 import pytest
 
-from splitsmith import match_model
+from splitsmith import match_model, raw_link
 from splitsmith.match_project import MatchProject, StageEntry
 from splitsmith.ui import footage_sort_api
 
@@ -279,9 +279,8 @@ def test_footage_added_to_the_wrong_shooter_is_sorted_and_moved(tmp_path: Path, 
     ]
     assert [(Path(v.path).name, v.role) for v in bob.stage(1).videos] == [("IMG_0002.MOV", "primary")]
     assert alice.unassigned_videos == []
-    assert (match_model.Match.shooter_root(root, "bob") / "raw" / "IMG_0002.MOV").resolve() == (
-        shared / "from-carol" / "IMG_0002.MOV"
-    ).resolve()
+    bobs_entry = match_model.Match.shooter_root(root, "bob") / "raw" / "IMG_0002.MOV"
+    assert raw_link.target(bobs_entry).resolve() == (shared / "from-carol" / "IMG_0002.MOV").resolve()  # type: ignore[union-attr]
 
 
 def test_per_shooter_import_leaves_a_squad_mates_run_unassigned(tmp_path: Path, source_clip: Path) -> None:
