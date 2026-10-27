@@ -24,6 +24,7 @@ from splitsmith.fcpxml_gen import (
     SecondaryClip,
     StageComposition,
 )
+from tests._platform import posix_paths
 
 
 def _shot(n: int, t: float, s: float) -> Shot:
@@ -388,6 +389,7 @@ def _is_concat(argv: list[str]) -> bool:
     return "-f" in argv and argv[argv.index("-f") + 1] == "concat"
 
 
+@posix_paths
 def test_a_repeat_render_encodes_nothing_and_stitches_the_cached_segments(tmp_path: Path) -> None:
     """The third identical YouTube export of Hostfinalen XI re-encoded
     every stage; with the cache the repeat is a stitch only."""
@@ -2227,6 +2229,7 @@ _MAIN_STUNG_BOUNDARY = (
 )
 
 
+@posix_paths
 def test_boundary_argv_is_byte_identical_to_main() -> None:
     w = Path("/w")
     common: dict[str, Any] = {

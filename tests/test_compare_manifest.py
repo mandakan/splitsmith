@@ -9,6 +9,7 @@ import yaml
 from pydantic import ValidationError
 
 from splitsmith.compare.manifest import CompareManifest, load_manifest
+from tests._platform import posix_paths
 
 
 def _write(path: Path, data: dict) -> Path:
@@ -113,6 +114,7 @@ def test_tilde_expansion(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Non
     fake_home = tmp_path / "home"
     fake_home.mkdir()
     monkeypatch.setenv("HOME", str(fake_home))
+    monkeypatch.setenv("USERPROFILE", str(fake_home))  # expanduser reads it on Windows
     src = _write(
         tmp_path / "m.yaml",
         {
@@ -125,6 +127,7 @@ def test_tilde_expansion(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Non
     assert m.shooters[0].project == fake_home / "projects" / "anders"
 
 
+@posix_paths
 def test_absolute_paths_passthrough(tmp_path: Path) -> None:
     src = _write(
         tmp_path / "m.yaml",

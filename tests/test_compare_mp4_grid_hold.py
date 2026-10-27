@@ -65,6 +65,7 @@ from PIL import Image
 from splitsmith.compare import mp4_grid
 from splitsmith.compare.project_loader import CompareShooterBundle, CompareStageBundle
 from splitsmith.overlay.raster import RasterizerUnavailableError
+from tests._platform import posix_paths
 from tests.conftest import fake_ffmpeg_probe
 
 ACTION = 12.5
@@ -467,6 +468,7 @@ def _zero_hold_matrix() -> list[tuple[str, ...]]:
     return out
 
 
+@posix_paths
 def test_zero_hold_produces_the_command_main_produces_today():
     assert _command(_plan(hold=0.0)) == MAIN_STAGE_ARGV
     # ...and so does a plan that never heard of the field.
@@ -481,6 +483,7 @@ def test_zero_hold_produces_the_command_main_produces_today():
     )
 
 
+@posix_paths
 def test_zero_hold_leaves_the_concat_stitch_alone():
     # The hold lives inside the stage segment precisely so the stitch stays
     # a dumb copy. Nothing about it may become hold-aware.

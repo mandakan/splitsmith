@@ -20,6 +20,7 @@ from PIL import Image
 from splitsmith.compare import mp4_grid
 from splitsmith.composition import MatchTitle, TitleCard
 from splitsmith.overlay.raster import RasterizerUnavailableError
+from tests._platform import posix_paths
 from tests.conftest import fake_ffmpeg_probe
 from tests.test_compare_mp4_grid_hold import _command, _driver_shooters, _graph_of, _plan, _still_runner
 
@@ -97,6 +98,7 @@ def _concat_names(work: Path) -> list[str]:
 # --- the card segment ---------------------------------------------------------
 
 
+@posix_paths
 def test_card_segment_carries_the_grid_stream_layout() -> None:
     """One video plus N+1 silent PCM tracks, named and flagged exactly as
     a stage segment's are, so the concat demuxer sees one uniform layout."""
@@ -129,6 +131,7 @@ def test_card_segment_carries_the_grid_stream_layout() -> None:
 # --- the lower-third in the stage graph ------------------------------------------
 
 
+@posix_paths
 def test_lower_third_is_the_last_input_and_fades_before_the_tail(tmp_path: Path) -> None:
     plan = _plan(hold=3.0)
     card = mp4_grid.LowerThirdInput(path=Path("/w/lt.png"), seconds=2.0)
@@ -167,6 +170,7 @@ def test_lower_third_is_the_last_input_and_fades_before_the_tail(tmp_path: Path)
 # --- the render driver -------------------------------------------------------------
 
 
+@posix_paths
 def test_cards_become_segments_in_spine_order_on_their_own_runner(tmp_path: Path) -> None:
     calls: list[tuple[str, ...]] = []
     cards: list[tuple[str, ...]] = []
@@ -437,6 +441,7 @@ def _fake_clip_writer(frames, *, out: Path, fps: float, ffmpeg_binary: str):
     return MotionClip(path=out, seconds=count / fps, frame_count=count)
 
 
+@posix_paths
 def test_card_segment_with_a_motion_clip_overlays_it_and_keeps_the_stream_layout() -> None:
     cmd = mp4_grid.build_card_segment_command(
         Path("/w/bd.png"),
@@ -653,6 +658,7 @@ def test_boundary_segment_pads_a_short_edge_with_a_held_frame_on_every_track(tmp
 # --- a transition into a slate (#1244) -----------------------------------------
 
 
+@posix_paths
 def test_a_transition_into_a_slate_trims_the_slate_and_the_stage_before_it(tmp_path: Path) -> None:
     """The slate after a boundary is encoded half a second shorter on the
     card runner; its head edge (a second of the same still) and the
@@ -708,6 +714,7 @@ def test_a_transition_into_a_slate_trims_the_slate_and_the_stage_before_it(tmp_p
     ]
 
 
+@posix_paths
 def test_a_head_edges_lower_third_opens_at_the_stage_start_not_half_a_fade_late(tmp_path: Path) -> None:
     """Review of #1244: the head edge's timeline starts ``handle`` before
     the stage, and the boundary prepends the rest of the half; the lower
@@ -937,6 +944,7 @@ def _frames_common() -> dict:
     }
 
 
+@posix_paths
 def test_grid_boundary_argv_is_byte_identical_to_main() -> None:
     w = Path("/w")
     common = _frames_common()
@@ -957,6 +965,7 @@ def test_grid_boundary_argv_is_byte_identical_to_main() -> None:
     ), "replacing needs a clip to replace with"
 
 
+@posix_paths
 def test_a_replacing_grid_sting_draws_the_clip_over_black_and_keeps_every_track() -> None:
     """#1535: a frames sting's clip over opaque black is the whole grid
     picture; the edges' video pads would be unconnected outputs, so only

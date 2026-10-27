@@ -4,6 +4,7 @@ from pathlib import Path
 import pytest
 
 from splitsmith.compare import mp4_grid
+from tests._platform import posix_paths
 
 
 def _plan(*, missing: str | None = None, lead_padded: str | None = None) -> mp4_grid.GridStagePlan:
@@ -273,6 +274,7 @@ def test_every_tile_takes_two_inputs_and_the_graph_reads_each_by_index():
         assert f"[{n}:v]" not in graph
 
 
+@posix_paths
 def test_a_real_tile_cuts_its_audio_with_atrim_from_an_unseeked_second_read():
     # Input-side -ss mis-cuts the audio of a stream-copied trim (the edit
     # list): on a real match the sound landed 0.42 s early against its
@@ -446,6 +448,7 @@ def test_a_stage_segment_carries_pcm_so_the_stitch_has_nothing_to_accumulate():
     assert "-movflags" not in cmd
 
 
+@posix_paths
 def test_a_lead_padded_tile_is_front_padded_so_its_beep_still_lands_on_time():
     # Erik's beep sits closer to his clip start than head_pad, so 0.5s of
     # pad has to be synthesised. Without it his beep lands 0.5s early and
@@ -523,6 +526,7 @@ def test_every_tile_is_tail_padded_to_the_stage_duration():
     assert graph.count("atrim=0:12.5") == 4
 
 
+@posix_paths
 def test_concat_copies_the_video_and_encodes_the_audio_once():
     # Video is copied -- every segment was pinned to the same canvas and
     # rate precisely so it can be. Audio is not: the segments carry PCM,
@@ -678,6 +682,7 @@ def _default_off_fingerprint() -> str:
     return hashlib.sha256(json.dumps(_default_off_commands(), indent=0).encode()).hexdigest()
 
 
+@posix_paths
 def test_the_default_off_argv_is_unchanged_since_the_preflight_landed():
     commands = _default_off_commands()
     assert len(commands) == 42  # 36 stage commands + 6 stitches
@@ -748,6 +753,7 @@ def test_no_inset_leaves_the_argv_as_it_was():
     )
 
 
+@posix_paths
 def test_an_inset_is_the_last_input_and_overlays_its_tile_in_the_corner():
     plan = _with_inset(_plan(), "Johan")
     cmd = mp4_grid.build_stage_command(

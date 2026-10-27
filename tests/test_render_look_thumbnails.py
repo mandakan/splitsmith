@@ -72,7 +72,7 @@ class _StubRasterizer:
         self.frame_requests.append((template, context.model_dump(), width, height, fps, max_seconds))
         mounted = None if frames_dir is None else frames_dir.rglob("*.jpg")
         self.mounted.append(
-            None if mounted is None else sorted(str(p.relative_to(frames_dir)) for p in mounted)
+            None if mounted is None else sorted(p.relative_to(frames_dir).as_posix() for p in mounted)
         )
         duration = self.motion_seconds
         count = 1 if duration <= 0 else max(1, math.ceil(min(duration, max_seconds) * fps - 1e-9))

@@ -16,6 +16,7 @@ from splitsmith.lab.secondary import (
     snap_beep_now,
     snap_is_stale,
 )
+from tests._platform import posix_paths
 
 NO_PROBE = CameraProbeResult()
 IPHONE = CameraProbeResult(make="Apple", model="iPhone 17 Pro", suggested_id="apple-iphone17pro")
@@ -238,6 +239,7 @@ def test_a_fixture_that_is_not_a_snap_is_never_stale():
     assert not snap_is_stale(primary, {"shots": [{"time": 1.0}]}, beep_now=9.9)
 
 
+@posix_paths
 def test_a_snap_reads_the_beep_of_its_own_stage_and_file():
     """One file can hold several stages (a single take) and a file name can
     repeat across matches; the beep is the one for this file on this stage."""

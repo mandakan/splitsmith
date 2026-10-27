@@ -17,6 +17,7 @@ from splitsmith.proxy import (
     proxy_key_for,
     transcode_proxy,
 )
+from tests._platform import posix_paths
 
 _URL = "https://r2.example/raw/clip.mov?X-Amz-Signature=secret"
 
@@ -31,6 +32,7 @@ def test_proxy_key_for_rejects_non_raw_path():
         proxy_key_for("exports/foo.mp4")
 
 
+@posix_paths
 def test_transcode_proxy_builds_expected_argv():
     calls = {}
 
