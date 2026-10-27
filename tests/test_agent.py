@@ -600,6 +600,17 @@ def _sigterm_ignored_outside_the_agent():
         signal.signal(signal.SIGTERM, previous)
 
 
+async def _sigterm_once_the_agent_takes_it() -> None:
+    """Raise SIGTERM once the agent has replaced the fixture's ``SIG_IGN``.
+    A fixed delay lost the signal on a slow runner: it arrived before the
+    agent's handler and was ignored, so the agent ran to the timeout."""
+    import signal
+
+    while signal.getsignal(signal.SIGTERM) is signal.SIG_IGN:
+        await asyncio.sleep(0.01)
+    signal.raise_signal(signal.SIGTERM)
+
+
 @pytest.mark.usefixtures("_sigterm_ignored_outside_the_agent")
 def test_sigterm_stops_the_agent_on_a_loop_without_signal_handlers(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -625,8 +636,7 @@ def test_sigterm_stops_the_agent_on_a_loop_without_signal_handlers(
     before = signal.getsignal(signal.SIGTERM)
 
     async def scenario() -> None:
-        loop = asyncio.get_running_loop()
-        loop.call_later(0.2, signal.raise_signal, signal.SIGTERM)
+        sigterm = asyncio.ensure_future(_sigterm_once_the_agent_takes_it())
         await asyncio.wait_for(
             agent.run_agent(
                 "http://srv",
@@ -636,6 +646,7 @@ def test_sigterm_stops_the_agent_on_a_loop_without_signal_handlers(
             ),
             timeout=5,
         )
+        await sigterm
 
     asyncio.run(scenario())  # returns rather than timing out
     assert signal.getsignal(signal.SIGTERM) is before
@@ -643,7 +654,6 @@ def test_sigterm_stops_the_agent_on_a_loop_without_signal_handlers(
 
 @pytest.mark.usefixtures("_sigterm_ignored_outside_the_agent")
 def test_run_agent_returns_on_sigterm_while_idle(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    import signal
 
     _isolate_env(monkeypatch)
 
@@ -653,8 +663,7 @@ def test_run_agent_returns_on_sigterm_while_idle(tmp_path: Path, monkeypatch: py
     monkeypatch.setattr(agent, "_run_worker_once", never_drain)
 
     async def scenario() -> None:
-        loop = asyncio.get_running_loop()
-        loop.call_later(0.2, signal.raise_signal, signal.SIGTERM)
+        sigterm = asyncio.ensure_future(_sigterm_once_the_agent_takes_it())
         await asyncio.wait_for(
             agent.run_agent(
                 "http://srv",
@@ -664,6 +673,7 @@ def test_run_agent_returns_on_sigterm_while_idle(tmp_path: Path, monkeypatch: py
             ),
             timeout=5,
         )
+        await sigterm
 
     asyncio.run(scenario())  # returns rather than timing out
 
