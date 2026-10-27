@@ -157,7 +157,7 @@ def build_theme(css_path: Path) -> dict[str, object]:
         fonts[role] = _first_family(decls[var])
 
     return {
-        "source": str(css_path.relative_to(REPO_ROOT)),
+        "source": css_path.relative_to(REPO_ROOT).as_posix(),
         "colors": colors,
         "fonts": fonts,
     }
