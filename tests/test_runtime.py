@@ -225,17 +225,22 @@ def _make_executable(path: Path) -> None:
     path.chmod(0o755)
 
 
+#: What a runnable binary is named on this host: Windows runs only a name
+#: with a runnable suffix, and ``_executable_in_dir`` looks for ``.exe``.
+_EXE = ".exe" if sys.platform == "win32" else ""
+
+
 def test_meipass_dir_wins_over_path(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """A bundled binary under ``sys._MEIPASS`` beats whatever's on PATH."""
     bundle = tmp_path / "meipass"
     bundle.mkdir()
-    _make_executable(bundle / "ffmpeg")
-    _make_executable(bundle / "ffprobe")
+    _make_executable(bundle / f"ffmpeg{_EXE}")
+    _make_executable(bundle / f"ffprobe{_EXE}")
     monkeypatch.setattr(sys, "_MEIPASS", str(bundle), raising=False)
 
     rt = resolve_runtime()
-    assert rt.ffmpeg_binary == str(bundle / "ffmpeg")
-    assert rt.ffprobe_binary == str(bundle / "ffprobe")
+    assert rt.ffmpeg_binary == str(bundle / f"ffmpeg{_EXE}")
+    assert rt.ffprobe_binary == str(bundle / f"ffprobe{_EXE}")
 
 
 def test_executable_dir_used_when_no_meipass(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -246,20 +251,20 @@ def test_executable_dir_used_when_no_meipass(monkeypatch: pytest.MonkeyPatch, tm
     fake_exe = bin_dir / "python-fake"
     fake_exe.write_text("", encoding="utf-8")
     fake_exe.chmod(0o755)
-    _make_executable(bin_dir / "ffmpeg")
-    _make_executable(bin_dir / "ffprobe")
+    _make_executable(bin_dir / f"ffmpeg{_EXE}")
+    _make_executable(bin_dir / f"ffprobe{_EXE}")
     monkeypatch.setattr(sys, "executable", str(fake_exe))
 
     rt = resolve_runtime()
-    assert rt.ffmpeg_binary == str(bin_dir / "ffmpeg")
-    assert rt.ffprobe_binary == str(bin_dir / "ffprobe")
+    assert rt.ffmpeg_binary == str(bin_dir / f"ffmpeg{_EXE}")
+    assert rt.ffprobe_binary == str(bin_dir / f"ffprobe{_EXE}")
 
 
 def test_env_var_beats_bundled_binary(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """``SPLITSMITH_FFMPEG`` overrides the bundled lookup."""
     bundle = tmp_path / "meipass"
     bundle.mkdir()
-    _make_executable(bundle / "ffmpeg")
+    _make_executable(bundle / f"ffmpeg{_EXE}")
     monkeypatch.setattr(sys, "_MEIPASS", str(bundle), raising=False)
 
     override = tmp_path / "override-ffmpeg"
@@ -273,7 +278,7 @@ def test_env_var_beats_bundled_binary(monkeypatch: pytest.MonkeyPatch, tmp_path:
 def test_explicit_kwarg_beats_bundled(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     bundle = tmp_path / "meipass"
     bundle.mkdir()
-    _make_executable(bundle / "ffmpeg")
+    _make_executable(bundle / f"ffmpeg{_EXE}")
     monkeypatch.setattr(sys, "_MEIPASS", str(bundle), raising=False)
 
     rt = resolve_runtime(ffmpeg_binary="/explicit/ffmpeg")

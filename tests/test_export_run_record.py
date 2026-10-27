@@ -346,8 +346,14 @@ def test_two_concurrent_desktop_writers_do_not_collide_on_a_temp_file(tmp_path: 
     real_replace = Path.replace
     both_written = threading.Barrier(2)
 
+    waited: set[int] = set()
+
     def slow_replace(self: Path, target):  # type: ignore[no-untyped-def]
-        if self.name.startswith("export_runs.json"):
+        # Each writer's first rename only: on Windows ``fs_atomic.replace``
+        # retries a rename the other writer briefly blocks, and a retry
+        # reaching the barrier alone would break it.
+        if self.name.startswith("export_runs.json") and threading.get_ident() not in waited:
+            waited.add(threading.get_ident())
             both_written.wait(timeout=10)
             time.sleep(0.05)
         return real_replace(self, target)
