@@ -24,6 +24,7 @@ import pytest
 from splitsmith import composition
 from splitsmith.compare import mp4_grid
 from splitsmith.compare.project_loader import CompareShooterBundle, CompareStageBundle
+from tests._platform import posix_paths
 
 FFMPEG = shutil.which("ffmpeg")
 FFPROBE = shutil.which("ffprobe")
@@ -1661,6 +1662,7 @@ def _video_ss_t(cmd: tuple[str, ...], trim: str) -> tuple[str, str]:
     return cmd[at - 4], cmd[at - 2]
 
 
+@posix_paths
 def test_a_transition_renders_edges_and_a_boundary_on_their_own_runner_and_trims_the_neighbours(
     tmp_path: Path,
 ):
@@ -1717,6 +1719,7 @@ def test_a_transition_renders_edges_and_a_boundary_on_their_own_runner_and_trims
     assert [(c.start_seconds, c.title) for c in result.chapters] == [(0.0, "Stage 1"), (11.5, "Stage 2")]
 
 
+@posix_paths
 def test_a_failed_edge_leaves_both_neighbours_untrimmed_and_reports_a_cut(tmp_path: Path):
     def failing_tail_edge(cmd, **kwargs):
         if str(cmd[-1]).endswith("edge-stage1-tail.mov"):
@@ -1842,6 +1845,7 @@ def _sting_grid(tmp_path: Path, *, kind: str = "sting:wipe", rasterizer=None, bo
     return result, calls, edges, fake, work
 
 
+@posix_paths
 def test_a_sting_boundary_takes_the_clip_on_the_boundary_runner_only(tmp_path: Path, monkeypatch) -> None:
     """Issue #1245: the clip is written before the boundary encodes and is
     an input of that segment alone; the stages, the edges and the
@@ -1895,6 +1899,7 @@ def test_a_sting_the_look_lacks_is_a_fade_on_the_grid(tmp_path: Path, monkeypatc
     assert fake.frames_rendered == 0
 
 
+@posix_paths
 def test_a_sting_whose_frames_fail_is_a_cut_on_the_grid(tmp_path: Path, monkeypatch) -> None:
     from splitsmith.look.motion import MotionClipError
 
@@ -2041,6 +2046,7 @@ def _cached_render(tmp_path: Path, work: str, runner, cache, steps=None):
     )
 
 
+@posix_paths
 def test_a_second_grid_render_reuses_every_stage_from_the_cache(tmp_path: Path):
     from splitsmith.segment_cache import SegmentCache
 
@@ -2064,6 +2070,7 @@ def test_a_second_grid_render_reuses_every_stage_from_the_cache(tmp_path: Path):
     assert [(s.stage_number, s.ok) for s in result.stages] == [(1, True), (2, True)]
 
 
+@posix_paths
 def test_a_stage_that_failed_is_not_cached(tmp_path: Path):
     from splitsmith.segment_cache import SegmentCache
 

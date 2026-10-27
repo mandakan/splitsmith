@@ -10,6 +10,7 @@ from splitsmith.compare import mp4_grid
 from splitsmith.compare.free_cell import FreeCellContext, free_cell_groups
 from splitsmith.overlay.layout import ColorToken
 from splitsmith.stage_summary_data import TileShot, TileStageData
+from tests._platform import posix_paths
 
 
 def _tile(label: str, *times: float) -> TileStageData:
@@ -140,6 +141,7 @@ def _three_up_plan() -> mp4_grid.GridStagePlan:
     )
 
 
+@posix_paths
 def test_the_free_square_takes_the_black_cells_input_and_nothing_renumbers() -> None:
     plan = _three_up_plan()
     canvas = mp4_grid.GridCanvas()

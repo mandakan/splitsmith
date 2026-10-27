@@ -209,7 +209,7 @@ def test_absolute_video_path_is_named_in_errors(tmp_path: Path) -> None:
 
     assert len(plan.errors) == 1
     assert "1" in plan.errors[0]
-    assert str(abs_path) in plan.errors[0]
+    assert abs_path.as_posix() in plan.errors[0]
 
 
 # ---------------------------------------------------------------------------

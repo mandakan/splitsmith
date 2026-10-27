@@ -17,6 +17,7 @@ from splitsmith.reel.render import (
     sfx_cues,
     sfx_mix_command,
 )
+from tests._platform import posix_paths
 from tests.synthetic_media import build_synthetic_video, ffmpeg_available
 
 UP = SequenceFormat(1080, 1920, 30, 1)
@@ -37,6 +38,7 @@ def test_reel_format_takes_the_most_common_rate():
     assert reel_format(metas, upright=True).frame_rate_num == 60
 
 
+@posix_paths
 def test_clip_command_crops_scales_conforms_and_slows():
     clip = ReelClip("002_cold", Path("/m/a.mp4"), 7.4, 1.2, speed=0.5, freeze_seconds=0.4, sfx=("slowmo",))
     argv = clip_command(clip, sequence=UP, output_path=Path("/w/out.mp4"))
@@ -51,6 +53,7 @@ def test_clip_command_crops_scales_conforms_and_slows():
     assert argv.count("/m/a.mp4") == 1
 
 
+@posix_paths
 def test_clip_at_real_speed_uses_the_unseeked_source_audio():
     clip = ReelClip("005_beat", Path("/m/a.mp4"), 7.4, 1.2)
     argv = clip_command(clip, sequence=UP, output_path=Path("/w/out.mp4"))
@@ -65,6 +68,7 @@ def test_clip_without_source_audio_is_silent():
     assert "anullsrc" in " ".join(argv)
 
 
+@posix_paths
 def test_a_card_is_silent_unless_it_is_the_timer_beep():
     def audio(sfx):
         argv = card_command(

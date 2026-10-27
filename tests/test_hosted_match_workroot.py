@@ -19,6 +19,7 @@ from fastapi.testclient import TestClient
 
 from splitsmith import match_model
 from splitsmith.match_project import MatchProject
+from tests._platform import posix_paths
 from tests.hosted_helpers import _CapturingSender, login
 from tests.mirror_helpers import seed_mirror, sync_docs_url
 
@@ -89,6 +90,7 @@ def test_sync_accepts_real_match_id_shapes(
     assert client.post("/api/sync/matches", json={"match_id": good, "name": "x"}).status_code == 200
 
 
+@posix_paths
 def test_worker_registry_does_not_reuse_another_accounts_root() -> None:
     from splitsmith.match_registry import MatchRegistry
 
