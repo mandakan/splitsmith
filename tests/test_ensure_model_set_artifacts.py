@@ -95,6 +95,9 @@ def test_the_worker_command_fetches_before_draining(monkeypatch) -> None:
     from splitsmith import cli, queue
 
     order: list[str] = []
+    # The command sets SPLITSMITH_MODE itself (setdefault); owning it here
+    # restores it afterwards, so later tests on this worker stay local.
+    monkeypatch.setenv("SPLITSMITH_MODE", "hosted")
     monkeypatch.setenv("SPLITSMITH_DATABASE_URL", "postgresql+asyncpg://x/y")
     monkeypatch.setattr(ensemble, "ensure_model_set_artifacts", lambda: order.append("fetch") or [])
 
