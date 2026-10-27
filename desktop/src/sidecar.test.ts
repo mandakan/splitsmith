@@ -152,6 +152,6 @@ describe("runtime layout", () => {
     expect(pythonRelative("linux")).toBe("python/bin/python3.12");
     expect(pythonRelative("win32")).toBe("python\\python.exe");
     expect(cliRelative("darwin")).toBe("python/bin/splitsmith");
-    expect(cliRelative("win32")).toBe("python\\Scripts\\splitsmith.exe");
+    expect(cliRelative("win32")).toBe("python\\Scripts\\splitsmith.cmd");
   });
 });

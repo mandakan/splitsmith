@@ -31,13 +31,21 @@ done
 case "$TARGET" in
   macos-aarch64) request="$PYVER"; layout="macos-aarch64-none" ;;
   linux-x86_64) request="cpython-$PYVER-linux-x86_64-gnu"; layout="linux-x86_64-gnu" ;;
+  windows-x86_64) request="cpython-$PYVER-windows-x86_64-none"; layout="windows-x86_64-none" ;;
   *) echo "unknown target $TARGET" >&2; exit 2 ;;
 esac
 rm -rf "$RUNTIME"; mkdir -p "$RUNTIME"
 UV_PYTHON_INSTALL_DIR="$RUNTIME" uv python install "$request"
 src="$(ls -d "$RUNTIME"/cpython-"$PYVER".*-"$layout")"
 mv "$src" "$RUNTIME/python"
-PY="$RUNTIME/python/bin/python$PYVER"
+# python-build-standalone's Windows layout has no bin/: python.exe at the
+# root, the stdlib in Lib\, console scripts in Scripts\.
+if [ "$TARGET" = windows-x86_64 ]; then
+  PY="$RUNTIME/python/python.exe"; STDLIB="$RUNTIME/python/Lib"; SCRIPTS="$RUNTIME/python/Scripts"
+else
+  PY="$RUNTIME/python/bin/python$PYVER"; STDLIB="$RUNTIME/python/lib/python$PYVER"; SCRIPTS="$RUNTIME/python/bin"
+fi
+SITE="$STDLIB/site-packages"
 
 uv pip install --python "$PY" --break-system-packages --no-cache "$wheel"
 
@@ -63,6 +71,13 @@ fi
 # third line closes. readlink -f resolves the /usr/local/bin symlink the
 # app installs back into the bundle (macOS 12.3+; LSMinimumSystemVersion
 # is set to match).
+if [ "$TARGET" = windows-x86_64 ]; then
+  # uv's Scripts\*.exe launchers carry the interpreter's absolute path and
+  # cannot be rewritten in place; ours become .cmd shims that find
+  # python.exe relative to themselves, and every other launcher goes (the
+  # bundle runs none of them).
+  "$PY" "$HERE/scripts/windows_console_shims.py" splitsmith
+else
 SHIM_HEAD=$(cat <<'EOF'
 #!/bin/sh
 '''exec' "$(dirname "$(readlink -f "$0")")/python3.12" "$0" "$@"
@@ -82,24 +97,29 @@ for script in "$RUNTIME"/python/bin/*; do
     mv "$script.tmp" "$script"; chmod +x "$script"
   fi
 done
+fi
 # The bundle outlives this dir: a script still naming it works here (and in
 # smoke.sh, run before the worktree goes) and nowhere else (0.87.2's CLI).
-if stale="$(grep -lF "$RUNTIME" "$RUNTIME"/python/bin/* 2>/dev/null)"; then
+# On Windows the dir is also spelled C:\..., which is what a launcher holds.
+build_dirs=(-e "$RUNTIME")
+if command -v cygpath >/dev/null; then build_dirs+=(-e "$(cygpath -w "$RUNTIME")" -e "$(cygpath -m "$RUNTIME")"); fi
+if stale="$(grep -ilF "${build_dirs[@]}" "$SCRIPTS"/* 2>/dev/null)"; then
   echo "console scripts still name the build dir:" >&2; echo "$stale" >&2; exit 1
 fi
 
 # Precompile so the sealed bundle is never written to at runtime.
-"$PY" -m compileall -q "$RUNTIME/python/lib/python$PYVER/site-packages" >/dev/null
+"$PY" -m compileall -q "$SITE" >/dev/null
 # Drop what the sealed bundle never uses: test trees, the installer stack
 # (nothing installs into a signed app), Tk and the C headers. The two big
 # items that stay are known: Playwright's Node driver (#986 replaces the
 # rasterizer with Electron's own Chromium) and llvmlite under librosa (#442).
-find "$RUNTIME/python/lib/python$PYVER/site-packages" -type d -name tests -prune -exec rm -rf {} +
-rm -rf "$RUNTIME/python/lib/python$PYVER/test" \
-  "$RUNTIME/python/lib/python$PYVER/site-packages"/pip "$RUNTIME/python/lib/python$PYVER/site-packages"/pip-*.dist-info \
-  "$RUNTIME/python/lib/python$PYVER/ensurepip" "$RUNTIME/python/lib/python$PYVER/idlelib" \
-  "$RUNTIME/python/lib/python$PYVER/tkinter" "$RUNTIME/python/lib/python$PYVER/lib-dynload"/_tkinter*.so \
+find "$SITE" -type d -name tests -prune -exec rm -rf {} +
+rm -rf "$STDLIB/test" "$SITE"/pip "$SITE"/pip-*.dist-info \
+  "$STDLIB/ensurepip" "$STDLIB/idlelib" "$STDLIB/tkinter" "$STDLIB/turtledemo" \
+  "$STDLIB/lib-dynload"/_tkinter*.so \
   "$RUNTIME"/python/lib/tcl* "$RUNTIME"/python/lib/tk* "$RUNTIME"/python/lib/libtcl* "$RUNTIME"/python/lib/libtk* \
-  "$RUNTIME/python/include" "$RUNTIME/python/share"
-rm -f "$RUNTIME"/python/bin/pip* "$RUNTIME"/python/bin/idle* "$RUNTIME"/python/bin/2to3*
+  "$RUNTIME/python/include" "$RUNTIME/python/share" \
+  "$RUNTIME/python/tcl" "$RUNTIME/python/libs" "$RUNTIME/python/DLLs"/_tkinter.pyd \
+  "$RUNTIME/python/DLLs"/tcl*.dll "$RUNTIME/python/DLLs"/tk*.dll
+rm -f "$SCRIPTS"/pip* "$SCRIPTS"/idle* "$SCRIPTS"/2to3*
 echo "runtime at $RUNTIME/python ($(du -sh "$RUNTIME/python" | cut -f1))"

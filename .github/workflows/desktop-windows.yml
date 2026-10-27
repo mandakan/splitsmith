@@ -1,0 +1,65 @@
+name: desktop-windows
+
+# The Windows runtime (#1765): python-build-standalone plus the wheel, built
+# under Git Bash by the same build-runtime.sh as macOS and Linux, then the
+# slim import check and smoke.sh against it. There is no installer yet, so
+# smoke.sh runs the bare runtime dir, and ffmpeg is Chocolatey's build as a
+# stand-in until our own Windows build is pinned in fetch-ffmpeg.sh. Called
+# by desktop.yml on PRs; never uploads.
+on:
+  workflow_call:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  runtime:
+    name: windows x86_64 runtime + smoke
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v5
+      - uses: astral-sh/setup-uv@v4
+        with:
+          enable-cache: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - uses: pnpm/action-setup@v4
+      - uses: actions/cache@v4
+        with:
+          path: ~/.splitsmith/models
+          key: models-${{ hashFiles('src/splitsmith/data/ensemble_calibration.json') }}
+
+      - name: SPA and wheel
+        # build.sh's first two steps; the rest of it (electron-builder) has
+        # no Windows target yet.
+        run: |
+          (cd src/splitsmith/ui_static && pnpm install --frozen-lockfile && pnpm build && find dist -name '*.map' -delete)
+          rm -rf dist && uv build --wheel --python 3.12
+
+      - name: Runtime
+        run: desktop/build-runtime.sh --target windows-x86_64
+
+      - name: Slim import surface
+        run: desktop/build/runtime/python/python.exe scripts/ci/assert_slim_import_surface.py
+
+      - name: ffmpeg stand-in
+        run: |
+          choco install ffmpeg -y --no-progress >/dev/null
+          src="$(dirname "$(find /c/ProgramData/chocolatey/lib/ffmpeg -name ffmpeg.exe | head -1)")"
+          mkdir -p desktop/build/runtime/bin
+          cp "$src/ffmpeg.exe" "$src/ffprobe.exe" desktop/build/runtime/bin/
+          desktop/build/runtime/bin/ffmpeg.exe -version | head -1
+
+      - name: Smoke
+        run: desktop/smoke.sh desktop/build/runtime
+
+      - name: Size
+        if: always()
+        run: du -sh desktop/build/runtime/python 2>/dev/null || true
