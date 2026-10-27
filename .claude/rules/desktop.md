@@ -146,9 +146,9 @@ function only. **No auto-update.**
   package.json `name`. **Don't add `productName` to package.json** (it would move
   the macOS userData dir); `electron-builder.yml`'s own `productName` is fine.
 
-## Windows (not shipped)
+## Windows
 
-There is no Windows build yet (#1765). The shell already knows win32:
+x64 NSIS installer and zip, unsigned (code signing is still open). The shell knows win32:
 `sidecar.ts` runs `python\python.exe` with `bin\ffmpeg.exe`, logs and caches
 numba under `%LOCALAPPDATA%\splitsmith` (the engine's cache dir), the menu
 takes the Linux shape (no CLI installer), `main.ts` sets the AppUserModelID

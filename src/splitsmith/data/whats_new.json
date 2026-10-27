@@ -1,6 +1,12 @@
 {
   "entries": [
     {
+      "id": "windows-app",
+      "date": "2026-10-27",
+      "title": "Splitsmith for Windows",
+      "body": "The desktop app now runs on 64-bit Windows 10 and 11. Get the installer or the zip from the download page; Windows asks before the first run, so choose More info, then Run anyway."
+    },
+    {
       "id": "thin-detection",
       "date": "2026-10-26",
       "title": "Shot detection without a model download",
