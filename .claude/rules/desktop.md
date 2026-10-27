@@ -52,8 +52,9 @@ An Electron shell, not a second frontend: `desktop/src/main.ts` spawns
   Windows has no shebang to rewrite: uv's `Scripts\*.exe` launchers hold the
   interpreter's absolute path, so `scripts/windows_console_shims.py` replaces
   ours with `<name>.cmd` + `<name>-script.py` (finding `..\python.exe` from
-  `%~dp0`) and deletes everything else in `Scripts\` (numba also drops a plain script there with a shebang); the same stale-path check runs,
-  in both the POSIX and the `C:\` spelling.
+  `%~dp0`) and deletes everything else in `Scripts\` (numba also drops a
+  plain script there with a shebang); the same stale-path check runs, in
+  both the POSIX and the `C:\` spelling.
 - The bundle is sealed: `PYTHONDONTWRITEBYTECODE`, precompiled bytecode,
   `NUMBA_CACHE_DIR` under `~/Library/Caches`. Data stays in `~/.splitsmith`,
   shared with the CLI on purpose.
