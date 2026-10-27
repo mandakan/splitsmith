@@ -212,9 +212,10 @@ if [ "$WINDOWS" = 1 ]; then
   # --disable-autodetect also drops the thread backend; name it.
   CONFIGURE+=(--enable-cross-compile --arch=x86_64 --target-os=mingw32 --cross-prefix="$CROSS-"
     --pkg-config=pkg-config --enable-zlib --enable-w32threads
-    # vfwcap and gdigrab: screen and camera capture the app never does,
-    # and avicap32.dll imports.
-    --disable-indevs --disable-outdevs)
+    # Screen and camera capture the app never does, and vfwcap imports
+    # avicap32.dll. Not --disable-indevs: lavfi is an indev, and trim, the
+    # renders and smoke.sh all read from it.
+    --disable-indev=vfwcap --disable-indev=gdigrab --disable-outdevs)
 else
   CONFIGURE+=(--enable-zlib --enable-bzlib --enable-iconv)
 fi
@@ -266,9 +267,10 @@ for bin in "ffmpeg$EXE" "ffprobe$EXE"; do
 done
 if [ "$WINDOWS" = 1 ]; then
   # What -encoders / -filters would list, from the generated config.
-  components="$(cat "$FFDIR/libavcodec/codec_list.c" "$FFDIR/libavfilter/filter_list.c")"
+  components="$(cat "$FFDIR/libavcodec/codec_list.c" "$FFDIR/libavfilter/filter_list.c" "$FFDIR/libavdevice/indev_list.c")"
   encoders="$(sed -n 's/.*&ff_\(.*\)_encoder,.*/\1/p' <<<"$components")"
   filters="$(sed -n 's/.*&ff_[av]f_\(.*\),.*/\1/p' <<<"$components")"
+  grep -q '&ff_lavfi_demuxer' <<<"$components" || { echo "no lavfi input device" >&2; exit 1; }
 else
   # Capture first: ``ffmpeg | grep -q`` would SIGPIPE ffmpeg on the first
   # match and, under pipefail, fail the script with no message.
