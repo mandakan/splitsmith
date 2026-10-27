@@ -4,7 +4,8 @@
       "id": "thin-detection",
       "date": "2026-10-26",
       "title": "Shot detection without a model download",
-      "body": "Detecting shots no longer downloads models first, so a new install finds shots straight away, even offline."
+      "body": "Detecting shots no longer downloads models first, even offline. For head cameras, an optional audio model on a match's Overview improves detection a little.",
+      "chip": "thin-detection"
     },
     {
       "id": "export-progress",

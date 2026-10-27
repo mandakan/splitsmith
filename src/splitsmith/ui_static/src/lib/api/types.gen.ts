@@ -3462,6 +3462,34 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/settings/detection-model": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Detection Model Settings
+         * @description Which model set shot detection uses on this machine, and whether
+         *     its files are here (spec 2026-10-26). Local only.
+         */
+        get: operations["get_detection_model_settings_api_settings_detection_model_get"];
+        /**
+         * Put Detection Model Settings
+         * @description Home's "Audio model for head cameras" switch. Choosing ``clap``
+         *     starts the model download when its files are missing and no download
+         *     is running; detection uses ``base`` until they are here. Turning it
+         *     off keeps the files.
+         */
+        put: operations["put_detection_model_settings_api_settings_detection_model_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/settings/export-presets": {
         parameters: {
             query?: never;
@@ -8410,6 +8438,43 @@ export interface components {
         DesktopTokenRevokeResponse: {
             /** Revoked */
             revoked: boolean;
+        };
+        /**
+         * DetectionModelSettings
+         * @description The detection model preference and what it needs on this machine.
+         */
+        DetectionModelSettings: {
+            /**
+             * Active Job
+             * @description The running model download job, if any.
+             */
+            active_job: string | null;
+            /**
+             * Model Set
+             * @description The set detection asks for (``SPLITSMITH_MODEL_SET`` wins).
+             */
+            model_set: string;
+            /**
+             * Present
+             * @description Every required artifact is cached and verified.
+             */
+            present: boolean;
+            /**
+             * Required
+             * @description Model registry slugs that set needs; none for ``base``.
+             */
+            required: string[];
+        };
+        /**
+         * DetectionModelSettingsRequest
+         * @description Body for PUT /api/settings/detection-model: the machine's model set.
+         */
+        DetectionModelSettingsRequest: {
+            /**
+             * Model Set
+             * @enum {string}
+             */
+            model_set: "base" | "clap";
         };
         /**
          * DevReviewConfirmBody
@@ -17462,6 +17527,59 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_detection_model_settings_api_settings_detection_model_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DetectionModelSettings"];
+                };
+            };
+        };
+    };
+    put_detection_model_settings_api_settings_detection_model_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DetectionModelSettingsRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DetectionModelSettings"];
                 };
             };
             /** @description Validation Error */

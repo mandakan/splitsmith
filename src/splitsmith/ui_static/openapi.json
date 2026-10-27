@@ -3187,6 +3187,68 @@
     "title": "DesktopTokenRevokeResponse",
     "type": "object"
    },
+   "DetectionModelSettings": {
+    "description": "The detection model preference and what it needs on this machine.",
+    "properties": {
+     "active_job": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "description": "The running model download job, if any.",
+      "title": "Active Job"
+     },
+     "model_set": {
+      "description": "The set detection asks for (``SPLITSMITH_MODEL_SET`` wins).",
+      "title": "Model Set",
+      "type": "string"
+     },
+     "present": {
+      "description": "Every required artifact is cached and verified.",
+      "title": "Present",
+      "type": "boolean"
+     },
+     "required": {
+      "description": "Model registry slugs that set needs; none for ``base``.",
+      "items": {
+       "type": "string"
+      },
+      "title": "Required",
+      "type": "array"
+     }
+    },
+    "required": [
+     "active_job",
+     "model_set",
+     "present",
+     "required"
+    ],
+    "title": "DetectionModelSettings",
+    "type": "object"
+   },
+   "DetectionModelSettingsRequest": {
+    "additionalProperties": false,
+    "description": "Body for PUT /api/settings/detection-model: the machine's model set.",
+    "properties": {
+     "model_set": {
+      "enum": [
+       "base",
+       "clap"
+      ],
+      "title": "Model Set",
+      "type": "string"
+     }
+    },
+    "required": [
+     "model_set"
+    ],
+    "title": "DetectionModelSettingsRequest",
+    "type": "object"
+   },
    "DevReviewConfirmBody": {
     "description": "Optional body for the queue's sign-off: how the fixture was checked.",
     "properties": {
@@ -18544,6 +18606,62 @@
      }
     },
     "summary": "Put Global Auto Sync"
+   }
+  },
+  "/api/settings/detection-model": {
+   "get": {
+    "description": "Which model set shot detection uses on this machine, and whether\nits files are here (spec 2026-10-26). Local only.",
+    "operationId": "get_detection_model_settings_api_settings_detection_model_get",
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/DetectionModelSettings"
+        }
+       }
+      },
+      "description": "Successful Response"
+     }
+    },
+    "summary": "Get Detection Model Settings"
+   },
+   "put": {
+    "description": "Home's \"Audio model for head cameras\" switch. Choosing ``clap``\nstarts the model download when its files are missing and no download\nis running; detection uses ``base`` until they are here. Turning it\noff keeps the files.",
+    "operationId": "put_detection_model_settings_api_settings_detection_model_put",
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/DetectionModelSettingsRequest"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/DetectionModelSettings"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Put Detection Model Settings"
    }
   },
   "/api/settings/export-presets": {

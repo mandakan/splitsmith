@@ -61,6 +61,7 @@ import { Timeline, type TimelineTrack } from "@/components/timeline/Timeline";
 import { WaveformTrack } from "@/components/timeline/WaveformTrack";
 import { Button } from "@/components/ui/button";
 import { Chip } from "@/components/ui/Chip";
+import { detectedWithLabel } from "@/lib/detectionModel";
 import { Kbd } from "@/components/ui/Kbd";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Portal } from "@/components/ui/Portal";
@@ -1974,6 +1975,7 @@ export function Audit({ fixture = null }: { fixture?: FixtureTarget | null } = {
   const flagCount = anomalies.filter((a) => a.time != null).length;
   const activeShooter = shooters.find((s) => s.slug === slugParam) ?? null;
   const chips = primary ? headerState({ primary, keptCount: keptShots.length, flagCount }) : null;
+  const detectedWith = detectedWithLabel(audit?._candidates_pending_audit);
   const header = stage
     ? {
         ordinal: pad2(stage.stage_number),
@@ -1991,6 +1993,7 @@ export function Audit({ fixture = null }: { fixture?: FixtureTarget | null } = {
                 {chips.flags ? <Chip tone="warn">{chips.flags}</Chip> : null}
               </>
             ) : null}
+            {detectedWith ? <Chip tick="muted">{detectedWith}</Chip> : null}
             {audit?.needs_attention?.flagged ? (
               <Chip tone="warn" title={audit.needs_attention.note ?? undefined}>
                 Flagged for desktop
