@@ -1,6 +1,6 @@
 [project]
 name = "splitsmith"
-version = "0.87.2"
+version = "0.88.0"
 description = "Shot splits from the audio your camera already recorded: audit, coach, compare and cut IPSC match video"
 readme = "README.md"
 requires-python = ">=3.11"

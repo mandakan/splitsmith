@@ -1,5 +1,87 @@
 # Changelog
 
+## [0.88.0](https://github.com/mandakan/splitsmith/compare/v0.87.2...v0.88.0) (2026-10-27)
+
+
+### Features
+
+* **compare:** render a grid tile without an exported trim ([#1706](https://github.com/mandakan/splitsmith/issues/1706)) ([51a2d49](https://github.com/mandakan/splitsmith/commit/51a2d49bd8d38cb775bb558b61113c1e5b1882ac))
+* **detection:** detect shots with no model download; CLAP becomes an opt-in model set ([#1750](https://github.com/mandakan/splitsmith/issues/1750)) ([bbeddab](https://github.com/mandakan/splitsmith/commit/bbeddaba1fc4b45b0e4cb97632abd7205cf0a309))
+* **export:** progress panel with time left, and a hosted limit on exports at once ([#1725](https://github.com/mandakan/splitsmith/issues/1725)) ([bb08166](https://github.com/mandakan/splitsmith/commit/bb081664742dcc4b02bb41c8eba5cfd110b8584b))
+* **grid:** render a hosted whole-match grid as one job per stage ([#1718](https://github.com/mandakan/splitsmith/issues/1718)) ([b335304](https://github.com/mandakan/splitsmith/commit/b33530477f842c46100ed21306ff25571535d868))
+* **observability:** record the worker that ran each hosted job ([#1667](https://github.com/mandakan/splitsmith/issues/1667)) ([7268a9c](https://github.com/mandakan/splitsmith/commit/7268a9ce91215d467f4bc3e2671f0bbc1a26224e))
+* reference footage in place on Windows through a pointer file ([#1749](https://github.com/mandakan/splitsmith/issues/1749)) ([3b855e0](https://github.com/mandakan/splitsmith/commit/3b855e01c9847bfe33e1b3f11a38c67a78f9be6a))
+* **ui:** opt into the head camera audio model from Overview ([#1761](https://github.com/mandakan/splitsmith/issues/1761)) ([7a41ecf](https://github.com/mandakan/splitsmith/commit/7a41ecf7b4a494ee91d4988839f8ff3953f2d16c))
+
+
+### Bug Fixes
+
+* **agent:** a worker disabled in admin stops draining on the r2 wake channel ([#1701](https://github.com/mandakan/splitsmith/issues/1701)) ([#1708](https://github.com/mandakan/splitsmith/issues/1708)) ([879683f](https://github.com/mandakan/splitsmith/commit/879683f1ef6b067c343cb9c0acd1d0455c82aa61))
+* **agent:** take SIGTERM through signal.signal where the loop has no handler ([#1748](https://github.com/mandakan/splitsmith/issues/1748)) ([15d9042](https://github.com/mandakan/splitsmith/commit/15d9042178807e1de92846a7411df3bb1bf28575))
+* **beep:** save the beep before its trim, and keep a hosted trim that is still current ([#1694](https://github.com/mandakan/splitsmith/issues/1694)) ([334f957](https://github.com/mandakan/splitsmith/commit/334f957972e436463c254c6b9d101c7177b23a61))
+* **compare:** name the missing trims and the in-app fix in the grid refusal ([#1695](https://github.com/mandakan/splitsmith/issues/1695)) ([c67ba52](https://github.com/mandakan/splitsmith/commit/c67ba52bc2a0b91a60338d1d753f827a80180c1a))
+* **compare:** validate a hosted grid request from a listing, never pull trims ([#1689](https://github.com/mandakan/splitsmith/issues/1689)) ([fa83bd2](https://github.com/mandakan/splitsmith/commit/fa83bd2b767d0ffb2cd5277745cce0e82dd5e30f))
+* **delete:** deleting a hosted match cancels only that match's jobs ([#1703](https://github.com/mandakan/splitsmith/issues/1703)) ([#1707](https://github.com/mandakan/splitsmith/issues/1707)) ([5863e8a](https://github.com/mandakan/splitsmith/commit/5863e8a4f4869b9996bd1e95ddad73a585deb0a8))
+* **deploy:** give the worker job 16 GiB so a 4K dressed grid stage fits ([#1730](https://github.com/mandakan/splitsmith/issues/1730)) ([a750421](https://github.com/mandakan/splitsmith/commit/a750421480fa48e2180f8c137d8d3d10c9e6741f))
+* **derived:** lock derived files without fcntl on Windows ([#1740](https://github.com/mandakan/splitsmith/issues/1740)) ([2cc3a1d](https://github.com/mandakan/splitsmith/commit/2cc3a1da402e8340436051df75891bacc4cf5628))
+* **desktop:** check the DMG as users get it; make the bundled CLI's launcher relocatable ([#1717](https://github.com/mandakan/splitsmith/issues/1717)) ([e5221dd](https://github.com/mandakan/splitsmith/commit/e5221ddd6e32ab8d312288b075c0627f0b9b13f0))
+* **export:** count a queued grid's stages in its first estimate ([#1726](https://github.com/mandakan/splitsmith/issues/1726)) ([aec9a54](https://github.com/mandakan/splitsmith/commit/aec9a543d760a7309320c34a6ba19bcf8d5f1a49))
+* **export:** measure a part's rate from its first fraction ([#1729](https://github.com/mandakan/splitsmith/issues/1729)) ([25934af](https://github.com/mandakan/splitsmith/commit/25934af210ec2f0041170446d31405538eb542f4))
+* **export:** queue a grid's jobs with their canvas, and count the upload ([#1727](https://github.com/mandakan/splitsmith/issues/1727)) ([0f46769](https://github.com/mandakan/splitsmith/commit/0f4676992eb061b9a9095769720b84cae7cf5876))
+* **ffmpeg:** quote a filter value for both of ffmpeg's parsing passes ([#1751](https://github.com/mandakan/splitsmith/issues/1751)) ([1e76e21](https://github.com/mandakan/splitsmith/commit/1e76e2151813060c0eb1f0ad01cab41cc2b1cf2d))
+* **footage-sort:** key a scanned clip by its posix path ([#1753](https://github.com/mandakan/splitsmith/issues/1753)) ([22517d3](https://github.com/mandakan/splitsmith/commit/22517d39fb12bd276012aec3122094dfc0a6595b))
+* **footage-sort:** match the per-shooter run filter on posix clip ids ([#1756](https://github.com/mandakan/splitsmith/issues/1756)) ([a4b88cb](https://github.com/mandakan/splitsmith/commit/a4b88cbdf6684948c8b1c2fdcc62bc34d6f75a69))
+* **footage:** a change of primary carries the audit to the new camera's clip ([#1666](https://github.com/mandakan/splitsmith/issues/1666)) ([f14e3f7](https://github.com/mandakan/splitsmith/commit/f14e3f74fcd775f628c12ea4db940572982c3677))
+* **grid:** stop a cancelled grid export's running encode ([#1731](https://github.com/mandakan/splitsmith/issues/1731)) ([d9215fa](https://github.com/mandakan/splitsmith/commit/d9215faf0d8011eada23ba241720d0721ca771c0))
+* **hosted:** bake the CLAP model into the images; workers fetch it at startup ([#1762](https://github.com/mandakan/splitsmith/issues/1762)) ([8dcaad9](https://github.com/mandakan/splitsmith/commit/8dcaad9071a9007aed810470e41128f8787c0525))
+* **hosted:** keep no full-resolution trim in storage ([#1705](https://github.com/mandakan/splitsmith/issues/1705)) ([159758b](https://github.com/mandakan/splitsmith/commit/159758b9502720f1704ff311e12007b857d7dca6))
+* **jobs:** report a hosted job's match_id on the wire ([#1687](https://github.com/mandakan/splitsmith/issues/1687)) ([dc20d04](https://github.com/mandakan/splitsmith/commit/dc20d040d4d8def863ef159bf8f1b6960a977a78))
+* **jobs:** scope hosted find_active to the calling match ([#1702](https://github.com/mandakan/splitsmith/issues/1702)) ([73eb230](https://github.com/mandakan/splitsmith/commit/73eb230650682a867d327410e37294ffed4ad6b2))
+* **jobs:** write a job's project fields through the port's read-modify-write ([#1690](https://github.com/mandakan/splitsmith/issues/1690)) ([1e9451a](https://github.com/mandakan/splitsmith/commit/1e9451a523fde91bf4efbae7c0f59346f09b3dbf))
+* **lab:** a re-promote keeps the fixture's lab labels ([#1665](https://github.com/mandakan/splitsmith/issues/1665)) ([12fd0b1](https://github.com/mandakan/splitsmith/commit/12fd0b1d62c629dc191b5d9e9eb825b1dd03231f))
+* name utf-8 on every text read, write and subprocess decode ([#1742](https://github.com/mandakan/splitsmith/issues/1742)) ([4c70bb9](https://github.com/mandakan/splitsmith/commit/4c70bb9017c771b2806ae992e743b65247f3b8b3))
+* **observability:** take the worker's size from its deploy, not the sandbox ([#1669](https://github.com/mandakan/splitsmith/issues/1669)) ([bded337](https://github.com/mandakan/splitsmith/commit/bded3372f6b84554befc48fa10ed72babe783263))
+* **queue:** run proxy jobs after every pipeline job ([#1693](https://github.com/mandakan/splitsmith/issues/1693)) ([fc9cfdf](https://github.com/mandakan/splitsmith/commit/fc9cfdf0596963e1e95cf3c9bfa2de431a6cd6b7))
+* retry a Windows rename onto a file another handle briefly holds ([#1752](https://github.com/mandakan/splitsmith/issues/1752)) ([aecf1ea](https://github.com/mandakan/splitsmith/commit/aecf1ea185bffc6205ced2cb8697b2a4d758037c))
+* **runtime:** on Windows find ffmpeg beside Python only by a runnable name ([#1755](https://github.com/mandakan/splitsmith/issues/1755)) ([0f34af4](https://github.com/mandakan/splitsmith/commit/0f34af47f31e7412045d84e151cef797e97a940f))
+* **share:** a malformed query on a share GET is the uniform 404 ([#1663](https://github.com/mandakan/splitsmith/issues/1663)) ([cada2bd](https://github.com/mandakan/splitsmith/commit/cada2bd677fb5d503751ba281f454a591543d21e))
+* **storage:** refuse Windows-absolute and backslash-traversing keys on every host ([#1747](https://github.com/mandakan/splitsmith/issues/1747)) ([912c704](https://github.com/mandakan/splitsmith/commit/912c704591e7dc70f4ca84ed131e6681300f13ff))
+* store and key project paths with forward slashes on every platform ([#1741](https://github.com/mandakan/splitsmith/issues/1741)) ([fcb95eb](https://github.com/mandakan/splitsmith/commit/fcb95ebad597dd698270cbdcd5f158b76be5d4bf))
+* **video-match:** ignore a Windows file's birth time, which is its copy time ([#1754](https://github.com/mandakan/splitsmith/issues/1754)) ([2efb4cc](https://github.com/mandakan/splitsmith/commit/2efb4cc28901bd25472bea3dde897b6eaabd9951))
+* **worker:** count a live drain's job in the fan-out backlog ([#1711](https://github.com/mandakan/splitsmith/issues/1711)) ([58efda3](https://github.com/mandakan/splitsmith/commit/58efda3fb29b265f59e0c43dd4d49b5c4dc0af72))
+* **worker:** end the one-shot drain before its timeout and recover killed workers' jobs ([#1697](https://github.com/mandakan/splitsmith/issues/1697)) ([17cc7ea](https://github.com/mandakan/splitsmith/commit/17cc7ea215a6d5129f29db70b53045bbd8efbc49))
+* **worker:** escalate to the platform worker while submits keep coming ([#1668](https://github.com/mandakan/splitsmith/issues/1668)) ([c8c9f0e](https://github.com/mandakan/splitsmith/commit/c8c9f0e1970f03f216b425679a673125f3c2c1ed))
+* **worker:** fan out for backlogs a live drain builds itself ([#1709](https://github.com/mandakan/splitsmith/issues/1709)) ([#1710](https://github.com/mandakan/splitsmith/issues/1710)) ([bb3d876](https://github.com/mandakan/splitsmith/commit/bb3d876321e2797e0513441f4e37bd4eadb07e43))
+* **worker:** self-hosted boxes heartbeat through the bucket in r2 mode ([#1698](https://github.com/mandakan/splitsmith/issues/1698)) ([1b993c2](https://github.com/mandakan/splitsmith/commit/1b993c2f43a4297ab8979e593ee6f7c2b2642e98))
+* **worker:** sweep the Cloud Run worker's source cache after every job ([#1679](https://github.com/mandakan/splitsmith/issues/1679)) ([fa4f3ed](https://github.com/mandakan/splitsmith/commit/fa4f3ede2234a1423f2d9867a29c2d8f43bd57d5))
+
+
+### Performance
+
+* **beep:** read a hosted beep detection's audio from a presigned URL ([#1716](https://github.com/mandakan/splitsmith/issues/1716)) ([db87483](https://github.com/mandakan/splitsmith/commit/db87483ddb93d1cb2e1c4fe1ab5cf3a23626a828))
+* **export:** cut a hosted export's lossless trims from presigned URLs ([#1713](https://github.com/mandakan/splitsmith/issues/1713)) ([36294d5](https://github.com/mandakan/splitsmith/commit/36294d588a08c59c180952a8013531568cc3b63f))
+* **grid:** probe a hosted grid's tiles in parallel while planning ([#1723](https://github.com/mandakan/splitsmith/issues/1723)) ([fdd854b](https://github.com/mandakan/splitsmith/commit/fdd854bc8cd5bd985c7ad31316261d1cd2d7e45f))
+* **grid:** stitch a hosted grid from the segments its stage jobs published ([#1728](https://github.com/mandakan/splitsmith/issues/1728)) ([d5c5875](https://github.com/mandakan/splitsmith/commit/d5c5875a8be474d35c9237afe10ed71d8e1e21d7))
+* **proxy:** stream the source to ffmpeg from a presigned URL ([#1696](https://github.com/mandakan/splitsmith/issues/1696)) ([35c859d](https://github.com/mandakan/splitsmith/commit/35c859ddbba38d9ea4644d45e1d601aca1ff0878))
+* **trim:** cut a hosted trim from a presigned URL, not a download ([#1712](https://github.com/mandakan/splitsmith/issues/1712)) ([0a4eab3](https://github.com/mandakan/splitsmith/commit/0a4eab3745af3916c21326db7fe99232fcd1d052))
+* **worker:** fan out beside a Cloud Run execution still booting ([#1720](https://github.com/mandakan/splitsmith/issues/1720)) ([13c48a2](https://github.com/mandakan/splitsmith/commit/13c48a2406e0d337f4fa4baf9d2f8e98f3b72b90))
+* **worker:** give every queued grid stage a worker of its own ([#1719](https://github.com/mandakan/splitsmith/issues/1719)) ([193b901](https://github.com/mandakan/splitsmith/commit/193b901aff6576f7c810d49631d07c11b7ae2fb0))
+* **worker:** keep no source cache between jobs on Cloud Run ([#1714](https://github.com/mandakan/splitsmith/issues/1714)) ([12312cb](https://github.com/mandakan/splitsmith/commit/12312cb01e8f233397d4881b2a5974b156b9dc2a))
+* **worker:** wake once for a grid's whole batch of stage jobs ([#1724](https://github.com/mandakan/splitsmith/issues/1724)) ([3cafd58](https://github.com/mandakan/splitsmith/commit/3cafd5830feccc96a0da6469dfdc997389596850))
+
+
+### Documentation
+
+* **saas:** replace the hosted cost estimate with the measured one ([#1738](https://github.com/mandakan/splitsmith/issues/1738)) ([4028288](https://github.com/mandakan/splitsmith/commit/4028288d062abd330167e97b317bf8aa6cb78330))
+
+
+### Build / CI
+
+* add a non-blocking Windows probe that reports what breaks ([#1739](https://github.com/mandakan/splitsmith/issues/1739)) ([ca99107](https://github.com/mandakan/splitsmith/commit/ca9910741f073bfc52ea0d50e4a7282688d4dc7e))
+* cache apt's downloads so a crawling Ubuntu mirror stops stalling shards ([#1660](https://github.com/mandakan/splitsmith/issues/1660)) ([2dccc1f](https://github.com/mandakan/splitsmith/commit/2dccc1f8f7e1f1cce558dd3aa5f02234036ded72))
+* check text out with LF on every platform ([#1758](https://github.com/mandakan/splitsmith/issues/1758)) ([266cf50](https://github.com/mandakan/splitsmith/commit/266cf5072b35c75814d30826b3e2b1d481de1a29))
+* **desktop:** bump electron to 44.9.3 ([#1664](https://github.com/mandakan/splitsmith/issues/1664)) ([125239d](https://github.com/mandakan/splitsmith/commit/125239d6606b216fc1125f8481b03b664ff84d0e))
+
 ## [0.87.2](https://github.com/mandakan/splitsmith/compare/v0.87.1...v0.87.2) (2026-10-22)
 
 
