@@ -5,8 +5,9 @@
 #     (needs a Developer ID Application cert in the keychain and
 #      APPLE_API_KEY / APPLE_API_KEY_ID / APPLE_API_ISSUER in the env)
 #   desktop/build.sh --linux [--wheel PATH]              -> AppImage + .deb
-# The target defaults to the build host's (lib/target.sh); --mac / --linux
-# name it. --wheel installs that wheel instead of building one from the tree.
+#   desktop/build.sh --windows [--wheel PATH]            -> NSIS installer + zip (Git Bash)
+# The target defaults to the build host's (lib/target.sh); --mac / --linux /
+# --windows name it. --wheel installs that wheel instead of building one from the tree.
 set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(cd "$HERE/.." && pwd)"
@@ -53,6 +54,7 @@ case "$TARGET" in
         "$HERE/linux/$f.sh" > "$HERE/build/linux/$f.sh"
     done
     ;;
+  windows-x86_64) builder_args=(--win --x64) ;;
   *) echo "unknown target $TARGET" >&2; exit 2 ;;
 esac
 (
@@ -70,6 +72,8 @@ if [ "$TARGET" = macos-aarch64 ]; then
     "$HERE/verify-signed.sh" "$HERE/dist/mac-arm64/Splitsmith.app"
   fi
   ls -la "$HERE"/dist/*.dmg
+elif [ "$TARGET" = windows-x86_64 ]; then
+  ls -la "$HERE"/dist/*.exe "$HERE"/dist/*.zip
 else
   ls -la "$HERE"/dist/*.AppImage "$HERE"/dist/*.deb
 fi
