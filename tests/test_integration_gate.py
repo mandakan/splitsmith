@@ -34,10 +34,11 @@ _TARGET = "tests/test_proxy.py::test_transcode_proxy_produces_smaller_valid_mp4"
 
 def _path_without_ffmpeg() -> str:
     """``PATH`` with every directory containing ffmpeg/ffprobe removed."""
+    names = ("ffmpeg", "ffprobe", "ffmpeg.exe", "ffprobe.exe")  # Windows finds the .exe
     kept = [
         entry
         for entry in os.environ.get("PATH", "").split(os.pathsep)
-        if entry and not (Path(entry) / "ffmpeg").exists() and not (Path(entry) / "ffprobe").exists()
+        if entry and not any((Path(entry) / name).exists() for name in names)
     ]
     return os.pathsep.join(kept)
 

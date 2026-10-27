@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import subprocess
 import sys
 from datetime import UTC
@@ -10,6 +11,14 @@ from pathlib import Path
 from sqlalchemy import select
 
 from splitsmith.db import AccessRequest, Base, User, create_engine, sessionmaker
+
+
+def _env(url: str) -> dict[str, str]:
+    """Only the database URL, plus ``SYSTEMROOT`` where Windows Python needs it to start."""
+    env = {"SPLITSMITH_DATABASE_URL": url, "PATH": ""}
+    if "SYSTEMROOT" in os.environ:
+        env["SYSTEMROOT"] = os.environ["SYSTEMROOT"]
+    return env
 
 
 def test_import_keeps_timestamps_and_skips_known(tmp_path: Path) -> None:
@@ -40,7 +49,7 @@ def test_import_keeps_timestamps_and_skips_known(tmp_path: Path) -> None:
     )
     out = subprocess.run(
         [sys.executable, "scripts/import_waitlist.py", str(dump)],
-        env={"SPLITSMITH_DATABASE_URL": url, "PATH": ""},
+        env=_env(url),
         capture_output=True,
         text=True,
         encoding="utf-8",
@@ -85,7 +94,7 @@ def test_invalid_entries_are_skipped_and_counted(tmp_path: Path) -> None:
     )
     out = subprocess.run(
         [sys.executable, "scripts/import_waitlist.py", str(dump)],
-        env={"SPLITSMITH_DATABASE_URL": url, "PATH": ""},
+        env=_env(url),
         capture_output=True,
         text=True,
         encoding="utf-8",

@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import re
 import signal
+import sys
 import time
 from pathlib import Path
 
@@ -27,6 +28,10 @@ _ROOT = Path(__file__).resolve().parents[1]
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="the worker runs on Linux; Procrastinate installs no SIGTERM handler on Windows",
+)
 def test_one_shot_drain_stops_claiming_at_its_deadline() -> None:
     """A drain past its deadline finishes the job in flight, claims no
     other and returns; Procrastinate's own SIGTERM handler stays installed
