@@ -4,6 +4,7 @@ set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(cd "$HERE/.." && pwd)"
 PY="$HERE/build/runtime/python/bin/python3.12"
+[ -x "$PY" ] || PY="$HERE/build/runtime/python/python.exe"  # Windows layout
 OUT="$HERE/build/NOTICES.md"
 [ -x "$PY" ] || { echo "runtime missing; run build-runtime.sh" >&2; exit 1; }
 # The ffmpeg source release fetch-ffmpeg.sh unpacked into build/bin; its tag

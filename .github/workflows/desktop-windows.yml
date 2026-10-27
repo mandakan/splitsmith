@@ -1,10 +1,11 @@
 name: desktop-windows
 
-# The Windows runtime (#1765): python-build-standalone plus the wheel, built
-# under Git Bash by the same build-runtime.sh as macOS and Linux, then the
-# slim import check and smoke.sh against it. There is no installer yet, so
-# smoke.sh runs the bare runtime dir with our pinned ffmpeg (fetch-ffmpeg.sh)
-# copied into it. Called by desktop.yml on PRs; never uploads.
+# The Windows NSIS installer and zip (#1765), built under Git Bash by the same
+# build.sh as macOS and Linux, with our pinned ffmpeg (fetch-ffmpeg.sh). Then
+# the slim import check and smoke.sh against the unpacked app, and a silent
+# per-user install and uninstall with smoke.sh against the installed copy.
+# Unsigned until code signing lands. Called by desktop.yml on PRs; never
+# uploads to a release.
 on:
   workflow_call:
   workflow_dispatch:
@@ -17,10 +18,13 @@ defaults:
     shell: bash
 
 jobs:
-  runtime:
-    name: windows x86_64 runtime + smoke
+  build:
+    name: windows x64 installer + zip + smoke
     runs-on: windows-latest
-    timeout-minutes: 60
+    timeout-minutes: 75
+    env:
+      UV_PYTHON: "3.12"
+      CSC_IDENTITY_AUTO_DISCOVERY: "false"
     steps:
       - uses: actions/checkout@v5
       - uses: astral-sh/setup-uv@v4
@@ -35,35 +39,51 @@ jobs:
           path: ~/.splitsmith/models
           key: models-${{ hashFiles('src/splitsmith/data/ensemble_calibration.json') }}
 
-      - name: SPA and wheel
-        # build.sh's first two steps; the rest of it (electron-builder) has
-        # no Windows target yet.
-        run: |
-          (cd src/splitsmith/ui_static && pnpm install --frozen-lockfile && pnpm build && find dist -name '*.map' -delete)
-          rm -rf dist && uv build --wheel --python 3.12
-
-      - name: Runtime
-        run: desktop/build-runtime.sh --target windows-x86_64
+      - name: Build
+        run: desktop/build.sh --windows
 
       - name: Slim import surface
-        run: desktop/build/runtime/python/python.exe scripts/ci/assert_slim_import_surface.py
+        run: desktop/dist/win-unpacked/resources/python/python.exe scripts/ci/assert_slim_import_surface.py
 
       - name: ffmpeg
         # build-ffmpeg.sh cross-compiles and cannot run the .exe, so this is
         # where the build's encoder and filter checks really run.
         run: |
-          desktop/fetch-ffmpeg.sh --target windows-x86_64
-          mkdir -p desktop/build/runtime/bin
-          cp desktop/build/bin/ffmpeg.exe desktop/build/bin/ffprobe.exe desktop/build/runtime/bin/
-          ff=desktop/build/runtime/bin/ffmpeg.exe
+          ff=desktop/dist/win-unpacked/resources/bin/ffmpeg.exe
           encoders="$("$ff" -hide_banner -encoders)"; filters="$("$ff" -hide_banner -filters)"
           grep -q libx264 <<<"$encoders" || { echo "no libx264 encoder" >&2; exit 1; }
           grep -q drawtext <<<"$filters" || { echo "no drawtext filter" >&2; exit 1; }
-          desktop/build/runtime/bin/ffprobe.exe -version | head -1
+          "$ff" -version | head -1
 
-      - name: Smoke
-        run: desktop/smoke.sh desktop/build/runtime
+      - name: Smoke (unpacked)
+        run: desktop/smoke.sh desktop/dist/win-unpacked
 
-      - name: Size
-        if: always()
-        run: du -sh desktop/build/runtime/python 2>/dev/null || true
+      - name: Install, smoke, uninstall
+        # Start-Process -Wait: the NSIS installer returns before it is done
+        # when started from bash. Git Bash would turn a bare /S into a path.
+        run: |
+          setup="$(cygpath -w "$(ls desktop/dist/*-Setup-*.exe)")"
+          powershell -NoProfile -Command "Start-Process -FilePath '$setup' -ArgumentList '/S' -Wait"
+          programs="$(cygpath -u "$LOCALAPPDATA")/Programs"
+          app="$(dirname "$(dirname "$(ls -d "$programs"/*/resources/python | head -1)")")"
+          [ -d "$app/resources" ] || { echo "nothing installed under $programs" >&2; ls "$programs" >&2; exit 1; }
+          echo "installed at $app"
+          ls "$app"/*.exe
+          desktop/smoke.sh "$app"
+          uninst="$(cygpath -w "$(ls "$app"/Uninstall*.exe)")"
+          powershell -NoProfile -Command "Start-Process -FilePath '$uninst' -ArgumentList '/S' -Wait"
+          # The uninstaller copies itself to %TEMP% and finishes from there.
+          for _ in $(seq 1 60); do [ -e "$app/resources" ] || break; sleep 2; done
+          [ ! -e "$app/resources" ] || { echo "uninstall left $app/resources" >&2; exit 1; }
+
+      - name: Checksums
+        run: cd desktop/dist && sha256sum *.exe *.zip > SHA256SUMS && cat SHA256SUMS && ls -la *.exe *.zip
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Splitsmith-windows-x64
+          path: |
+            desktop/dist/*.exe
+            desktop/dist/*.zip
+            desktop/dist/SHA256SUMS
+          retention-days: 14

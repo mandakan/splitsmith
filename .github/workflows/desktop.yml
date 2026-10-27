@@ -2,8 +2,8 @@ name: desktop
 
 # The desktop bundles on PRs: the unsigned macOS DMG, opened, installed and
 # launched (desktop-macos.yml), and the Linux AppImage + deb
-# (desktop-linux.yml), and the Windows runtime, smoked without an installer
-# yet (desktop-windows.yml). None uploads to a release; signing and
+# (desktop-linux.yml), and the Windows installer and zip, smoked unpacked and
+# installed (desktop-windows.yml). None uploads to a release; signing and
 # notarization stay local (spec 2026-09-20).
 on:
   pull_request:
