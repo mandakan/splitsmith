@@ -4,8 +4,9 @@ uv writes each console script as ``Scripts\\<name>.exe``, a launcher that
 holds the interpreter's absolute path: the build dir, which the installed
 app never sees. For every console script of the named distributions this
 writes ``<name>.cmd``, which runs ``..\\python.exe`` next to it, plus the
-``<name>-script.py`` it runs, then deletes every ``.exe`` left in Scripts
-(the dependencies' launchers too: the bundle runs none of them).
+``<name>-script.py`` it runs, then deletes everything else in Scripts: the
+dependencies' launchers and plain scripts too (numba's ``Scripts\\numba``
+carries a shebang naming the build dir), since the bundle runs none of them.
 
 Run with the bundle's own interpreter, from build-runtime.sh:
 
@@ -34,19 +35,23 @@ CMD = '@"%~dp0..\\python.exe" "%~dp0{name}-script.py" %*\r\n'
 
 def write_shims(scripts: Path, dists: list[str]) -> list[str]:
     names = []
+    written: set[Path] = set()
     for dist in dists:
         for ep in md.distribution(dist).entry_points.select(group="console_scripts"):
             module, _, attr = ep.value.partition(":")
             attr = attr.strip()
             head = attr.split(".")[0]
-            (scripts / f"{ep.name}-script.py").write_text(
+            script, cmd = scripts / f"{ep.name}-script.py", scripts / f"{ep.name}.cmd"
+            script.write_text(
                 SCRIPT.format(module=module.strip(), attr=head, name=ep.name, call=attr),
                 encoding="utf-8",
             )
-            (scripts / f"{ep.name}.cmd").write_text(CMD.format(name=ep.name), encoding="ascii", newline="")
+            cmd.write_text(CMD.format(name=ep.name), encoding="ascii", newline="")
+            written |= {script, cmd}
             names.append(ep.name)
-    for exe in scripts.glob("*.exe"):
-        exe.unlink()
+    for entry in scripts.iterdir():
+        if entry not in written and entry.is_file():
+            entry.unlink()
     return names
 
 
