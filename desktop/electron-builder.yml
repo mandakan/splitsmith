@@ -75,6 +75,8 @@ win:
     - target: zip
       arch: [x64]
   icon: build-resources/icon.ico
+  # The zip's name; nsis.artifactName overrides it for the installer.
+  artifactName: ${productName}-${version}-win-x64.${ext}
 nsis:
   # Per-user, no admin prompt: %LOCALAPPDATA%\Programs, Start menu and
   # desktop shortcuts. userData is %APPDATA%\splitsmith-desktop (package.json
@@ -84,8 +86,6 @@ nsis:
   perMachine: false
   deleteAppDataOnUninstall: false
   artifactName: ${productName}-Setup-${version}-x64.${ext}
-zip:
-  artifactName: ${productName}-${version}-win-x64.${ext}
 deb:
   artifactName: splitsmith-desktop_${version}_amd64.${ext}
   depends: [libnss3, libgbm1, libasound2, libgtk-3-0, libxss1, libnotify4, xdg-utils, libatspi2.0-0, libdrm2, libxkbcommon0]
