@@ -88,6 +88,7 @@ def test_a_logo_is_stored_by_content_in_the_brand_folder(tmp_path: Path) -> None
         (b"\x89PNG\r\n\x1a\n" + b"\0" * 40, "PNG, JPEG, WebP or SVG"),
         (b"\0" * (2 * 1024 * 1024 + 1), "2 MB"),
     ],
+    ids=["svg-with-script", "broken-png", "over-2mb"],  # a 2 MB id overflows Windows' environment
 )
 def test_a_logo_that_is_not_a_small_image_is_refused(tmp_path: Path, data: bytes, says: str) -> None:
     with pytest.raises(look_brand.BrandError, match=says):

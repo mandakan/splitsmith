@@ -308,6 +308,8 @@ def test_second_start_while_one_is_pending_resumes_it(tmp_path: Path, monkeypatc
     first = client.post(START)
     assert first.status_code == 200, first.text
     assert first.json()["resumed"] is False
+    # A second passes: two requests can share one Windows clock tick.
+    client.app.state.splitsmith_state.device_flow["expires_at"] -= 1.0
 
     second = client.post(START)
     assert second.status_code == 200, second.text

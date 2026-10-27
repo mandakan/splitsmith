@@ -139,6 +139,11 @@ def test_shutdown_route_exits_main(tmp_path: Path) -> None:
     assert rc == 0, f"non-zero exit {rc}"
 
 
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="Windows has no SIGTERM to send; the desktop app stops the sidecar through /api/shutdown"
+    " (test_shutdown_route_exits_main)",
+)
 def test_sigterm_to_main_exits_clean(tmp_path: Path) -> None:
     """The subprocess entrypoint exits 0 on SIGTERM and emits a banner."""
     env = os.environ.copy()

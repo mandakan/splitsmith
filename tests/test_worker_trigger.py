@@ -8,6 +8,7 @@ leg is mocked at the httpx transport.
 from __future__ import annotations
 
 import asyncio
+import sys
 from typing import Any
 
 import httpx
@@ -40,6 +41,14 @@ _ALL_ENV_VARS = (
     ENV_WAKE_CHANNEL,
     ENV_WORKER_MAX_EXECUTIONS,
     ENV_WORKER_JOBS_PER_EXECUTION,
+)
+
+
+# The dispatcher runs in the hosted service, on Linux. On Windows asyncio may
+# wake a sleep up to one 15.6 ms clock tick early, so a 50 ms settle check
+# lands inside its cooldown and skips.
+_LINUX_CLOCK = pytest.mark.skipif(
+    sys.platform == "win32", reason="asyncio wakes up to a clock tick early on Windows"
 )
 
 
@@ -1421,6 +1430,7 @@ def test_solo_jobs_share_the_cap() -> None:
     assert starts == 7
 
 
+@_LINUX_CLOCK
 def test_a_burst_dropped_by_the_cooldown_is_counted_when_it_ends() -> None:
     """Five submits beside a live drain: the first sees one job, the other
     four land in the cooldown. One settle check at its end counts all five."""
@@ -1463,6 +1473,7 @@ def test_make_solo_jobs_counter_counts_queued_grid_stages() -> None:
     assert asyncio.run(scenario()) == 2
 
 
+@_LINUX_CLOCK
 def test_a_backlog_queued_behind_a_cold_wake_fans_out_while_it_boots() -> None:
     """A burst (a grid's stage jobs, a match's uploads) wakes one execution;
     the rest of the burst lands in the cooldown. The settle check at its end
