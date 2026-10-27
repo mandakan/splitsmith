@@ -21,9 +21,9 @@ case "$TARGET" in
     ASSET="ffmpeg-linux-x86_64-9.0.2-gpl.tar.gz"
     SHA256="3c8a08e7a77b840e1cd7006d86cc4c49cd988daf9f492d7fcd4ac1393d3a43a3" ;;
   windows-x86_64)
-    TAG="ffmpeg-windows-x86_64-9.0.2-r1"
+    TAG="ffmpeg-windows-x86_64-9.0.2-r2"
     ASSET="ffmpeg-windows-x86_64-9.0.2-gpl.tar.gz"
-    SHA256="4bb41654ab30e6bc4ea2d074dab3bc26bb7ce8d83e9fa13404ecfcfe3d30c8bf"
+    SHA256="0bdc7a8c2c2cff33bd238182547e57b30fa9b2a952d9df71b584a9581974dbcd"
     EXE=.exe ;;
   *) echo "unknown target $TARGET" >&2; exit 2 ;;
 esac
