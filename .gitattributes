@@ -1,0 +1,8 @@
+# Text checks out with LF on every platform. Shipped Look templates are
+# hashed over their bytes (the template history in looks) and tests read
+# files back as text, so a Windows checkout with CRLF reads as edited.
+* text=auto eol=lf
+
+# Committed with CRLF and compared byte for byte: never converted.
+*.csv -text
+src/splitsmith/data/fonts/*-OFL.txt -text
