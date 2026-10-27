@@ -245,6 +245,43 @@ class EnsembleRuntime:
     model_set: str = "clap"
 
 
+def ensure_model_set_artifacts() -> list[str]:
+    """Fetch the artifacts the requested model set needs (``resolve_model_set``)
+    and return the slugs it downloaded; none for ``base``.
+
+    For a worker process to call once at startup: detection never downloads
+    (``_load_runtime`` falls back to ``base``) and hosted mode has no boot
+    prefetch, so a worker whose model cache is empty (a fresh volume, an image
+    built with ``BAKE_MODELS=0``) would otherwise detect with ``base`` for
+    good. Blocks while it downloads. A fetch that fails (``ModelError``,
+    ``OSError``) logs a warning and returns what it got: the worker still
+    starts and detects with ``base``."""
+    from ..models import registry as registry_mod
+
+    name = resolve_model_set()
+    required = load_calibration().model_set(name).requires_artifacts
+    registry = registry_mod.get_default_registry() if required else None
+    if registry is None:
+        return []
+    fetched: list[str] = []
+    for status in registry.status():
+        if status.slug not in required or status.state == "present":
+            continue
+        logger.info("fetching %s for the %s model set", status.slug, name)
+        try:
+            registry.resolve(status.slug)
+        except (ModelError, OSError) as exc:
+            logger.warning(
+                "could not fetch %s for the %s model set (%s); detecting with base until it is cached",
+                status.slug,
+                name,
+                exc,
+            )
+            return fetched
+        fetched.append(status.slug)
+    return fetched
+
+
 def load_ensemble_runtime(*, model_set: str | None = None, with_voter_e: bool = True) -> EnsembleRuntime:
     """Materialise calibration + models for one model set (see
     :func:`resolve_model_set`; ``model_set`` is the caller's preference).

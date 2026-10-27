@@ -504,6 +504,34 @@ def test_run_agent_without_state_or_token_raises(tmp_path: Path) -> None:
         asyncio.run(scenario())
 
 
+def test_run_agent_fetches_the_model_set_before_the_channel_opens(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Detection never downloads, so the agent fetches its model set's
+    artifacts at startup, before it can take a job."""
+    from splitsmith import ensemble
+
+    _isolate_env(monkeypatch)
+    creds = {"database_url": "postgresql://db", "public_url": "http://srv", "s3": None}
+    order: list[str] = []
+    monkeypatch.setattr(ensemble, "ensure_model_set_artifacts", lambda: order.append("fetch") or [])
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/api/workers/register":
+            return httpx.Response(200, json={"worker_id": "w1", "worker_token": "wtok", "credentials": creds})
+        order.append("channel")
+        return httpx.Response(404, json={"detail": "not found"})
+
+    async def scenario() -> None:
+        await agent.run_agent(
+            "http://srv", registration_token="reg", state_dir=tmp_path, transport=httpx.MockTransport(handler)
+        )
+
+    with pytest.raises(SystemExit):
+        asyncio.run(scenario())
+    assert order[:2] == ["fetch", "channel"]
+
+
 def test_run_agent_registers_then_exits_on_channel_404(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
