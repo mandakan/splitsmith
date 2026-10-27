@@ -11,6 +11,7 @@ import { onRequestGet, pickLatest } from "../../functions/desktop/latest.json.js
 const DMG = "Splitsmith-0.0.0-arm64.dmg";
 const APPIMAGE = "Splitsmith-0.0.0-x86_64.AppImage";
 const DEB = "splitsmith-desktop_0.0.0_amd64.deb";
+const EXE = "Splitsmith-Setup-0.0.0.exe";
 
 const rel = (
   tag_name: string,
@@ -49,6 +50,11 @@ describe("pickLatest", () => {
     const releases = [rel("v0.44.0", [DMG]), rel("v0.43.0", [DMG, APPIMAGE]), rel("v0.42.0", [DMG, APPIMAGE, DEB])];
     expect(pickLatest(releases, "linux")).toEqual(at("v0.42.0"));
     expect(pickLatest(releases, "mac")).toEqual(at("v0.44.0"));
+  });
+  it("win32 waits for the installer", () => {
+    const releases = [rel("v0.43.0", [DMG, APPIMAGE, DEB]), rel("v0.42.0", [DMG, APPIMAGE, DEB, EXE])];
+    expect(pickLatest(releases, "win32")).toEqual(at("v0.42.0"));
+    expect(pickLatest([rel("v0.42.0")], "win32")).toBeNull();
   });
   it("rejects an unknown platform", () => {
     expect(() => pickLatest([], "windows")).toThrow();

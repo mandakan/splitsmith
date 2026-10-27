@@ -1,8 +1,10 @@
 /**
  * The application menu's shape, per platform. Pure: menu.ts supplies the
- * handlers and applies it. macOS keeps the menu it shipped with; Linux
- * has no app-name menu (hide/hideOthers/unhide are macOS roles) and no
- * CLI installer (the .deb installs /usr/bin/splitsmith).
+ * handlers and applies it. macOS keeps the menu it shipped with. Linux
+ * and Windows share one shape: no app-name menu (hide/hideOthers/unhide
+ * are macOS roles), the quit role under File (Electron labels it "Exit"
+ * on Windows), and no CLI installer (the .deb installs /usr/bin/splitsmith;
+ * Windows has no /usr/local/bin to link into).
  */
 import type { MenuItemConstructorOptions } from "electron";
 
@@ -28,7 +30,7 @@ const VIEW: MenuItemConstructorOptions = {
 };
 
 export function menuTemplate(platform: NodeJS.Platform, h: MenuHandlers, appName: string): MenuItemConstructorOptions[] {
-  if (platform === "linux") {
+  if (platform === "linux" || platform === "win32") {
     return [
       { label: "File", submenu: [{ label: "Open log folder", click: h.openLogFolder }, { type: "separator" }, { role: "quit" }] },
       { role: "editMenu" },

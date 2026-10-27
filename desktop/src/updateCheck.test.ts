@@ -50,9 +50,10 @@ describe("updateDecision", () => {
 });
 
 describe("feedUrl", () => {
-  it("is unchanged on macOS and asks for linux on Linux", () => {
+  it("is unchanged on macOS and names the platform on Linux and Windows", () => {
     expect(feedUrl("darwin")).toBe(UPDATE_FEED_URL);
     expect(feedUrl("darwin")).toBe("https://splitsmith.app/desktop/latest.json");
     expect(feedUrl("linux")).toBe("https://splitsmith.app/desktop/latest.json?platform=linux");
+    expect(feedUrl("win32")).toBe("https://splitsmith.app/desktop/latest.json?platform=win32");
   });
 });

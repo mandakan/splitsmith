@@ -109,8 +109,8 @@ dismissed file under userData, the sheet). The feed is the Pages Function
 `functions/desktop/latest.json.js` on splitsmith.app: it picks the newest
 `v*.*.*` release that has a `.dmg` attached, because GitHub's `releases/latest`
 can be an ffmpeg source release and release-please publishes before the DMG
-exists. `?platform=linux` waits for both the AppImage and the .deb; no parameter
-stays the macOS answer. Moving the download behind a purchase changes that
+exists. `?platform=linux` waits for both the AppImage and the .deb,
+`?platform=win32` for an `.exe`; no parameter stays the macOS answer. Moving the download behind a purchase changes that
 function only. **No auto-update.**
 
 ## Linux
@@ -142,7 +142,13 @@ function only. **No auto-update.**
 
 ## Windows (not shipped)
 
-There is no Windows build. `windows-probe.yml` runs the suite on
+There is no Windows build yet (#1765). The shell already knows win32:
+`sidecar.ts` runs `python\python.exe` with `bin\ffmpeg.exe`, logs and caches
+numba under `%LOCALAPPDATA%\splitsmith` (the engine's cache dir), the menu
+takes the Linux shape (no CLI installer), `main.ts` sets the AppUserModelID
+to `electron-builder.yml`'s `appId`, and the feed answers `?platform=win32`.
+The runtime, ffmpeg, the installer, signing and CI are still to do.
+`windows-probe.yml` runs the suite on
 `windows-latest` (Python 3.12, as the bundle ships) on every push to main and
 reports what breaks in the run summary; it is not a gate, and test failures
 never turn it red. `scripts/ci/windows_probe.py` also imports every module on

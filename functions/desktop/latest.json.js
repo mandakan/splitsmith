@@ -31,6 +31,7 @@ function json(status, body, extra = {}) {
 const REQUIRED_ASSETS = {
   mac: [/\.dmg$/],
   linux: [/\.AppImage$/, /\.deb$/],
+  win32: [/\.exe$/],
 };
 
 export function pickLatest(releases, platform = "mac") {
@@ -51,7 +52,7 @@ export function pickLatest(releases, platform = "mac") {
 
 export async function onRequestGet({ request }) {
   const requested = new URL(request.url).searchParams.get("platform");
-  if (requested !== null && requested !== "linux") return json(400, { error: `unknown platform ${requested}` });
+  if (requested !== null && requested !== "linux" && requested !== "win32") return json(400, { error: `unknown platform ${requested}` });
   const platform = requested ?? "mac";
   let releases;
   try {

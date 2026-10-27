@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { isSidecarOrigin, parseReadyLine, platformDirs, sidecarSpec } from "./sidecar";
+import { cliRelative, isSidecarOrigin, parseReadyLine, platformDirs, pythonRelative, sidecarSpec } from "./sidecar";
 
 const READY =
   'SPLITSMITH_READY {"artifacts_dir": "/a", "base_url": "http://127.0.0.1:53241", "ffmpeg_binary": "/f", "host": "127.0.0.1", "log_file": null, "pid": 12, "port": 53241}';
@@ -105,5 +105,53 @@ describe("platformDirs on macOS", () => {
       logDir: "/Users/me/Library/Logs/Splitsmith",
       numbaCacheDir: "/Users/me/Library/Caches/Splitsmith/numba",
     });
+  });
+});
+
+describe("sidecarSpec on Windows", () => {
+  const base = {
+    resourcesPath: "C:\\Users\\me\\AppData\\Local\\Programs\\Splitsmith\\resources",
+    port: 5000,
+    home: "C:\\Users\\me",
+  };
+  it("runs python.exe from the runtime root and the .exe binaries", () => {
+    const spec = sidecarSpec({ ...base, platform: "win32", env: { LOCALAPPDATA: "C:\\Users\\me\\AppData\\Local" } });
+    expect(spec.command).toBe("C:\\Users\\me\\AppData\\Local\\Programs\\Splitsmith\\resources\\python\\python.exe");
+    expect(spec.env.SPLITSMITH_FFMPEG).toBe("C:\\Users\\me\\AppData\\Local\\Programs\\Splitsmith\\resources\\bin\\ffmpeg.exe");
+    expect(spec.env.SPLITSMITH_FFPROBE).toBe("C:\\Users\\me\\AppData\\Local\\Programs\\Splitsmith\\resources\\bin\\ffprobe.exe");
+  });
+  it("logs and caches under %LOCALAPPDATA%, next to the engine's cache", () => {
+    const spec = sidecarSpec({ ...base, platform: "win32", env: { LOCALAPPDATA: "D:\\Local" } });
+    expect(spec.logDir).toBe("D:\\Local\\splitsmith\\logs");
+    expect(spec.args).toEqual(["-m", "splitsmith.ui.embedded", "--log-dir", "D:\\Local\\splitsmith\\logs"]);
+    expect(spec.env.NUMBA_CACHE_DIR).toBe("D:\\Local\\splitsmith\\numba");
+  });
+  it("falls back to AppData\\Local when LOCALAPPDATA is missing or relative", () => {
+    for (const env of [{}, { LOCALAPPDATA: "" }, { LOCALAPPDATA: "Local" }]) {
+      expect(platformDirs("win32", "C:\\Users\\me", env)).toEqual({
+        logDir: "C:\\Users\\me\\AppData\\Local\\splitsmith\\logs",
+        numbaCacheDir: "C:\\Users\\me\\AppData\\Local\\splitsmith\\numba",
+      });
+    }
+  });
+  it("drops Python and splitsmith variables whatever their case", () => {
+    const spec = sidecarSpec({
+      ...base,
+      platform: "win32",
+      env: { Path: "C:\\Windows", PythonPath: "C:\\evil", Splitsmith_Project_Root: "C:\\x" },
+    });
+    expect(spec.env).not.toHaveProperty("PythonPath");
+    expect(spec.env).not.toHaveProperty("Splitsmith_Project_Root");
+    expect(spec.env.Path).toBe("C:\\Windows");
+  });
+});
+
+describe("runtime layout", () => {
+  it("names the interpreter and console script per platform", () => {
+    expect(pythonRelative("darwin")).toBe("python/bin/python3.12");
+    expect(pythonRelative("linux")).toBe("python/bin/python3.12");
+    expect(pythonRelative("win32")).toBe("python\\python.exe");
+    expect(cliRelative("darwin")).toBe("python/bin/splitsmith");
+    expect(cliRelative("win32")).toBe("python\\Scripts\\splitsmith.exe");
   });
 });

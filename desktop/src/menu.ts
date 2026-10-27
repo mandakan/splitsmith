@@ -10,7 +10,7 @@ import { app, BrowserWindow, dialog, Menu, shell } from "electron";
 
 import { CLI_TARGET, cliLinkPlan } from "./cliLink";
 import { menuTemplate } from "./menuTemplate";
-import { CLI_RELATIVE, sidecarState } from "./sidecar";
+import { cliRelative, sidecarState } from "./sidecar";
 import { checkForUpdates } from "./updates";
 
 function resourcesPath(): string {
@@ -84,7 +84,7 @@ function report(message: string, detail: string, type: "info" | "warning" | "err
 
 /** Symlink the bundle's console script to /usr/local/bin, with an admin prompt when needed. */
 function installCli(): void {
-  const source = path.join(resourcesPath(), CLI_RELATIVE);
+  const source = path.join(resourcesPath(), cliRelative(process.platform));
   const plan = cliLinkPlan(source, CLI_TARGET, currentTarget(CLI_TARGET));
   if (plan.kind === "already") {
     report("Already installed", `${CLI_TARGET} points at this app.`);
