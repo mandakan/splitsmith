@@ -60,7 +60,9 @@ def test_the_same_false_positive_unmasked_does_count() -> None:
 def test_relabel_refreshes_the_masked_flag_from_the_fixture(tmp_path: Path) -> None:
     """A mask added after the eval ran takes effect on the next label save."""
     audit = tmp_path / "stage-shots-m-2026-stage1-sabc.json"
-    audit.write_text(json.dumps({"beep_time": 0.5, "shots": [{"time": 3.0}], "masked_regions": [REGION]}))
+    audit.write_text(
+        json.dumps({"beep_time": 0.5, "shots": [{"time": 3.0}], "masked_regions": [REGION]}), encoding="utf-8"
+    )
     fixture = lab_core.EvalFixture(
         slug=audit.stem,
         audit_path=str(audit),
