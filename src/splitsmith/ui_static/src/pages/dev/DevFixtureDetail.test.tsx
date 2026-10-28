@@ -53,6 +53,10 @@ vi.mock("@/components/lab/SnippetPlayer", () => ({
   ),
 }));
 
+// The speech review has its own test (SpeechPanel.test.tsx) and a second
+// waveform; this page's tests are about the overview.
+vi.mock("@/components/lab/SpeechPanel", () => ({ SpeechPanel: () => null }));
+
 vi.mock("@/lib/api", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/api")>();
   return {

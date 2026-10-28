@@ -27,7 +27,14 @@ from ..ensemble.api import (
     detect_shots_ensemble,
 )
 from ..ensemble.calibration import camera_class_from_mount
-from ..fixture_schema import REVIEW_NEEDED, REVIEWED, in_masked_span, masked_spans, review_status
+from ..fixture_schema import (
+    REVIEW_NEEDED,
+    REVIEWED,
+    in_masked_span,
+    masked_spans,
+    review_status,
+    speech_review,
+)
 from . import sources
 
 DEFAULT_FIXTURES_ROOT = Path(__file__).resolve().parents[3] / "tests" / "fixtures"
@@ -199,6 +206,9 @@ class FixtureRecord(BaseModel):
     # (``fixture_schema.review_status``, #1363), and the queue's order from
     # ``scripts/fixture_review_inventory.py`` (``None`` until it has run).
     review_status: str = REVIEWED
+    # The speech review's decision (``fixture_schema.speech_review``,
+    # #1778): ``None`` until a person has reviewed the fixture's speech.
+    speech_decision: str | None = None
     review_priority: float | None = None
     review_reasons: list[str] = []
     # Event grouping key (issue #149 follow-up). Identifies the same
@@ -311,6 +321,7 @@ def list_fixtures(fixtures_root: Path | None = None) -> list[FixtureRecord]:
                 anchor_slug=anchor_slug,
                 event_id=event_id,
                 review_status=review_status(payload),
+                speech_decision=(review.decision if (review := speech_review(payload)) else None),
                 superseded_by=payload.get("superseded_by") or None,
                 review_priority=priorities.get(json_path.stem, (None, []))[0],
                 review_reasons=priorities.get(json_path.stem, (None, []))[1],

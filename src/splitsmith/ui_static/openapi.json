@@ -14023,6 +14023,92 @@
     "summary": "Lab Fixtures"
    }
   },
+  "/api/lab/fixtures/{slug}/speech": {
+   "get": {
+    "description": "A fixture's speech masks: the masker's proposal, what the\nfixture stores and its review stamp (#1778).",
+    "operationId": "lab_speech_api_lab_fixtures__slug__speech_get",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "slug",
+      "required": true,
+      "schema": {
+       "title": "Slug",
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Lab Speech"
+   },
+   "put": {
+    "description": "Save the reviewer's decision: ``masked_regions`` and the\n``speech_review`` stamp. 422 for a region over a shot or the beep.",
+    "operationId": "lab_speech_save_api_lab_fixtures__slug__speech_put",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "slug",
+      "required": true,
+      "schema": {
+       "title": "Slug",
+       "type": "string"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "additionalProperties": true,
+        "title": "Body",
+        "type": "object"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Lab Speech Save"
+   }
+  },
   "/api/lab/labels": {
    "post": {
     "description": "Apply categorical labels to a fixture's audit JSON (issue #86).\n\nBody shape::\n\n    {\n      \"audit_path\": \"...stage-shots-foo-2026-stage4.json\",\n      \"labels\": [\n        {\"candidate_number\": 7,  \"time\": 2.812, \"reason\": \"cross_bay\"},\n        {\"candidate_number\": 14, \"time\": 4.364, \"reason\": null},\n        {\"candidate_number\": 22, \"time\": 5.220, \"subclass\": \"steel\"}\n      ]\n    }\n\n``time`` is the storage key (1 ms resolution) and is required:\n``candidate_number`` shifts across detector reshuffles, time\ndoes not. Patches in place with a ``.bak`` backup; returns counts\nchanged plus a freshly relabeled ``run`` so the SPA can update\nwithout firing a full ``/api/lab/eval``. ``run`` is ``None`` when\nno cached run exists yet (the SPA falls back to a real eval in\nthat case).",

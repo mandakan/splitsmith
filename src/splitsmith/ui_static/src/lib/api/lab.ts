@@ -1,6 +1,7 @@
 /** The lab, fixture and dev calls of ``api`` (split out of ``lib/api.ts``, #1580). */
 
 import type { ModelMap } from "@/lib/modelMap";
+import type { SpeechDecision, SpeechReviewState, SpeechSpan } from "@/lib/speechReview";
 import { request } from "./client";
 import type {
   DevReviewQueueResponse,
@@ -34,6 +35,16 @@ export const labApi = {
     request<PeaksResult>(
       `/api/fixture/peaks?path=${encodeURIComponent(fixturePath)}&bins=${bins}`,
     ),
+
+  /** A fixture's speech masks: proposal, stored masks, review stamp (#1778). */
+  getLabSpeech: (slug: string) =>
+    request<SpeechReviewState>(`/api/lab/fixtures/${encodeURIComponent(slug)}/speech`),
+
+  saveLabSpeech: (slug: string, body: { decision: SpeechDecision; regions: SpeechSpan[] }) =>
+    request<SpeechReviewState>(`/api/lab/fixtures/${encodeURIComponent(slug)}/speech`, {
+      method: "PUT",
+      json: body,
+    }),
 
   fixtureAudioUrl: (fixturePath: string) =>
     `/api/fixture/audio?path=${encodeURIComponent(fixturePath)}`,

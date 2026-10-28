@@ -14,6 +14,7 @@ export const FILTER_DEFS = [
   { key: "promoted", label: "promoted" },
   { key: "not-in-model", label: "not in model" },
   { key: "audio-missing", label: "no audio" },
+  { key: "speech", label: "speech unreviewed" },
 ] as const;
 
 export type FilterKey = (typeof FILTER_DEFS)[number]["key"];
@@ -51,6 +52,7 @@ export function filterFixtures(
     if (filter === "promoted" && !isPromoted(fx)) return false;
     if (filter === "not-in-model" && fx.in_calibration) return false;
     if (filter === "audio-missing" && fx.has_audio) return false;
+    if (filter === "speech" && (!fx.has_audio || fx.speech_decision)) return false;
     if (!q) return true;
     return (
       fx.slug.toLowerCase().includes(q) ||
