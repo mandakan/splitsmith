@@ -68,6 +68,7 @@ from splitsmith.ensemble.fixtures import (
 )
 from splitsmith.ensemble.tta import compute_tta_agreement
 from splitsmith.ensemble.voters import within_stage_amp_anchor
+from splitsmith.fixture_schema import in_masked_span, masked_spans
 from splitsmith.lab import sources as lab_sources
 from splitsmith.shot_detect import detect_shots
 
@@ -219,7 +220,13 @@ def _build_universe(
             audio, sr, times, truth["beep_time"], confidences, peak_amps, tta_agreement
         )
 
+        # Masked audio (#1778) is not what the range sounded like: its
+        # candidates train nothing. ``candidate_idx`` keeps the detector's
+        # order, so the sweep join is unaffected.
+        spans = masked_spans(truth)
         for i, shot in enumerate(shots):
+            if in_masked_span(float(cand_t[i]), spans):
+                continue
             universe.append(
                 {
                     "fixture": fix,

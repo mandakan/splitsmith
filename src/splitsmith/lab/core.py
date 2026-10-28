@@ -27,7 +27,7 @@ from ..ensemble.api import (
     detect_shots_ensemble,
 )
 from ..ensemble.calibration import camera_class_from_mount
-from ..fixture_schema import REVIEW_NEEDED, REVIEWED, review_status
+from ..fixture_schema import REVIEW_NEEDED, REVIEWED, in_masked_span, masked_spans, review_status
 from . import sources
 
 DEFAULT_FIXTURES_ROOT = Path(__file__).resolve().parents[3] / "tests" / "fixtures"
@@ -411,6 +411,10 @@ class EvalCandidate(BaseModel):
     ensemble_score: float
     kept: bool
     truth: int = Field(description="1 if matched to a ground-truth shot within tolerance, else 0.")
+    masked: bool = Field(
+        default=False,
+        description="Inside the fixture's masked speech (#1778): listed for the reviewer, never scored.",
+    )
     matched_shot_number: int | None = None
     reason: str | None = Field(
         default=None,
@@ -561,6 +565,9 @@ def _metrics(
     truth_times: list[float],
     candidates: list[EvalCandidate],
 ) -> EvalFixtureMetrics:
+    # Masked audio (#1778) is not what the range sounded like: a candidate
+    # there counts neither way.
+    candidates = [c for c in candidates if not c.masked]
     n_truth = len(truth_times)
     kept = [c for c in candidates if c.kept]
     n_kept = len(kept)
@@ -967,6 +974,7 @@ def run_eval(
         cand_times = np.array([c.time for c in result.candidates], dtype=np.float64)
         labels, matched, truth_times = _label_truth(cand_times, audit.get("shots", []), cfg.tolerance_ms)
         reason_by_time, subclass_entries = _load_labels_from_audit(audit)
+        spans = masked_spans(audit)
         candidates = [
             EvalCandidate(
                 candidate_number=c.candidate_number,
@@ -987,6 +995,7 @@ def run_eval(
                 matched_shot_number=matched[i],
                 reason=_reason_for_time(c.time, reason_by_time),
                 subclass=_subclass_for_time(c.time, subclass_entries),
+                masked=in_masked_span(c.time, spans),
             )
             for i, c in enumerate(result.candidates)
         ]
@@ -1045,12 +1054,14 @@ def relabel_run(run: EvalRun) -> EvalRun:
             new_fixtures.append(fix.model_copy(deep=True))
             continue
         reason_by_time, subclass_entries = _load_labels_from_audit(audit)
+        spans = masked_spans(audit)
 
         new_candidates = [
             c.model_copy(
                 update={
                     "reason": _reason_for_time(c.time, reason_by_time),
                     "subclass": _subclass_for_time(c.time, subclass_entries),
+                    "masked": in_masked_span(c.time, spans),
                 }
             )
             for c in fix.candidates
