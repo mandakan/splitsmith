@@ -107,3 +107,30 @@ def test_fetch_only_takes_the_named_wavs_and_reports_unknown_names(fa, tmp_path,
     errors = fa.fetch("https://x", only=fa.read_names(names))
     assert served == ["a.wav"]
     assert errors == ["c.wav: not in audio.lock.json"]
+
+
+def test_requests_carry_the_access_token_when_set(fa, monkeypatch):
+    monkeypatch.setenv(fa.CLIENT_ID_ENV, "id.access")
+    monkeypatch.setenv(fa.CLIENT_SECRET_ENV, "s3cret")
+    req = fa._request("https://x/wav/a.wav")
+    assert req.get_header("Cf-access-client-id") == "id.access"
+    assert req.get_header("Cf-access-client-secret") == "s3cret"
+
+
+def test_requests_carry_no_token_headers_without_one(fa, monkeypatch):
+    monkeypatch.delenv(fa.CLIENT_ID_ENV, raising=False)
+    monkeypatch.delenv(fa.CLIENT_SECRET_ENV, raising=False)
+    req = fa._request("https://x/wav/a.wav")
+    assert req.get_header("Cf-access-client-id") is None
+
+
+def test_a_refusal_without_a_token_names_the_variables(fa, tmp_path, monkeypatch):
+    monkeypatch.delenv(fa.CLIENT_ID_ENV, raising=False)
+    monkeypatch.delenv(fa.CLIENT_SECRET_ENV, raising=False)
+
+    def refuse(req, **_k):
+        raise fa.urllib.error.HTTPError(req.full_url, 403, "Forbidden", {}, None)
+
+    monkeypatch.setattr(fa.urllib.request, "urlopen", refuse)
+    err = fa._download("https://x", "x.wav", {"sha256": "0" * 64, "bytes": 8})
+    assert fa.CLIENT_ID_ENV in err and fa.CLIENT_SECRET_ENV in err

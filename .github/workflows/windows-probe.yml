@@ -94,7 +94,11 @@ jobs:
           key: fixture-audio-win-${{ hashFiles('tests/fixtures/audio.lock.json', 'tests/fixtures/audio.ci.txt') }}
       - name: Fetch the fixture WAVs the tests read
         # Four shards fetching from R2 at once on a cache miss timed out;
-        # fetch skips files that already verify, so a retry resumes.
+        # fetch skips files that already verify, so a retry resumes. The
+        # bucket is behind Cloudflare Access (scripts/fixture_audio.py).
+        env:
+          SPLITSMITH_FIXTURE_AUDIO_CLIENT_ID: ${{ secrets.FIXTURE_AUDIO_CLIENT_ID }}
+          SPLITSMITH_FIXTURE_AUDIO_CLIENT_SECRET: ${{ secrets.FIXTURE_AUDIO_CLIENT_SECRET }}
         run: |
           for attempt in 1 2 3; do
             uv run python scripts/fixture_audio.py fetch --only tests/fixtures/audio.ci.txt && exit 0
