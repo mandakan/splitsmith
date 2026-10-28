@@ -781,6 +781,26 @@ class BeepWindowConfig(BaseModel):
     conflict_threshold_s: float = 2.0
 
 
+class SpeechMaskConfig(BaseModel):
+    """Proposing speech masks before a fixture's audio is published (lab only).
+
+    A voice activity detector scores 32 ms frames; a region opens at
+    ``threshold`` and closes below ``end_threshold``, so a word's tail is
+    not cut. Regions shorter than ``min_speech_s`` are dropped (a shot's
+    echo can score as speech for a frame or two), neighbours closer than
+    ``merge_gap_s`` join, and each is padded by ``pad_s``. Nothing is ever
+    masked within ``protect_ms`` of a labelled shot or the beep: speech
+    there goes to a reviewer instead.
+    """
+
+    threshold: float = 0.5
+    end_threshold: float = 0.35
+    min_speech_s: float = 0.25
+    merge_gap_s: float = 0.3
+    pad_s: float = 0.1
+    protect_ms: float = 50.0
+
+
 class Config(BaseModel):
     beep_detect: BeepDetectConfig = Field(default_factory=BeepDetectConfig)
     shot_detect: ShotDetectConfig = Field(default_factory=ShotDetectConfig)
@@ -795,6 +815,7 @@ class Config(BaseModel):
     highlights: HighlightConfig = Field(default_factory=HighlightConfig)
     footage_sort: FootageSortConfig = Field(default_factory=FootageSortConfig)
     access: AccessConfig = Field(default_factory=AccessConfig)
+    speech_mask: SpeechMaskConfig = Field(default_factory=SpeechMaskConfig)
 
     @classmethod
     def load(cls, path: Path | None) -> Config:
