@@ -1,5 +1,25 @@
 # Changelog
 
+## [0.90.0](https://github.com/mandakan/splitsmith/compare/v0.89.0...v0.90.0) (2026-10-28)
+
+
+### Features
+
+* **hosted:** a desktop mirror runs no hosted compute but its audit audio ([#1777](https://github.com/mandakan/splitsmith/issues/1777)) ([dfd69c0](https://github.com/mandakan/splitsmith/commit/dfd69c0e31ac36492d2b8bbc98a6af491aa4c1ae))
+* **lab:** masked speech regions and the speech review stamp ([#1783](https://github.com/mandakan/splitsmith/issues/1783)) ([14e42b9](https://github.com/mandakan/splitsmith/commit/14e42b99b2d3bd4d0adf43b375a9f4e0ae5470b5))
+* **lab:** review a fixture's speech masks on its page ([#1784](https://github.com/mandakan/splitsmith/issues/1784)) ([a87bcec](https://github.com/mandakan/splitsmith/commit/a87bcec2e2503deb8259cb18bba456a622ea2a36))
+* **lab:** speech mask proposals for fixture audio ([#1782](https://github.com/mandakan/splitsmith/issues/1782)) ([d5a7413](https://github.com/mandakan/splitsmith/commit/d5a7413bf92c855df2427e89bcaf81e0cedf330d))
+
+
+### Bug Fixes
+
+* **desktop:** let launch-check.sh's cleanup wait for the app tree ([#1774](https://github.com/mandakan/splitsmith/issues/1774)) ([b07558e](https://github.com/mandakan/splitsmith/commit/b07558e5c51759491a7adf8648a16ecdbff3f1af))
+
+
+### Documentation
+
+* **site:** name Windows in the install step ([#1776](https://github.com/mandakan/splitsmith/issues/1776)) ([6c4986c](https://github.com/mandakan/splitsmith/commit/6c4986ca54f9bbfa970015e20f21a9e1b4744aef))
+
 ## [0.89.0](https://github.com/mandakan/splitsmith/compare/v0.88.0...v0.89.0) (2026-10-27)
 
 
