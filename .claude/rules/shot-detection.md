@@ -181,9 +181,18 @@ the requested set's models on the first detection.
 ## Fixture audio is not in git
 
 - `tests/fixtures/audio.lock.json` maps every fixture WAV to its sha256; bytes
-  live content-addressed in a public-read R2 bucket (`wav/<sha256>.wav`, served
-  at `fixtures.splitsmith.app`), and `tests/fixtures/.gitignore` keeps local
-  copies out.
+  live content-addressed in a private R2 bucket (`wav/<sha256>.wav`, served
+  at `fixtures.splitsmith.app` behind Cloudflare Access), and
+  `tests/fixtures/.gitignore` keeps local copies out.
+- **The corpus is private** because it holds other shooters' recordings, and
+  their camera holders' voices. A fetch needs an Access service token in
+  `SPLITSMITH_FIXTURE_AUDIO_CLIENT_ID` / `SPLITSMITH_FIXTURE_AUDIO_CLIENT_SECRET`
+  (CI: the `FIXTURE_AUDIO_CLIENT_*` secrets; a fork's pull request skips the
+  fetch). Nothing from it is published until the clip has a speech-masking
+  review.
+- **Fixture JSON never names a person**: `source_video` is the file name
+  only, and the people in `footage_sort` fixtures are pseudonyms. The repo is
+  public; the shooter ids are pseudonyms only while nothing maps them back.
 - One WAV stays in git on purpose: the smoke fixture
   `stage-shots-tallmilan-2026-stage3-s97dcec94-pin.wav` (the slim wheel and both
   desktop smokes read it, one in a bare container).

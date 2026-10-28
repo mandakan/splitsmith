@@ -1,7 +1,7 @@
 """Fixture audio kept out of git: content-addressed in R2, versioned by a manifest.
 
 ``tests/fixtures/audio.lock.json`` maps each externally stored fixture WAV to
-its sha256 and size; the WAV lives at ``wav/<sha256>.wav`` in a public-read
+its sha256 and size; the WAV lives at ``wav/<sha256>.wav`` in a private
 bucket, and ``tests/fixtures/.gitignore`` keeps the local copy out of git.
 A changed WAV is a new object under a new hash, so the manifest in git is the
 whole version history and nothing in the bucket is ever overwritten.
@@ -11,10 +11,15 @@ whole version history and nothing in the bucket is ever overwritten.
     uv run python scripts/fixture_audio.py status   # what is local, missing or changed
     uv run python scripts/fixture_audio.py push STEM_OR_WAV ...  # upload, then record in the manifest
 
-``fetch`` reads ``SPLITSMITH_FIXTURE_AUDIO_URL`` (default: the bucket's public
-domain) and needs no credentials. ``push`` uploads with ``wrangler r2 object put``
-into ``splitsmith-fixtures``, so it needs a ``wrangler login`` on the Cloudflare
-account that owns splitsmith.app; it skips an object the public URL already serves.
+``fetch`` reads ``SPLITSMITH_FIXTURE_AUDIO_URL`` (default: the bucket's domain).
+The domain sits behind Cloudflare Access: the corpus holds other shooters'
+recordings, so it is not public until each clip has had a speech-masking review.
+Requests carry an Access service token from ``SPLITSMITH_FIXTURE_AUDIO_CLIENT_ID``
+and ``SPLITSMITH_FIXTURE_AUDIO_CLIENT_SECRET`` (CI has them as secrets; a fork's
+pull request does not, so its fixture-audio tests skip). ``push`` uploads with
+``wrangler r2 object put`` into ``splitsmith-fixtures``, so it needs a
+``wrangler login`` on the Cloudflare account that owns splitsmith.app; it skips
+an object the bucket already serves.
 """
 
 from __future__ import annotations
@@ -26,6 +31,7 @@ import os
 import subprocess
 import sys
 import tempfile
+import urllib.error
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -94,9 +100,26 @@ def status(manifest: dict[str, dict] | None = None) -> dict[str, list[str]]:
     return out
 
 
+CLIENT_ID_ENV = "SPLITSMITH_FIXTURE_AUDIO_CLIENT_ID"
+CLIENT_SECRET_ENV = "SPLITSMITH_FIXTURE_AUDIO_CLIENT_SECRET"
+
+
 def _request(url: str, method: str = "GET") -> urllib.request.Request:
     # Cloudflare answers Python's default User-Agent with 403.
-    return urllib.request.Request(url, method=method, headers={"User-Agent": "splitsmith-fixture-audio/1"})
+    headers = {"User-Agent": "splitsmith-fixture-audio/1"}
+    client_id, secret = os.environ.get(CLIENT_ID_ENV), os.environ.get(CLIENT_SECRET_ENV)
+    if client_id and secret:
+        headers["CF-Access-Client-Id"] = client_id
+        headers["CF-Access-Client-Secret"] = secret
+    return urllib.request.Request(url, method=method, headers=headers)
+
+
+def _explain(exc: OSError) -> str:
+    """A refusal from Access reads as a missing token, not a network fault."""
+    if isinstance(exc, urllib.error.HTTPError) and exc.code in (401, 403):
+        if not (os.environ.get(CLIENT_ID_ENV) and os.environ.get(CLIENT_SECRET_ENV)):
+            return f"{exc} (fixture audio is private: set {CLIENT_ID_ENV} and {CLIENT_SECRET_ENV})"
+    return str(exc)
 
 
 def _download(base_url: str, name: str, entry: dict) -> str | None:
@@ -113,7 +136,7 @@ def _download(base_url: str, name: str, entry: dict) -> str | None:
         tmp.replace(FIXTURES / name)
         return None
     except OSError as exc:
-        return f"{name}: {exc}"
+        return f"{name}: {_explain(exc)}"
     finally:
         tmp.unlink(missing_ok=True)
 

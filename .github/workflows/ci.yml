@@ -122,9 +122,21 @@ jobs:
           key: fixture-audio-${{ hashFiles('tests/fixtures/audio.lock.json', 'tests/fixtures/audio.ci.txt') }}
 
       - name: Fetch the fixture WAVs the tests read
-        # Public bucket, no credentials. Verifies every hash, so a restored
-        # cache that does not match the lock is downloaded again.
-        run: python3 scripts/fixture_audio.py fetch --only tests/fixtures/audio.ci.txt
+        # The bucket is behind Cloudflare Access (scripts/fixture_audio.py).
+        # Verifies every hash, so a restored cache that does not match the
+        # lock is downloaded again. A fork's pull request gets no secrets: it
+        # skips the fetch and the tests that read a WAV skip. Anywhere else a
+        # missing token fails here, so a lost secret never passes silently.
+        env:
+          SPLITSMITH_FIXTURE_AUDIO_CLIENT_ID: ${{ secrets.FIXTURE_AUDIO_CLIENT_ID }}
+          SPLITSMITH_FIXTURE_AUDIO_CLIENT_SECRET: ${{ secrets.FIXTURE_AUDIO_CLIENT_SECRET }}
+          FROM_FORK: ${{ github.event.pull_request.head.repo.fork || false }}
+        run: |
+          if [ -z "$SPLITSMITH_FIXTURE_AUDIO_CLIENT_ID" ] && [ "$FROM_FORK" = "true" ]; then
+            echo "::notice::fork pull request: no fixture audio token, WAV tests skip"
+            exit 0
+          fi
+          python3 scripts/fixture_audio.py fetch --only tests/fixtures/audio.ci.txt
 
       - name: Warm numba/librosa JIT cache (avoids the xdist compile race, #742)
         # librosa's numba kernels compile on first use into a shared
