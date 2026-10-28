@@ -14,6 +14,7 @@ paths:
   - "scripts/feature_caches.py"
   - "scripts/fixture_audio.py"
   - "scripts/fixture_review_inventory.py"
+  - "scripts/speech_mask_survey.py"
   - "scripts/promote_*.py"
   - "scripts/train_*.py"
   - "tests/fixtures/*.json"
@@ -204,3 +205,19 @@ the requested set's models on the first detection.
   changed WAV to the `splitsmith-fixtures` bucket through
   `wrangler r2 object put` (needs a `wrangler login` on the
   account that owns splitsmith.app) and records it in the lock.
+
+## Speech masks before publication
+
+- `lab/speech_mask.py` proposes masks; it never edits audio or a fixture.
+  Silero VAD (pinned by sha256 in `VAD_ARTIFACT`, fetched through the model
+  registry on first use, never in tests) scores 32 ms frames; regions come
+  from `SpeechMaskConfig` (hysteresis, minimum length, merge, pad).
+- **A mask never covers a labelled shot or the beep**: `protect_ms` around
+  each is cut out of every region, and speech that reached in is listed as
+  `protected_overlaps` for a person to decide. Masked silence must never
+  sit where a shot is, or the model learns that silence means no shot.
+- `MASKER_VERSION` moves with any change that would move a proposal, so a
+  review stamp names the masker it reviewed.
+- `scripts/speech_mask_survey.py` is the dry run over the corpus
+  (`build/speech_mask_survey.json`).
+
