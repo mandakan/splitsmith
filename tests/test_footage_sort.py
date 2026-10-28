@@ -103,7 +103,7 @@ def test_no_confident_proposal_contradicts_the_users_own_sorting(name: str) -> N
 def test_trusted_clocks_sort_nearly_everything_without_help(name: str, high_right: int) -> None:
     """Phones and head cams with right clocks: every clip the user sorted by
     hand comes out pre-checked and right, except where the scorecards
-    themselves cannot tell (Oden Cup stage 11: Martin and Anton scored in
+    themselves cannot tell (Oden Cup stage 11: Magnus and Albin scored in
     the same second, 12 minutes after a reshoot)."""
     fixture, clips, shooters = _load(name)
     labels = _labels(fixture)
@@ -123,17 +123,17 @@ def test_tied_scorecards_go_to_the_user() -> None:
 
     proposal = {p.clip_id: p for p in propose(clips, shooters).clips}
 
-    reshoot = proposal["Anton_pov_stage_11_reshoot.mov"]
+    reshoot = proposal["Albin_pov_stage_11_reshoot.mov"]
     assert reshoot.confidence == "needs_you"
     assert reshoot.reason.issue == "ambiguous"
     assert {(reshoot.shooter, reshoot.stage), (reshoot.reason.rival, reshoot.reason.rival_stage)} == {
-        ("martin", 11),
-        ("anton", 11),
+        ("magnus", 11),
+        ("albin", 11),
     }
 
 
 def test_shared_folders_are_sorted_blind() -> None:
-    """Höstfinalen XI as received: Martin's and Anton's folders plus the
+    """Höstfinalen XI as received: Magnus's and Albin's folders plus the
     user's head cam. Every phone clip shows someone other than the phone's
     owner (the user's account), all of them pre-checked; the Insta360 runs
     minutes fast and is held back for an anchor."""
@@ -222,12 +222,12 @@ def test_filename_schemes() -> None:
     assert filename_scheme("IMG_3007.MOV") == "IMG"
     assert filename_scheme("VID_20260412_132733_00_040.mp4") == "VID_datetime"
     assert filename_scheme("video-1223_singular_display.mov") == "meta"
-    assert filename_scheme("Martin_S01_B50.MOV") == "mov"
+    assert filename_scheme("Magnus_S01_B50.MOV") == "mov"
 
 
 def test_same_phone_model_in_two_folders_is_two_cameras() -> None:
-    a = _clip("IMG_1.MOV", 0, folder="from-martin")
-    b = _clip("IMG_1.MOV", 0, folder="from-janne")
+    a = _clip("IMG_1.MOV", 0, folder="from-magnus")
+    b = _clip("IMG_1.MOV", 0, folder="from-henrik")
     assert camera_key(a) != camera_key(b)
 
 
@@ -247,7 +247,7 @@ def test_head_cam_and_phone_on_one_run_head_cam_primary() -> None:
 def test_two_runs_on_one_stage_are_a_conflict() -> None:
     """A clip, then another of the same (shooter, stage) four minutes later
     on another camera: a reshoot or a mis-scored neighbour, never merged."""
-    squad = _squad(mathias={1: 400.0}, anton={1: 900.0})
+    squad = _squad(mathias={1: 400.0}, albin={1: 900.0})
     clips = [_clip("a.MOV", 100, folder="x"), _clip("b.MOV", 340, folder="y")]
 
     proposal = propose(clips, squad)
@@ -266,7 +266,7 @@ def test_clip_without_a_timestamp_needs_the_user() -> None:
 
 
 def test_clip_of_nobody_on_a_trusted_clock_is_skipped() -> None:
-    squad = _squad(mathias={1: 100.0, 2: 1300.0}, anton={1: 200.0, 2: 1400.0})
+    squad = _squad(mathias={1: 100.0, 2: 1300.0}, albin={1: 200.0, 2: 1400.0})
     clips = [_clip("run1.MOV", 0), _clip("run2.MOV", 1250), _clip("warmup.MOV", 2400)]
 
     proposal = {p.clip_id: p for p in propose(clips, squad).clips}
@@ -278,7 +278,7 @@ def test_clip_of_nobody_on_a_trusted_clock_is_skipped() -> None:
 
 
 def test_user_override_and_skip_win() -> None:
-    squad = _squad(mathias={1: 100.0}, anton={1: 400.0})
+    squad = _squad(mathias={1: 100.0}, albin={1: 400.0})
     clips = [_clip("a.MOV", 0), _clip("b.MOV", 300, folder="other")]
 
     proposal = {
@@ -287,14 +287,14 @@ def test_user_override_and_skip_win() -> None:
             clips,
             squad,
             overrides=[
-                Override(clip_id="a.MOV", shooter="anton", stage=1),
+                Override(clip_id="a.MOV", shooter="albin", stage=1),
                 Override(clip_id="b.MOV", skip=True),
             ],
         ).clips
     }
 
     assert (proposal["a.MOV"].shooter, proposal["a.MOV"].stage, proposal["a.MOV"].decided_by) == (
-        "anton",
+        "albin",
         1,
         "user",
     )

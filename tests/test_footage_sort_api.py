@@ -286,7 +286,7 @@ def test_footage_added_to_the_wrong_shooter_is_sorted_and_moved(tmp_path: Path, 
 def test_per_shooter_import_leaves_a_squad_mates_run_unassigned(tmp_path: Path, source_clip: Path) -> None:
     """Bob shoots right before alice. A clip of bob's run starts inside
     alice's scorecard window, so the per-shooter import as alice used to
-    make it her primary (Anton's glasses on Mathias's stages, Höstfinalen
+    make it her primary (Albin's glasses on Mathias's stages, Höstfinalen
     2026). With both shooters' scorecards it stays unassigned; alice's own
     clip, on her next stage, is still placed."""
     _, client, root, base = _match_app(
@@ -321,7 +321,7 @@ def test_path_keys_compare_umlauts_composed() -> None:
 
     from splitsmith.ui.footage_sort_api import _resolved
 
-    composed = unicodedata.normalize("NFC", "/nonexistent/Höstfinalen XI - anton/IMG_5262.MOV")
+    composed = unicodedata.normalize("NFC", "/nonexistent/Höstfinalen XI - albin/IMG_5262.MOV")
     decomposed = unicodedata.normalize("NFD", composed)
 
     assert composed != decomposed

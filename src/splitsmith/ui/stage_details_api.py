@@ -23,7 +23,7 @@ router = APIRouter()
 
 #: The content type SSI gives IPSC matches; their participant pages use
 #: ``PARTICIPANT_CT``. Read off a real link (Black Handgun 2023: match
-#: ``22/17169``, Janne's page ``participant/23/512019``). Other match kinds
+#: ``22/17169``, Henrik's page ``participant/23/512019``). Other match kinds
 #: get the match page instead, since their participant type is unknown.
 IPSC_MATCH_CT = 22
 PARTICIPANT_CT = 23

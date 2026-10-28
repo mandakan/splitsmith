@@ -127,19 +127,19 @@ def test_compare_via_manifest_and_via_merged_match_produce_same_structure(
     tmp_path: Path,
 ):
     """Same shooters + trims, rendered both ways, should reference the same trims."""
-    anton_root = tmp_path / "anton"
-    martin_root = tmp_path / "martin"
-    _seed_legacy_project(anton_root, name="VADS Easter", competitor="Anton Johansson")
-    _seed_legacy_project(martin_root, name="VADS Easter", competitor="Martin Engström")
+    albin_root = tmp_path / "albin"
+    magnus_root = tmp_path / "magnus"
+    _seed_legacy_project(albin_root, name="VADS Easter", competitor="Albin Lund")
+    _seed_legacy_project(magnus_root, name="VADS Easter", competitor="Magnus Åström")
 
     # ------- Path 1: render from manifest --------
     manifest = CompareManifest(
         output=tmp_path / "via_manifest.fcpxml",
-        audio_from="Anton",
+        audio_from="Albin",
         layout_2up="horizontal",
         shooters=[
-            CompareShooter(project=anton_root, label="Anton"),
-            CompareShooter(project=martin_root, label="Martin"),
+            CompareShooter(project=albin_root, label="Albin"),
+            CompareShooter(project=magnus_root, label="Magnus"),
         ],
     )
     bundles_via_manifest = [load_shooter(s.project, s.label, probe=_stub_probe) for s in manifest.shooters]
@@ -152,7 +152,7 @@ def test_compare_via_manifest_and_via_merged_match_produce_same_structure(
 
     # ------- Path 2: merge then render from merged match --------
     merged_root = tmp_path / "merged"
-    plan = plan_merge([anton_root, martin_root], merged_root)
+    plan = plan_merge([albin_root, magnus_root], merged_root)
     match = execute_merge(plan, move=False)
     # The merge slugifies competitor names. The emitter renders labels
     # from Shooter.name (display name), not the slug -- so labels match.
@@ -208,23 +208,23 @@ def test_compare_via_manifest_and_via_merged_match_produce_same_structure(
 
 def test_load_shooter_from_match_skips_stages_with_missing_trims(tmp_path: Path):
     """A merged-match shooter omits stages whose trim file isn't on disk."""
-    anton_root = tmp_path / "anton"
-    martin_root = tmp_path / "martin"
-    _seed_legacy_project(anton_root, name="X", competitor="Anton")
-    _seed_legacy_project(martin_root, name="X", competitor="Martin")
+    albin_root = tmp_path / "albin"
+    magnus_root = tmp_path / "magnus"
+    _seed_legacy_project(albin_root, name="X", competitor="Albin")
+    _seed_legacy_project(magnus_root, name="X", competitor="Magnus")
 
     merged_root = tmp_path / "merged"
-    plan = plan_merge([anton_root, martin_root], merged_root)
+    plan = plan_merge([albin_root, magnus_root], merged_root)
     execute_merge(plan, move=False)
 
-    # Resolve the opaque slug Anton was assigned in the merge plan.
-    anton_slug = next(m.slug for m in plan.shooter_moves if m.source_root == anton_root)
+    # Resolve the opaque slug Albin was assigned in the merge plan.
+    albin_slug = next(m.slug for m in plan.shooter_moves if m.source_root == albin_root)
 
     # Delete one shooter's stage-1 trim post-merge.
-    victim = merged_root / "shooters" / anton_slug / "exports" / "stage1_egg-grab_trimmed.mp4"
+    victim = merged_root / "shooters" / albin_slug / "exports" / "stage1_egg-grab_trimmed.mp4"
     assert victim.exists()
     victim.unlink()
 
-    bundle = load_shooter_from_match(merged_root, anton_slug, label="Anton", probe=_stub_probe)
+    bundle = load_shooter_from_match(merged_root, albin_slug, label="Albin", probe=_stub_probe)
     assert 1 not in bundle.stages_by_number
     assert 2 in bundle.stages_by_number

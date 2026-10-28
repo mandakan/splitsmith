@@ -1,8 +1,8 @@
 {
  "shooters": [
   {
-   "key": "anton",
-   "name": "Anton Johansson",
+   "key": "albin",
+   "name": "Albin Lund",
    "scorecards": {
     "1": "2026-04-05T12:43:01.598923Z",
     "2": "2026-04-05T11:07:25.814534Z",
@@ -13,8 +13,8 @@
    }
   },
   {
-   "key": "martin",
-   "name": "Martin Engström",
+   "key": "magnus",
+   "name": "Magnus Åström",
    "scorecards": {
     "1": "2026-04-05T12:35:58.076872Z",
     "2": "2026-04-05T11:38:57.245367Z",
@@ -36,7 +36,7 @@
    "model": "iPhone 17 Pro Max",
    "labels": [
     {
-     "shooter": "anton",
+     "shooter": "albin",
      "stage": 2
     }
    ]
@@ -51,7 +51,7 @@
    "model": "iPhone 17 Pro Max",
    "labels": [
     {
-     "shooter": "anton",
+     "shooter": "albin",
      "stage": 3
     }
    ]
@@ -66,7 +66,7 @@
    "model": "iPhone 17 Pro Max",
    "labels": [
     {
-     "shooter": "anton",
+     "shooter": "albin",
      "stage": 1
     }
    ]
@@ -81,7 +81,7 @@
    "model": "iPhone 17 Pro Max",
    "labels": [
     {
-     "shooter": "anton",
+     "shooter": "albin",
      "stage": 5
     }
    ]
@@ -96,7 +96,7 @@
    "model": "iPhone 17 Pro Max",
    "labels": [
     {
-     "shooter": "anton",
+     "shooter": "albin",
      "stage": 6
     }
    ]
@@ -111,7 +111,7 @@
    "model": "iPhone 17 Pro Max",
    "labels": [
     {
-     "shooter": "anton",
+     "shooter": "albin",
      "stage": 4
     }
    ]
@@ -126,7 +126,7 @@
    "model": "iPhone 17 Pro",
    "labels": [
     {
-     "shooter": "martin",
+     "shooter": "magnus",
      "stage": 2
     }
    ]
@@ -141,7 +141,7 @@
    "model": "iPhone 17 Pro",
    "labels": [
     {
-     "shooter": "martin",
+     "shooter": "magnus",
      "stage": 3
     }
    ]
@@ -156,7 +156,7 @@
    "model": "iPhone 17 Pro",
    "labels": [
     {
-     "shooter": "martin",
+     "shooter": "magnus",
      "stage": 1
     }
    ]
@@ -171,7 +171,7 @@
    "model": "iPhone 17 Pro",
    "labels": [
     {
-     "shooter": "martin",
+     "shooter": "magnus",
      "stage": 5
     }
    ]
@@ -186,7 +186,7 @@
    "model": "iPhone 17 Pro",
    "labels": [
     {
-     "shooter": "martin",
+     "shooter": "magnus",
      "stage": 6
     }
    ]
@@ -201,7 +201,7 @@
    "model": "iPhone 17 Pro",
    "labels": [
     {
-     "shooter": "martin",
+     "shooter": "magnus",
      "stage": 4
     }
    ]

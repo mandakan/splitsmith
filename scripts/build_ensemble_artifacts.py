@@ -68,6 +68,7 @@ from splitsmith.ensemble.fixtures import (
 )
 from splitsmith.ensemble.tta import compute_tta_agreement
 from splitsmith.ensemble.voters import within_stage_amp_anchor
+from splitsmith.lab import sources as lab_sources
 from splitsmith.shot_detect import detect_shots
 
 # Sibling scripts. The CLI runs with scripts/ on sys.path, but the UI's
@@ -1127,7 +1128,7 @@ def _build_visual_universe(
         if cam_class != DEFAULT_CAMERA_CLASS:
             continue
 
-        source_video_str = truth.get("source_video") or ""
+        source_video_str = lab_sources.resolve(fix, truth.get("source_video"), FIXTURES_DIR) or ""
         window = truth.get("fixture_window_in_source") or [0.0, 0.0]
         if not source_video_str:
             skipped_no_video.append(fix)

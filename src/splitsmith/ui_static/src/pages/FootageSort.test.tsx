@@ -24,7 +24,7 @@ vi.mock("@/lib/api", async (importOriginal) => {
   };
 });
 
-const PHONE = "from-martin|Apple|iPhone 17 Pro Max|IMG";
+const PHONE = "from-magnus|Apple|iPhone 17 Pro Max|IMG";
 const HEAD = "head|||VID_datetime";
 
 function clip(
@@ -85,8 +85,8 @@ function view(): SortView {
         stages_with_footage: [1, 2],
       },
       {
-        key: "anton",
-        name: "Anton Johansson",
+        key: "albin",
+        name: "Albin Lund",
         stages: [1, 2],
         stages_with_footage: [],
       },
@@ -98,7 +98,7 @@ function view(): SortView {
     cameras: [
       {
         key: PHONE,
-        folder: "from-martin",
+        folder: "from-magnus",
         model: "iPhone 17 Pro Max",
         scheme: "IMG",
         clip_ids: [],
@@ -117,14 +117,14 @@ function view(): SortView {
     ],
     clips: [
       clip(
-        "from-martin/IMG_1.MOV",
+        "from-magnus/IMG_1.MOV",
         0,
         PHONE,
-        { shooter: "anton", stage: 2 },
+        { shooter: "albin", stage: 2 },
         true,
       ),
       clip(
-        "from-martin/IMG_2.MOV",
+        "from-magnus/IMG_2.MOV",
         1,
         PHONE,
         { shooter: "mathias", stage: 1 },
@@ -198,7 +198,7 @@ describe("FootageSort", () => {
       await screen.findByText(/the clock lines up with no scorecard/),
     ).toBeInTheDocument();
     expect(screen.getByText("Mathias Axell", { selector: ":not(option)" })).toBeInTheDocument();
-    expect(screen.getByText("Anton Johansson", { selector: ":not(option)" })).toBeInTheDocument();
+    expect(screen.getByText("Albin Lund", { selector: ":not(option)" })).toBeInTheDocument();
     expect(
       screen.getByRole("button", { name: "Import 2 clips" }),
     ).toBeEnabled();
@@ -208,13 +208,13 @@ describe("FootageSort", () => {
     renderPage();
 
     const pick = await screen.findByRole("combobox", { name: /^Whose camera:/ });
-    await userEvent.selectOptions(pick, "anton");
+    await userEvent.selectOptions(pick, "albin");
 
     expect(api.putFootageSortDecisions).toHaveBeenCalledWith("abc123", {
       anchors: [],
       overrides: [],
       checked: {},
-      camera_shooters: [{ camera_key: HEAD, shooter: "anton" }],
+      camera_shooters: [{ camera_key: HEAD, shooter: "albin" }],
     });
   });
 
@@ -228,7 +228,7 @@ describe("FootageSort", () => {
     expect(api.putFootageSortDecisions).toHaveBeenCalledWith("abc123", {
       anchors: [],
       overrides: [],
-      checked: { "from-martin/IMG_1.MOV": false },
+      checked: { "from-magnus/IMG_1.MOV": false },
       camera_shooters: [],
     });
   });
@@ -254,14 +254,14 @@ describe("FootageSort", () => {
       "2",
     );
     await userEvent.click(
-      within(sheet).getByRole("button", { name: "Anton Johansson" }),
+      within(sheet).getByRole("button", { name: "Albin Lund" }),
     );
     await userEvent.click(
       within(sheet).getByRole("button", { name: "Use this" }),
     );
 
     expect(api.putFootageSortDecisions).toHaveBeenCalledWith("abc123", {
-      anchors: [{ clip_id: "head/VID_1.mp4", shooter: "anton", stage: 2 }],
+      anchors: [{ clip_id: "head/VID_1.mp4", shooter: "albin", stage: 2 }],
       overrides: [],
       checked: { "head/VID_1.mp4": true },
       camera_shooters: [],
@@ -301,14 +301,14 @@ describe("FootageSort", () => {
     vi.mocked(api.importFootageSort).mockResolvedValue({
       imported: [
         {
-          clip_id: "from-martin/IMG_1.MOV",
-          shooter: "anton",
+          clip_id: "from-magnus/IMG_1.MOV",
+          shooter: "albin",
           stage: 2,
           role: "primary",
           path: "raw/IMG_1.MOV",
         },
         {
-          clip_id: "from-martin/IMG_2.MOV",
+          clip_id: "from-magnus/IMG_2.MOV",
           shooter: "mathias",
           stage: 1,
           role: "primary",
@@ -341,7 +341,7 @@ describe("FootageSort", () => {
     );
     expect(
       await screen.findByText(
-        "footage: Imported 2 clips: Mathias Axell 1, Anton Johansson 1",
+        "footage: Imported 2 clips: Mathias Axell 1, Albin Lund 1",
       ),
     ).toBeInTheDocument();
   });
@@ -395,14 +395,14 @@ describe("FootageSort", () => {
 
     await userEvent.click(
       await screen.findByRole("checkbox", {
-        name: "Select all for Anton Johansson",
+        name: "Select all for Albin Lund",
       }),
     );
 
     expect(api.putFootageSortDecisions).toHaveBeenCalledWith("abc123", {
       anchors: [],
       overrides: [],
-      checked: { "from-martin/IMG_1.MOV": false },
+      checked: { "from-magnus/IMG_1.MOV": false },
       camera_shooters: [],
     });
   });
@@ -411,8 +411,8 @@ describe("FootageSort", () => {
     vi.mocked(api.importFootageSort).mockResolvedValue({
       imported: [
         {
-          clip_id: "from-martin/IMG_1.MOV",
-          shooter: "anton",
+          clip_id: "from-magnus/IMG_1.MOV",
+          shooter: "albin",
           stage: 2,
           role: "primary",
           path: "raw/IMG_1.MOV",
@@ -426,17 +426,17 @@ describe("FootageSort", () => {
 
     await userEvent.click(
       await screen.findByRole("button", {
-        name: "Import 1 for Anton Johansson",
+        name: "Import 1 for Albin Lund",
       }),
     );
 
     await waitFor(() =>
       expect(api.importFootageSort).toHaveBeenCalledWith("abc123", "symlink", [
-        "anton",
+        "albin",
       ]),
     );
     expect(await screen.findByRole("status")).toHaveTextContent(
-      "Imported 1 clip to Anton Johansson",
+      "Imported 1 clip to Albin Lund",
     );
     expect(screen.getByText("Mathias Axell", { selector: ":not(option)" })).toBeInTheDocument();
   });
@@ -550,11 +550,11 @@ describe("FootageSort compare panel", () => {
     expect(panel).toHaveTextContent("0 still missing for Mathias Axell");
     expect(within(panel).getAllByText("has it")).toHaveLength(2);
     await userEvent.click(
-      within(sheet).getByRole("button", { name: "Anton Johansson" }),
+      within(sheet).getByRole("button", { name: "Albin Lund" }),
     );
 
-    // Anton's checked IMG_2 proposes stage 2, so only stage 1 is missing.
-    expect(panel).toHaveTextContent("1 still missing for Anton Johansson");
+    // Albin's checked IMG_2 proposes stage 2, so only stage 1 is missing.
+    expect(panel).toHaveTextContent("1 still missing for Albin Lund");
     expect(within(panel).getAllByText("has it")).toHaveLength(1);
   });
 });

@@ -24,9 +24,9 @@ function item(
     shooter_name:
       slug === "mathias"
         ? "Mathias Axell"
-        : slug === "martin"
-          ? "Martin Engström"
-          : "Anton Johansson",
+        : slug === "magnus"
+          ? "Magnus Åström"
+          : "Albin Lund",
     stage_number: stage,
     stage_name: `S${stage}`,
     role,
@@ -54,22 +54,22 @@ const key = (it: BeepQueueItem) => ({
 const ITEMS = [
   item("mathias", 1, "primary"),
   item("mathias", 1, "secondary"),
-  item("martin", 1, "primary"),
-  item("anton", 1, "primary", "confirmed"),
+  item("magnus", 1, "primary"),
+  item("albin", 1, "primary", "confirmed"),
   item("mathias", 2, "primary", "missing"),
-  item("anton", 2, "secondary"),
-  item("martin", 2, "primary", "low_confidence"),
+  item("albin", 2, "secondary"),
+  item("magnus", 2, "primary", "low_confidence"),
 ];
 
 describe("beep review queue", () => {
   it("puts every primary first (stage, then shooter), secondaries after, confirmed ones out", () => {
     expect(queueOrder(ITEMS).map((it) => it.video_id)).toEqual([
       "mathias-1-primary",
-      "martin-1-primary",
+      "magnus-1-primary",
       "mathias-2-primary",
-      "martin-2-primary",
+      "magnus-2-primary",
       "mathias-1-secondary",
-      "anton-2-secondary",
+      "albin-2-secondary",
     ]);
   });
 
@@ -86,7 +86,7 @@ describe("beep review queue", () => {
   it("moves to the next beep, crossing stages and shooters, wrapping to the one left for later", () => {
     const order = queueOrder(ITEMS);
     expect(nextInQueue(order, key(ITEMS[0]))?.video_id).toBe(
-      "martin-1-primary",
+      "magnus-1-primary",
     );
     expect(nextInQueue(order, key(ITEMS[6]))?.video_id).toBe(
       "mathias-1-secondary",
@@ -102,7 +102,7 @@ describe("beep review queue", () => {
   });
 
   it("has no next once the current beep is the only one waiting", () => {
-    const one = [item("martin", 3, "primary")];
+    const one = [item("magnus", 3, "primary")];
     expect(nextInQueue(queueOrder(one), key(one[0]))).toBeNull();
   });
 });
@@ -110,18 +110,18 @@ describe("beep review queue", () => {
 describe("rechecking the secondary beeps", () => {
   const items = [
     item("mathias", 2, "secondary", "confirmed"),
-    item("anton", 1, "primary", "confirmed"),
-    item("anton", 2, "secondary", "unreviewed"),
+    item("albin", 1, "primary", "confirmed"),
+    item("albin", 2, "secondary", "unreviewed"),
     item("mathias", 1, "secondary", "confirmed"),
-    item("anton", 1, "secondary", "confirmed"),
+    item("albin", 1, "secondary", "confirmed"),
   ];
 
   it("walks every secondary, confirmed or not, by stage then shooter; never a primary", () => {
     expect(recheckOrder(items).map((it) => it.video_id)).toEqual([
       "mathias-1-secondary",
-      "anton-1-secondary",
+      "albin-1-secondary",
       "mathias-2-secondary",
-      "anton-2-secondary",
+      "albin-2-secondary",
     ]);
   });
 
@@ -141,8 +141,8 @@ describe("rechecking the secondary beeps", () => {
 
   it("links a camera into the pass, remembering where it started", () => {
     const href = (...seg: string[]) => `/match/m1/${seg.join("/")}`;
-    expect(recheckHref(recheckOrder(items)[0], href, "anton/3")).toBe(
-      "/match/m1/audit/mathias/1?cam=mathias-1-secondary&recheck=secondaries&from=anton%2F3",
+    expect(recheckHref(recheckOrder(items)[0], href, "albin/3")).toBe(
+      "/match/m1/audit/mathias/1?cam=mathias-1-secondary&recheck=secondaries&from=albin%2F3",
     );
   });
 });

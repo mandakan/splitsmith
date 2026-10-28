@@ -18,7 +18,7 @@ import {
 } from "@/lib/stageDetails";
 
 // The Black Handgun 2023 results table as a browser copies it from
-// Shoot'n Score It (Janne, Production Optics): Swedish headers, decimal
+// Shoot'n Score It (Henrik, Production Optics): Swedish headers, decimal
 // commas, a stage button cell holding "N. Name".
 const BLACK_HANDGUN = [
   "Station\t\tHF\tTID\tPTS\tA\tC\tD\tM\tPROC\tNS\tVRF",
@@ -40,8 +40,8 @@ const TWELVE = Array.from({ length: 12 }, (_, i) => i + 1);
 
 function view(n = 12): StageDetailsView {
   return {
-    slug: "janne",
-    name: "Janne Hauta",
+    slug: "henrik",
+    name: "Henrik Berg",
     division: "Production Optics",
     power_factor: "minor",
     power_factor_set: false,
@@ -193,11 +193,11 @@ describe("detailsNotice", () => {
 
   it("names every shooter with stages lacking a time", () => {
     expect(detailsNotice([entry("m", "Mathias Axell", 0)])).toBeNull();
-    expect(detailsNotice([entry("j", "Janne Hauta", 4), entry("m", "Mathias Axell", 0)])?.title).toBe(
-      "Janne has stages without a time",
+    expect(detailsNotice([entry("j", "Henrik Berg", 4), entry("m", "Mathias Axell", 0)])?.title).toBe(
+      "Henrik has stages without a time",
     );
-    expect(detailsNotice([entry("j", "Janne Hauta", 4), entry("e", "Erik", 1)])?.title).toBe(
-      "Janne and Erik have stages without a time",
+    expect(detailsNotice([entry("j", "Henrik Berg", 4), entry("e", "Erik", 1)])?.title).toBe(
+      "Henrik and Erik have stages without a time",
     );
   });
 });

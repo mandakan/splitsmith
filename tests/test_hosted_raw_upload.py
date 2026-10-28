@@ -845,7 +845,7 @@ def test_recent_projects_detail_reads_from_store_after_path_wiped(hosted_client)
         json={
             "name": "Picker Detail Test",
             "stages": [{"stage_number": 1, "stage_name": "S1"}],
-            "primary_shooter": {"name": "Anton"},
+            "primary_shooter": {"name": "Albin"},
         },
     )
     assert resp.status_code == 200, resp.text
@@ -864,7 +864,7 @@ def test_recent_projects_detail_reads_from_store_after_path_wiped(hosted_client)
     assert entry["name"] == "Picker Detail Test"
     assert entry["shooter_count"] == 1
     assert entry["stage_count"] == 1
-    assert entry["shooter_names"] == ["Anton"]
+    assert entry["shooter_names"] == ["Albin"]
     # No upload yet and no stage time, so the picker's Continue card points
     # at Stage details (the shooting order helps place the footage).
     assert entry["next_step"]["kind"] == "details"

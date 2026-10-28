@@ -91,23 +91,23 @@ def test_no_scoreboard_means_no_division(tmp_path: Path) -> None:
 
 
 def test_title_lines_put_the_division_under_the_name() -> None:
-    project = MatchProject(name="Bromma", competitor_name="Martin Engström", match_date=date(2026, 10, 3))
+    project = MatchProject(name="Bromma", competitor_name="Magnus Åström", match_date=date(2026, 10, 3))
     assert title_info_lines(project, extra="Level II", division="Classic Major") == (
         "2026-10-03",
-        "Martin Engström",
+        "Magnus Åström",
         "Classic Major",
         "Level II",
     )
-    assert title_info_lines(project, division=None) == ("2026-10-03", "Martin Engström")
-    assert title_info_lines(project, division="  ") == ("2026-10-03", "Martin Engström")
+    assert title_info_lines(project, division=None) == ("2026-10-03", "Magnus Åström")
+    assert title_info_lines(project, division="  ") == ("2026-10-03", "Magnus Åström")
 
 
 def test_roster_lines_name_every_shooter_once_anyone_has_a_division() -> None:
-    assert roster_lines([("Martin", "Classic Major"), ("Mathias", None)]) == (
-        "Martin · Classic Major",
+    assert roster_lines([("Magnus", "Classic Major"), ("Mathias", None)]) == (
+        "Magnus · Classic Major",
         "Mathias",
     )
-    assert roster_lines([("Martin", None), ("Mathias", None)]) == ()
+    assert roster_lines([("Magnus", None), ("Mathias", None)]) == ()
     assert roster_lines([]) == ()
 
 
@@ -121,23 +121,23 @@ def test_grid_title_lists_shooters_in_slot_order_with_their_divisions(tmp_path: 
             label="Mathias", project_root=tmp_path, project=_pinned(competitor_division="Production Optics")
         ),
         CompareShooterBundle(
-            label="Martin", project_root=tmp_path, project=_pinned(competitor_division="Classic Major")
+            label="Magnus", project_root=tmp_path, project=_pinned(competitor_division="Classic Major")
         ),
     ]
     divisions = bundle_divisions(bundles)
-    assert divisions == [("Martin", "Classic Major"), ("Mathias", "Production Optics")]
+    assert divisions == [("Magnus", "Classic Major"), ("Mathias", "Production Optics")]
     title, closing = title_cards(
         _grid_match(),
         CardOptions(title_page=True, closing_card=True, title_info="Level II"),
         divisions=divisions,
     )
     assert title is not None and closing is not None
-    assert title.info == ("2026-10-03", "Martin · Classic Major", "Mathias · Production Optics", "Level II")
+    assert title.info == ("2026-10-03", "Magnus · Classic Major", "Mathias · Production Optics", "Level II")
     assert closing.info == title.info
 
 
 def test_grid_title_without_the_option_is_as_before(tmp_path: Path) -> None:
-    divisions = [("Martin", "Classic Major")]
+    divisions = [("Magnus", "Classic Major")]
     title, _ = title_cards(
         _grid_match(), CardOptions(title_page=True, title_division=False), divisions=divisions
     )

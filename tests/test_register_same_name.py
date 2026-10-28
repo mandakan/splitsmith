@@ -33,12 +33,12 @@ def _clip(tmp_path: Path, folder: str, data: bytes, name: str = "IMG_1234.MOV") 
 
 def test_same_name_different_clips_each_import(tmp_path: Path) -> None:
     project, root = _project(tmp_path)
-    martin = _clip(tmp_path, "from-martin", b"martin's clip")
-    anton = _clip(tmp_path, "from-anton", b"anton's clip, longer")
+    magnus = _clip(tmp_path, "from-magnus", b"magnus's clip")
+    albin = _clip(tmp_path, "from-albin", b"albin's clip, longer")
 
-    first = project.register_video(martin, root)
+    first = project.register_video(magnus, root)
     project.assign_video(first.path, to_stage_number=1, role="primary")
-    second = project.register_video(anton, root)
+    second = project.register_video(albin, root)
     project.assign_video(second.path, to_stage_number=2, role="primary")
 
     assert second is not first
@@ -46,8 +46,8 @@ def test_same_name_different_clips_each_import(tmp_path: Path) -> None:
     assert second.path.as_posix() == "raw/IMG_1234-2.MOV"
     assert [v.path.as_posix() for v in project.stage(1).videos] == ["raw/IMG_1234.MOV"]
     assert [v.path.as_posix() for v in project.stage(2).videos] == ["raw/IMG_1234-2.MOV"]
-    assert raw_link.target(root / "raw" / "IMG_1234.MOV") == martin
-    assert raw_link.target(root / "raw" / "IMG_1234-2.MOV") == anton
+    assert raw_link.target(root / "raw" / "IMG_1234.MOV") == magnus
+    assert raw_link.target(root / "raw" / "IMG_1234-2.MOV") == albin
 
 
 def test_a_third_same_name_clip_takes_the_next_free_name(tmp_path: Path) -> None:
@@ -60,9 +60,9 @@ def test_a_third_same_name_clip_takes_the_next_free_name(tmp_path: Path) -> None
 
 def test_the_same_source_twice_is_one_entry(tmp_path: Path) -> None:
     project, root = _project(tmp_path)
-    martin = _clip(tmp_path, "from-martin", b"martin's clip")
-    first = project.register_video(martin, root)
-    again = project.register_video(martin, root)
+    magnus = _clip(tmp_path, "from-magnus", b"magnus's clip")
+    first = project.register_video(magnus, root)
+    again = project.register_video(magnus, root)
     assert again is first
     assert len(project.unassigned_videos) == 1
 
@@ -75,19 +75,19 @@ def test_a_link_left_behind_for_the_same_source_is_reused(tmp_path: Path) -> Non
     ``test_a_third_same_name_clip_takes_the_next_free_name``, which a
     size-and-mtime comparison of symlinked files would conflate."""
     project, root = _project(tmp_path)
-    martin = _clip(tmp_path, "usb", b"martin's clip")
-    first = project.register_video(martin, root)
+    magnus = _clip(tmp_path, "usb", b"magnus's clip")
+    first = project.register_video(magnus, root)
     project.unassigned_videos.clear()
-    again = project.register_video(martin, root)
+    again = project.register_video(magnus, root)
     assert again.path.as_posix() == first.path.as_posix() == "raw/IMG_1234.MOV"
 
 
 def test_a_copy_of_the_same_source_is_reused(tmp_path: Path) -> None:
     project, root = _project(tmp_path)
-    martin = _clip(tmp_path, "from-martin", b"martin's clip")
-    first = project.register_video(martin, root, link_mode="copy")
+    magnus = _clip(tmp_path, "from-magnus", b"magnus's clip")
+    first = project.register_video(magnus, root, link_mode="copy")
     project.unassigned_videos.clear()
-    again = project.register_video(martin, root, link_mode="copy")
+    again = project.register_video(magnus, root, link_mode="copy")
     assert again.path.as_posix() == first.path.as_posix() == "raw/IMG_1234.MOV"
 
 
@@ -97,10 +97,10 @@ def test_a_different_file_already_in_raw_is_not_adopted(tmp_path: Path) -> None:
     raw.mkdir(parents=True, exist_ok=True)
     (raw / "IMG_1234.MOV").write_bytes(b"something the user put here")
     os.utime(raw / "IMG_1234.MOV", (1_000_000, 1_000_000))
-    anton = _clip(tmp_path, "from-anton", b"anton's clip")
+    albin = _clip(tmp_path, "from-albin", b"albin's clip")
 
-    video = project.register_video(anton, root)
+    video = project.register_video(albin, root)
 
     assert video.path.as_posix() == "raw/IMG_1234-2.MOV"
     assert (raw / "IMG_1234.MOV").read_bytes() == b"something the user put here"
-    assert raw_link.target(raw / "IMG_1234-2.MOV") == anton
+    assert raw_link.target(raw / "IMG_1234-2.MOV") == albin

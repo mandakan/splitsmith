@@ -8,6 +8,7 @@ import pytest
 
 from splitsmith.ensemble import fixtures as fx_module
 from splitsmith.fixture_schema import review_status
+from splitsmith.lab import sources
 from splitsmith.lab.promote import write_promoted_fixture
 
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -94,7 +95,8 @@ def test_write_promoted_fixture_rebases_to_the_clip(tmp_path):
     assert [s["time"] for s in written["shots"]] == [7.0, 15.0]
     assert written["_candidates_pending_audit"]["candidates"][0]["time"] == 6.0
     assert written["fixture_window_in_source"] == [25.0, 45.0]
-    assert written["source_video"] == "/Volumes/X9/raw/m/IMG_1.MOV"
+    assert written["source_video"] == "IMG_1.MOV"
+    assert sources.resolve(out.stem, "IMG_1.MOV", out.parent) == "/Volumes/X9/raw/m/IMG_1.MOV"
     assert written["review"]["status"] == "needs_review"
     assert (tmp_path / "fx" / "stage-shots-m-2026-stage1-a-cam-promotion-report.json").exists()
     assert np.isclose(written["beep_time"] + 25.0, 30.0)

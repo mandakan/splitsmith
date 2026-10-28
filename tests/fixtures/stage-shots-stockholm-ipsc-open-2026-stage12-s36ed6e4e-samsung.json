@@ -1,6 +1,6 @@
 {
-  "source": "raw/martin_12_2.mp4",
-  "source_video": "/Volumes/X9/raw/2026-stockholm-ipsc-open/martin/hand/martin_12_2.mp4",
+  "source": "raw/magnus_12_2.mp4",
+  "source_video": "magnus_12_2.mp4",
   "stage_number": 12,
   "stage_name": "Stage B2 Left",
   "fixture_window_in_source": [
@@ -1630,7 +1630,7 @@
       "action": "promote-from-anchor",
       "tool_version": "0.1.0",
       "details": {
-        "secondary_source": "raw/martin_12_2.mp4",
+        "secondary_source": "raw/magnus_12_2.mp4",
         "cross_align_confidence": null,
         "voter_a_candidate_count": 47,
         "snapped": 25,

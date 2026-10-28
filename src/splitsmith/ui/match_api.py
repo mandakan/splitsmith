@@ -1591,7 +1591,7 @@ async def build_shooter_trim_caches(request: Request, slug: str) -> JSONResponse
 
     Operates against the shooter's project root directly rather than
     the bound ``state``, so the user can regenerate Mathias's caches
-    while staying on Anton's audit screen. Eligibility is
+    while staying on Albin's audit screen. Eligibility is
     :func:`_audit_trim_targets` -- one job per uncached angle, not one
     per stage, because Audit plays secondaries alongside the primary
     and each has its own cache keyed on ``video_id``. Jobs go through

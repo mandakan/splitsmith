@@ -16,15 +16,15 @@ per shooter only.
 
 - Every phone and head cam embeds its capture start. Filesystem dates on
   shared files are copy dates (median 4-7 h off, months in two matches).
-- Device and folder say nothing about who is in a clip: Martin's phone films
-  Mathias and Anton, a club mate holds the shooter's own phone, two shooters
+- Device and folder say nothing about who is in a clip: Magnus's phone films
+  Mathias and Albin, a club mate holds the shooter's own phone, two shooters
   own the same iPhone model.
 - Each competitor's scorecard is typed shortly after their own run. "The
   first scorecard of any squad member typed after the clip started" gave the
   right shooter and stage for 218 of 221 clips whose clock was right; the
   blind run over the unsorted Höstfinalen XI folders sorted all 24 phone
-  clips plausibly (Martin's folder: Mathias and Anton; Anton's: Mathias and
-  Martin), confirmed by the user.
+  clips plausibly (Magnus's folder: Mathias and Albin; Albin's: Mathias and
+  Magnus), confirmed by the user.
 - Scorecard times are not fully reliable (SSI bugs, scores typed after the
   fact). They are the prior, never silently final.
 - Phone clocks are right (network time). The Insta360 head cam is not:
@@ -169,7 +169,7 @@ primary button, **Import N clips**. Camera clock state as a `Chip`
 Add footage still files a folder under the active shooter, but with two or
 more shooters holding scorecards its auto-assign keeps only clips the
 engine, over everyone's scorecards, puts on that shooter: a squad mate's
-run minutes earlier sits in the active shooter's window (Anton's glasses
+run minutes earlier sits in the active shooter's window (Albin's glasses
 became Mathias's primaries in a replay of Höstfinalen XI). The import
 banner and the Unassigned panel offer "Sort across shooters", which opens
 the sort one folder above the last one added.

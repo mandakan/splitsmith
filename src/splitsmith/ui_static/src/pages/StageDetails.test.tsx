@@ -16,8 +16,8 @@ vi.mock("@/lib/api", async (importOriginal) => {
 
 function view(over: Partial<StageDetailsView> = {}): StageDetailsView {
   return {
-    slug: "janne",
-    name: "Janne Hauta",
+    slug: "henrik",
+    name: "Henrik Berg",
     division: "Production Optics",
     power_factor: "minor",
     power_factor_set: false,
@@ -46,7 +46,7 @@ function renderPage(caps: MatchShellOutletContext["capabilities"] = ["edit", "re
     project: null,
     health: null,
     shooters: [
-      { slug: "janne", name: "Janne Hauta" },
+      { slug: "henrik", name: "Henrik Berg" },
       { slug: "mathias", name: "Mathias Axell" },
     ] as unknown as ShooterListEntry[],
     refresh: vi.fn(),
@@ -54,7 +54,7 @@ function renderPage(caps: MatchShellOutletContext["capabilities"] = ["edit", "re
     capabilities: caps,
   };
   return render(
-    <MemoryRouter initialEntries={["/match/m1/stage-details/janne"]}>
+    <MemoryRouter initialEntries={["/match/m1/stage-details/henrik"]}>
       <Routes>
         <Route path="/match/:matchId" element={<OutletCtx ctx={ctx} />}>
           <Route path="stage-details/:slug" element={<StageDetails />} />
@@ -81,7 +81,7 @@ describe("Stage details", () => {
   it("fills rows from a paste, warns on a mismatch, and saves them", async () => {
     renderPage();
     const box = await screen.findByLabelText("Paste results here");
-    expect(screen.getByRole("link", { name: /Janne on Shoot'n Score It/ })).toHaveAttribute(
+    expect(screen.getByRole("link", { name: /Henrik on Shoot'n Score It/ })).toHaveAttribute(
       "href",
       "https://shootnscoreit.com/event/participant/23/512019/",
     );
@@ -96,7 +96,7 @@ describe("Stage details", () => {
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
     await waitFor(() => expect(api.putStageDetails).toHaveBeenCalledTimes(1));
     const [slug, body] = vi.mocked(api.putStageDetails).mock.calls[0];
-    expect(slug).toBe("janne");
+    expect(slug).toBe("henrik");
     expect(body.rows[0]).toMatchObject({ time_seconds: 12.68, alphas: 5, stage_points: 37 });
     expect(body.rows[0].manual).toContain("alphas");
   });

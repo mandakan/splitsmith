@@ -35,19 +35,19 @@ function cell(
 }
 
 const MATHIAS = cell("mathias", 1.93, 13.57, 2.43);
-const MARTIN = cell("martin", 1.65, 14.28, 3.92);
-const ANTON = cell("anton", 1.67, 13.9, 3.88);
+const MAGNUS = cell("magnus", 1.65, 14.28, 3.92);
+const ALBIN = cell("albin", 1.67, 13.9, 3.88);
 const NOT_AUDITED = cell("cleo", null, 0, 3.1, false);
 
 describe("per-stage sort", () => {
   it("sorts the shooters on a column, a shooter without the figure last either way", () => {
-    const cells = [MATHIAS, NOT_AUDITED, MARTIN, ANTON];
+    const cells = [MATHIAS, NOT_AUDITED, MAGNUS, ALBIN];
     expect(
       sortCells(cells, { key: "draw", dir: "asc" }).map((c) => c.slug),
-    ).toEqual(["martin", "anton", "mathias", "cleo"]);
+    ).toEqual(["magnus", "albin", "mathias", "cleo"]);
     expect(
       sortCells(cells, { key: "draw", dir: "desc" }).map((c) => c.slug),
-    ).toEqual(["mathias", "anton", "martin", "cleo"]);
+    ).toEqual(["mathias", "albin", "magnus", "cleo"]);
     expect(sortCells(cells, null)).toBe(cells);
   });
 
@@ -84,10 +84,10 @@ describe("per-stage sort", () => {
 
 describe("best per stage", () => {
   it("marks the best of each column, every shooter on a tie, never shots", () => {
-    const best = bestCells([MATHIAS, MARTIN, ANTON, NOT_AUDITED]);
-    expect([...best.draw!]).toEqual(["martin"]);
+    const best = bestCells([MATHIAS, MAGNUS, ALBIN, NOT_AUDITED]);
+    expect([...best.draw!]).toEqual(["magnus"]);
     expect([...best.time!]).toEqual(["mathias"]);
-    expect([...best.hf!]).toEqual(["martin"]);
+    expect([...best.hf!]).toEqual(["magnus"]);
     expect(best.shots).toBeUndefined();
     const tie = bestCells([cell("a", 1.5, 10, null), cell("b", 1.5, 11, null)]);
     expect([...tie.draw!].sort()).toEqual(["a", "b"]);

@@ -1100,7 +1100,7 @@ def test_stream_video_serves_a_mov_as_quicktime_inline(tmp_path: Path) -> None:
     sound, 2026-10-02). kind=proxy falls back to the source locally."""
     client, _ = _seed_project_with_primary(tmp_path)
     shooter_root = tmp_path / "match" / "shooters" / "me"
-    source = tmp_path / "from-anton" / "IMG_5277.MOV"
+    source = tmp_path / "from-albin" / "IMG_5277.MOV"
     source.parent.mkdir(parents=True)
     source.write_bytes(b"FAKE_MOV_BYTES")
     project = MatchProject.load(shooter_root)
@@ -2166,7 +2166,7 @@ def test_scan_attaches_a_club_mates_clip_of_the_same_run_as_secondary(tmp_path: 
         return folder
 
     head_dir = _folder("head", "VID.mp4", 1767268500)  # 11:55:00Z
-    phone_dir = _folder("from-martin", "IMG.MOV", 1767268530)  # 30 s later, same run
+    phone_dir = _folder("from-magnus", "IMG.MOV", 1767268530)  # 30 s later, same run
 
     first = client.post(
         "/api/shooters/me/videos/scan", json={"source_dir": str(head_dir), "auto_assign_primary": True}
@@ -3009,7 +3009,7 @@ def test_match_export_title_page_carries_the_division_unless_turned_off(
     _stub_match_export_probe(monkeypatch)
     project_root = next((root / "shooters").iterdir())
     project = MatchProject.load(project_root)
-    project.competitor_name = "Martin Engström"
+    project.competitor_name = "Magnus Åström"
     project.competitor_division = "Classic Major"
     from splitsmith.identity import ShooterIdentity
 
@@ -3032,14 +3032,14 @@ def test_match_export_title_page_carries_the_division_unless_turned_off(
         assert _wait_for_job(client, resp.json()["id"])["status"] == "succeeded"
     on, off, _ = (r.title_page_info for r in seen)
     # The club line (#1243) sits between the shooter's name and the division.
-    assert on[on.index("Martin Engström") + 1 :][:2] == ("PK", "Classic Major")
+    assert on[on.index("Magnus Åström") + 1 :][:2] == ("PK", "Classic Major")
     assert "Classic Major" not in off
     # #1242: the Look variant is a request field, not a CLI-only knob.
     assert [r.card_variant for r in seen] == ["default", "default", "rise"]
     # #1243: the job resolves the shooter's identity for the cards.
     assert seen[0].shooter_identity is not None
     assert seen[0].shooter_identity.accent == "#123456" and seen[0].shooter_identity.club == "PK"
-    assert seen[0].shooter_identity.label == "Martin Engström"
+    assert seen[0].shooter_identity.label == "Magnus Åström"
 
 
 @pytest.mark.parametrize(

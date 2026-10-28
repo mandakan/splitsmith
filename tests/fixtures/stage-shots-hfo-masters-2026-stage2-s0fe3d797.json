@@ -1628,7 +1628,7 @@
     "stage_number": 2,
     "stage_name": "A100"
   },
-  "source_video": "/Volumes/X9/matches/hfo-masters-2026/shooters/s_73ec3fed/raw/IMG_2521.MOV",
+  "source_video": "IMG_2521.MOV",
   "fixture_window_in_source": [
     0.0,
     25.469

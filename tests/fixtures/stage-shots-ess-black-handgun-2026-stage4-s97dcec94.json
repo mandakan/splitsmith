@@ -564,7 +564,7 @@
     "stage_number": 4,
     "stage_name": "Seastar"
   },
-  "source_video": "/Volumes/X9/matches/ess-black-handgun-2026/shooters/s_1fd553b5/raw/IMG_2212.MOV",
+  "source_video": "IMG_2212.MOV",
   "fixture_window_in_source": [
     0.0,
     24.3658

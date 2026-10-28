@@ -1,8 +1,8 @@
 {
  "shooters": [
   {
-   "key": "anton",
-   "name": "Anton Johansson",
+   "key": "albin",
+   "name": "Albin Lund",
    "scorecards": {
     "1": "2026-04-12T11:40:43.623000Z",
     "2": "2026-04-12T12:11:53.626220Z",
@@ -15,8 +15,8 @@
    }
   },
   {
-   "key": "martin",
-   "name": "Martin Engström",
+   "key": "magnus",
+   "name": "Magnus Åström",
    "scorecards": {
     "1": "2026-04-12T11:43:04.103725Z",
     "2": "2026-04-12T12:13:51.272588Z",
@@ -54,7 +54,7 @@
    "model": "iPhone 17 Pro",
    "labels": [
     {
-     "shooter": "martin",
+     "shooter": "magnus",
      "stage": 3
     }
    ]
@@ -84,7 +84,7 @@
    "model": "iPhone 17 Pro",
    "labels": [
     {
-     "shooter": "martin",
+     "shooter": "magnus",
      "stage": 4
     }
    ]
@@ -114,7 +114,7 @@
    "model": "iPhone 17 Pro",
    "labels": [
     {
-     "shooter": "martin",
+     "shooter": "magnus",
      "stage": 5
     }
    ]
@@ -144,7 +144,7 @@
    "model": "iPhone 17 Pro",
    "labels": [
     {
-     "shooter": "martin",
+     "shooter": "magnus",
      "stage": 6
     }
    ]
@@ -174,7 +174,7 @@
    "model": "iPhone 17 Pro",
    "labels": [
     {
-     "shooter": "martin",
+     "shooter": "magnus",
      "stage": 7
     }
    ]
@@ -204,7 +204,7 @@
    "model": "iPhone 17 Pro",
    "labels": [
     {
-     "shooter": "martin",
+     "shooter": "magnus",
      "stage": 8
     }
    ]
@@ -249,7 +249,7 @@
    "model": "iPhone 17 Pro",
    "labels": [
     {
-     "shooter": "martin",
+     "shooter": "magnus",
      "stage": 1
     }
    ]
@@ -279,7 +279,7 @@
    "model": "iPhone 17 Pro",
    "labels": [
     {
-     "shooter": "martin",
+     "shooter": "magnus",
      "stage": 2
     }
    ]
@@ -399,7 +399,7 @@
    "model": "Vanguard",
    "labels": [
     {
-     "shooter": "anton",
+     "shooter": "albin",
      "stage": 3
     }
    ]
@@ -414,7 +414,7 @@
    "model": "Vanguard",
    "labels": [
     {
-     "shooter": "anton",
+     "shooter": "albin",
      "stage": 6
     }
    ]
@@ -429,7 +429,7 @@
    "model": "Vanguard",
    "labels": [
     {
-     "shooter": "anton",
+     "shooter": "albin",
      "stage": 4
     }
    ]
@@ -444,7 +444,7 @@
    "model": "Vanguard",
    "labels": [
     {
-     "shooter": "anton",
+     "shooter": "albin",
      "stage": 7
     }
    ]
@@ -459,7 +459,7 @@
    "model": "Vanguard",
    "labels": [
     {
-     "shooter": "anton",
+     "shooter": "albin",
      "stage": 5
     }
    ]
@@ -474,7 +474,7 @@
    "model": "Vanguard",
    "labels": [
     {
-     "shooter": "anton",
+     "shooter": "albin",
      "stage": 8
     }
    ]
@@ -489,7 +489,7 @@
    "model": "Vanguard",
    "labels": [
     {
-     "shooter": "anton",
+     "shooter": "albin",
      "stage": 1
     }
    ]
@@ -504,7 +504,7 @@
    "model": "Vanguard",
    "labels": [
     {
-     "shooter": "anton",
+     "shooter": "albin",
      "stage": 2
     }
    ]

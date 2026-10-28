@@ -27,13 +27,13 @@ CTX = FreeCellContext(
     stage_name="B6 Front",
     match_name="Höstfinalen XI",
     match_date="2026-09-26",
-    shooters=("Anton", "Martin", "Mathias"),
+    shooters=("Albin", "Magnus", "Mathias"),
     expected_rounds=16,
     paper_targets=8,
     steel_targets=3,
     tiles={
-        "Anton": _tile("Anton", 1.6, 1.9, 2.2),
-        "Martin": _tile("Martin", 1.4, 1.65, 1.9),
+        "Albin": _tile("Albin", 1.6, 1.9, 2.2),
+        "Magnus": _tile("Magnus", 1.4, 1.65, 1.9),
         "Mathias": TileStageData(label="Mathias", stage_number=4),
     },
 )
@@ -56,39 +56,39 @@ def test_match_card_says_the_match_the_day_and_the_squad() -> None:
     assert _texts(free_cell_groups("match", CTX)) == [
         ["Höstfinalen XI"],
         ["2026-09-26"],
-        ["Anton · Martin · Mathias"],
+        ["Albin · Magnus · Mathias"],
     ]
 
 
 def test_splits_mark_the_best_of_each_column_and_dash_what_is_missing() -> None:
     groups = free_cell_groups("splits", CTX)
     assert _texts(groups)[0] == ["Stage 04 · Splits"]
-    anton, martin, mathias = groups[1:]
-    # Martin has the quicker draw and the quicker splits: marked.
-    assert [e.text for e in martin.elements] == ["Martin", "1.40", "0.25", "0.25"]
-    assert [e.color for e in martin.elements[1:]] == [ColorToken.SPLIT_GOOD] * 3
-    assert [e.color for e in anton.elements[1:]] == [ColorToken.INK] * 3
+    albin, magnus, mathias = groups[1:]
+    # Magnus has the quicker draw and the quicker splits: marked.
+    assert [e.text for e in magnus.elements] == ["Magnus", "1.40", "0.25", "0.25"]
+    assert [e.color for e in magnus.elements[1:]] == [ColorToken.SPLIT_GOOD] * 3
+    assert [e.color for e in albin.elements[1:]] == [ColorToken.INK] * 3
     # A shooter with no audited shots reads as dashes, never zeros.
     assert [e.text for e in mathias.elements] == ["Mathias", "-", "-", "-"]
     # Captions only on the first row.
-    assert [e.caption for e in anton.elements] == ["Shooter", "Draw", "Avg", "Best"]
-    assert all(e.caption is None for e in martin.elements)
+    assert [e.caption for e in albin.elements] == ["Shooter", "Draw", "Avg", "Best"]
+    assert all(e.caption is None for e in magnus.elements)
 
 
 def test_a_draw_region_does_not_change_the_shooters_draw() -> None:
-    """#1528: the Draw is the timer draw, so Anton's draw region with a moved
-    start leaves his Draw as it was and Martin's 1.40 is still the best."""
+    """#1528: the Draw is the timer draw, so Albin's draw region with a moved
+    start leaves his Draw as it was and Magnus's 1.40 is still the best."""
     from dataclasses import replace
 
     from splitsmith.config import StageEvent
 
     draw = StageEvent(id="evt-1", kind="draw", start=0.6, end=1.6, source="manual")
-    tiles = {**CTX.tiles, "Anton": replace(CTX.tiles["Anton"], events=(draw,))}
+    tiles = {**CTX.tiles, "Albin": replace(CTX.tiles["Albin"], events=(draw,))}
     groups = free_cell_groups("splits", replace(CTX, tiles=tiles))
     plain = free_cell_groups("splits", CTX)[1]
-    anton = groups[1]
-    assert anton.elements[1].text == plain.elements[1].text
-    assert anton.elements[1].color == ColorToken.INK
+    albin = groups[1]
+    assert albin.elements[1].text == plain.elements[1].text
+    assert albin.elements[1].color == ColorToken.INK
 
 
 def test_splits_with_no_audited_shots_say_so() -> None:
@@ -99,9 +99,9 @@ def test_splits_with_no_audited_shots_say_so() -> None:
 def test_splits_name_shooters_by_a_short_first_name() -> None:
     from splitsmith.compare.free_cell import short_names
 
-    assert short_names(["Mathias Axell", "Martin Engström", "Anna Jonsson"]) == {
+    assert short_names(["Mathias Axell", "Magnus Åström", "Anna Jonsson"]) == {
         "Mathias Axell": "Mathias",
-        "Martin Engström": "Martin",
+        "Magnus Åström": "Magnus",
         "Anna Jonsson": "Anna",
     }
     assert short_names(["Anna Berg", "Anna Ek", "Bo"]) == {
@@ -128,14 +128,14 @@ def _three_up_plan() -> mp4_grid.GridStagePlan:
             row=row,
             col=col,
         )
-        for label, (row, col) in zip(("Anton", "Martin", "Mathias"), ((0, 0), (0, 1), (1, 0)), strict=True)
+        for label, (row, col) in zip(("Albin", "Magnus", "Mathias"), ((0, 0), (0, 1), (1, 0)), strict=True)
     )
     return mp4_grid.GridStagePlan(
         stage_number=4,
         stage_name="B6 Front",
         tiles=tiles,
         duration_seconds=10.0,
-        audio_label="Anton",
+        audio_label="Albin",
         rows=2,
         cols=2,
     )

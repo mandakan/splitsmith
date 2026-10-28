@@ -72,16 +72,16 @@ describe("camera choice across stages", () => {
   });
 
   it("rides in the URL", () => {
-    expect(camsParam({ martin: "hand", anton: "hand" })).toBe(
-      "anton:hand,martin:hand",
+    expect(camsParam({ magnus: "hand", albin: "hand" })).toBe(
+      "albin:hand,magnus:hand",
     );
-    expect(parseCams("anton:hand,martin:hand,broken")).toEqual({
-      anton: "hand",
-      martin: "hand",
+    expect(parseCams("albin:hand,magnus:hand,broken")).toEqual({
+      albin: "hand",
+      magnus: "hand",
     });
     expect(camsParam({})).toBeNull();
-    expect(withCams("/m/compare/3?play=all", "anton:hand")).toBe(
-      "/m/compare/3?play=all&cams=anton%3Ahand",
+    expect(withCams("/m/compare/3?play=all", "albin:hand")).toBe(
+      "/m/compare/3?play=all&cams=albin%3Ahand",
     );
     expect(withCams("/m/compare/3", null)).toBe("/m/compare/3");
   });

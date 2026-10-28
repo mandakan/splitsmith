@@ -566,8 +566,8 @@ describe("MatchShell chrome ownership (#550)", () => {
 
 describe("stageClickPath", () => {
   it("keeps you in Coach, Splits and Export, on the shooter you are looking at", () => {
-    expect(stageClickPath("/coach/martin", 3, "martin", "mathias")).toBe("/coach/martin/3");
-    expect(stageClickPath("/coach/martin/1", 3, "martin", "mathias")).toBe("/coach/martin/3");
+    expect(stageClickPath("/coach/magnus", 3, "magnus", "mathias")).toBe("/coach/magnus/3");
+    expect(stageClickPath("/coach/magnus/1", 3, "magnus", "mathias")).toBe("/coach/magnus/3");
     expect(stageClickPath("/results", 2, undefined, "mathias")).toBe("/results/mathias/2");
     expect(stageClickPath("/export/anna", 4, "anna", "mathias")).toBe("/export/anna/4");
   });

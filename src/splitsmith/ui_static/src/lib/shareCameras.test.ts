@@ -44,16 +44,16 @@ describe("share dialog camera defaults", () => {
   it("everyone on handheld: changes those who have one and names the rest", () => {
     const shooters = [
       { slug: "mathias", name: "Mathias", choices: [PRIMARY, "hand", "head"] },
-      { slug: "martin", name: "Martin", choices: [PRIMARY, "hand", "head"] },
-      { slug: "anton", name: "Anton", choices: [PRIMARY, "head"] },
+      { slug: "magnus", name: "Magnus", choices: [PRIMARY, "hand", "head"] },
+      { slug: "albin", name: "Albin", choices: [PRIMARY, "head"] },
     ];
     expect(allChoices(shooters)).toEqual([PRIMARY, "hand", "head"]);
     expect(applyToAll(shooters, "hand")).toEqual({
       changes: [
         { slug: "mathias", selector: "hand" },
-        { slug: "martin", selector: "hand" },
+        { slug: "magnus", selector: "hand" },
       ],
-      without: ["Anton"],
+      without: ["Albin"],
     });
   });
 
@@ -67,8 +67,8 @@ describe("share dialog camera defaults", () => {
 describe("per-link cameras", () => {
   const shooters = [
     { slug: "mathias", name: "Mathias", choices: ["head", "hand"], defaultValue: "head" },
-    { slug: "martin", name: "Martin", choices: ["head", "hand"], defaultValue: "hand" },
-    { slug: "anton", name: "Anton", choices: ["head", "chest"], defaultValue: "head" },
+    { slug: "magnus", name: "Magnus", choices: ["head", "hand"], defaultValue: "hand" },
+    { slug: "albin", name: "Albin", choices: ["head", "chest"], defaultValue: "head" },
   ];
 
   it("a shooter the link does not name follows the default", () => {
@@ -76,18 +76,18 @@ describe("per-link cameras", () => {
     expect(linkValue({ mathias: "hand" }, "mathias")).toBe("hand");
     expect(linkWith(null, "mathias", "hand")).toEqual({ mathias: "hand" });
     expect(linkWith({ mathias: "hand" }, "mathias", DEFAULT)).toBeNull();
-    expect(linkWith({ mathias: "hand", martin: "head" }, "mathias", DEFAULT)).toEqual({ martin: "head" });
+    expect(linkWith({ mathias: "hand", magnus: "head" }, "mathias", DEFAULT)).toEqual({ magnus: "head" });
   });
 
   it("everyone on handheld for one link names who has none; Default clears the link", () => {
     expect(linkEveryone(null, shooters, "hand")).toEqual({
-      cameras: { mathias: "hand", martin: "hand" },
-      without: ["Anton"],
+      cameras: { mathias: "hand", magnus: "hand" },
+      without: ["Albin"],
     });
-    expect(linkEveryone({ anton: "chest" }, shooters, "hand").cameras).toEqual({
-      anton: "chest",
+    expect(linkEveryone({ albin: "chest" }, shooters, "hand").cameras).toEqual({
+      albin: "chest",
       mathias: "hand",
-      martin: "hand",
+      magnus: "hand",
     });
     expect(linkEveryone({ mathias: "hand" }, shooters, DEFAULT)).toEqual({ cameras: null, without: [] });
   });
@@ -95,8 +95,8 @@ describe("per-link cameras", () => {
   it("says what each shooter opens on, marking the link's own choices", () => {
     expect(opensOn(shooters, { mathias: "hand" })).toEqual([
       { name: "Mathias", label: "Handheld", own: true },
-      { name: "Martin", label: "Handheld", own: false },
-      { name: "Anton", label: "Head cam", own: false },
+      { name: "Magnus", label: "Handheld", own: false },
+      { name: "Albin", label: "Head cam", own: false },
     ]);
   });
 });

@@ -781,7 +781,7 @@
     "stage_number": 2,
     "stage_name": "Unload, and then show clear"
   },
-  "source_video": "/Volumes/X9/matches/tallmilan-2026/shooters/s_de0eac89/raw/IMG_1521.mov",
+  "source_video": "IMG_1521.mov",
   "fixture_window_in_source": [
     0.0,
     35.369

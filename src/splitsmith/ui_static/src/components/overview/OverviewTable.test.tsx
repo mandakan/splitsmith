@@ -117,10 +117,10 @@ describe("OverviewTable", () => {
       cells: [
         filmed,
         cell({ stage_number: 6, stage_name: "B5 All", slug: "s2", shooter_name: "Anna" }),
-        cell({ stage_number: 6, stage_name: "B5 All", slug: "s3", shooter_name: "Anton" }),
+        cell({ stage_number: 6, stage_name: "B5 All", slug: "s3", shooter_name: "Albin" }),
       ],
     };
-    renderTable({}, [shooter("s1", "Mathias Axell"), shooter("s2", "Anna"), shooter("s3", "Anton")], triage);
+    renderTable({}, [shooter("s1", "Mathias Axell"), shooter("s2", "Anna"), shooter("s3", "Albin")], triage);
     const parent = screen.getAllByRole("row")[1];
     const cells = within(parent).getAllByRole("cell");
     expect(cells[2]).toHaveTextContent("1 / 3");

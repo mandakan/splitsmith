@@ -125,7 +125,7 @@
 - `SortCamera.shooter: str | None`, `SortCamera.shooter_source: Literal["user","clip","folder"] | None`.
 - SPA: a shooter `select` on each camera row in the anchor cameras block, labelled "Whose camera"; "from the folder name" hint when the source is folder; change writes decisions.
 
-- [ ] Tests first: ranking per scheme (PXL times, IMG numbers, GoPro GX010012 before GX020012 before GX010013), a camera mixing schemes ranks by the common kind, `stage_in_name` positives and negatives ("stage_3.mp4", "S03", "IMG_3" is not a stage, "best3" is not); folder match ("Janne", "janne hauta", "JANNE_clips"), two matches give None; camera shooter precedence user > clip > folder; API round-trips `camera_shooters`.
+- [ ] Tests first: ranking per scheme (PXL times, IMG numbers, GoPro GX010012 before GX020012 before GX010013), a camera mixing schemes ranks by the common kind, `stage_in_name` positives and negatives ("stage_3.mp4", "S03", "IMG_3" is not a stage, "best3" is not); folder match ("Henrik", "henrik berg", "HENRIK_clips"), two matches give None; camera shooter precedence user > clip > folder; API round-trips `camera_shooters`.
 - [ ] Implement; run the sort tests.
 - [ ] Commit `feat: sort learns recording order and whose camera`.
 

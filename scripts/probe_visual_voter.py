@@ -27,6 +27,8 @@ import torch
 from PIL import Image
 from transformers import CLIPModel, CLIPProcessor
 
+from splitsmith.lab import sources as lab_sources
+
 REPO_ROOT = Path(__file__).resolve().parent.parent
 FIXTURES_DIR = REPO_ROOT / "tests" / "fixtures"
 OUT_DIR = REPO_ROOT / "build" / "visual-probe"
@@ -65,7 +67,7 @@ def iter_target_fixtures(only: str | None) -> Iterable[Path]:
         camera = data.get("camera") or {}
         if camera.get("id") != "go3s" or camera.get("mount") != "head":
             continue
-        src = data.get("source_video")
+        src = lab_sources.resolve(path.stem, data.get("source_video"), path.parent)
         if not src:
             continue
         if not Path(src).exists():
@@ -170,7 +172,7 @@ def probe_fixture(
     candidates = ((data.get("_candidates_pending_audit") or {}).get("candidates")) or []
     window = data.get("fixture_window_in_source") or [0.0, 0.0]
     src_offset = float(window[0])
-    video = Path(data["source_video"])
+    video = Path(lab_sources.resolve(fixture_path.stem, data["source_video"], fixture_path.parent))
     shots_by_cand = {s.get("candidate_number"): s for s in (data.get("shots") or [])}
     labels_by_time = ((data.get("_candidates_pending_audit") or {}).get("labels_by_time")) or {}
 

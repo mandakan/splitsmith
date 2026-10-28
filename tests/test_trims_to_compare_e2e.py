@@ -121,7 +121,7 @@ def _seed_shooter(
 def chained_match(tmp_path: Path) -> Path:
     """Two shooters, three stages, both nominating their chest cam.
 
-    Anton has a chest cam on stages 1 and 3; Bea only on stage 3. So stage 1
+    Albin has a chest cam on stages 1 and 3; Bea only on stage 3. So stage 1
     substitutes for Bea alone, stage 2 substitutes for both, and stage 3
     substitutes for neither -- one marker of each shape.
     """
@@ -130,7 +130,7 @@ def chained_match(tmp_path: Path) -> Path:
     match.stages = [MatchStageDefinition(stage_number=n, stage_name=name) for n, name in _STAGE_DEFS]
     match.save(match_root)
 
-    _seed_shooter(match_root, slug="s_anton", name="Anton", chest_stages={1, 3})
+    _seed_shooter(match_root, slug="s_albin", name="Albin", chest_stages={1, 3})
     _seed_shooter(match_root, slug="s_bea", name="Bea", chest_stages={3})
     return match_root
 
@@ -179,7 +179,7 @@ def test_match_trims_then_compare_export_fills_every_tile(
             "export",
             str(chained_match),
             "--audio-from",
-            "Anton",
+            "Albin",
             "--output",
             str(output),
         ],
@@ -196,7 +196,7 @@ def test_match_trims_then_compare_export_fills_every_tile(
         # Both shooters contribute a real clip. A trim the loader couldn't
         # find would drop that shooter's tile and render a filler in its
         # place -- the exact failure this chain exists to prevent.
-        assert sorted(names) == ["Anton", "Bea"], f"stage {number} tiles: {names}"
+        assert sorted(names) == ["Albin", "Bea"], f"stage {number} tiles: {names}"
 
     # Every asset the grid references is a trim that actually exists on disk.
     srcs = [rep.attrib["src"] for rep in root.iter("media-rep")]
@@ -223,13 +223,13 @@ def test_match_trims_then_compare_export_names_substitutions_in_markers(
     output = chained_match / "compare.fcpxml"
     export = runner.invoke(
         app,
-        ["compare", "export", str(chained_match), "--audio-from", "Anton", "--output", str(output)],
+        ["compare", "export", str(chained_match), "--audio-from", "Albin", "--output", str(output)],
     )
     assert export.exit_code == 0, export.output
 
     markers = _markers_by_stage(ET.parse(output).getroot())
     assert markers[1] == "Stage 1 -- Egg Grab (Bea: primary)"
     # Two substituted shooters are listed comma-separated in sorted order.
-    assert markers[2] == "Stage 2 -- Tower (Anton: primary, Bea: primary)"
+    assert markers[2] == "Stage 2 -- Tower (Albin: primary, Bea: primary)"
     # Nobody substituted on stage 3, so the marker stays clean.
     assert markers[3] == "Stage 3 -- Long Range"

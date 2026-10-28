@@ -179,7 +179,7 @@ export function referenceVideoUrl(view: SortView, ref: SortReference): string
 - [ ] Page tests (fixture gains `stages_with_footage: [1, 2]` for mathias, references for mathias on stages 1 and 2 from the project, `frames_pending: 0`):
   - `compares a clip with a sorted shooter`: open VID_1, press Compare with a shooter, the panel lists "Stage 01 Lucky Seven" and "Stage 02 Long Way Round" tiles; click stage 2, press Use stage 02, the Stage combobox reads "2"; press Use this -> `putFootageSortDecisions` called with an override `{ clip_id: "head/VID_1.mp4", shooter: "mathias", stage: 2 }` (match the shape `assignClip` emits today).
   - `the panel survives the next clip`: open, Compare, Next (ArrowDown), the panel is still there.
-  - `marks the stages the shooter already has`: assigning anton with a checked anton clip on stage 1 in the fixture -> tile 1 says "has it" and the heading says "1 still missing".
+  - `marks the stages the shooter already has`: assigning albin with a checked albin clip on stage 1 in the fixture -> tile 1 says "has it" and the heading says "1 still missing".
 - [ ] Run `pnpm vitest run src/pages/FootageSort.test.tsx`. Expected: fail (no button).
 - [ ] Implement; run page tests, `pnpm typecheck`, eslint on the touched files, `uv run pytest -n0 tests/test_whats_new.py`. Expected: pass.
 - [ ] Commit: `feat(ui): compare a clip with a sorted shooter on Sort footage`.

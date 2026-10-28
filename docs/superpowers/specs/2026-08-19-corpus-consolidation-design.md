@@ -59,8 +59,8 @@ The merged matches are not supersets of their legacy sources.
 - `blacksmith-handgun-open-2026` shooter `s_ce10fa76` (Mathias) has one
   real audit doc (`stage4.json`) and eight `.bak` files. Legacy
   `blacksmith-2026` has all 8 real docs.
-- Where both sides do have a doc (vads anton/martin, blacksmith
-  anton/martin), the merged doc is strictly newer: more `audit_events`,
+- Where both sides do have a doc (vads albin/magnus, blacksmith
+  albin/magnus), the merged doc is strictly newer: more `audit_events`,
   later timestamps, same shot counts.
 
 A migration that assumes containment destroys 7 audit documents.
@@ -80,7 +80,7 @@ A migration that assumes containment destroys 7 audit documents.
 
 - Changing the sync protocol, the merged project layout, or the ensemble
   itself.
-- Running detection or audit for newly registered footage. Anton's
+- Running detection or audit for newly registered footage. Albin's
   tallmilan slot is created and populated; producing splits for it is
   separate work.
 - Touching the SMB share's contents. It stays intact as a second copy.
@@ -120,7 +120,7 @@ share's own `<match>/<shooter>/<handheld|headcam>`. Renames required:
 | `2026-black-handgun` | `2026-ess-black-handgun` |
 | `2026-hfo-masters/*/handheld,headcam` | `.../hand,head` |
 | `2026-oden` | `2026-oden-cup` |
-| loose dirs (`2026-black-handgun-from-martin`, `Stockholm IPSC Open 2026 2`, ...) | moved to `/Volumes/X9/raw/_unsorted/`, not deleted |
+| loose dirs (`2026-black-handgun-from-magnus`, `Stockholm IPSC Open 2026 2`, ...) | moved to `/Volumes/X9/raw/_unsorted/`, not deleted |
 
 `2026-stockholm-ipsc-open` is already correct.
 
@@ -140,7 +140,7 @@ names; conflating them is the most likely way to corrupt this migration.
 
 The match slug is `jinglebell-challenge-2026`, singular, matching the
 project's own `name` and the share directory. The existing project
-directory `jinglebells-challenge-2026-anton` is the odd one out and its
+directory `jinglebells-challenge-2026-albin` is the odd one out and its
 spelling does not survive.
 
 Renaming a raw directory breaks every symlink pointing into it. Rename
@@ -200,7 +200,7 @@ Applied per shooter, in this order:
   `blacksmith-2026`. Each is diffed against its local `.bak` first and any
   disagreement is reported, not silently resolved. The match is synced, so
   the restore republishes those stages.
-- Anton's `tallmilan-2026` footage (5 clips, 467 MB, for a 7-stage match)
+- Albin's `tallmilan-2026` footage (5 clips, 467 MB, for a 7-stage match)
   becomes a fourth shooter. The slot is created and the clips registered
   with a proposed stage assignment from `video_match`; two stages will
   have no footage, and no detection or audit is run.
@@ -218,8 +218,8 @@ Applied per shooter, in this order:
    layer, per the architecture rules in CLAUDE.md.
 2. `scripts/migrate_fixtures_raw_root.py` -- rewrites the 78 stale
    `source_video` values (30 that break outright: 18 under
-   `bofors-bombardment-2026{,-martin}`, 12 under
-   `vads-easter-shoot-2026-{anton,martin}`; 48 that would keep pointing at
+   `bofors-bombardment-2026{,-magnus}`, 12 under
+   `vads-easter-shoot-2026-{albin,magnus}`; 48 that would keep pointing at
    the share copy rather than the canonical X9 one). Follows the existing
    `migrate_fixtures_add_camera.py` / `migrate_fixtures_event_id.py`
    precedent.

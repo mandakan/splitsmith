@@ -14,7 +14,7 @@ vi.mock("@/lib/api", async (importOriginal) => {
 });
 
 const job = (id: string, status: Job["status"], kind = "shot_detect"): Job =>
-  ({ id, kind, status, match_id: "m", shooter_slug: "anton", stage_number: 7, acknowledged: false }) as Job;
+  ({ id, kind, status, match_id: "m", shooter_slug: "albin", stage_number: 7, acknowledged: false }) as Job;
 
 const OLD = [job("old1", "succeeded"), job("old2", "failed", "trim")];
 

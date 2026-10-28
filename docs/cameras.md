@@ -96,7 +96,7 @@ only overall.
 
 ## DJI Osmo Action 4 (head)
 
-- Audio is too noisy to audit shots on (the user's call, Höstfinalen XI, Martin's stages 2 to 8
+- Audio is too noisy to audit shots on (the user's call, Höstfinalen XI, Magnus's stages 2 to 8
   were audited on a handheld angle instead).
 - **False positives (2026-10-26).** The 8 fixtures snapped onto it from the handheld (one
   shooter, Höstfinalen XI) make 24 false positives per 100 shots, held out by match, against 3 to
@@ -140,7 +140,7 @@ Every secondary angle is now a fixture too, snapped from its stage's reviewed an
 |---|---|---|---|
 | Insta360 GO 3S | 32 | 12 | Blacksmith 2026, Tallmilan 2026, Höstfinalen XI, Stockholm IPSC Open 2026, HFO Masters 2026 (snapped) |
 | Meta Vanguard | 16 | 0 | Blacksmith Handgun Open 2026 (April firmware), Höstfinalen XI (September firmware) |
-| DJI Osmo Action 4 | 0 | 8 | Höstfinalen XI (Martin; audited by ear on the handheld, placed on the DJI) |
+| DJI Osmo Action 4 | 0 | 8 | Höstfinalen XI (Magnus; audited by ear on the handheld, placed on the DJI) |
 | iPhone | about 98 | about 40 | most matches |
 | Samsung | 0 | 11 | Höstfinalen XI, Stockholm IPSC Open 2026 |
 
