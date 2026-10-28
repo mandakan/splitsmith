@@ -28,8 +28,12 @@ cleanup() {
     # setsid put the Linux tree in one process group; killing xvfb-run alone
     # leaves Xvfb running.
     if [ "$mac" = 1 ]; then kill "$pid" 2>/dev/null || true; else kill -- -"$pid" 2>/dev/null || true; fi
+    # Wait for the tree to go: Electron and the sidecar write their logs into
+    # $WORK while they shut down, and an rm racing them fails the check.
+    for _ in $(seq 1 20); do kill -0 -- -"$pid" 2>/dev/null || kill -0 "$pid" 2>/dev/null || break; sleep 0.5; done
   fi
-  rm -rf "$WORK"
+  # A temp dir that will not go is not a failed launch.
+  rm -rf "$WORK" 2>/dev/null || true
 }
 trap cleanup EXIT
 # A fresh HOME keeps the app away from any real ~/.splitsmith, its logs and
