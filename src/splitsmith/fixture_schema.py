@@ -26,7 +26,7 @@ import subprocess
 from datetime import UTC, datetime
 from enum import StrEnum
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel
 
@@ -279,6 +279,70 @@ def review_status(data: dict[str, Any]) -> str:
     ):
         return REVIEW_NEEDED
     return REVIEWED
+
+
+# ---------------------------------------------------------------------------
+# Speech masks and the speech review (#1778)
+# ---------------------------------------------------------------------------
+#
+# ``masked_regions`` lists spans of the fixture's WAV (seconds from its start)
+# whose speech is masked; ``lab/speech_mask.py`` proposes them and a person
+# accepts or edits them. Training and evaluation leave every candidate inside
+# one out, since masked audio is not what the range sounded like. A mask never
+# covers a labelled shot or the beep (the masker cuts them out).
+#
+# ``speech_review`` is the stamp that lets a fixture's audio be published.
+
+#: What the reviewer decided for a fixture's audio.
+SPEECH_MASKED = "masked"  # the regions in masked_regions cover its speech
+SPEECH_NONE = "no_speech"  # nothing to mask
+SPEECH_EXCLUDED = "excluded"  # speech over the shots: never published
+SPEECH_DECISIONS = (SPEECH_MASKED, SPEECH_NONE, SPEECH_EXCLUDED)
+
+
+class MaskedRegion(BaseModel):
+    start: float
+    end: float
+    method: str
+    masker_version: int
+
+
+class SpeechReview(BaseModel):
+    decision: Literal["masked", "no_speech", "excluded"]
+    reviewed_at: str
+    #: The masker whose proposal was reviewed (``speech_mask.MASKER_VERSION``).
+    masker_version: int
+
+
+def masked_spans(data: dict[str, Any]) -> list[tuple[float, float]]:
+    """The fixture's masked spans; a malformed entry is skipped."""
+    spans = []
+    for entry in data.get("masked_regions") or []:
+        try:
+            region = MaskedRegion.model_validate(entry)
+        except ValueError:
+            continue
+        if region.end > region.start:
+            spans.append((region.start, region.end))
+    return spans
+
+
+def in_masked_span(t: float, spans: list[tuple[float, float]]) -> bool:
+    return any(start <= t < end for start, end in spans)
+
+
+def speech_review(data: dict[str, Any]) -> SpeechReview | None:
+    try:
+        return SpeechReview.model_validate(data["speech_review"]) if data.get("speech_review") else None
+    except ValueError:
+        return None
+
+
+def publishable(data: dict[str, Any]) -> bool:
+    """Whether the fixture's audio may go into a public corpus: a person
+    reviewed its speech and did not exclude it."""
+    review = speech_review(data)
+    return review is not None and review.decision != SPEECH_EXCLUDED
 
 
 # ---------------------------------------------------------------------------

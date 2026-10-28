@@ -220,4 +220,14 @@ the requested set's models on the first detection.
   review stamp names the masker it reviewed.
 - `scripts/speech_mask_survey.py` is the dry run over the corpus
   (`build/speech_mask_survey.json`).
+- A fixture's `masked_regions` (`fixture_schema.MaskedRegion`, WAV seconds)
+  are its accepted masks. **No candidate inside one trains or scores**: the
+  build's `_build_universe` skips it (keeping the detector's `candidate_idx`,
+  which the sweep join reads) and the lab's `_metrics` ignores
+  `EvalCandidate.masked`, which `run_eval` and `relabel_run` set from the
+  fixture. A new trainer or evaluator reads `fixture_schema.masked_spans`.
+  `tests/test_fixture_masks.py` pins both.
+- `speech_review` (`masked`, `no_speech` or `excluded`, with the masker
+  version) is the stamp that lets audio be published; `publishable()` is
+  the one check.
 
