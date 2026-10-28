@@ -37,8 +37,8 @@ def test_files_are_recognised_by_name():
         "squadmate",
     )
     # A joined, renamed Pixel clip keeps no tags; the make recorded on the clip decides.
-    assert camera_for("janne_stage1.mp4", None, NO_PROBE, make="Google").id == "google-pixel"
-    assert camera_for("janne_stage1.mp4", None, NO_PROBE) is None
+    assert camera_for("henrik_stage1.mp4", None, NO_PROBE, make="Google").id == "google-pixel"
+    assert camera_for("henrik_stage1.mp4", None, NO_PROBE) is None
     phone = camera_for("IMG_3120.MOV", None, IPHONE)
     assert (phone.id, phone.model, phone.mount) == ("apple-iphone17pro", "iPhone 17 Pro", CameraMount.hand)
 
@@ -136,14 +136,14 @@ def test_the_projects_make_and_model_place_a_renamed_file():
     vanguard = camera_for("stage3.mov", None, NO_PROBE, make="Meta", model="Vanguard")
     assert vanguard.id == "meta-vanguard"
     assert (
-        camera_for("martin_8_1.MOV", "hand", IPHONE, make="Apple", model="iPhone 17 Pro").id
+        camera_for("magnus_8_1.MOV", "hand", IPHONE, make="Apple", model="iPhone 17 Pro").id
         == "apple-iphone17pro"
     )
     assert camera_for("mystery.mp4", "head", NO_PROBE, make="Acme", model="Cam") is None
 
 
 def test_a_samsung_probe_places_a_renamed_phone_file():
-    samsung = camera_for("anton_8_2.mp4", "hand", CameraProbeResult(make="Samsung"))
+    samsung = camera_for("albin_8_2.mp4", "hand", CameraProbeResult(make="Samsung"))
     assert (samsung.id, samsung.mount) == ("samsung", CameraMount.hand)
 
 

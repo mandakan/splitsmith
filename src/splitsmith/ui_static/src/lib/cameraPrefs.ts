@@ -7,7 +7,7 @@
  * the stage's primary. The shooter's saved ``compare_camera`` is the same
  * kind of selector, so a saved default, a choice made while watching and
  * the export grid all agree. Choices ride in the URL as
- * ``cams=martin:hand,anton:hand`` so a copied link opens on them.
+ * ``cams=magnus:hand,albin:hand`` so a copied link opens on them.
  */
 import type { CoachVideoEntry } from "./api";
 
@@ -44,7 +44,7 @@ export function selectorFor(
   return index === 0 || v.role === "primary" ? null : v.role;
 }
 
-/** ``cams=martin:hand,anton:primary`` to ``{martin: "hand", anton: "primary"}``. */
+/** ``cams=magnus:hand,albin:primary`` to ``{magnus: "hand", albin: "primary"}``. */
 export function parseCams(raw: string | null): Record<string, string> {
   const out: Record<string, string> = {};
   if (!raw) return out;

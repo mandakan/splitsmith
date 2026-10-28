@@ -57,7 +57,7 @@ def _probe(path: Path) -> dict:
 
 
 def _key(name: str) -> str:
-    """Shooter key: lowercase first name, ASCII-folded (``Engström`` -> ``engstrom``)."""
+    """Shooter key: lowercase first name, ASCII-folded (``Åström`` -> ``astrom``)."""
     first = name.split()[0].lower()
     return unicodedata.normalize("NFKD", first).encode("ascii", "ignore").decode()
 

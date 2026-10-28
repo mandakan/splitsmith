@@ -227,7 +227,7 @@ def test_is_match_folder(tmp_path: Path):
 
 def test_is_legacy_project_folder(tmp_path: Path):
     root = tmp_path / "legacy"
-    _make_legacy(root, name="Legacy Match", competitor="Anton Johansson")
+    _make_legacy(root, name="Legacy Match", competitor="Albin Lund")
     assert is_legacy_project_folder(root)
     assert not is_match_folder(root)
 
@@ -246,7 +246,7 @@ def test_from_path_raises_when_neither(tmp_path: Path):
 
 def test_legacy_to_match_view_preserves_core_fields(tmp_path: Path):
     root = tmp_path / "legacy"
-    project = _make_legacy(root, name="VADS", competitor="Anton Johansson")
+    project = _make_legacy(root, name="VADS", competitor="Albin Lund")
 
     match, shooter = legacy_to_match_view(project)
 
@@ -260,7 +260,7 @@ def test_legacy_to_match_view_preserves_core_fields(tmp_path: Path):
     assert match.stages[0].stage_name == "Egg Grab"
 
     assert shooter.slug == only_slug
-    assert shooter.name == "Anton Johansson"
+    assert shooter.name == "Albin Lund"
     assert shooter.selected_shooter_id == 55429
     assert shooter.stages[0].time_seconds == 11.0
 
@@ -268,7 +268,7 @@ def test_legacy_to_match_view_preserves_core_fields(tmp_path: Path):
 def test_legacy_to_match_view_slug_is_deterministic(tmp_path: Path):
     """Same project metadata -> same opaque slug across reloads."""
     root = tmp_path / "legacy"
-    project = _make_legacy(root, name="VADS", competitor="Anton Johansson")
+    project = _make_legacy(root, name="VADS", competitor="Albin Lund")
 
     match_a, _ = legacy_to_match_view(project)
     match_b, _ = legacy_to_match_view(project)
@@ -277,7 +277,7 @@ def test_legacy_to_match_view_slug_is_deterministic(tmp_path: Path):
 
 def test_load_match_or_legacy_legacy_path(tmp_path: Path):
     root = tmp_path / "legacy"
-    _make_legacy(root, name="VADS", competitor="Anton Johansson")
+    _make_legacy(root, name="VADS", competitor="Albin Lund")
 
     match, roots = load_match_or_legacy(root)
 
@@ -304,10 +304,10 @@ def test_load_match_or_legacy_match_path(tmp_path: Path):
 
 
 def test_plan_merge_happy_path(tmp_path: Path):
-    a = _make_legacy(tmp_path / "anton", name="VADS", competitor="Anton Johansson")
-    b = _make_legacy(tmp_path / "martin", name="VADS", competitor="Martin Engström")
+    a = _make_legacy(tmp_path / "albin", name="VADS", competitor="Albin Lund")
+    b = _make_legacy(tmp_path / "magnus", name="VADS", competitor="Magnus Åström")
 
-    plan = plan_merge([tmp_path / "anton", tmp_path / "martin"], tmp_path / "merged")
+    plan = plan_merge([tmp_path / "albin", tmp_path / "magnus"], tmp_path / "merged")
 
     assert plan.name == "VADS"
     assert plan.scoreboard_match_id == "27242"
@@ -321,8 +321,8 @@ def test_plan_merge_happy_path(tmp_path: Path):
 
 
 def test_plan_merge_rejects_scoreboard_mismatch(tmp_path: Path):
-    _make_legacy(tmp_path / "a", name="VADS", competitor="Anton", scoreboard_id="111")
-    _make_legacy(tmp_path / "b", name="VADS", competitor="Martin", scoreboard_id="222")
+    _make_legacy(tmp_path / "a", name="VADS", competitor="Albin", scoreboard_id="111")
+    _make_legacy(tmp_path / "b", name="VADS", competitor="Magnus", scoreboard_id="222")
 
     with pytest.raises(MergeConflictError, match="scoreboard_match_id"):
         plan_merge([tmp_path / "a", tmp_path / "b"], tmp_path / "merged")
@@ -400,8 +400,8 @@ def test_plan_merge_accepts_explicit_name_override(tmp_path: Path):
 def test_plan_merge_assigns_opaque_slugs(tmp_path: Path):
     """Slugs are random opaque ids (``s_<hex>``), not derived from the
     competitor names, so the on-disk layout doesn't leak PII."""
-    _make_legacy(tmp_path / "a", name="X", competitor="Anton Johansson")
-    _make_legacy(tmp_path / "b", name="X", competitor="Martin Engström")
+    _make_legacy(tmp_path / "a", name="X", competitor="Albin Lund")
+    _make_legacy(tmp_path / "b", name="X", competitor="Magnus Åström")
 
     plan = plan_merge([tmp_path / "a", tmp_path / "b"], tmp_path / "merged")
     slugs = [m.slug for m in plan.shooter_moves]
@@ -415,29 +415,29 @@ def test_plan_merge_assigns_opaque_slugs(tmp_path: Path):
 
 
 def test_execute_merge_copy_creates_full_layout(tmp_path: Path):
-    _make_legacy(tmp_path / "anton", name="VADS", competitor="Anton Johansson")
-    _make_legacy(tmp_path / "martin", name="VADS", competitor="Martin Engström")
+    _make_legacy(tmp_path / "albin", name="VADS", competitor="Albin Lund")
+    _make_legacy(tmp_path / "magnus", name="VADS", competitor="Magnus Åström")
     # Seed some user data to confirm copy.
-    (tmp_path / "anton" / "raw" / "fake.mp4").write_bytes(b"raw-anton")
-    (tmp_path / "anton" / "audit" / "stage1.json").write_text('{"shots": []}', encoding="utf-8")
-    (tmp_path / "martin" / "raw" / "fake.mp4").write_bytes(b"raw-martin")
+    (tmp_path / "albin" / "raw" / "fake.mp4").write_bytes(b"raw-albin")
+    (tmp_path / "albin" / "audit" / "stage1.json").write_text('{"shots": []}', encoding="utf-8")
+    (tmp_path / "magnus" / "raw" / "fake.mp4").write_bytes(b"raw-magnus")
 
     out = tmp_path / "merged"
-    plan = plan_merge([tmp_path / "anton", tmp_path / "martin"], out)
+    plan = plan_merge([tmp_path / "albin", tmp_path / "magnus"], out)
     match = execute_merge(plan, move=False)
 
     # Resolve the opaque slug for each source so the asserts below don't
     # need to know the random ids.
     moves_by_src = {m.source_root: m for m in plan.shooter_moves}
-    anton_slug = moves_by_src[tmp_path / "anton"].slug
-    martin_slug = moves_by_src[tmp_path / "martin"].slug
+    albin_slug = moves_by_src[tmp_path / "albin"].slug
+    magnus_slug = moves_by_src[tmp_path / "magnus"].slug
 
     # match.json present, shooters subdirs populated. project.json is kept
     # alongside shooter.json as a legacy compat shim (most server endpoints
     # still speak the legacy MatchProject schema); match-level fields are
     # stripped so match.json stays authoritative.
     assert (out / MATCH_FILE).is_file()
-    for slug in (anton_slug, martin_slug):
+    for slug in (albin_slug, magnus_slug):
         sroot = out / SHOOTERS_DIR / slug
         assert (sroot / SHOOTER_FILE).is_file(), slug
         assert (sroot / "project.json").is_file(), slug
@@ -448,31 +448,31 @@ def test_execute_merge_copy_creates_full_layout(tmp_path: Path):
         assert legacy["match_date"] is None
 
     # User data carried across.
-    raw_file = out / SHOOTERS_DIR / anton_slug / "raw" / "fake.mp4"
-    assert raw_file.read_bytes() == b"raw-anton"
-    assert (out / SHOOTERS_DIR / anton_slug / "audit" / "stage1.json").read_text(
+    raw_file = out / SHOOTERS_DIR / albin_slug / "raw" / "fake.mp4"
+    assert raw_file.read_bytes() == b"raw-albin"
+    assert (out / SHOOTERS_DIR / albin_slug / "audit" / "stage1.json").read_text(
         encoding="utf-8"
     ) == '{"shots": []}'
 
     # Sources untouched (copy mode).
-    assert (tmp_path / "anton" / "raw" / "fake.mp4").exists()
-    assert (tmp_path / "anton" / "project.json").exists()
+    assert (tmp_path / "albin" / "raw" / "fake.mp4").exists()
+    assert (tmp_path / "albin" / "project.json").exists()
 
     # Returned Match is loadable.
-    assert sorted(match.shooters) == sorted([anton_slug, martin_slug])
+    assert sorted(match.shooters) == sorted([albin_slug, magnus_slug])
     Match.load(out)  # raises if invalid
 
 
 def test_execute_merge_move_relocates_sources(tmp_path: Path):
-    _make_legacy(tmp_path / "anton", name="VADS", competitor="Anton")
-    _make_legacy(tmp_path / "martin", name="VADS", competitor="Martin")
+    _make_legacy(tmp_path / "albin", name="VADS", competitor="Albin")
+    _make_legacy(tmp_path / "magnus", name="VADS", competitor="Magnus")
 
     out = tmp_path / "merged"
-    plan = plan_merge([tmp_path / "anton", tmp_path / "martin"], out)
+    plan = plan_merge([tmp_path / "albin", tmp_path / "magnus"], out)
     execute_merge(plan, move=True)
 
-    assert not (tmp_path / "anton").exists()
-    assert not (tmp_path / "martin").exists()
+    assert not (tmp_path / "albin").exists()
+    assert not (tmp_path / "magnus").exists()
     match = Match.load(out)
     assert len(match.shooters) == 2
     for slug in match.shooters:
@@ -496,21 +496,21 @@ def test_execute_merge_shooter_json_has_no_match_fields(tmp_path: Path):
     The legacy project.json carried name/scoreboard_match_id/match_date as
     top-level fields; in the new schema those live only on match.json.
     """
-    _make_legacy(tmp_path / "anton", name="VADS", competitor="Anton")
+    _make_legacy(tmp_path / "albin", name="VADS", competitor="Albin")
     out = tmp_path / "merged"
-    _make_legacy(tmp_path / "martin", name="VADS", competitor="Martin")
+    _make_legacy(tmp_path / "magnus", name="VADS", competitor="Magnus")
 
-    plan = plan_merge([tmp_path / "anton", tmp_path / "martin"], out)
+    plan = plan_merge([tmp_path / "albin", tmp_path / "magnus"], out)
     execute_merge(plan, move=False)
 
-    anton_slug = next(m.slug for m in plan.shooter_moves if m.source_root == tmp_path / "anton")
-    shooter_json = json.loads((out / SHOOTERS_DIR / anton_slug / SHOOTER_FILE).read_text(encoding="utf-8"))
+    albin_slug = next(m.slug for m in plan.shooter_moves if m.source_root == tmp_path / "albin")
+    shooter_json = json.loads((out / SHOOTERS_DIR / albin_slug / SHOOTER_FILE).read_text(encoding="utf-8"))
     for forbidden in ("name", "scoreboard_match_id", "scoreboard_content_type", "match_date"):
         # ``name`` IS a Shooter field (the human-readable shooter name), so
         # only the *match*-flavored fields are forbidden. The shooter's own
         # name is fine.
         if forbidden == "name":
-            assert shooter_json["name"] == "Anton"
+            assert shooter_json["name"] == "Albin"
             continue
         assert forbidden not in shooter_json, forbidden
 
@@ -621,15 +621,15 @@ def _merged_then_edited(tmp_path: Path) -> tuple[Path, str]:
     project.json only, as every server write path does."""
     from splitsmith.match_project import StageVideo
 
-    _make_legacy(tmp_path / "anton", name="VADS", competitor="Anton Johansson")
-    plan = plan_merge([tmp_path / "anton"], tmp_path / "merged")
+    _make_legacy(tmp_path / "albin", name="VADS", competitor="Albin Lund")
+    plan = plan_merge([tmp_path / "albin"], tmp_path / "merged")
     execute_merge(plan)
     slug = plan.shooter_moves[0].slug
     shooter_root = Match.shooter_root(tmp_path / "merged", slug)
 
     project = MatchProject.load(shooter_root)
     project.stages[0].videos.append(StageVideo(path=Path("raw/VID1.mp4"), role="primary"))
-    project.competitor_name = "Anton J."
+    project.competitor_name = "Albin J."
     project.save(shooter_root)
     return tmp_path / "merged", slug
 
@@ -640,7 +640,7 @@ def test_load_shooter_reads_per_shooter_data_edited_after_the_merge(tmp_path: Pa
     shooter = Match.load(match_root).load_shooter(match_root, slug)
 
     assert shooter.slug == slug
-    assert shooter.name == "Anton J."
+    assert shooter.name == "Albin J."
     assert [len(s.videos) for s in shooter.stages] == [1, 0, 0]
 
 
@@ -654,7 +654,7 @@ def test_match_info_counts_videos_added_after_the_merge(tmp_path: Path):
     result = CliRunner().invoke(match_app, ["info", str(match_root)], env={"COLUMNS": "200"})
 
     assert result.exit_code == 0, result.output
-    row = next(line for line in result.output.splitlines() if "Anton J." in line)
+    row = next(line for line in result.output.splitlines() if "Albin J." in line)
     cells = [c.strip() for c in row.split("│") if c.strip()]
     assert cells[-2:] == ["1", "1"], row  # Stages, Videos
 
@@ -673,4 +673,4 @@ def test_load_shooter_with_an_unreadable_project_json_falls_back(tmp_path: Path)
 
     shooter = Match.load(match_root).load_shooter(match_root, slug)
 
-    assert shooter.name == "Anton Johansson"  # the merge-time snapshot
+    assert shooter.name == "Albin Lund"  # the merge-time snapshot

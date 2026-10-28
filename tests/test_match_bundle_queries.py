@@ -37,7 +37,7 @@ def _create_match(client: TestClient) -> str:
                 {"stage_number": 1, "stage_name": "S1"},
                 {"stage_number": 2, "stage_name": "S2"},
             ],
-            "primary_shooter": {"name": "Anton"},
+            "primary_shooter": {"name": "Albin"},
         },
     )
     assert resp.status_code == 200, resp.text
@@ -177,7 +177,7 @@ def test_beep_queue_content_is_unchanged_by_the_bundle(
 ) -> None:
     """The bundled handler must list the same items with the same statuses
     as the per-shooter loads did: Bea's two primaries are detected above
-    the threshold but unreviewed; Anton has no footage and no items."""
+    the threshold but unreviewed; Albin has no footage and no items."""
     client, sender = hosted_app
     login(client, sender, OWNER)
     uid = _user_id(hosted_env, OWNER)
@@ -211,8 +211,8 @@ def test_triage_content_is_unchanged_by_the_bundle(
 
     assert resp.status_code == 200, resp.text
     cells = {(c["slug"], c["stage_number"]): c for c in resp.json()["cells"]}
-    anton = next(slug for slug, _ in cells if slug != "bea")
-    assert cells[(anton, 1)]["status"] == "todo"
+    albin = next(slug for slug, _ in cells if slug != "bea")
+    assert cells[(albin, 1)]["status"] == "todo"
     assert cells[("bea", 1)]["status"] == "in_progress"  # audit doc without a save event
     assert cells[("bea", 1)]["shot_count"] == 1
     assert cells[("bea", 2)]["status"] == "ready"  # footage and a time, no audit yet

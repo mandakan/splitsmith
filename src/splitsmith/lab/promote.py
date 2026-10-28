@@ -47,6 +47,7 @@ from ..fixture_schema import (
     shots_revision_sha,
 )
 from ..rise_foot import peak_envelope, rise_foot
+from . import sources
 from .core import (
     DEFAULT_SHOOTER_KEY,
     build_event_id,
@@ -397,7 +398,7 @@ def write_promoted_fixture(
     if pending.get("candidates"):
         data["_candidates_pending_audit"] = {**pending, "candidates": rebase(pending["candidates"])}
     if source_video is not None:
-        data["source_video"] = source_video
+        data["source_video"] = sources.publish(slug, source_video, fixtures_root)
 
     if target_json.exists():
         # A re-snap starts with no reasons; keep the lab's (#1459).

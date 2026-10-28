@@ -16649,7 +16649,7 @@
   },
   "/api/match/shooters/{slug}/build-trim-caches": {
    "post": {
-    "description": "Submit trim-cache jobs for every angle in ``slug``'s project\nwhose audit-mode short-GOP MP4 is missing (#351).\n\nOperates against the shooter's project root directly rather than\nthe bound ``state``, so the user can regenerate Mathias's caches\nwhile staying on Anton's audit screen. Eligibility is\n:func:`_audit_trim_targets` -- one job per uncached angle, not one\nper stage, because Audit plays secondaries alongside the primary\nand each has its own cache keyed on ``video_id``. Jobs go through\nthe existing JobRegistry; the SPA's JobsPanel surfaces them.\n\nAlready-cached angles are reported under ``skipped`` rather than\nre-queued: the underlying ``ensure_video_audit_trim`` is\nidempotent, but skipping early avoids the queue churn.",
+    "description": "Submit trim-cache jobs for every angle in ``slug``'s project\nwhose audit-mode short-GOP MP4 is missing (#351).\n\nOperates against the shooter's project root directly rather than\nthe bound ``state``, so the user can regenerate Mathias's caches\nwhile staying on Albin's audit screen. Eligibility is\n:func:`_audit_trim_targets` -- one job per uncached angle, not one\nper stage, because Audit plays secondaries alongside the primary\nand each has its own cache keyed on ``video_id``. Jobs go through\nthe existing JobRegistry; the SPA's JobsPanel surfaces them.\n\nAlready-cached angles are reported under ``skipped`` rather than\nre-queued: the underlying ``ensure_video_audit_trim`` is\nidempotent, but skipping early avoids the queue churn.",
     "operationId": "build_shooter_trim_caches_api_match_shooters__slug__build_trim_caches_post",
     "parameters": [
      {

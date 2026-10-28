@@ -639,7 +639,7 @@ def keep_this_shooters(
     suggestions through the footage sort engine.
 
     ``auto_match`` sees one shooter's scorecard windows, and a squad mate's
-    run minutes earlier falls in them (Höstfinalen XI 2026: Anton's glasses
+    run minutes earlier falls in them (Höstfinalen XI 2026: Albin's glasses
     clips auto-assigned as Mathias's primaries). With two or more shooters
     in the match, a clip stays suggested only when the engine, over every
     shooter's scorecards, puts it on ``slug`` with ``high`` or ``medium``

@@ -83,7 +83,7 @@ def test_derive_without_a_time_leaves_hit_factor_empty() -> None:
 
 
 def _project(tmp_path: Path) -> MatchProject:
-    project = MatchProject.init(tmp_path / "janne", name="BH")
+    project = MatchProject.init(tmp_path / "henrik", name="BH")
     project.competitor_division = "Production Optics"
     project.stages = [
         StageEntry(stage_number=1, stage_name="Now You See Me", time_seconds=0.0),
@@ -146,8 +146,8 @@ def test_project_round_trips_the_new_fields(tmp_path: Path) -> None:
     project.power_factor = "major"
     project.stage(1).shot_order = 3
     project.stage(1).scorecard = _card(alphas=1, manual=["alphas"])
-    project.save(tmp_path / "janne")
-    loaded = MatchProject.load(tmp_path / "janne")
+    project.save(tmp_path / "henrik")
+    loaded = MatchProject.load(tmp_path / "henrik")
     assert loaded.power_factor == "major"
     assert loaded.stage(1).shot_order == 3
     assert loaded.stage(1).scorecard.manual == ["alphas"]  # type: ignore[union-attr]
@@ -166,7 +166,7 @@ def test_linking_the_scoreboard_keeps_what_was_typed(tmp_path: Path) -> None:
         "match": {"name": "BH"},
         "competitors": [
             {
-                "name": "Janne",
+                "name": "Henrik",
                 "stages": [
                     {
                         "stage_number": 1,

@@ -19,6 +19,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from splitsmith.lab import core as lab_core
+from splitsmith.lab import sources
 from splitsmith.lab.core import PromoteRequest, promote_stage_to_fixture
 from splitsmith.match_project import MatchProject, StageEntry, StageVideo
 from splitsmith.ui.server import create_app
@@ -79,9 +80,11 @@ def test_promote_writes_supplied_provenance_fields(tmp_path: Path) -> None:
     )
 
     written = json.loads(Path(rec.audit_path).read_text(encoding="utf-8"))
-    # ``scrub_local_path`` strips ``/Users/<name>/matches/<match>/`` from
-    # source_video for PII safety, leaving the project-relative tail.
-    assert written["source_video"] == "raw/clip.MOV"
+    # The public fixture keeps the file name; the full path, which names
+    # a person on a real drive, stays in the local map (lab.sources).
+    assert written["source_video"] == "clip.MOV"
+    full = sources.resolve(rec.slug, written["source_video"], fixtures_root)
+    assert full == "/Users/x/matches/test/raw/clip.MOV"
     assert written["fixture_window_in_source"] == [2.5, 18.5]
     assert written["camera"]["mount"] == "hand"
 
@@ -301,7 +304,9 @@ def test_lab_promote_endpoint_writes_full_provenance(tmp_path: Path, monkeypatch
     # tmp_path (macOS /private/var/folders/...) ``scrub_local_path``
     # leaves the absolute path intact -- scrub coverage is already in
     # the unit-level test above. Here we just confirm derivation.
-    assert Path(written["source_video"]).as_posix().endswith("/raw/v.mp4")
+    assert written["source_video"] == "v.mp4"
+    full = sources.resolve(fixture_json.stem, "v.mp4", fixture_json.parent)
+    assert Path(full).as_posix().endswith("/raw/v.mp4")
     # fixture_window_in_source = [max(0, beep - pre), beep + stage_time + post]
     # beep=1.0, pre=5.0, stage=10.0, post=5.0  ->  [0.0, 16.0]
     assert written["fixture_window_in_source"] == [0.0, 16.0]
@@ -339,7 +344,8 @@ def test_promote_overrides_audit_json_provenance_with_request(tmp_path: Path) ->
     written = json.loads(Path(rec.audit_path).read_text(encoding="utf-8"))
     # ``/new/correct/path.mov`` doesn't match the user-home prefix so
     # scrub_local_path leaves it intact.
-    assert written["source_video"] == "/new/correct/path.mov"
+    assert written["source_video"] == "path.mov"
+    assert sources.resolve(rec.slug, "path.mov", fixtures_root) == "/new/correct/path.mov"
     assert written["fixture_window_in_source"] == [0.5, 13.5]
     assert written["camera"]["mount"] == "hand"
 

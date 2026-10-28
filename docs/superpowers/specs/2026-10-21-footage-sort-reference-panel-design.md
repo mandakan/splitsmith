@@ -64,7 +64,7 @@ screenshot `reference-panel-mockup-2.png`):
 - Top: "Compare with" and a shooter dropdown. It lists the match's shooters
   who have reference footage on at least one stage, default the one with
   the most such stages; the shooter selected in the clip panel is excluded
-  only when another exists (comparing Janne with Janne's own earlier clips
+  only when another exists (comparing Henrik with Henrik's own earlier clips
   is legitimate: it shows the stages already covered). When nobody has
   reference footage the Compare button is disabled with the title "No
   shooter has footage yet", and the panel never opens empty.

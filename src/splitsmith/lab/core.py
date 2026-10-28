@@ -28,6 +28,7 @@ from ..ensemble.api import (
 )
 from ..ensemble.calibration import camera_class_from_mount
 from ..fixture_schema import REVIEW_NEEDED, REVIEWED, review_status
+from . import sources
 
 DEFAULT_FIXTURES_ROOT = Path(__file__).resolve().parents[3] / "tests" / "fixtures"
 DEFAULT_RUNS_ROOT = Path("build/lab/runs")
@@ -304,7 +305,7 @@ def list_fixtures(fixtures_root: Path | None = None) -> list[FixtureRecord]:
                 stage_time_seconds=payload.get("stage_time_seconds"),
                 beep_time=payload.get("beep_time"),
                 source=payload.get("source"),
-                source_video=payload.get("source_video"),
+                source_video=sources.resolve(json_path.stem, payload.get("source_video"), json_path.parent),
                 audit_mtime=json_path.stat().st_mtime,
                 audio_mtime=wav.stat().st_mtime if wav.exists() else None,
                 anchor_slug=anchor_slug,
@@ -1243,9 +1244,10 @@ def promote_stage_to_fixture(req: PromoteRequest) -> FixtureRecord:
     # Strip local home-dir prefixes from human-readable path fields so
     # the published fixture carries no OS-username PII.
     if "source" in payload:
-        payload["source"] = scrub_local_path(payload.get("source"))
+        payload["source"] = sources.public_text(scrub_local_path(payload.get("source")))
     if "source_video" in payload:
-        payload["source_video"] = scrub_local_path(payload.get("source_video"))
+        # File name only; the full path stays in the local map (lab.sources).
+        payload["source_video"] = sources.publish(req.fixture_slug, payload.get("source_video"), root)
 
     if req.require_provenance:
         missing = []

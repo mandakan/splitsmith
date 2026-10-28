@@ -1,8 +1,8 @@
 {
  "shooters": [
   {
-   "key": "martin",
-   "name": "Martin Engström",
+   "key": "magnus",
+   "name": "Magnus Åström",
    "scorecards": {
     "1": "2026-06-28T09:21:47.832710Z",
     "2": "2026-06-28T09:54:12.520506Z",
@@ -19,8 +19,8 @@
    }
   },
   {
-   "key": "anton",
-   "name": "Anton Johansson",
+   "key": "albin",
+   "name": "Albin Lund",
    "scorecards": {
     "1": "2026-06-28T09:23:35.048309Z",
     "2": "2026-06-28T09:57:27.396572Z",
@@ -57,436 +57,436 @@
  ],
  "clips": [
   {
-   "id": "anton_1.mp4",
+   "id": "albin_1.mp4",
    "folder": "",
-   "filename": "anton_1.mp4",
+   "filename": "albin_1.mp4",
    "start": "2026-06-28T09:22:45+00:00",
    "duration": 36.162,
    "make": null,
    "model": null,
    "labels": [
     {
-     "shooter": "anton",
+     "shooter": "albin",
      "stage": 1
     }
    ]
   },
   {
-   "id": "anton_10.mp4",
+   "id": "albin_10.mp4",
    "folder": "",
-   "filename": "anton_10.mp4",
+   "filename": "albin_10.mp4",
    "start": "2026-06-28T15:38:30+00:00",
    "duration": 38.704,
    "make": null,
    "model": null,
    "labels": [
     {
-     "shooter": "anton",
+     "shooter": "albin",
      "stage": 10
     }
    ]
   },
   {
-   "id": "anton_11_1.MOV",
+   "id": "albin_11_1.MOV",
    "folder": "",
-   "filename": "anton_11_1.MOV",
+   "filename": "albin_11_1.MOV",
    "start": "2026-06-28T07:09:22+00:00",
    "duration": 17.19,
    "make": "Apple",
    "model": "iPhone 17 Pro Max",
    "labels": [
     {
-     "shooter": "anton",
+     "shooter": "albin",
      "stage": 11
     }
    ]
   },
   {
-   "id": "anton_11_2.mp4",
+   "id": "albin_11_2.mp4",
    "folder": "",
-   "filename": "anton_11_2.mp4",
+   "filename": "albin_11_2.mp4",
    "start": "2026-06-28T07:09:41+00:00",
    "duration": 18.12,
    "make": null,
    "model": null,
    "labels": [
     {
-     "shooter": "anton",
+     "shooter": "albin",
      "stage": 11
     }
    ]
   },
   {
-   "id": "anton_12_1.MOV",
+   "id": "albin_12_1.MOV",
    "folder": "",
-   "filename": "anton_12_1.MOV",
+   "filename": "albin_12_1.MOV",
    "start": "2026-06-28T07:34:20+00:00",
    "duration": 41.787,
    "make": "Apple",
    "model": "iPhone 17 Pro Max",
    "labels": [
     {
-     "shooter": "anton",
+     "shooter": "albin",
      "stage": 12
     }
    ]
   },
   {
-   "id": "anton_12_2.mp4",
+   "id": "albin_12_2.mp4",
    "folder": "",
-   "filename": "anton_12_2.mp4",
+   "filename": "albin_12_2.mp4",
    "start": "2026-06-28T07:34:59+00:00",
    "duration": 44.808,
    "make": null,
    "model": null,
    "labels": [
     {
-     "shooter": "anton",
+     "shooter": "albin",
      "stage": 12
     }
    ]
   },
   {
-   "id": "anton_2.mp4",
+   "id": "albin_2.mp4",
    "folder": "",
-   "filename": "anton_2.mp4",
+   "filename": "albin_2.mp4",
    "start": "2026-06-28T09:55:32+00:00",
    "duration": 68.586,
    "make": null,
    "model": null,
    "labels": [
     {
-     "shooter": "anton",
+     "shooter": "albin",
      "stage": 2
     }
    ]
   },
   {
-   "id": "anton_3.mp4",
+   "id": "albin_3.mp4",
    "folder": "",
-   "filename": "anton_3.mp4",
+   "filename": "albin_3.mp4",
    "start": "2026-06-28T11:22:19+00:00",
    "duration": 59.199,
    "make": null,
    "model": null,
    "labels": [
     {
-     "shooter": "anton",
+     "shooter": "albin",
      "stage": 3
     }
    ]
   },
   {
-   "id": "anton_4.mp4",
+   "id": "albin_4.mp4",
    "folder": "",
-   "filename": "anton_4.mp4",
+   "filename": "albin_4.mp4",
    "start": "2026-06-28T11:54:42+00:00",
    "duration": 49.627,
    "make": null,
    "model": null,
    "labels": [
     {
-     "shooter": "anton",
+     "shooter": "albin",
      "stage": 4
     }
    ]
   },
   {
-   "id": "anton_5.MOV",
+   "id": "albin_5.MOV",
    "folder": "",
-   "filename": "anton_5.MOV",
+   "filename": "albin_5.MOV",
    "start": "2026-06-28T12:30:12+00:00",
    "duration": 32.647,
    "make": "Apple",
    "model": "iPhone 17 Pro Max",
    "labels": [
     {
-     "shooter": "anton",
+     "shooter": "albin",
      "stage": 5
     }
    ]
   },
   {
-   "id": "anton_6.mp4",
+   "id": "albin_6.mp4",
    "folder": "",
-   "filename": "anton_6.mp4",
+   "filename": "albin_6.mp4",
    "start": "2026-06-28T13:43:03+00:00",
    "duration": 80.162,
    "make": null,
    "model": null,
    "labels": [
     {
-     "shooter": "anton",
+     "shooter": "albin",
      "stage": 6
     }
    ]
   },
   {
-   "id": "anton_7.mp4",
+   "id": "albin_7.mp4",
    "folder": "",
-   "filename": "anton_7.mp4",
+   "filename": "albin_7.mp4",
    "start": "2026-06-28T14:13:01+00:00",
    "duration": 39.076,
    "make": null,
    "model": null,
    "labels": [
     {
-     "shooter": "anton",
+     "shooter": "albin",
      "stage": 7
     }
    ]
   },
   {
-   "id": "anton_8_1.MOV",
+   "id": "albin_8_1.MOV",
    "folder": "",
-   "filename": "anton_8_1.MOV",
+   "filename": "albin_8_1.MOV",
    "start": "2026-06-28T14:41:05+00:00",
    "duration": 46.842,
    "make": "Apple",
    "model": "iPhone 17 Pro Max",
    "labels": [
     {
-     "shooter": "anton",
+     "shooter": "albin",
      "stage": 8
     }
    ]
   },
   {
-   "id": "anton_8_2.mp4",
+   "id": "albin_8_2.mp4",
    "folder": "",
-   "filename": "anton_8_2.mp4",
+   "filename": "albin_8_2.mp4",
    "start": "2026-06-28T14:41:42+00:00",
    "duration": 38.271,
    "make": null,
    "model": null,
    "labels": [
     {
-     "shooter": "anton",
+     "shooter": "albin",
      "stage": 8
     }
    ]
   },
   {
-   "id": "anton_9.mp4",
+   "id": "albin_9.mp4",
    "folder": "",
-   "filename": "anton_9.mp4",
+   "filename": "albin_9.mp4",
    "start": "2026-06-28T15:09:13+00:00",
    "duration": 27.303,
    "make": null,
    "model": null,
    "labels": [
     {
-     "shooter": "anton",
+     "shooter": "albin",
      "stage": 9
     }
    ]
   },
   {
-   "id": "martin_1.MOV",
+   "id": "magnus_1.MOV",
    "folder": "",
-   "filename": "martin_1.MOV",
+   "filename": "magnus_1.MOV",
    "start": "2026-06-28T09:20:06+00:00",
    "duration": 62.412,
    "make": "Apple",
    "model": "iPhone 17 Pro",
    "labels": [
     {
-     "shooter": "martin",
+     "shooter": "magnus",
      "stage": 1
     }
    ]
   },
   {
-   "id": "martin_10.MOV",
+   "id": "magnus_10.MOV",
    "folder": "",
-   "filename": "martin_10.MOV",
+   "filename": "magnus_10.MOV",
    "start": "2026-06-28T15:35:12+00:00",
    "duration": 62.745,
    "make": "Apple",
    "model": "iPhone 17 Pro",
    "labels": [
     {
-     "shooter": "martin",
+     "shooter": "magnus",
      "stage": 10
     }
    ]
   },
   {
-   "id": "martin_11.MOV",
+   "id": "magnus_11.MOV",
    "folder": "",
-   "filename": "martin_11.MOV",
+   "filename": "magnus_11.MOV",
    "start": "2026-06-28T07:07:23+00:00",
    "duration": 29.312,
    "make": "Apple",
    "model": "iPhone 17 Pro",
    "labels": [
     {
-     "shooter": "martin",
+     "shooter": "magnus",
      "stage": 11
     }
    ]
   },
   {
-   "id": "martin_12_1.MOV",
+   "id": "magnus_12_1.MOV",
    "folder": "",
-   "filename": "martin_12_1.MOV",
+   "filename": "magnus_12_1.MOV",
    "start": "2026-06-28T07:30:49+00:00",
    "duration": 71.733,
    "make": "Apple",
    "model": "iPhone 17 Pro",
    "labels": [
     {
-     "shooter": "martin",
+     "shooter": "magnus",
      "stage": 12
     }
    ]
   },
   {
-   "id": "martin_12_2.mp4",
+   "id": "magnus_12_2.mp4",
    "folder": "",
-   "filename": "martin_12_2.mp4",
+   "filename": "magnus_12_2.mp4",
    "start": "2026-06-28T07:32:00+00:00",
    "duration": 71.106,
    "make": null,
    "model": null,
    "labels": [
     {
-     "shooter": "martin",
+     "shooter": "magnus",
      "stage": 12
     }
    ]
   },
   {
-   "id": "martin_2.mp4",
+   "id": "magnus_2.mp4",
    "folder": "",
-   "filename": "martin_2.mp4",
+   "filename": "magnus_2.mp4",
    "start": "2026-06-28T09:52:53+00:00",
    "duration": 78.143,
    "make": null,
    "model": null,
    "labels": [
     {
-     "shooter": "martin",
+     "shooter": "magnus",
      "stage": 2
     }
    ]
   },
   {
-   "id": "martin_3.MOV",
+   "id": "magnus_3.MOV",
    "folder": "",
-   "filename": "martin_3.MOV",
+   "filename": "magnus_3.MOV",
    "start": "2026-06-28T11:18:47+00:00",
    "duration": 65.295,
    "make": "Apple",
    "model": "iPhone 17 Pro",
    "labels": [
     {
-     "shooter": "martin",
+     "shooter": "magnus",
      "stage": 3
     }
    ]
   },
   {
-   "id": "martin_4.MOV",
+   "id": "magnus_4.MOV",
    "folder": "",
-   "filename": "martin_4.MOV",
+   "filename": "magnus_4.MOV",
    "start": "2026-06-28T11:52:05+00:00",
    "duration": 50.99,
    "make": "Apple",
    "model": "iPhone 17 Pro",
    "labels": [
     {
-     "shooter": "martin",
+     "shooter": "magnus",
      "stage": 4
     }
    ]
   },
   {
-   "id": "martin_5.MOV",
+   "id": "magnus_5.MOV",
    "folder": "",
-   "filename": "martin_5.MOV",
+   "filename": "magnus_5.MOV",
    "start": "2026-06-28T12:58:06+00:00",
    "duration": 61.277,
    "make": "Apple",
    "model": "iPhone 17 Pro",
    "labels": [
     {
-     "shooter": "martin",
+     "shooter": "magnus",
      "stage": 5
     }
    ]
   },
   {
-   "id": "martin_6.MOV",
+   "id": "magnus_6.MOV",
    "folder": "",
-   "filename": "martin_6.MOV",
+   "filename": "magnus_6.MOV",
    "start": "2026-06-28T13:38:52+00:00",
    "duration": 70.468,
    "make": "Apple",
    "model": "iPhone 17 Pro",
    "labels": [
     {
-     "shooter": "martin",
+     "shooter": "magnus",
      "stage": 6
     }
    ]
   },
   {
-   "id": "martin_7.MOV",
+   "id": "magnus_7.MOV",
    "folder": "",
-   "filename": "martin_7.MOV",
+   "filename": "magnus_7.MOV",
    "start": "2026-06-28T14:10:28+00:00",
    "duration": 50.957,
    "make": "Apple",
    "model": "iPhone 17 Pro",
    "labels": [
     {
-     "shooter": "martin",
+     "shooter": "magnus",
      "stage": 7
     }
    ]
   },
   {
-   "id": "martin_8_1.MOV",
+   "id": "magnus_8_1.MOV",
    "folder": "",
-   "filename": "martin_8_1.MOV",
+   "filename": "magnus_8_1.MOV",
    "start": "2026-06-28T14:38:27+00:00",
    "duration": 53.84,
    "make": "Apple",
    "model": "iPhone 17 Pro",
    "labels": [
     {
-     "shooter": "martin",
+     "shooter": "magnus",
      "stage": 8
     }
    ]
   },
   {
-   "id": "martin_8_2.mp4",
+   "id": "magnus_8_2.mp4",
    "folder": "",
-   "filename": "martin_8_2.mp4",
+   "filename": "magnus_8_2.mp4",
    "start": "2026-06-28T14:39:18+00:00",
    "duration": 29.108,
    "make": null,
    "model": null,
    "labels": [
     {
-     "shooter": "martin",
+     "shooter": "magnus",
      "stage": 8
     }
    ]
   },
   {
-   "id": "martin_9.MOV",
+   "id": "magnus_9.MOV",
    "folder": "",
-   "filename": "martin_9.MOV",
+   "filename": "magnus_9.MOV",
    "start": "2026-06-28T15:06:11+00:00",
    "duration": 57.708,
    "make": "Apple",
    "model": "iPhone 17 Pro",
    "labels": [
     {
-     "shooter": "martin",
+     "shooter": "magnus",
      "stage": 9
     }
    ]

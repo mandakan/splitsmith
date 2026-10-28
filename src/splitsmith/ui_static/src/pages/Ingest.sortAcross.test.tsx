@@ -87,7 +87,7 @@ const alicesProject = {
       match_timestamp: "2026-09-26T11:00:00Z",
     },
   ],
-  last_scanned_dir: "/Volumes/X9/raw/2026-hostfinalen/from-anton",
+  last_scanned_dir: "/Volumes/X9/raw/2026-hostfinalen/from-albin",
 } as unknown as MatchProject;
 const bobsProject = {
   ...alicesProject,
@@ -123,7 +123,7 @@ const parentListing: FsListing = {
   parent: "/Volumes/X9/raw",
   entries: [
     {
-      name: "from-anton",
+      name: "from-albin",
       kind: "dir",
       video_count: 20,
       size_bytes: null,

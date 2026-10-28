@@ -5,13 +5,13 @@
 The match Overview (the `/` route under `MatchShell`, with no shooter slug in
 the URL) is silently scoped to a single shooter and picks the wrong one. In
 `MatchShell.tsx` the base project for the slug-less route is loaded from
-`r.shooters[0]` -- the alphabetically-first shooter. For a match where Anton
-Johansson sorts first and has no footage, the entire Overview renders his
+`r.shooters[0]` -- the alphabetically-first shooter. For a match where Albin
+Lund sorts first and has no footage, the entire Overview renders his
 per-shooter empty state:
 
 - Hero shows "AWAITING FOOTAGE" / "ADD FOOTAGE TO GET STARTED" even though
   another shooter (Mathias Axell) has 9 videos and 2 audited stages.
-- The subtitle prints `project.competitor_name` -- "ANTON JOHANSSON" -- a
+- The subtitle prints `project.competitor_name` -- "ALBIN LUND" -- a
   shooter name the user cannot change from this page (the header pills link
   to *other* pages, they do not re-scope the Overview).
 - The stage tiles all show "AWAITING / READY TO RECORD" placeholders.

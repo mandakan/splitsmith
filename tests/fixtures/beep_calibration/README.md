@@ -25,7 +25,7 @@ Each fixture supports up to two evaluation tracks:
   available. Headcam clips have ~0.5 s pre-beep; iPhone clips have ~5 s.
 * **full** — the wide-window WAV in `tests/fixtures/full/<stem>_full.wav`.
   Optional. Produced by `scripts/extract_full_fixture_audio.py` from
-  the source MP4 listed in `tests/fixtures/full/_sources.yaml`. Covers
+  the source MP4 listed in `tests/fixtures/.local/full_sources.yaml` (local only). Covers
   the late-beep / cross-bay scenarios that don't appear in the clip.
 
 iPhone fixtures have no source MP4 wired up, so they are clip-only.

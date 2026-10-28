@@ -1,6 +1,6 @@
 {
-  "source": "raw/Anton_pov_stage_11.mov",
-  "source_video": "/Volumes/X9/raw/2026-oden-cup/anton/head/Anton_pov_stage_11.mov",
+  "source": "raw/Albin_pov_stage_11.mov",
+  "source_video": "Albin_pov_stage_11.mov",
   "stage_number": 11,
   "stage_name": "Stage 11",
   "fixture_window_in_source": [
@@ -1042,7 +1042,7 @@
       "action": "promote-from-anchor",
       "tool_version": "0.1.0",
       "details": {
-        "secondary_source": "raw/Anton_pov_stage_11.mov",
+        "secondary_source": "raw/Albin_pov_stage_11.mov",
         "cross_align_confidence": null,
         "voter_a_candidate_count": 29,
         "snapped": 14,

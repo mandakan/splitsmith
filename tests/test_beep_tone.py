@@ -67,7 +67,7 @@ def test_a_wavering_tone_starts_where_it_starts() -> None:
 
 
 def test_a_tone_before_the_beep_reads_negative() -> None:
-    """Oden Cup Martin 2: the tone starts 80 ms before the confirmed beep."""
+    """Oden Cup Magnus 2: the tone starts 80 ms before the confirmed beep."""
     sig = _tone(2.0, 2800, 0.92)
     assert beep_tone.tone_offset_ms(sig, SR, 1.0, (2200, 3500)) == pytest.approx(-80.0, abs=6)
 

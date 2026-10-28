@@ -478,7 +478,7 @@
     "id": "s97dcec94"
   },
   "event_id": "tallmilan-2026:3:s97dcec94",
-  "source_video": "/Volumes/X9/raw/2026-tallmilan/mathias/head/VID_20260426_165837_00_049.mp4",
+  "source_video": "VID_20260426_165837_00_049.mp4",
   "review": {
     "status": "needs_review",
     "derived_from": null,

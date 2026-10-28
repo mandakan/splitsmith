@@ -487,13 +487,13 @@ def test_two_squad_mates_in_one_window_stay_ambiguous(tmp_path: Path, camera_clo
     whatever camera filmed them."""
     base = datetime(2026, 9, 26, 12, 52, 4, tzinfo=UTC)
     stage = _stage(8, base + timedelta(minutes=6))
-    anton = _make_video(tmp_path / "IMG_3659.mov", base)
+    albin = _make_video(tmp_path / "IMG_3659.mov", base)
     mathias = _make_video(tmp_path / "IMG_3660.mov", base + timedelta(seconds=228))
 
-    result = match_videos_to_stages([anton, mathias], [stage], VideoMatchConfig(prefer_ctime=False))
+    result = match_videos_to_stages([albin, mathias], [stage], VideoMatchConfig(prefer_ctime=False))
 
     assert result.matches == []
-    assert result.ambiguous_stages == {8: sorted([anton, mathias])}
+    assert result.ambiguous_stages == {8: sorted([albin, mathias])}
 
 
 def test_one_contested_camera_blocks_the_whole_run(tmp_path: Path, camera_clocks: None) -> None:

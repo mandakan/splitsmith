@@ -8,7 +8,7 @@ often leaves the camera rolling for minutes. The current
 pre-beep + ~1.5 s post-stage, so they don't contain that material.
 
 This script regenerates wider audio per fixture by re-extracting from the
-ORIGINAL source ``.mp4`` listed in ``tests/fixtures/full/_sources.yaml``.
+ORIGINAL source ``.mp4`` listed in ``tests/fixtures/.local/full_sources.yaml``.
 The short fixtures + audit JSONs stay untouched -- they remain the unit-test
 source of truth. The wide WAVs go under ``tests/fixtures/full/`` with a
 sidecar ``*_full.json`` recording the source-time window covered, so
@@ -40,7 +40,8 @@ from splitsmith.video_probe import ProbeError, probe
 
 FIXTURES_DIR = Path("tests/fixtures")
 FULL_DIR = FIXTURES_DIR / "full"
-SOURCES_YAML = FULL_DIR / "_sources.yaml"
+# Local only (gitignored): the paths name people. lab/sources.py explains why.
+SOURCES_YAML = FIXTURES_DIR / ".local" / "full_sources.yaml"
 PROBE_CACHE_DIR = FIXTURES_DIR / ".cache" / "video_probe"
 SAMPLE_RATE = 48000  # match splitsmith.beep.detect.load_audio
 
@@ -74,15 +75,17 @@ def resolve_video(stem: str, sources: dict) -> Path:
     else:
         basename = (sources.get("fixtures") or {}).get(stem)
         if not basename:
-            raise ExtractError(f"{stem}: no entry in _sources.yaml. Add a 'fixtures' or 'overrides' line.")
+            raise ExtractError(
+                f"{stem}: no entry in full_sources.yaml. Add a 'fixtures' or 'overrides' line."
+            )
         video_dir = sources.get("video_dir")
         if not video_dir:
-            raise ExtractError(f"{stem}: 'video_dir' unset in _sources.yaml and no override given.")
+            raise ExtractError(f"{stem}: 'video_dir' unset in full_sources.yaml and no override given.")
         candidate = Path(video_dir) / basename
     if not candidate.exists():
         raise ExtractError(
             f"{stem}: source video not found at {candidate}. "
-            "Update _sources.yaml or mount the source drive."
+            "Update full_sources.yaml or mount the source drive."
         )
     return candidate
 

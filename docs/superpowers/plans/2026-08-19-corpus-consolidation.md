@@ -525,10 +525,10 @@ def _mod():
 
 
 MAPPING = {
-    "/Volumes/X9/matches/vads-easter-shoot-2026-anton/raw": (
+    "/Volumes/X9/matches/vads-easter-shoot-2026-albin/raw": (
         "/Volumes/X9/matches/vads-easter-shoot-2026/shooters/s_9540b345/raw"
     ),
-    "/Volumes/mathias/skytte/video/raw/tallmilan-2026/martin/handheld": (
+    "/Volumes/mathias/skytte/video/raw/tallmilan-2026/magnus/handheld": (
         "/Volumes/X9/matches/tallmilan-2026/shooters/s_36ed6e4e/raw"
     ),
 }
@@ -537,7 +537,7 @@ MAPPING = {
 def test_rewrites_a_legacy_project_path_keeping_the_filename() -> None:
     mod = _mod()
     outcome = mod.rewrite_source_video(
-        "/Volumes/X9/matches/vads-easter-shoot-2026-anton/raw/IMG_1295.mov", MAPPING
+        "/Volumes/X9/matches/vads-easter-shoot-2026-albin/raw/IMG_1295.mov", MAPPING
     )
     assert outcome.status == "rewritten"
     assert outcome.rewritten == (
@@ -548,12 +548,12 @@ def test_rewrites_a_legacy_project_path_keeping_the_filename() -> None:
 def test_rewrites_a_share_path_to_the_shooter_raw_form() -> None:
     mod = _mod()
     outcome = mod.rewrite_source_video(
-        "/Volumes/mathias/skytte/video/raw/tallmilan-2026/martin/handheld/martin_stage_4.MOV",
+        "/Volumes/mathias/skytte/video/raw/tallmilan-2026/magnus/handheld/magnus_stage_4.MOV",
         MAPPING,
     )
     assert outcome.status == "rewritten"
     assert outcome.rewritten == (
-        "/Volumes/X9/matches/tallmilan-2026/shooters/s_36ed6e4e/raw/martin_stage_4.MOV"
+        "/Volumes/X9/matches/tallmilan-2026/shooters/s_36ed6e4e/raw/magnus_stage_4.MOV"
     )
 
 
@@ -578,7 +578,7 @@ def test_the_run_is_idempotent_over_a_fixture_tree(tmp_path: Path) -> None:
     fixtures.mkdir()
     doc = {
         "stage_number": 1,
-        "source_video": "/Volumes/X9/matches/vads-easter-shoot-2026-anton/raw/IMG_1295.mov",
+        "source_video": "/Volumes/X9/matches/vads-easter-shoot-2026-albin/raw/IMG_1295.mov",
     }
     target = fixtures / "stage-shots-vads-stage1-s0fe3d797.json"
     target.write_text(json.dumps(doc))
@@ -600,7 +600,7 @@ def test_dry_run_writes_nothing(tmp_path: Path) -> None:
     mod = _mod()
     fixtures = tmp_path / "fixtures"
     fixtures.mkdir()
-    original = "/Volumes/X9/matches/vads-easter-shoot-2026-anton/raw/IMG_1295.mov"
+    original = "/Volumes/X9/matches/vads-easter-shoot-2026-albin/raw/IMG_1295.mov"
     target = fixtures / "stage-shots-vads-stage1-s0fe3d797.json"
     target.write_text(json.dumps({"source_video": original}))
 
@@ -2069,7 +2069,7 @@ Expected: every camera directory is now `hand` or `head`. This also renames `202
 mv /Volumes/X9/raw/2026-black-handgun /Volumes/X9/raw/2026-ess-black-handgun
 mv /Volumes/X9/raw/2026-oden /Volumes/X9/raw/2026-oden-cup
 mkdir -p /Volumes/X9/raw/_unsorted
-mv "/Volumes/X9/raw/2026-ess-black-handgun/2026-black-handgun-from-martin" /Volumes/X9/raw/_unsorted/ 2>/dev/null
+mv "/Volumes/X9/raw/2026-ess-black-handgun/2026-black-handgun-from-magnus" /Volumes/X9/raw/_unsorted/ 2>/dev/null
 mv "/Volumes/X9/raw/2026-stockholm-ipsc-open/Stockholm IPSC Open 2026"* /Volumes/X9/raw/_unsorted/ 2>/dev/null
 ls /Volumes/X9/raw /Volumes/X9/raw/_unsorted
 ```
@@ -2146,8 +2146,8 @@ against an opaque ``s_<hex>`` slug by competitor name.
 
 ```bash
 cd /Users/mathias/work/splitsmith-lab
-for name in blacksmith-2026 blacksmith-handgun-2026-anton blacksmith-handgun-2026-martin \
-            tallmilan-2025 tallmilan-2026 tallmilan-2026-janne tallmilan-2026-martin; do
+for name in blacksmith-2026 blacksmith-handgun-2026-albin blacksmith-handgun-2026-magnus \
+            tallmilan-2025 tallmilan-2026 tallmilan-2026-henrik tallmilan-2026-magnus; do
   echo "== $name"
   uv run python scripts/consolidate_matches.py reconcile \
     --source ~/matches/$name --destination /Volumes/X9/matches/$name
@@ -2156,7 +2156,7 @@ done
 
 Expected per pair: at most one `set_shooter_token` action, zero
 `copy_audit_doc` actions (the audit docs were measured byte-identical),
-`violations=0`. `blacksmith-handgun-2026-anton` already agrees on both
+`violations=0`. `blacksmith-handgun-2026-albin` already agrees on both
 sides and should show no actions at all.
 
 Re-run each with `--apply` once the plans read correctly.
@@ -2167,8 +2167,8 @@ Re-run each with `--apply` once the plans read correctly.
 cd /Users/mathias/work/splitsmith-lab
 uv run splitsmith match merge \
   /Volumes/X9/matches/tallmilan-2026 \
-  /Volumes/X9/matches/tallmilan-2026-janne \
-  /Volumes/X9/matches/tallmilan-2026-martin \
+  /Volumes/X9/matches/tallmilan-2026-henrik \
+  /Volumes/X9/matches/tallmilan-2026-magnus \
   --output /Volumes/X9/matches/.tallmilan-2026-merged \
   --dry-run
 ```
@@ -2179,7 +2179,7 @@ Read the plan. Then re-run without `--dry-run`. The output goes to a dot-prefixe
 ```bash
 uv run splitsmith match merge \
   /Volumes/X9/matches/bofors-bombardment-2026 \
-  /Volumes/X9/matches/bofors-bombardment-2026-martin \
+  /Volumes/X9/matches/bofors-bombardment-2026-magnus \
   --output /Volumes/X9/matches/.bofors-bombardment-2026-merged \
   --dry-run
 ```
@@ -2190,11 +2190,11 @@ Then re-run without `--dry-run`.
 ```bash
 uv run splitsmith match merge /Volumes/X9/matches/tallmilan-2025 \
   --output /Volumes/X9/matches/.tallmilan-2025-merged --dry-run
-uv run splitsmith match merge /Volumes/X9/matches/jinglebells-challenge-2026-anton \
+uv run splitsmith match merge /Volumes/X9/matches/jinglebells-challenge-2026-albin \
   --output /Volumes/X9/matches/.jinglebell-challenge-2026-merged \
   --name "Jinglebell Challenge 2026" --dry-run
 ```
-`jinglebells-challenge-2026-anton` has no `scoreboard_match_id`, so `--name` is required; `plan_merge` raises `MergeConflictError` without it. Re-run both without `--dry-run`.
+`jinglebells-challenge-2026-albin` has no `scoreboard_match_id`, so `--name` is required; `plan_merge` raises `MergeConflictError` without it. Re-run both without `--dry-run`.
 
 - [ ] **Step 5: Swap the merged directories into their final slugs**
 
@@ -2267,16 +2267,16 @@ uv run python scripts/consolidate_matches.py reconcile \
 
 ```bash
 uv run python scripts/consolidate_matches.py reconcile \
-  --source /Volumes/X9/matches/blacksmith-handgun-2026-anton \
+  --source /Volumes/X9/matches/blacksmith-handgun-2026-albin \
   --destination ~/matches/blacksmith-handgun-open-2026/shooters/s_46039db3 --apply
 uv run python scripts/consolidate_matches.py reconcile \
-  --source /Volumes/X9/matches/blacksmith-handgun-2026-martin \
+  --source /Volumes/X9/matches/blacksmith-handgun-2026-magnus \
   --destination ~/matches/blacksmith-handgun-open-2026/shooters/s_b3d21334 --apply
 uv run python scripts/consolidate_matches.py reconcile \
-  --source /Volumes/X9/matches/vads-easter-shoot-2026-anton \
+  --source /Volumes/X9/matches/vads-easter-shoot-2026-albin \
   --destination /Volumes/X9/matches/vads-easter-shoot-2026/shooters/s_9540b345 --apply
 uv run python scripts/consolidate_matches.py reconcile \
-  --source /Volumes/X9/matches/vads-easter-shoot-2026-martin \
+  --source /Volumes/X9/matches/vads-easter-shoot-2026-magnus \
   --destination /Volumes/X9/matches/vads-easter-shoot-2026/shooters/s_fac64ec6 --apply
 ```
 Expected on each: zero `copy_audit_doc` actions (both sides hold all docs, destination wins), some `copy_media` actions, `violations=0`.
@@ -2290,8 +2290,8 @@ in `/Volumes/X9/matches`, so they move now:
 
 ```bash
 mkdir -p /Volumes/X9/matches/_legacy
-for name in blacksmith-2026 blacksmith-handgun-2026-anton blacksmith-handgun-2026-martin \
-            vads-easter-shoot-2026-anton vads-easter-shoot-2026-martin; do
+for name in blacksmith-2026 blacksmith-handgun-2026-albin blacksmith-handgun-2026-magnus \
+            vads-easter-shoot-2026-albin vads-easter-shoot-2026-magnus; do
   mv "/Volumes/X9/matches/$name" /Volumes/X9/matches/_legacy/
 done
 uv run python scripts/consolidate_matches.py inventory --label phase3 \
@@ -2302,9 +2302,9 @@ git commit -m "chore(migration): phase 3 reconciliation, blacksmith audit docs r
 
 ---
 
-### Task 13: Phase 4 -- add Anton to tallmilan-2026
+### Task 13: Phase 4 -- add Albin to tallmilan-2026
 
-Anton has 5 clips for a 7-stage match. His slot will be incomplete and
+Albin has 5 clips for a 7-stage match. His slot will be incomplete and
 that is expected, not a defect. No detection or audit is run.
 
 - [ ] **Step 1: Create the shooter slot through the API**
@@ -2320,7 +2320,7 @@ uv run splitsmith ui --project /Volumes/X9/matches/tallmilan-2026 &
 sleep 5
 curl -sS -X POST http://127.0.0.1:8000/api/match/shooters \
   -H 'content-type: application/json' \
-  -d '{"name": "Anton Johansson"}' | python3 -m json.tool
+  -d '{"name": "Albin Lund"}' | python3 -m json.tool
 ```
 
 Record the minted `s_<hex>` slug from the response. Do not hand-write
@@ -2334,7 +2334,7 @@ has no shooter directory.
 SLUG=s_xxxxxxxx  # the slug minted in step 1
 curl -sS -X POST "http://127.0.0.1:8000/api/shooters/$SLUG/videos/scan" \
   -H 'content-type: application/json' \
-  -d '{"source_dir": "/Volumes/X9/raw/2026-tallmilan/anton/hand", "link_mode": "symlink"}' \
+  -d '{"source_dir": "/Volumes/X9/raw/2026-tallmilan/albin/hand", "link_mode": "symlink"}' \
   | python3 -m json.tool
 ```
 
@@ -2348,7 +2348,7 @@ diverge from every other shooter's layout.
 ```bash
 uv run splitsmith match info /Volumes/X9/matches/tallmilan-2026
 ```
-Expected: Anton appears with 5 of 7 stages populated. Record which two
+Expected: Albin appears with 5 of 7 stages populated. Record which two
 stages have no footage in the phase report. Then stop the server:
 
 ```bash
@@ -2367,7 +2367,7 @@ Expected: no broken links; `tallmilan-2026` now shows 4 shooters.
 
 ```bash
 git add build/consolidation/phase4.json
-git commit -m "chore(migration): phase 4 anton added to tallmilan-2026 (5 of 7 stages)"
+git commit -m "chore(migration): phase 4 albin added to tallmilan-2026 (5 of 7 stages)"
 ```
 
 ---

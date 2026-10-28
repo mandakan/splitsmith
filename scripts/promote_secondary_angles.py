@@ -35,6 +35,7 @@ from splitsmith.beep import detect as beep_detect
 from splitsmith.ensemble import fixtures as fx_module
 from splitsmith.ensemble.api import load_ensemble_runtime
 from splitsmith.fixture_schema import probe_camera_metadata, review_status
+from splitsmith.lab import sources as lab_sources
 from splitsmith.lab.promote import PromoteFromAnchorRequest, promote_from_anchor, write_promoted_fixture
 from splitsmith.lab.secondary import (
     AnchorFixture,
@@ -149,7 +150,12 @@ def main() -> int:
             return json.loads((args.fixtures / f"{stem}.json").read_text(encoding="utf-8"))
 
         data = load(snap.stem)
-        return snap_is_stale(data, load(anchor.stem), beep_now=snap_beep_now(data, beeps))
+        # The JSON keeps the file name only; the beep map is keyed by full path.
+        located = {
+            **data,
+            "source_video": lab_sources.resolve(snap.stem, data.get("source_video"), args.fixtures),
+        }
+        return snap_is_stale(data, load(anchor.stem), beep_now=snap_beep_now(located, beeps))
 
     plans = plan_secondary_promotions(stages, corpus, cameras, stale_snap=stale if args.resnap else None)
     todo = [p for p in plans if p.skip is None]

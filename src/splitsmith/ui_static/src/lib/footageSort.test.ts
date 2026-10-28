@@ -28,14 +28,14 @@ import {
 } from "./footageSort";
 
 const PHONE: SortCamera = {
-  key: "from-martin|Apple|iPhone 17 Pro Max|IMG",
-  folder: "from-martin",
+  key: "from-magnus|Apple|iPhone 17 Pro Max|IMG",
+  folder: "from-magnus",
   model: "iPhone 17 Pro Max",
   scheme: "IMG",
   clip_ids: [
-    "from-martin/IMG_1.MOV",
-    "from-martin/IMG_2.MOV",
-    "from-martin/IMG_3.MOV",
+    "from-magnus/IMG_1.MOV",
+    "from-magnus/IMG_2.MOV",
+    "from-magnus/IMG_3.MOV",
   ],
   clock: "trusted",
   offset_seconds: 0, shooter: null, shooter_source: null,
@@ -110,8 +110,8 @@ function view(): SortView {
         stages_with_footage: [1, 2],
       },
       {
-        key: "anton",
-        name: "Anton Johansson",
+        key: "albin",
+        name: "Albin Lund",
         stages: [1, 2],
         stages_with_footage: [],
       },
@@ -122,17 +122,17 @@ function view(): SortView {
     ],
     cameras: [PHONE, HEAD],
     clips: [
-      clip("from-martin/IMG_1.MOV", PHONE, {
-        shooter: "anton",
+      clip("from-magnus/IMG_1.MOV", PHONE, {
+        shooter: "albin",
         stage: 2,
         checked: true,
       }),
-      clip("from-martin/IMG_2.MOV", PHONE, {
+      clip("from-magnus/IMG_2.MOV", PHONE, {
         shooter: "mathias",
         stage: 1,
         checked: true,
       }),
-      clip("from-martin/IMG_3.MOV", PHONE, {
+      clip("from-magnus/IMG_3.MOV", PHONE, {
         confidence: "skipped",
         reason: {
           ...clip("x/y", PHONE).proposal.reason,
@@ -168,12 +168,12 @@ function view(): SortView {
         frame: false,
       },
       {
-        shooter: "anton",
+        shooter: "albin",
         stage: 2,
         source: "sort",
         video_path: null,
         video_id: null,
-        clip_id: "from-martin/IMG_1.MOV",
+        clip_id: "from-magnus/IMG_1.MOV",
         stream_kind: "auto",
         frame: true,
       },
@@ -197,10 +197,10 @@ describe("sortSections", () => {
     expect(
       s.byShooter.map((g) => [g.key, g.clips.map((c) => c.clip_id)]),
     ).toEqual([
-      ["mathias", ["from-martin/IMG_2.MOV"]],
-      ["anton", ["from-martin/IMG_1.MOV"]],
+      ["mathias", ["from-magnus/IMG_2.MOV"]],
+      ["albin", ["from-magnus/IMG_1.MOV"]],
     ]);
-    expect(s.skipped.map((c) => c.clip_id)).toEqual(["from-martin/IMG_3.MOV"]);
+    expect(s.skipped.map((c) => c.clip_id)).toEqual(["from-magnus/IMG_3.MOV"]);
     expect(s.imported.map((c) => c.clip_id)).toEqual(["head/VID_2.mp4"]);
   });
 
@@ -233,8 +233,8 @@ describe("decisions", () => {
     const apply = (d: ReturnType<typeof assignClip>) => {
       v = { ...v, anchors: d.anchors, overrides: d.overrides, user_checked: d.checked };
     };
-    apply(assignClip(v, "head/VID_1.mp4", "anton", 1));
-    apply(assignClip(v, "head/VID_2.mp4", "anton", 2));
+    apply(assignClip(v, "head/VID_1.mp4", "albin", 1));
+    apply(assignClip(v, "head/VID_2.mp4", "albin", 2));
 
     const named = [...v.anchors, ...v.overrides].map((x) => [x.clip_id, "stage" in x ? x.stage : null]);
     expect(named).toEqual(
@@ -247,44 +247,44 @@ describe("decisions", () => {
   });
 
   it("naming a clip of a trusted camera is an override and checks it", () => {
-    const d = assignClip(view(), "from-martin/IMG_1.MOV", "mathias", 2);
+    const d = assignClip(view(), "from-magnus/IMG_1.MOV", "mathias", 2);
 
     expect(d.overrides).toEqual([
-      { clip_id: "from-martin/IMG_1.MOV", shooter: "mathias", stage: 2, skip: false },
+      { clip_id: "from-magnus/IMG_1.MOV", shooter: "mathias", stage: 2, skip: false },
     ]);
     expect(d.anchors).toEqual([]);
-    expect(d.checked["from-martin/IMG_1.MOV"]).toBe(true);
+    expect(d.checked["from-magnus/IMG_1.MOV"]).toBe(true);
   });
 
   it("skip replaces an earlier choice and unchecks; reset forgets both", () => {
     const v = view();
     v.overrides = [
-      { skip: false, clip_id: "from-martin/IMG_1.MOV", shooter: "mathias", stage: 2 },
+      { skip: false, clip_id: "from-magnus/IMG_1.MOV", shooter: "mathias", stage: 2 },
     ];
-    v.user_checked = { "from-martin/IMG_1.MOV": true };
+    v.user_checked = { "from-magnus/IMG_1.MOV": true };
 
-    const skipped = skipClip(v, "from-martin/IMG_1.MOV");
+    const skipped = skipClip(v, "from-magnus/IMG_1.MOV");
     expect(skipped.overrides).toEqual([
-      { clip_id: "from-martin/IMG_1.MOV", skip: true },
+      { clip_id: "from-magnus/IMG_1.MOV", skip: true },
     ]);
-    expect(skipped.checked["from-martin/IMG_1.MOV"]).toBe(false);
+    expect(skipped.checked["from-magnus/IMG_1.MOV"]).toBe(false);
 
     const reset = resetClip(
       { ...v, overrides: skipped.overrides, user_checked: skipped.checked },
-      "from-martin/IMG_1.MOV",
+      "from-magnus/IMG_1.MOV",
     );
     expect(reset.overrides).toEqual([]);
-    expect("from-martin/IMG_1.MOV" in reset.checked).toBe(false);
+    expect("from-magnus/IMG_1.MOV" in reset.checked).toBe(false);
   });
 
   it("a check mark keeps every other decision", () => {
     const v = view();
-    v.overrides = [{ clip_id: "from-martin/IMG_2.MOV", skip: true }];
+    v.overrides = [{ clip_id: "from-magnus/IMG_2.MOV", skip: true }];
 
-    const d = setChecked(v, "from-martin/IMG_1.MOV", false);
+    const d = setChecked(v, "from-magnus/IMG_1.MOV", false);
 
     expect(d.overrides).toEqual(v.overrides);
-    expect(d.checked).toEqual({ "from-martin/IMG_1.MOV": false });
+    expect(d.checked).toEqual({ "from-magnus/IMG_1.MOV": false });
   });
 });
 
@@ -302,19 +302,19 @@ describe("wording", () => {
       "Scored 1:42 after the clip started",
     );
     expect(reasonText(v, v.clips[2])).toBe("No squad score follows it");
-    const tied = clip("from-martin/IMG_1.MOV", PHONE, {
+    const tied = clip("from-magnus/IMG_1.MOV", PHONE, {
       shooter: "mathias",
       stage: 1,
       confidence: "needs_you",
       reason: {
         ...v.clips[0].proposal.reason,
         issue: "ambiguous",
-        rival: "anton",
+        rival: "albin",
         rival_stage: 1,
       },
     });
     expect(reasonText(v, tied)).toBe(
-      "Mathias Axell Stage 01 and Anton Johansson Stage 01 were scored seconds apart",
+      "Mathias Axell Stage 01 and Albin Lund Stage 01 were scored seconds apart",
     );
   });
 
@@ -322,33 +322,33 @@ describe("wording", () => {
     const v = view();
     const base = v.clips[0].proposal.reason;
     const byOrder = clip("head/IMG_0008.MOV", HEAD, {
-      shooter: "anton",
+      shooter: "albin",
       stage: 5,
       confidence: "needs_you",
       reason: { ...base, order_rank: 8, order_position: 2, order_evidence: "name_number" },
     });
     expect(reasonText(v, byOrder)).toBe(
-      "8th clip from this camera by file number, and stage 05 is the 2nd stage Anton Johansson shot. A suggestion: the clock does not say.",
+      "8th clip from this camera by file number, and stage 05 is the 2nd stage Albin Lund shot. A suggestion: the clock does not say.",
     );
-    const byName = clip("head/anton_stage_3.MOV", HEAD, {
-      shooter: "anton",
+    const byName = clip("head/albin_stage_3.MOV", HEAD, {
+      shooter: "albin",
       stage: 3,
       confidence: "medium",
       reason: { ...base, stage_from_name: true },
     });
     expect(reasonText(v, byName)).toBe("Stage number in the file name");
-    const owned = { ...v, cameras: v.cameras.map((c) => (c.key === HEAD.key ? { ...c, shooter: "anton" } : c)) };
+    const owned = { ...v, cameras: v.cameras.map((c) => (c.key === HEAD.key ? { ...c, shooter: "albin" } : c)) };
     const waiting = clip("head/IMG_0009.MOV", HEAD, {
       confidence: "needs_you",
       reason: { ...base, issue: "needs_order" },
     });
-    expect(reasonText(owned, waiting)).toBe("Set the order Anton Johansson shot the stages to place this clip");
+    expect(reasonText(owned, waiting)).toBe("Set the order Albin Lund shot the stages to place this clip");
   });
 
   it("sets and clears whose camera, keeping the other decisions", () => {
     const v = { ...view(), user_checked: { x: true } };
-    const set = setCameraShooter(v, HEAD.key, "anton");
-    expect(set.camera_shooters).toEqual([{ camera_key: HEAD.key, shooter: "anton" }]);
+    const set = setCameraShooter(v, HEAD.key, "albin");
+    expect(set.camera_shooters).toEqual([{ camera_key: HEAD.key, shooter: "albin" }]);
     expect(set.checked).toEqual({ x: true });
     const cleared = setCameraShooter({ ...v, camera_shooters: set.camera_shooters }, HEAD.key, null);
     expect(cleared.camera_shooters).toEqual([]);
@@ -366,7 +366,7 @@ describe("wording", () => {
   });
 
   it("labels a camera by device and folder", () => {
-    expect(cameraLabel(PHONE)).toBe("iPhone 17 Pro Max · from-martin");
+    expect(cameraLabel(PHONE)).toBe("iPhone 17 Pro Max · from-magnus");
     expect(cameraLabel(HEAD)).toBe("Action cam · head");
   });
 });
@@ -379,8 +379,8 @@ describe("whereNow", () => {
       unassigned_in,
       proposal: { ...v.clips[0].proposal, shooter },
     });
-    expect(whereNow(v, clipOf(null, "anton"))).toBeNull();
-    expect(whereNow(v, clipOf("mathias", "anton"))).toBe(
+    expect(whereNow(v, clipOf(null, "albin"))).toBeNull();
+    expect(whereNow(v, clipOf("mathias", "albin"))).toBe(
       "Moves from Mathias Axell",
     );
     expect(whereNow(v, clipOf("mathias", "mathias"))).toBe(
@@ -393,17 +393,17 @@ describe("review order", () => {
   it("follows the page: unknown-clock camera, then shooters in match order, then skipped", () => {
     expect(reviewOrder(view())).toEqual([
       "head/VID_1.mp4",
-      "from-martin/IMG_2.MOV",
-      "from-martin/IMG_1.MOV",
-      "from-martin/IMG_3.MOV",
+      "from-magnus/IMG_2.MOV",
+      "from-magnus/IMG_1.MOV",
+      "from-magnus/IMG_3.MOV",
     ]);
   });
 
   it("steps to the neighbour and stops at either end", () => {
     const v = view();
-    expect(neighbour(v, "head/VID_1.mp4", 1)).toBe("from-martin/IMG_2.MOV");
+    expect(neighbour(v, "head/VID_1.mp4", 1)).toBe("from-magnus/IMG_2.MOV");
     expect(neighbour(v, "head/VID_1.mp4", -1)).toBeNull();
-    expect(neighbour(v, "from-martin/IMG_3.MOV", 1)).toBeNull();
+    expect(neighbour(v, "from-magnus/IMG_3.MOV", 1)).toBeNull();
     expect(neighbour(v, "head/VID_2.mp4", 1)).toBeNull();
   });
 
@@ -423,14 +423,14 @@ describe("select all", () => {
 
     const d = setCheckedMany(
       v,
-      ["from-martin/IMG_1.MOV", "from-martin/IMG_2.MOV"],
+      ["from-magnus/IMG_1.MOV", "from-magnus/IMG_2.MOV"],
       false,
     );
 
     expect(d.checked).toEqual({
       "head/VID_1.mp4": true,
-      "from-martin/IMG_1.MOV": false,
-      "from-martin/IMG_2.MOV": false,
+      "from-magnus/IMG_1.MOV": false,
+      "from-magnus/IMG_2.MOV": false,
     });
   });
 
@@ -451,15 +451,15 @@ describe("import summary", () => {
   it("names the shooters and what still needs the user", () => {
     const v = view();
     const imported = [
-      { shooter: "anton" },
+      { shooter: "albin" },
       { shooter: "mathias" },
-      { shooter: "anton" },
+      { shooter: "albin" },
     ];
     expect(importedText(v, imported)).toBe(
-      "Imported 3 clips: Mathias Axell 1, Anton Johansson 2",
+      "Imported 3 clips: Mathias Axell 1, Albin Lund 2",
     );
     expect(importedText(v, imported, 8)).toBe(
-      "Imported 3 clips: Mathias Axell 1, Anton Johansson 2. 8 still need you",
+      "Imported 3 clips: Mathias Axell 1, Albin Lund 2. 8 still need you",
     );
   });
 });
@@ -480,20 +480,20 @@ describe("reference footage", () => {
   it("ranks the shooters with footage by how many stages they cover", () => {
     expect(referenceShooters(view()).map((s) => s.key)).toEqual([
       "mathias",
-      "anton",
+      "albin",
     ]);
     const nobody = { ...view(), references: [] };
     expect(referenceShooters(nobody)).toEqual([]);
   });
 
   it("defaults to the best other shooter", () => {
-    expect(defaultReferenceShooter(view(), "mathias")).toBe("anton");
-    expect(defaultReferenceShooter(view(), "anton")).toBe("mathias");
-    expect(defaultReferenceShooter({ ...view(), references: [] }, "anton")).toBeNull();
+    expect(defaultReferenceShooter(view(), "mathias")).toBe("albin");
+    expect(defaultReferenceShooter(view(), "albin")).toBe("mathias");
+    expect(defaultReferenceShooter({ ...view(), references: [] }, "albin")).toBeNull();
   });
 
   it("builds one tile per match stage with the reference and the frame", () => {
-    const tiles = referenceTiles(view(), "mathias", "anton", "head/VID_1.mp4");
+    const tiles = referenceTiles(view(), "mathias", "albin", "head/VID_1.mp4");
     expect(tiles.map((t) => [t.stage, t.name, t.reference?.source ?? null, t.frame])).toEqual([
       [1, "Lucky Seven", "project", true],
       [2, "", "project", false],
@@ -501,18 +501,18 @@ describe("reference footage", () => {
   });
 
   it("marks the stages the assigned shooter has, from the project and the sort", () => {
-    // mathias has both stages in his project; anton's checked IMG_1 proposes stage 2.
-    expect(referenceTiles(view(), "anton", "mathias", "head/VID_1.mp4").map((t) => t.has)).toEqual([
+    // mathias has both stages in his project; albin's checked IMG_1 proposes stage 2.
+    expect(referenceTiles(view(), "albin", "mathias", "head/VID_1.mp4").map((t) => t.has)).toEqual([
       true,
       true,
     ]);
-    const tiles = referenceTiles(view(), "mathias", "anton", "head/VID_1.mp4");
+    const tiles = referenceTiles(view(), "mathias", "albin", "head/VID_1.mp4");
     expect(tiles.map((t) => t.has)).toEqual([false, true]);
     expect(missingCount(tiles)).toBe(1);
   });
 
   it("excludes the clip being assigned", () => {
-    const tiles = referenceTiles(view(), "mathias", "anton", "from-martin/IMG_1.MOV");
+    const tiles = referenceTiles(view(), "mathias", "albin", "from-magnus/IMG_1.MOV");
     expect(tiles.map((t) => t.has)).toEqual([false, false]);
     expect(missingCount(tiles)).toBe(2);
   });
@@ -520,9 +520,9 @@ describe("reference footage", () => {
   it("an unchecked or imported clip never counts", () => {
     const v = view();
     v.clips[0].checked = false;
-    expect(referenceTiles(v, "mathias", "anton", "head/VID_1.mp4").map((t) => t.has)).toEqual([false, false]);
+    expect(referenceTiles(v, "mathias", "albin", "head/VID_1.mp4").map((t) => t.has)).toEqual([false, false]);
     v.clips[0].checked = true;
-    v.clips[0].imported_by = "anton";
-    expect(referenceTiles(v, "mathias", "anton", "head/VID_1.mp4").map((t) => t.has)).toEqual([false, false]);
+    v.clips[0].imported_by = "albin";
+    expect(referenceTiles(v, "mathias", "albin", "head/VID_1.mp4").map((t) => t.has)).toEqual([false, false]);
   });
 });

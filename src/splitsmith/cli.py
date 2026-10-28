@@ -49,6 +49,7 @@ app = typer.Typer(
 console = Console()
 
 from .compare.cli import compare_app  # noqa: E402
+from .lab import sources as lab_sources  # noqa: E402
 from .lab_cli import app as _lab_app  # noqa: E402
 from .looks_cli import looks_app  # noqa: E402
 from .match_cli import match_app  # noqa: E402
@@ -954,10 +955,10 @@ def audit_prep(
 
     fixture_json_data = {
         "source": (f"{video.name} stage {stage_number} '{stage_name}' " "(audio extracted at 48 kHz mono)"),
-        # Structured absolute path to the source video. Lets the
-        # Lab UI's Re-label button hop straight to /review with the
-        # video bound, instead of needing the CLI ``--video`` flag.
-        "source_video": str(Path(video).resolve()),
+        # The source video's file name; the full path goes into the local
+        # map (lab.sources), which the Lab UI's Re-label button resolves
+        # through to bind the video in /review.
+        "source_video": lab_sources.publish(stem, Path(video).resolve(), output_dir),
         "stage_number": stage_number,
         "stage_name": stage_name,
         "fixture_window_in_source": [round(fix_lo, 4), round(fix_hi, 4)],

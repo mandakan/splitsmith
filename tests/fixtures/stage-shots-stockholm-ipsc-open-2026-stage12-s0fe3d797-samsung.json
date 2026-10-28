@@ -1,6 +1,6 @@
 {
-  "source": "raw/anton_12_2.mp4",
-  "source_video": "/Volumes/X9/raw/2026-stockholm-ipsc-open/anton/hand/anton_12_2.mp4",
+  "source": "raw/albin_12_2.mp4",
+  "source_video": "albin_12_2.mp4",
   "stage_number": 12,
   "stage_name": "Stage B2 Left",
   "fixture_window_in_source": [
@@ -1239,7 +1239,7 @@
       "action": "promote-from-anchor",
       "tool_version": "0.1.0",
       "details": {
-        "secondary_source": "raw/anton_12_2.mp4",
+        "secondary_source": "raw/albin_12_2.mp4",
         "cross_align_confidence": null,
         "voter_a_candidate_count": 32,
         "snapped": 24,

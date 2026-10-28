@@ -440,7 +440,7 @@ class Match(BaseModel):
         """Match a user-typed shooter reference to a slug, or ``None``.
 
         Accepts an exact slug (``"s_a4f12d8e"``) or a display name
-        (``"Anton Johansson"``, case-insensitive). Slugs are opaque random
+        (``"Albin Lund"``, case-insensitive). Slugs are opaque random
         ids, so the old "slugify the display name to guess a slug" trick no
         longer applies -- we look the name up instead.
 

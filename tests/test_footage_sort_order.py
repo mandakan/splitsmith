@@ -17,7 +17,7 @@ from splitsmith.footage_sort_names import (
     stage_in_name,
 )
 
-PEOPLE = [("janne", "Janne Hauta"), ("mathias", "Mathias Axell")]
+PEOPLE = [("henrik", "Henrik Berg"), ("mathias", "Mathias Axell")]
 T0 = datetime(2023, 9, 9, 9, tzinfo=UTC)
 
 
@@ -32,9 +32,9 @@ def test_name_time_and_number() -> None:
 
 
 def test_stage_in_name() -> None:
-    assert stage_in_name("janne_stage_1.MOV") == 1
-    assert stage_in_name("Anton_pov_stage_11_reshoot.mov") == 11
-    assert stage_in_name("Janne_S01_B50.MOV") == 1
+    assert stage_in_name("henrik_stage_1.MOV") == 1
+    assert stage_in_name("Albin_pov_stage_11_reshoot.mov") == 11
+    assert stage_in_name("Henrik_S01_B50.MOV") == 1
     assert stage_in_name("Stage 03.mp4") == 3
     assert stage_in_name("st7.mp4") == 7
     assert stage_in_name("IMG_3.MOV") is None
@@ -43,11 +43,11 @@ def test_stage_in_name() -> None:
 
 
 def test_shooter_in_name() -> None:
-    assert shooter_in_name("Janne", PEOPLE) == "janne"
-    assert shooter_in_name("janne hauta clips", PEOPLE) == "janne"
-    assert shooter_in_name("JANNE_clips", PEOPLE) == "janne"
+    assert shooter_in_name("Henrik", PEOPLE) == "henrik"
+    assert shooter_in_name("henrik berg clips", PEOPLE) == "henrik"
+    assert shooter_in_name("HENRIK_clips", PEOPLE) == "henrik"
     assert shooter_in_name("Höstfinalen XI - mathias", PEOPLE) == "mathias"
-    assert shooter_in_name("janne and mathias", PEOPLE) is None
+    assert shooter_in_name("henrik and mathias", PEOPLE) is None
     assert shooter_in_name("jannes", PEOPLE) is None
     assert shooter_in_name("", PEOPLE) is None
 
@@ -71,8 +71,8 @@ def _phone(n: int, *, prefix: str = "IMG_", folder: str = "phone") -> list[SortC
     ]
 
 
-def _janne(order: list[int], covered: list[int] | None = None) -> ShooterScorecards:
-    return ShooterScorecards(key="janne", name="Janne Hauta", order=order, covered=covered or [])
+def _henrik(order: list[int], covered: list[int] | None = None) -> ShooterScorecards:
+    return ShooterScorecards(key="henrik", name="Henrik Berg", order=order, covered=covered or [])
 
 
 def _by_clip(proposal: footage_sort.SortProposal) -> dict[str, tuple[str | None, int | None, str]]:
@@ -84,17 +84,17 @@ def test_equal_counts_line_up_with_the_order() -> None:
     key = footage_sort.camera_key(clips[0])
 
     out = propose(
-        clips, [_janne([3, 1, 2])], camera_shooters=[CameraShooter(camera_key=key, shooter="janne")]
+        clips, [_henrik([3, 1, 2])], camera_shooters=[CameraShooter(camera_key=key, shooter="henrik")]
     )
 
     assert _by_clip(out) == {
-        "c1": ("janne", 3, "needs_you"),
-        "c2": ("janne", 1, "needs_you"),
-        "c3": ("janne", 2, "needs_you"),
+        "c1": ("henrik", 3, "needs_you"),
+        "c2": ("henrik", 1, "needs_you"),
+        "c3": ("henrik", 2, "needs_you"),
     }
     reason = next(p.reason for p in out.clips if p.clip_id == "c2")
     assert (reason.order_rank, reason.order_position, reason.order_evidence) == (2, 2, "name_number")
-    assert out.cameras[0].shooter == "janne" and out.cameras[0].shooter_source == "user"
+    assert out.cameras[0].shooter == "henrik" and out.cameras[0].shooter_source == "user"
 
 
 def test_an_extra_clip_leaves_its_stretch_open() -> None:
@@ -102,7 +102,7 @@ def test_an_extra_clip_leaves_its_stretch_open() -> None:
     key = footage_sort.camera_key(clips[0])
 
     out = propose(
-        clips, [_janne([1, 2, 3])], camera_shooters=[CameraShooter(camera_key=key, shooter="janne")]
+        clips, [_henrik([1, 2, 3])], camera_shooters=[CameraShooter(camera_key=key, shooter="henrik")]
     )
 
     assert all(p.shooter is None for p in out.clips)
@@ -113,19 +113,19 @@ def test_a_placed_clip_splits_the_stretches() -> None:
     key = footage_sort.camera_key(clips[0])
     # c3 is a walkthrough the user skipped; c4 is placed on stage 30. Before
     # it, two clips for two open stages; after it, one for one.
-    overrides = [Override(clip_id="c3", skip=True), Override(clip_id="c4", shooter="janne", stage=30)]
+    overrides = [Override(clip_id="c3", skip=True), Override(clip_id="c4", shooter="henrik", stage=30)]
 
     out = propose(
         clips,
-        [_janne([10, 20, 30, 40])],
+        [_henrik([10, 20, 30, 40])],
         overrides=overrides,
-        camera_shooters=[CameraShooter(camera_key=key, shooter="janne")],
+        camera_shooters=[CameraShooter(camera_key=key, shooter="henrik")],
     )
 
     got = _by_clip(out)
-    assert got["c1"][:2] == ("janne", 10) and got["c2"][:2] == ("janne", 20)
-    assert got["c5"][:2] == ("janne", 40)
-    assert got["c4"] == ("janne", 30, "high")
+    assert got["c1"][:2] == ("henrik", 10) and got["c2"][:2] == ("henrik", 20)
+    assert got["c5"][:2] == ("henrik", 40)
+    assert got["c4"] == ("henrik", 30, "high")
 
 
 def test_covered_stages_are_not_open() -> None:
@@ -134,17 +134,17 @@ def test_covered_stages_are_not_open() -> None:
 
     out = propose(
         clips,
-        [_janne([1, 2, 3], covered=[2])],
-        camera_shooters=[CameraShooter(camera_key=key, shooter="janne")],
+        [_henrik([1, 2, 3], covered=[2])],
+        camera_shooters=[CameraShooter(camera_key=key, shooter="henrik")],
     )
 
-    assert [(p.shooter, p.stage) for p in out.clips] == [("janne", 1), ("janne", 3)]
+    assert [(p.shooter, p.stage) for p in out.clips] == [("henrik", 1), ("henrik", 3)]
 
 
 def test_a_decided_clip_names_the_camera() -> None:
     clips = _phone(3)
 
-    out = propose(clips, [_janne([1, 2, 3])], overrides=[Override(clip_id="c1", shooter="janne", stage=1)])
+    out = propose(clips, [_henrik([1, 2, 3])], overrides=[Override(clip_id="c1", shooter="henrik", stage=1)])
 
     assert out.cameras[0].shooter_source == "clip"
     assert [(p.stage, p.confidence) for p in out.clips] == [(1, "high"), (2, "needs_you"), (3, "needs_you")]
@@ -152,49 +152,49 @@ def test_a_decided_clip_names_the_camera() -> None:
 
 def test_the_folder_names_the_camera_and_two_names_name_nobody() -> None:
     mathias = ShooterScorecards(key="mathias", name="Mathias Axell", order=[1, 2])
-    out = propose(_phone(2, folder="Janne"), [_janne([2, 1]), mathias])
+    out = propose(_phone(2, folder="Henrik"), [_henrik([2, 1]), mathias])
     assert out.cameras[0].shooter_source == "folder"
     assert [p.stage for p in out.clips] == [2, 1]
 
-    both = propose(_phone(2, folder="janne och mathias"), [_janne([2, 1]), mathias])
+    both = propose(_phone(2, folder="henrik och mathias"), [_henrik([2, 1]), mathias])
     assert both.cameras[0].shooter is None and all(p.shooter is None for p in both.clips)
 
 
 def test_a_stage_in_the_file_name_places_the_clip() -> None:
     clips = [
-        SortClip(clip_id="a", filename="janne_stage_2.MOV"),
-        SortClip(clip_id="b", filename="janne_stage_5.MOV"),
+        SortClip(clip_id="a", filename="henrik_stage_2.MOV"),
+        SortClip(clip_id="b", filename="henrik_stage_5.MOV"),
     ]
 
-    janne = _janne([])
-    janne.stages = [1, 2, 3, 4, 5, 6]
-    out = propose(clips, [janne])
+    henrik = _henrik([])
+    henrik.stages = [1, 2, 3, 4, 5, 6]
+    out = propose(clips, [henrik])
 
-    assert _by_clip(out) == {"a": ("janne", 2, "medium"), "b": ("janne", 5, "medium")}
+    assert _by_clip(out) == {"a": ("henrik", 2, "medium"), "b": ("henrik", 5, "medium")}
     assert all(p.reason.stage_from_name for p in out.clips)
 
 
 def test_a_named_stage_must_exist_and_still_be_missing() -> None:
     clips = [
-        SortClip(clip_id="a", filename="janne_stage_99.MOV"),
-        SortClip(clip_id="b", filename="janne_stage_3.MOV"),
-        SortClip(clip_id="c", filename="janne_stage_4.MOV"),
+        SortClip(clip_id="a", filename="henrik_stage_99.MOV"),
+        SortClip(clip_id="b", filename="henrik_stage_3.MOV"),
+        SortClip(clip_id="c", filename="henrik_stage_4.MOV"),
     ]
-    janne = _janne([], covered=[3])
-    janne.stages = [1, 2, 3, 4]
+    henrik = _henrik([], covered=[3])
+    henrik.stages = [1, 2, 3, 4]
 
-    out = propose(clips, [janne])
+    out = propose(clips, [henrik])
 
     assert _by_clip(out)["a"][:2] == (None, None)
     assert _by_clip(out)["b"][:2] == (None, None)
-    assert _by_clip(out)["c"] == ("janne", 4, "medium")
+    assert _by_clip(out)["c"] == ("henrik", 4, "medium")
 
 
 def test_without_an_order_the_clips_ask_for_one() -> None:
     clips = _phone(2)
     key = footage_sort.camera_key(clips[0])
 
-    out = propose(clips, [_janne([])], camera_shooters=[CameraShooter(camera_key=key, shooter="janne")])
+    out = propose(clips, [_henrik([])], camera_shooters=[CameraShooter(camera_key=key, shooter="henrik")])
 
     assert all(p.reason.issue == "needs_order" and p.shooter is None for p in out.clips)
 
@@ -203,18 +203,18 @@ def test_a_camera_the_clock_places_is_untouched() -> None:
     """Scorecards line the camera up: the order pass changes nothing."""
     cards = {1: T0 + timedelta(minutes=3), 2: T0 + timedelta(minutes=33)}
     clips = [
-        SortClip(clip_id="x1", folder="Janne", filename="IMG_0001.MOV", start=T0, duration=60.0),
+        SortClip(clip_id="x1", folder="Henrik", filename="IMG_0001.MOV", start=T0, duration=60.0),
         SortClip(
             clip_id="x2",
-            folder="Janne",
+            folder="Henrik",
             filename="IMG_0002.MOV",
             start=T0 + timedelta(minutes=30),
             duration=60.0,
         ),
     ]
-    plain = propose(clips, [ShooterScorecards(key="janne", name="Janne Hauta", scorecards=cards)])
+    plain = propose(clips, [ShooterScorecards(key="henrik", name="Henrik Berg", scorecards=cards)])
     ordered = propose(
-        clips, [ShooterScorecards(key="janne", name="Janne Hauta", scorecards=cards, order=[2, 1])]
+        clips, [ShooterScorecards(key="henrik", name="Henrik Berg", scorecards=cards, order=[2, 1])]
     )
 
     assert _by_clip(plain) == _by_clip(ordered)
@@ -226,27 +226,27 @@ def test_a_trusted_camera_leaves_an_unplaced_clip_alone() -> None:
     even with the camera's shooter and order known."""
     cards = {1: T0 + timedelta(minutes=3), 2: T0 + timedelta(minutes=33)}
     clips = [
-        SortClip(clip_id="x1", folder="Janne", filename="IMG_0001.MOV", start=T0, duration=60.0),
+        SortClip(clip_id="x1", folder="Henrik", filename="IMG_0001.MOV", start=T0, duration=60.0),
         SortClip(
             clip_id="x2",
-            folder="Janne",
+            folder="Henrik",
             filename="IMG_0002.MOV",
             start=T0 + timedelta(minutes=30),
             duration=60.0,
         ),
         SortClip(
             clip_id="warm",
-            folder="Janne",
+            folder="Henrik",
             filename="IMG_0003.MOV",
             start=T0 + timedelta(hours=2),
             duration=60.0,
         ),
     ]
-    janne = ShooterScorecards(
-        key="janne", name="Janne Hauta", scorecards=cards, order=[1, 2, 3], stages=[1, 2, 3]
+    henrik = ShooterScorecards(
+        key="henrik", name="Henrik Berg", scorecards=cards, order=[1, 2, 3], stages=[1, 2, 3]
     )
 
-    out = propose(clips, [janne])
+    out = propose(clips, [henrik])
 
     warm = next(p for p in out.clips if p.clip_id == "warm")
     assert out.cameras[0].clock == "trusted"

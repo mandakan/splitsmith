@@ -5,7 +5,7 @@ screens A to D; the user approved them as drawn on 2026-10-22).
 
 ## Why
 
-Black Handgun 2023, two shooters. The scoreboard had no data for Janne:
+Black Handgun 2023, two shooters. The scoreboard had no data for Henrik:
 no times, no scores, no scorecard timestamps. Three things went wrong.
 
 1. The gap showed up only when Audit asked for a stage time. Nothing
@@ -16,12 +16,12 @@ no times, no scores, no scorecard timestamps. Three things went wrong.
    (`POST /api/stages/{n}/time`, `StageTimeRequest`); only the screen is
    missing.
 3. Scores cannot be entered at all, so export had no score card for
-   Janne. `StageScorecard` already holds every field and every output
+   Henrik. `StageScorecard` already holds every field and every output
    shows what is present; only the scoreboard import fills it.
 
-On top of that, the footage sort placed none of Janne's clips. His
+On top of that, the footage sort placed none of Henrik's clips. His
 camera had no usable clock and he had no scorecard times. The user knew
-the order Janne shot the stages, and the clips' file names were in
+the order Henrik shot the stages, and the clips' file names were in
 recording order, but the app could use neither.
 
 ## Goals
@@ -64,7 +64,7 @@ recording order, but the app could use neither.
 
 - One notice per match on Overview when any shooter has a non-skipped
   stage with no time (`time_seconds <= 0`). It names the shooters in one
-  line ("Janne has no stage details from the scoreboard", "Janne and Erik
+  line ("Henrik has no stage details from the scoreboard", "Henrik and Erik
   have ..."), says once why it matters, and has one button that opens
   Stage details on the first such shooter. Scores missing alone do not
   raise the notice (a time is what blocks work); my call.
@@ -136,7 +136,7 @@ recording order, but the app could use neither.
   saved; the user saves.
 - The link: `https://shootnscoreit.com/event/participant/23/<competitor
   id>/`, where the competitor id is the shooter's stored
-  `selected_competitor_id` (verified: Janne in Black Handgun 2023 is
+  `selected_competitor_id` (verified: Henrik in Black Handgun 2023 is
   competitor 512019 on match 22/17169, and the user's link uses 512019).
   Whether the 23 is fixed for every IPSC match or follows the match's
   content type: left to the builder to check against a second match;
@@ -154,10 +154,10 @@ recording order, but the app could use neither.
 
 See "Sort" below. In the clip panel the proposal's reason is worded, e.g.
 "5th clip from this phone by the time in its file name, and stage 05 is
-the 5th stage Janne shot. The phone's clock does not match the
+the 5th stage Henrik shot. The phone's clock does not match the
 scoreboard, so this is a suggestion." When a camera cannot be placed and
 its shooter has no order, the panel says so and links to Stage details:
-"Set the order Janne shot the stages to place these clips."
+"Set the order Henrik shot the stages to place these clips."
 
 ## Data (decided)
 
@@ -239,7 +239,7 @@ In `footage_sort.py`, pure as today:
   2. A decided clip: the user placed at least one clip of that camera for
      one shooter and none for another (an anchor or override).
   3. The file names: every named file of the camera names the same
-     shooter ("janne_stage_1.MOV").
+     shooter ("henrik_stage_1.MOV").
   4. The folder name: a camera whose folder name contains a shooter's
      name (full name, first name, or slug; case- and accent-insensitive;
      as whole words) is that shooter's, unless two shooters match. The
