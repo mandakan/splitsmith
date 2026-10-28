@@ -148,7 +148,7 @@ from .. import shot_detect as shot_detect_module  # noqa: F401  (kept for legacy
 from .. import thumbnail as thumbnail_helpers
 from .. import trim as trim_module
 from .. import waveform as waveform_helpers
-from ..access import Feature, FeatureRequiredError, access_config, features_for
+from ..access import Feature, FeatureRequiredError, MirrorComputeRefusedError, access_config, features_for
 from ..async_bridge import DbRunner, get_runner, install_runner, run_sync
 from ..audit_clock import CLIP_VIDEO_FIELD
 from ..audit_data import StageExportError, audit_shots_to_engine_shots
@@ -9784,6 +9784,14 @@ def create_app(
         """Map the job backend's account-feature backstop to the gate's 403 body."""
         return JSONResponse(
             status_code=403, content={"detail": {"code": "feature_required", "feature": exc.feature.value}}
+        )
+
+    @app.exception_handler(MirrorComputeRefusedError)
+    async def _mirror_compute_handler(_request: Request, exc: MirrorComputeRefusedError) -> JSONResponse:
+        """A job hosted never runs for a desktop mirror: a 409, since no tier unlocks it."""
+        return JSONResponse(
+            status_code=409,
+            content={"detail": {"code": "desktop_owns_compute", "kind": exc.kind, "message": str(exc)}},
         )
 
     @app.exception_handler(RequestValidationError)

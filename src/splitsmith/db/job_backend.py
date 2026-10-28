@@ -43,10 +43,10 @@ from sqlalchemy import and_, not_, or_, select, text, update
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from .. import __version__
-from ..access import Feature, FeatureRequiredError
+from ..access import MIRROR_JOB_KINDS, Feature, FeatureRequiredError, MirrorComputeRefusedError
 from ..async_bridge import run_sync
 from ..observability import PhaseTimer, WorkerProbe, capture_job_exception, emit_job_event
-from ..ui.context import current_export_id
+from ..ui.context import current_export_id, current_match_origin
 from ..ui.job_journal import rehydrate_args, to_wire_args
 from ..ui.jobs import (
     Job,
@@ -244,6 +244,10 @@ class PostgresJobBackend:
             raise ShutdownInProgressError("server is shutting down; no new jobs accepted")
         if self._submit_allowed is not None and not await self._submit_allowed():
             raise FeatureRequiredError(Feature.hosted_compute)
+        # The match-side backstop beside the account one: a desktop mirror's
+        # compute is the desktop's, so only MIRROR_JOB_KINDS reach the fleet.
+        if current_match_origin.get() == "desktop" and kind not in MIRROR_JOB_KINDS:
+            raise MirrorComputeRefusedError(kind)
         if self._deferrer is None:
             raise RuntimeError(
                 "PostgresJobBackend.submit needs a deferrer; this backend was "
@@ -351,6 +355,11 @@ class PostgresJobBackend:
                 ) from exc
             if before_body is not None:
                 before_body()
+            # Again at run, once ``before_body`` has pinned the match's
+            # origin: a job queued before the submit check existed must not
+            # run on a mirror either.
+            if current_match_origin.get() == "desktop" and kind not in MIRROR_JOB_KINDS:
+                raise MirrorComputeRefusedError(kind)
             body(handle, **call_args)
 
         with self._lock:

@@ -71,6 +71,15 @@ Deploy facts (worker env, `FORWARDED_ALLOW_IPS`, the waitlist cut-over) are in
   handler that chains a job after a committed write catches
   `FeatureRequiredError` and skips the chain rather than reporting the write as
   refused.
+- **A desktop mirror runs no hosted compute but `access.MIRROR_JOB_KINDS`**
+  (the audit WAV from a pushed rendition), whatever the account's features:
+  `PostgresJobBackend` refuses any other kind at submit and again at run, once
+  the worker has pinned the origin, with `MirrorComputeRefusedError`. It is a
+  `FeatureRequiredError`, so chain sites skip it as they skip a missing
+  feature, and the app maps it to a 409 `desktop_owns_compute`. This is what
+  keeps the sync-and-share offering's cost per subscriber near zero; widen the
+  set only for work that is seconds, not minutes.
+  `tests/test_mirror_compute_backstop.py` enumerates the live registry.
 - The intake (`POST /api/v1/access-requests` and sign-in's blocked branch)
   answers the same bytes whatever the email's state, rate-limited or not, and
   never mails the requester; only admins are alerted.

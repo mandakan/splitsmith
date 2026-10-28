@@ -63,6 +63,29 @@ class FeatureRequiredError(Exception):
         self.feature = feature
 
 
+#: The job kinds hosted runs for a desktop mirror (``matches.origin ==
+#: "desktop"``), whatever the account's features. The desktop owns a mirror's
+#: trims, detection and renders and runs them at no cost to us; hosted only
+#: derives the audit WAV from a pushed web rendition, seconds of ffmpeg. So
+#: the desktop-plus-sync offering never bills hosted ingest or render time,
+#: which is what keeps its per-subscriber cost near zero.
+MIRROR_JOB_KINDS: frozenset[str] = frozenset({"derive_audio"})
+
+
+class MirrorComputeRefusedError(FeatureRequiredError):
+    """A job kind hosted never runs for a desktop mirror (``MIRROR_JOB_KINDS``).
+
+    A :class:`FeatureRequiredError` so every handler that skips a chained job
+    on a missing feature skips this one the same way; the app maps it to its
+    own 409, since no tier would unlock it.
+    """
+
+    def __init__(self, kind: str) -> None:
+        super().__init__(Feature.hosted_compute)
+        self.kind = kind
+        self.args = (f"{kind} runs on the desktop for a desktop-synced match, never hosted",)
+
+
 def export_limit(tier: str | None, override: int | None, config: AccessConfig) -> int:
     """How many exports an account may run at once: its own override when
     an admin set one, else its tier's number, else the default."""
