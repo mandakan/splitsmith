@@ -47,7 +47,9 @@ import { CandidateTable } from "@/components/lab/CandidateTable";
 import { DiffList } from "@/components/lab/DiffList";
 import { KeyboardLegend } from "@/components/lab/KeyboardLegend";
 import { LabelBreakdown } from "@/components/lab/LabelBreakdown";
+import { Label } from "@/components/ui";
 import { Pin } from "@/components/lab/Pin";
+import { SpeechPanel } from "@/components/lab/SpeechPanel";
 import { StepThroughPanel } from "@/components/lab/StepThroughPanel";
 import { VoterRecallTable } from "@/components/lab/VoterRecallTable";
 import {
@@ -655,6 +657,25 @@ export function DevFixtureDetail() {
           )}
         </div>
       </section>
+
+      {/* Speech review (#1778): masks before any of this audio is public. */}
+      {slug && (
+        <section className="overflow-hidden rounded-md border border-rule bg-surface">
+          <div className="border-b border-rule px-4 py-2.5">
+            <Label tone="ink">Speech</Label>
+          </div>
+          <SpeechPanel
+            slug={slug}
+            peaks={peaks ?? null}
+            time={time}
+            onScrub={handleScrub}
+            playFrom={(t) => {
+              lastFullPlayAtRef.current = performance.now();
+              playFull(t);
+            }}
+          />
+        </section>
+      )}
 
       {/* The labeling workbench. One scroll surface per pane, both
           bounded to the viewport: the candidate table is the primary

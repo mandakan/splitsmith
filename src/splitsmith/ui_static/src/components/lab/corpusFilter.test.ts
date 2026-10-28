@@ -104,3 +104,15 @@ describe("fixtureTags", () => {
     expect(keys).toContain("needs review");
   });
 });
+
+describe("speech filter", () => {
+  it("keeps fixtures with audio and no speech review", () => {
+    const fixtures = [
+      record({ slug: "a" }),
+      record({ slug: "b", speech_decision: "masked" }),
+      record({ slug: "c", has_audio: false }),
+      record({ slug: "d", speech_decision: null }),
+    ];
+    expect(filterFixtures(fixtures, "", "speech").map((f) => f.slug)).toEqual(["a", "d"]);
+  });
+});

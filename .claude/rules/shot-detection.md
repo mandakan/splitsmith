@@ -230,4 +230,10 @@ the requested set's models on the first detection.
 - `speech_review` (`masked`, `no_speech` or `excluded`, with the masker
   version) is the stamp that lets audio be published; `publishable()` is
   the one check.
+- The review is the fixture page's Speech panel (`components/lab/SpeechPanel`,
+  rules in `lib/speechReview.ts`) over `GET`/`PUT /api/lab/fixtures/{slug}/speech`
+  (`lab/speech_review.py`). **The server re-checks every region** (length,
+  inside the clip, no overlap, never over a protected window) whatever the
+  page sent; the page only keeps itself from offering a save it would refuse.
+  The corpus's "speech unreviewed" filter walks what is left.
 

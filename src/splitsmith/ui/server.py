@@ -11268,6 +11268,53 @@ def create_app(
                 records.append(d)
             return JSONResponse(records)
 
+        def _lab_vad() -> Any:
+            """The speech detector, loaded once (downloads on first use)."""
+            vad = _lab_runtime_cache.get("vad")
+            if vad is None:
+                from ..lab import speech_mask
+
+                vad = speech_mask.load_vad()
+                _lab_runtime_cache["vad"] = vad
+            return vad
+
+        @app.get("/api/lab/fixtures/{slug}/speech")
+        def lab_speech(slug: str) -> JSONResponse:
+            """A fixture's speech masks: the masker's proposal, what the
+            fixture stores and its review stamp (#1778)."""
+            from ..lab import speech_review as sr
+
+            try:
+                path = sr.fixture_path(lab_module.core.DEFAULT_FIXTURES_ROOT, slug)
+            except FileNotFoundError as exc:
+                raise HTTPException(status_code=404, detail="fixture not found") from exc
+            try:
+                session = _lab_vad()
+            except Exception as exc:  # noqa: BLE001 -- the page still shows what is stored
+                logger.warning("speech detector unavailable: %s", exc)
+                session = None
+            state = sr.load_state(path, session=session, config=sr.config_from_env())
+            return JSONResponse(state.model_dump(mode="json"))
+
+        @app.put("/api/lab/fixtures/{slug}/speech")
+        def lab_speech_save(slug: str, body: dict[str, Any] = Body(...)) -> JSONResponse:  # noqa: B008
+            """Save the reviewer's decision: ``masked_regions`` and the
+            ``speech_review`` stamp. 422 for a region over a shot or the beep."""
+            from ..lab import speech_review as sr
+
+            try:
+                path = sr.fixture_path(lab_module.core.DEFAULT_FIXTURES_ROOT, slug)
+            except FileNotFoundError as exc:
+                raise HTTPException(status_code=404, detail="fixture not found") from exc
+            try:
+                parsed = sr.SpeechReviewIn.model_validate(body)
+                state = sr.load_state(path, session=None, config=sr.config_from_env())
+                sr.save_review(path, parsed, config=sr.config_from_env(), duration=state.duration or None)
+            except (sr.SpeechReviewError, ValueError) as exc:
+                raise HTTPException(status_code=422, detail=str(exc)) from exc
+            saved = sr.load_state(path, session=None, config=sr.config_from_env())
+            return JSONResponse(saved.model_dump(mode="json"))
+
         @app.get("/api/lab/last-run")
         def lab_last_run() -> JSONResponse:
             """Return the most recent eval/rescore in this server session.
