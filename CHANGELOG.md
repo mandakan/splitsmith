@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.89.0](https://github.com/mandakan/splitsmith/compare/v0.88.0...v0.89.0) (2026-10-27)
+
+
+### Features
+
+* **desktop:** build and smoke the Windows runtime in CI ([#1768](https://github.com/mandakan/splitsmith/issues/1768)) ([82e2b17](https://github.com/mandakan/splitsmith/commit/82e2b176ba5f0ce37ef71151a54885a8106d84be))
+* **desktop:** our own static Windows ffmpeg ([#1770](https://github.com/mandakan/splitsmith/issues/1770)) ([41610ed](https://github.com/mandakan/splitsmith/commit/41610edd9c03566d9a8695f76b603191cfab2158))
+* **desktop:** ship the Windows app ([#1773](https://github.com/mandakan/splitsmith/issues/1773)) ([65a2e5d](https://github.com/mandakan/splitsmith/commit/65a2e5deb4dd878076ab2481f4215b1211932b3a))
+* **desktop:** teach the shell and the update feed about Windows ([#1766](https://github.com/mandakan/splitsmith/issues/1766)) ([e83a179](https://github.com/mandakan/splitsmith/commit/e83a17929544d25c579dc1f31de01c7750456be5))
+* **desktop:** Windows launch check and release job ([#1772](https://github.com/mandakan/splitsmith/issues/1772)) ([c0cffeb](https://github.com/mandakan/splitsmith/commit/c0cffeb7203478bfdd19bc0b664c9f02d832ca72))
+* **desktop:** Windows NSIS installer and portable zip ([#1771](https://github.com/mandakan/splitsmith/issues/1771)) ([15a3496](https://github.com/mandakan/splitsmith/commit/15a3496bacc0c83dc491ce7999f86822aeac683e))
+
 ## [0.88.0](https://github.com/mandakan/splitsmith/compare/v0.87.2...v0.88.0) (2026-10-27)
 
 
