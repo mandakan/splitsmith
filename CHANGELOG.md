@@ -1,5 +1,33 @@
 # Changelog
 
+## [0.90.0](https://github.com/mandakan/splitsmith/compare/v0.89.0...v0.90.0) (2026-11-04)
+
+
+### Features
+
+* **hosted:** a desktop mirror runs no hosted compute but its audit audio ([#1777](https://github.com/mandakan/splitsmith/issues/1777)) ([dfd69c0](https://github.com/mandakan/splitsmith/commit/dfd69c0e31ac36492d2b8bbc98a6af491aa4c1ae))
+* **lab:** masked speech regions and the speech review stamp ([#1783](https://github.com/mandakan/splitsmith/issues/1783)) ([14e42b9](https://github.com/mandakan/splitsmith/commit/14e42b99b2d3bd4d0adf43b375a9f4e0ae5470b5))
+* **lab:** review a fixture's speech masks on its page ([#1784](https://github.com/mandakan/splitsmith/issues/1784)) ([a87bcec](https://github.com/mandakan/splitsmith/commit/a87bcec2e2503deb8259cb18bba456a622ea2a36))
+* **lab:** speech mask proposals for fixture audio ([#1782](https://github.com/mandakan/splitsmith/issues/1782)) ([d5a7413](https://github.com/mandakan/splitsmith/commit/d5a7413bf92c855df2427e89bcaf81e0cedf330d))
+
+
+### Bug Fixes
+
+* **desktop:** let launch-check.sh's cleanup wait for the app tree ([#1774](https://github.com/mandakan/splitsmith/issues/1774)) ([b07558e](https://github.com/mandakan/splitsmith/commit/b07558e5c51759491a7adf8648a16ecdbff3f1af))
+
+
+### Documentation
+
+* **site:** name Windows in the install step ([#1776](https://github.com/mandakan/splitsmith/issues/1776)) ([6c4986c](https://github.com/mandakan/splitsmith/commit/6c4986ca54f9bbfa970015e20f21a9e1b4744aef))
+
+
+### Build / CI
+
+* **deps:** bump filelock from 3.29.0 to 4.2.1 ([#1722](https://github.com/mandakan/splitsmith/issues/1722)) ([02ff82e](https://github.com/mandakan/splitsmith/commit/02ff82e183033658506996be6bd9cf22f6629288))
+* **deps:** bump msgpack from 1.2.1 to 1.2.3 ([#1769](https://github.com/mandakan/splitsmith/issues/1769)) ([c637dad](https://github.com/mandakan/splitsmith/commit/c637dad8cd81a61ef451fe29142c69581ac10672))
+* **deps:** bump setuptools from 83.0.0 to 84.1.0 ([#1721](https://github.com/mandakan/splitsmith/issues/1721)) ([48606e2](https://github.com/mandakan/splitsmith/commit/48606e2b4e799f263132623256297c37b21ccdb5))
+* **deps:** patch undici and fast-uri in the root and desktop lockfiles ([#1785](https://github.com/mandakan/splitsmith/issues/1785)) ([7aa4877](https://github.com/mandakan/splitsmith/commit/7aa4877c9b0e8ca9421c9deb64f77be2a2215b50))
+
 ## [0.89.0](https://github.com/mandakan/splitsmith/compare/v0.88.0...v0.89.0) (2026-10-27)
 
 
